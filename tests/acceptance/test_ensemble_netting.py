@@ -28,14 +28,16 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
+from vqapr.flow.run_records import RunRecordWriter
 from vqapr.public import (
     QUANTUM,
-    RunRecordSpec,
+    DatasetRegistration,
+    SourceSpec,
     WeightingRefusal,
     equal_weight,
     net_members,
     optimize,
-    publish_run_record,
+    register_dataset,
     rescale,
 )
 from vqapr.workspace import Workspace  # scaffolding only; deliberately not a public name
@@ -233,15 +235,16 @@ def test_criterion_9_equal_weight_combination_is_the_strategys_choice(
 def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
     tmp_path: Path, manifest: dict[str, object]
 ) -> None:
-    """Publish a member's record, then reach it back the way a later ensemble would.
+    """Register a member's recorded table, then reach it back the way a later ensemble would.
 
-    What it does: publishes a member's recorded account table, then reads it back from the
-    published parquet and computes a moving return from the recovered series. Nothing here holds
-    the producing run, which is what makes the record reusable after that run is gone. The package
-    names used to publish and weight come from ``vqapr.public``; workspace creation and the parquet
-    read reach past it, the first because a real project already has a workspace and the second
-    because reading a published artifact is what a subscriber's own machinery does. The real-run
-    version, published and read back through the spine, is in
+    What it does: writes a member's account table the way a run with a store writes it, registers
+    that directory as a dataset, then reads it back from the parquet and computes a moving return
+    from the recovered series. Nothing here holds the producing run, which is what makes the
+    record reusable after that run is gone. The package names used to register and weight come
+    from ``vqapr.public``; the record writer, workspace creation and the parquet read reach past
+    it, the first because a run is what writes a record and the others because a real project
+    already has a workspace and reading a registered table is what a subscriber's own machinery
+    does. The real-run version, registered and read back through the spine, is in
     ``showcases/show_006_ensemble_netting``.
 
     What it proves and what it does not, stated plainly. With 22 committed sessions and 21
@@ -252,57 +255,54 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
     Workspace.create(tmp_path)
     cutoff = datetime(2026, 4, 1, 15, 30, tzinfo=ZoneInfo("Asia/Seoul"))
 
-    recorded = {
-        "vqapr.account": tuple(
-            {
-                "instrument": "_ACCOUNT",
-                "cash": str(Decimal("1000") + index),
-                "account_version": index,
-                "run_id": "member-1",
-                "producer_id": "reversal",
-                "stage": "STRATEGY_CALLBACK",
-                "event_time": cutoff + timedelta(days=index),
-                "sequence": 0,
-            }
-            for index in range(3)
+    writer = RunRecordWriter(tmp_path / ".vqapr", "member-1", "reversal@00000000")
+    writer.open()
+    for index in range(3):
+        writer.append(
+            "vqapr.account",
+            [
+                {
+                    "instrument": "_ACCOUNT",
+                    "cash": Decimal("1000") + index,
+                    "account_version": index,
+                    "event_time": cutoff + timedelta(days=index),
+                }
+            ],
         )
-    }
-    result = type("_R", (), {"final_state": type("_S", (), {"recorder_rows": recorded})()})()
-
-    published = publish_run_record(
-        tmp_path,
-        RunRecordSpec.of(
-            "member_account",
-            table_id="vqapr.account",
-            value_fields=(
-                "cash",
-                "account_version",
-                "run_id",
-                "producer_id",
-                "stage",
-                "event_time",
-                "sequence",
-            ),
-        ),
-        result,
+    writer.release()
+    directory = (
+        tmp_path / ".vqapr" / "runs" / "member-1" / "strategies" / "reversal@00000000"
+        / "tables" / "vqapr.account"
     )
 
-    assert str(published.registration.dataset_id) == "member_account"
-    assert published.row_count == 3
+    registered = register_dataset(
+        tmp_path,
+        DatasetRegistration.of(
+            "member_account",
+            "member-1-account",
+            instrument_field="instrument",
+            available_at="event_time",
+            key_fields=("event_time", "instrument"),
+            fields={"cash": "cash", "account_version": "account_version"},
+            grain="instrument_instant",
+        ),
+        SourceSpec.of("member-1-account", directory),
+    )
+    assert registered is True
 
-    # Read back from the published dataset alone. Nothing here holds the producing run.
+    # Read back from the registered directory alone. Nothing here holds the producing run.
     con = duckdb.connect()
     try:
         rows = con.execute(
-            f"SELECT cash, run_id FROM read_parquet('{published.output_path.as_posix()}')"
-            " ORDER BY available_at"
+            f"SELECT cash, account_version FROM read_parquet('{directory.as_posix()}/*.parquet')"
+            " ORDER BY event_time"
         ).fetchall()
     finally:
         con.close()
 
     series = [Decimal(str(row[0])) for row in rows]
     assert series == [Decimal("1000"), Decimal("1001"), Decimal("1002")]
-    assert {row[1] for row in rows} == {"member-1"}, "the record says which run produced it"
+    assert [row[1] for row in rows] == [0, 1, 2], "the record's own versions, in order"
 
     # A moving return over that series is the whole input member weighting needs.
     returns = [later / earlier - 1 for earlier, later in pairwise(series)]

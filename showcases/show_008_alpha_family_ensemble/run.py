@@ -1,8 +1,8 @@
 """Three signed alphas, a family ensemble, and a signal measured on what the run stored.
 
-    reversal member  (Academic)  -> publish_run_allocation -> reversal_allocation
-    momentum member  (Academic)  -> publish_run_allocation -> momentum_allocation
-    low-vol member   (Academic)  -> publish_run_allocation -> lowvol_allocation
+    reversal member  (Academic)  -> its recorded vqapr.weight, registered -> reversal_allocation
+    momentum member  (Academic)  -> its recorded vqapr.weight, registered -> momentum_allocation
+    low-vol member   (Academic)  -> its recorded vqapr.weight, registered -> lowvol_allocation
                                                                      |
                                                                      + --> ensemble run (KRX)
                                                                            subscribes to all three,
@@ -47,6 +47,7 @@ import argparse
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from fractions import Fraction
@@ -62,7 +63,6 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
-    AllocationPublicationSpec,
     ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
@@ -77,7 +77,6 @@ from vqapr.public import (
     export_roster,
     information_coefficient,
     preflight_run,
-    publish_run_allocation,
     rank_information_coefficient,
     register_component,
     register_dataset,
@@ -132,7 +131,9 @@ def _read_published(path: Path) -> list[dict[str, object]]:
     con = duckdb.connect()
     try:
         cursor = con.execute(
-            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+            "SELECT *, event_time AS available_at "
+            f"FROM read_parquet('{path.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY available_at, instrument"
         )
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
@@ -718,7 +719,72 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
 
 
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    occurrences: int
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
+    `CAST` in the registration; `DECIMAL(38, 12)` is exact for a weight on the `1e-12` grid.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, occurrences = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    return _Registered(dataset_id, directory, int(rows), int(occurrences))
 
 
 def _measure_published_signal(
@@ -919,7 +985,7 @@ def _member_run(
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    return run(project, preflight_run(project, definition)).result()
+    return run(project, preflight_run(project, definition), store_root=project / ".vqapr")
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -1060,7 +1126,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ("momentum", momentum_ref, time(8, 15), "momentum_allocation"),
         ("lowvol", lowvol_ref, time(8, 30), "lowvol_allocation"),
     ):
-        result = _member_run(
+        member_run = _member_run(
             project,
             strategy_ref=ref,
             at=at,
@@ -1070,8 +1136,15 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             end=end,
             universe=universe,
         )
-        published[label] = publish_run_allocation(
-            project, AllocationPublicationSpec.of(dataset_id), callback_evidence(result)
+        result = member_run.result()
+        published[label] = _register_run_table(
+            project,
+            member_run,
+            run_id=str(ref.component_id),
+            component_id=str(ref.component_id),
+            dataset_id=dataset_id,
+            table="vqapr.weight",
+            fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
         )
         memories[label] = _memory(result)
 
@@ -1111,8 +1184,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ("momentum", "momentum_allocation"),
         ("lowvol", "lowvol_allocation"),
     ):
-        if str(published[label].registration.dataset_id) != dataset_id:
-            raise AssertionError(f"{label} member did not publish under {dataset_id}")
+        if published[label].dataset_id != dataset_id:
+            raise AssertionError(f"{label} member's table is not registered as {dataset_id}")
 
     # Assertion 2: the netting measurement ran on three members and at least one ticker-occurrence
     # showed a genuine offset.
@@ -1203,14 +1276,14 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # Assertion 6: the published low-vol signal is measured against what followed it. This is the
     # `analysis/` half of record 016's open follow-up, run on a published artifact.
     closes = _closes_by_instrument(observation_path)
-    measurement = _measure_published_signal(published["lowvol"].output_path, closes)
+    measurement = _measure_published_signal(published["lowvol"].directory, closes)
 
     # Assertion 7: the low-vol member is actually a *low* volatility tilt. Nothing above can see
     # its sign -- netting, gross weight and the information coefficient are all sign-agnostic, so a
     # member that preferred the most volatile name would pass every other gate in this file. The
     # published weights are checked against realised volatility recomputed here from the committed
     # closes, and the ordering must be strictly inverse on every published occurrence.
-    sign_check = _check_lowvol_orientation(published["lowvol"].output_path, closes)
+    sign_check = _check_lowvol_orientation(published["lowvol"].directory, closes)
 
     trace = {
         "status": "current",
@@ -1227,7 +1300,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
                 "exchange": "Academic (fractional, zero cost)",
                 "account_mode": AccountMode.SIGNED.value,
                 "occurrences": memories[label].get("occurrences"),
-                "published_dataset": str(published[label].registration.dataset_id),
+                "published_dataset": published[label].dataset_id,
                 "published_occurrences": published[label].occurrences,
                 "published_rows": published[label].row_count,
             }
@@ -1247,15 +1320,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         },
     }
     digests = {
-        f"{label}_allocation.parquet": _digest(published[label].output_path)
+        f"{label}_allocation": _digest(published[label].directory)
         for label in ("reversal", "momentum", "lowvol")
     }
-    digests.update(
-        {
-            f"{label}_allocation.lineage.json": _digest(published[label].lineage_path)
-            for label in ("reversal", "momentum", "lowvol")
-        }
-    )
     return trace, digests
 
 

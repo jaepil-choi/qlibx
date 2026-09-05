@@ -1,7 +1,7 @@
 """Two signed members, published allocations, and a netted ensemble — through the spine.
 
-    reversal member (Academic)   -> publish_run_allocation -> reversal_allocation dataset
-    momentum member (Academic)   -> publish_run_allocation -> momentum_allocation dataset
+    reversal member (Academic)   -> its recorded vqapr.weight, registered -> reversal_allocation
+    momentum member (Academic)   -> its recorded vqapr.weight, registered -> momentum_allocation
                                                                         |
                                                                         + --> ensemble run (KRX)
                                                                                 subscribes to both,
@@ -45,6 +45,7 @@ import argparse
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -57,7 +58,6 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
-    AllocationPublicationSpec,
     ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
@@ -65,15 +65,12 @@ from vqapr.public import (
     FillConvention,
     FillSelector,
     RunDefinition,
-    RunRecordSpec,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
     component_ref,
     export_roster,
     preflight_run,
-    publish_run_allocation,
-    publish_run_record,
     register_component,
     register_dataset,
     register_execution_input,
@@ -112,7 +109,9 @@ def _read_published(path: Path) -> list[dict[str, object]]:
     con = duckdb.connect()
     try:
         cursor = con.execute(
-            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+            "SELECT *, event_time AS available_at "
+            f"FROM read_parquet('{path.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY available_at, instrument"
         )
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
@@ -566,8 +565,97 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
+def _recorded_rows(
+    project: Path, run_result: Any, *, run_id: str, component_id: str, table: str
+) -> list[dict[str, Any]]:
+    """The rows a stored run recorded for one table, read back from its record in commit order.
+
+    A run given a store streams every chunk to `tables/<table>/` and keeps none on its roots, so
+    `final_state.recorder_rows` is empty for it; this is the same rows from the place they went.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        return []
+    con = duckdb.connect()
+    try:
+        cursor = con.execute(
+            f"SELECT * FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY event_time, sequence"
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    finally:
+        con.close()
+
+
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    occurrences: int
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
+    `CAST` in the registration; `DECIMAL(38, 12)` is exact for a weight on the `1e-12` grid.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, occurrences = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    return _Registered(dataset_id, directory, int(rows), int(occurrences))
 
 
 def _member_run(
@@ -595,7 +683,7 @@ def _member_run(
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
     )
-    return run(project, preflight_run(project, definition)).result()
+    return run(project, preflight_run(project, definition), store_root=project / ".vqapr")
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -725,7 +813,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
     end = datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}")
 
-    reversal_result = _member_run(
+    reversal_run = _member_run(
         project,
         strategy_ref=reversal_ref,
         at=time(8, 0),
@@ -735,12 +823,18 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         end=end,
         universe=universe,
     )
-    reversal_evidence = callback_evidence(reversal_result)
-    reversal_published = publish_run_allocation(
-        project, AllocationPublicationSpec.of("reversal_allocation"), reversal_evidence
+    reversal_result = reversal_run.result()
+    reversal_published = _register_run_table(
+        project,
+        reversal_run,
+        run_id=str(reversal_ref.component_id),
+        component_id=str(reversal_ref.component_id),
+        dataset_id="reversal_allocation",
+        table="vqapr.weight",
+        fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
     )
 
-    momentum_result = _member_run(
+    momentum_run = _member_run(
         project,
         strategy_ref=momentum_ref,
         at=time(8, 15),
@@ -750,39 +844,43 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         end=end,
         universe=universe,
     )
-    momentum_evidence = callback_evidence(momentum_result)
-    momentum_published = publish_run_allocation(
-        project, AllocationPublicationSpec.of("momentum_allocation"), momentum_evidence
+    momentum_result = momentum_run.result()
+    momentum_published = _register_run_table(
+        project,
+        momentum_run,
+        run_id=str(momentum_ref.component_id),
+        component_id=str(momentum_ref.component_id),
+        dataset_id="momentum_allocation",
+        table="vqapr.weight",
+        fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
     )
 
     # The reuse half of "a run records what a later run will need to reuse it", proved on a real
     # run rather than a constructed result. The account series a member recorded without being
-    # asked is published as an ordinary dataset and read back after the producing run's objects
+    # asked is registered as an ordinary dataset and read back after the producing run's objects
     # are gone -- which is the round trip that would have caught cash being recorded as NAV.
-    account_published = publish_run_record(
+    account_published = _register_run_table(
         project,
-        RunRecordSpec.of(
-            "reversal_account",
-            table_id="vqapr.account",
-            value_fields=(
-                "cash",
-                "account_version",
-                "run_id",
-                "producer_id",
-                "stage",
-                "event_time",
-                "sequence",
-            ),
-        ),
-        reversal_result,
+        reversal_run,
+        run_id=str(reversal_ref.component_id),
+        component_id=str(reversal_ref.component_id),
+        dataset_id="reversal_account",
+        table="vqapr.account",
+        fields={"cash": "cash", "account_version": "account_version", "run_id": "run_id"},
     )
-    recorded_account = reversal_result.final_state.recorder_rows["vqapr.account"]
+    recorded_account = _recorded_rows(
+        project,
+        reversal_run,
+        run_id=str(reversal_ref.component_id),
+        component_id=str(reversal_ref.component_id),
+        table="vqapr.account",
+    )
     if account_published.row_count != len(recorded_account):
         raise AssertionError(
-            f"published {account_published.row_count} account rows from "
+            f"registered {account_published.row_count} account rows from "
             f"{len(recorded_account)} recorded"
         )
-    replayed_account = _read_published(account_published.output_path)
+    replayed_account = _read_published(account_published.directory)
     if len(replayed_account) != len(recorded_account):
         raise AssertionError("the published account series does not read back row for row")
     # Cash is an account-level fact, so it lives on the account-level rows; the instrument panel
@@ -824,9 +922,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             f"momentum member must never assign self.memory; saw {momentum_memory}"
         )
 
-    # Assertion 1: both members published, and the ensemble subscribed to both by dataset id.
-    reversal_lineage = json.loads(reversal_published.lineage_path.read_text(encoding="utf-8"))
-    momentum_lineage = json.loads(momentum_published.lineage_path.read_text(encoding="utf-8"))
+    # Assertion 1: both members' tables are registered, and the ensemble subscribed to both by
+    # dataset id.
     subscribed = {"reversal_allocation", "momentum_allocation"}
     # The ensemble's own strategy_accesses over its callbacks are the authoritative proof of what
     # it actually subscribed to and read -- not a static declaration read off the component.
@@ -840,10 +937,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError(
             f"ensemble did not subscribe to both member datasets: saw {sorted(accessed_datasets)}"
         )
-    if str(reversal_published.registration.dataset_id) != "reversal_allocation":
-        raise AssertionError("reversal member did not publish under reversal_allocation")
-    if str(momentum_published.registration.dataset_id) != "momentum_allocation":
-        raise AssertionError("momentum member did not publish under momentum_allocation")
+    if reversal_published.dataset_id != "reversal_allocation":
+        raise AssertionError("reversal member's table is not registered as reversal_allocation")
+    if momentum_published.dataset_id != "momentum_allocation":
+        raise AssertionError("momentum member's table is not registered as momentum_allocation")
 
     # Assertion 2: at least one ticker on at least one occurrence disagreed (non-zero offset).
     netting_rows = ensemble_result.final_state.recorder_rows.get("ensemble.netting", ())
@@ -858,18 +955,14 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         {row["event_time"] for row in netting_rows if Decimal(row["offset_weight"]) > 0}
     )
 
-    # Assertion 3: the memory-free member reports state_path == ["constant"], the mutating one
-    # reports ["moved"]. This is package-computed from committed vs. current model state refs
-    # across the run's own published evidence, not read off a self-reported flag.
-    if reversal_lineage["run"]["state_path"] != ["moved"]:
+    # Assertion 3: the mutating member carried state across the run and the memory-free one did
+    # not. Read off the run's own final model state (`_memory`), the same source the publication
+    # lineage used to derive its `state_path` from before that path went (campaign Step 4).
+    if not reversal_memory:
+        raise AssertionError("reversal member must carry state across the run; its memory is empty")
+    if momentum_memory:
         raise AssertionError(
-            f"reversal member's lineage state_path must be ['moved'], "
-            f"saw {reversal_lineage['run']['state_path']}"
-        )
-    if momentum_lineage["run"]["state_path"] != ["constant"]:
-        raise AssertionError(
-            f"momentum member's lineage state_path must be ['constant'], "
-            f"saw {momentum_lineage['run']['state_path']}"
+            f"momentum member must never assign self.memory; saw {momentum_memory}"
         )
 
     # Assertion 4 (the fill-journal replay against the committed Account) already aborted inside
@@ -904,18 +997,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
             "occurrences": reversal_memory.get("occurrences"),
-            "published_dataset": str(reversal_published.registration.dataset_id),
+            "published_dataset": reversal_published.dataset_id,
             "published_occurrences": reversal_published.occurrences,
             "published_rows": reversal_published.row_count,
-            "state_path": reversal_lineage["run"]["state_path"],
         },
         "momentum_member": {
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
-            "published_dataset": str(momentum_published.registration.dataset_id),
+            "published_dataset": momentum_published.dataset_id,
             "published_occurrences": momentum_published.occurrences,
             "published_rows": momentum_published.row_count,
-            "state_path": momentum_lineage["run"]["state_path"],
         },
         "ensemble_run": {
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
@@ -928,12 +1019,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         },
     }
     digests = {
-        "reversal_allocation.parquet": _digest(reversal_published.output_path),
-        "reversal_allocation.lineage.json": _digest(reversal_published.lineage_path),
-        "momentum_allocation.parquet": _digest(momentum_published.output_path),
-        "momentum_allocation.lineage.json": _digest(momentum_published.lineage_path),
-        "reversal_account.parquet": _digest(account_published.output_path),
-        "reversal_account.lineage.json": _digest(account_published.lineage_path),
+        "reversal_allocation": _digest(reversal_published.directory),
+        "momentum_allocation": _digest(momentum_published.directory),
+        "reversal_account": _digest(account_published.directory),
     }
     return trace, digests
 
@@ -961,14 +1049,14 @@ def main() -> None:
     ensemble = trace["ensemble_run"]
     print(f"sessions / callbacks       : {trace['sessions']} / {trace['callbacks']}")
     print(
-        f"reversal published          : "
-        f"{trace['reversal_member']['published_occurrences']} occurrences, "
-        f"state_path={trace['reversal_member']['state_path']}"
+        f"reversal registered         : "
+        f"{trace['reversal_member']['published_occurrences']} occurrences as "
+        f"{trace['reversal_member']['published_dataset']} (from the member run's own record)"
     )
     print(
-        f"momentum published          : "
-        f"{trace['momentum_member']['published_occurrences']} occurrences, "
-        f"state_path={trace['momentum_member']['state_path']}"
+        f"momentum registered         : "
+        f"{trace['momentum_member']['published_occurrences']} occurrences as "
+        f"{trace['momentum_member']['published_dataset']} (from the member run's own record)"
     )
     print(
         f"run record round trip       : {trace['run_record']['rows']} account rows published "

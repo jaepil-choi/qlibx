@@ -149,10 +149,11 @@ def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
     """Every Strategy callback evidence a finished run published, in lifecycle order.
 
     A run's decisions are reachable only through its state root, and reconstructing them from
-    ``occurrences`` would mean re-deriving what the Flow already stamped. This is the read half of
-    the publication contract: what ``publish_run_allocation`` consumes, taken from where the Flow
-    put it. Declining callbacks are included, because whether a decline publishes nothing is the
-    publisher's rule to apply, not this accessor's.
+    ``occurrences`` would mean re-deriving what the Flow already stamped. Read by tests and
+    showcases that want the decisions in-process; a later run that wants them reads the run's
+    recorded ``vqapr.weight`` table, registered as a dataset (one-shape campaign Step 4).
+    Declining callbacks are included, because whether a decline counts is the reader's rule to
+    apply, not this accessor's.
     """
     if not isinstance(result, SimulationResult):
         raise TypeError("result must be a SimulationResult returned by run()")

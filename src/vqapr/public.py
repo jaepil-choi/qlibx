@@ -82,14 +82,6 @@ from vqapr.extension.registration import (
     register_strategy_model,
 )
 from vqapr.flow.datamodel import DataModelResult
-from vqapr.flow.materialize import (
-    AllocationPublicationResult,
-    AllocationPublicationSpec,
-    RunRecordResult,
-    RunRecordSpec,
-    publish_run_allocation,
-    publish_run_record,
-)
 from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
@@ -154,8 +146,6 @@ __all__ = (
     "AccountMode",
     "AccountSnapshot",
     "AllocationInvariants",
-    "AllocationPublicationResult",
-    "AllocationPublicationSpec",
     "AllocationSign",
     "AllocationViolation",
     "Budget",
@@ -222,8 +212,6 @@ __all__ = (
     "RowsLookback",
     "RunDefinition",
     "RunRecordMissing",
-    "RunRecordResult",
-    "RunRecordSpec",
     "RunResult",
     "Side",
     "SideCost",
@@ -265,8 +253,6 @@ __all__ = (
     "optimize",
     "preflight_run",
     "proportional_weight",
-    "publish_run_allocation",
-    "publish_run_record",
     "rank",
     "rank_information_coefficient",
     "read_run_record",

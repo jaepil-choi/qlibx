@@ -74,12 +74,7 @@ def test_the_recorded_tables_exist_with_the_expected_shape(pipeline_result) -> N
     assert trace["signal_occurrences"] > 0
     assert trace["signal_occurrences"] <= trace["callbacks"]
 
-    assert set(digests) == {
-        "signal_measurement.parquet",
-        "signal_measurement.lineage.json",
-        "run_account.parquet",
-        "run_account.lineage.json",
-    }
+    assert set(digests) == {"signal_measurement", "run_account"}
 
 
 def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
@@ -89,14 +84,15 @@ def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
     project = tmp_path / "orthogonality-project"
     trace, _digests = showcase._pipeline(project)
 
-    output_path = project / ".vqapr" / "materialized" / "signal_measurement.parquet"
-    assert output_path.is_file()
+    # The table the run recorded, registered as a dataset from the run's own record (Step 4).
+    directory = project / trace["signal_run_record"]["directory"]
+    assert directory.is_dir() and any(directory.glob("*.parquet"))
 
     con = duckdb.connect()
     try:
         rows = con.execute(
-            f"SELECT available_at, neutralized_signal "
-            f"FROM read_parquet('{output_path.as_posix()}') ORDER BY available_at, instrument"
+            f"SELECT event_time, neutralized_signal "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet') ORDER BY event_time, instrument"
         ).fetchall()
     finally:
         con.close()

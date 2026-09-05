@@ -126,8 +126,8 @@ class AcceptedRunState:
         """The flattened rows every reader has always seen.
 
         Rows are wrapped read-only once, where the chunk is appended, so flattening here only
-        concatenates references. The sole in-run consumer is `publish_run_record`, after the run;
-        everything else reads this in tests and showcases.
+        concatenates references. Read in tests and showcases; a run with a store has already
+        streamed every chunk to its record directory, which is what a later run reads.
         """
         return MappingProxyType(
             {

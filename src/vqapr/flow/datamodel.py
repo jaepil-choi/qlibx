@@ -34,9 +34,9 @@ from vqapr.data.windows import AccessRecord, ModelWindow
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows
+from vqapr.domain.timestamps import require_tz_aware
 from vqapr.flow.loop import OccurrenceFlow
 from vqapr.flow.run import FrozenDataModel, FrozenRun
-from vqapr.flow.stamping import derived_available_at
 from vqapr.runtime.agendas import OperationOccurrence
 from vqapr.workspace import Workspace
 
@@ -46,6 +46,53 @@ MATERIALIZED_DIRECTORY = "materialized"
 COMPUTE_STAGE = "datamodel.compute"
 OUTPUT_STAGE = "datamodel.output"
 PUBLISH_STAGE = "datamodel.publish"
+
+
+class LookAheadDetected(AssertionError):
+    """A read returned a row that was not knowable at the instant that read it.
+
+    Its own exception type because this is not a bug in the caller's declaration -- it is the
+    package having violated its own point-in-time boundary, and the two want different responses.
+    """
+
+
+def derived_available_at(
+    evaluation_time: datetime,
+    accesses: Sequence[AccessRecord],
+) -> datetime:
+    """Stamp when a derived value was knowable from the rows actually consumed.
+
+    Lived in `flow/stamping.py` while two producers stamped derived rows; the publication path
+    went with `flow/materialize.py` (one-shape campaign Step 4), and this is the one caller left.
+
+    The answer is always `evaluation_time`, and the loop that used to search for a later instant
+    was unreachable. It was unreachable *contingently*, not by construction: `scan.py` binds
+    every observation query with `WHERE available_at <= evaluation_time`, so no access can carry a
+    later one. Loosen that bound and the loop becomes live again.
+
+    Deleting it would have satisfied the dead-code rule and quietly removed the only thing watching
+    for the failure. That failure is uniquely dangerous here because look-ahead **improves**
+    correlations: a leak makes every downstream number look better, so neither the count gate nor
+    `compare_factors.py` would flag it, and nothing else in the stack is looking. A silent
+    improvement is the hardest kind of wrong to notice.
+
+    So the branch is gone and the invariant it depended on is now checked instead. It costs one
+    comparison per access on a path that already iterates them, and it fails loudly the moment the
+    PIT bound stops holding.
+    """
+    stamped = require_tz_aware(evaluation_time, name="evaluation_time")
+    for access in accesses:
+        observed = access.max_available_at
+        if observed is not None and observed > stamped:
+            raise LookAheadDetected(
+                "a read returned a row newer than the instant that read it: "
+                f"{getattr(access, 'dataset_id', '<unknown dataset>')} carried "
+                f"{observed.isoformat()} at evaluation_time {stamped.isoformat()}. "
+                "Every observation query binds available_at <= evaluation_time; reaching this "
+                "means that bound was loosened, and look-ahead improves correlations rather than "
+                "breaking them, so no downstream gate would have caught it."
+            )
+    return stamped
 
 
 def refusal(

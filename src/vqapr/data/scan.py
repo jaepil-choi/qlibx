@@ -160,10 +160,18 @@ def _relation(spec: SourceSpec) -> str:
     `hive_partitioned`가 여기서 실제로 갈린다 — False면 파티션 키가 컬럼으로 살아나지 않는다.
     """
     path = spec.path
-    target = (path / "**" / "*.parquet").as_posix() if path.is_dir() else path.as_posix()
-    target = target.replace("'", "''")
     hive = 1 if spec.hive_partitioned else 0
-    return f"read_parquet('{target}', hive_partitioning={hive})"
+    if not path.is_dir():
+        target = path.as_posix().replace("'", "''")
+        return f"read_parquet('{target}', hive_partitioning={hive})"
+    # A directory is many parts, and their schemas are unioned by name rather than taken from
+    # whichever file duckdb opens first. A run's record writes a column that was all-null in an
+    # early session as `null`-typed there and with its real type later (`run_records.py`,
+    # `_arrow_table`), and states that "every reader unions with the later type" -- this reader
+    # did not, so a registered `vqapr.account` directory read or refused depending on which part
+    # sorted first (one-shape campaign Step 4, record 159).
+    target = (path / "**" / "*.parquet").as_posix().replace("'", "''")
+    return f"read_parquet('{target}', hive_partitioning={hive}, union_by_name=true)"
 
 
 def _configure(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:

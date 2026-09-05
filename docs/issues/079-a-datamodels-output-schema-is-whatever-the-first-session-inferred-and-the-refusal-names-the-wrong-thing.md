@@ -1,6 +1,11 @@
 # 079 — a datamodel's output schema is whatever the first session inferred, and the refusal names the wrong thing
 
-**Status:** **OPEN -- owner ruling 2026-09-05: option C, and only C.** The data and its
+**Status:** **CLOSED 2026-09-05 -- record `156`.** `type_drift` is gone; the refusal is
+`datamodel.output.schema_mismatch`, quotes pyarrow and the schema the first session
+established, and its `fix` names `float` or a quantized `Decimal`. The skill says what
+`compute()` returns is typed by its first session. Ruling below, as filed.
+
+**Ruling 2026-09-05 by owner: option C, and only C.** The data and its
 types are the author's responsibility. `value_fields` stays a list of names, no precision is
 declared anywhere, and the `type_drift` refusal is replaced by pyarrow's own sentence, unwrapped:
 the scalar type did not drift, the framework cannot tell which of type or precision did, so it

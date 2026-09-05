@@ -60,6 +60,7 @@ def test_the_reporters_run_would_have_named_its_own_cause() -> None:
         "partial": 0,
         "zero_dealt": 4,
         "reasons": {"no_trade": 1, "nontradable": 3},
+        "never_filled": [],
     }
 
 
@@ -96,6 +97,33 @@ def test_reasons_stay_separate_because_they_are_not_one_fact() -> None:
     assert summary["reasons"] == {"absent": 1, "nontradable": 1, "unfunded": 1}
 
 
+def test_a_name_that_never_filled_once_is_named_rather_than_folded_into_absent() -> None:
+    """`docs/issues/085`. A 20% ETF sleeve was in the run's instruments, the listing and the
+    roster, and missing from the execution input's price table. Every one of 82 rebalances
+    ordered it and every fill dealt zero -- correct -- and the summary said `absent: 82` beside
+    `ok: true`, a number that cannot be told apart from one missing row on each of 82 names.
+    The reporter found it thirty minutes later, from a -4.45%p shortfall that matched 20% of
+    the book sitting in cash. It is the axis `reasons` cannot see, and it is stated by name.
+    """
+    rows = (
+        *(_fill(requested="10", dealt="10") for _ in range(82)),
+        *(
+            {**_fill(requested="7", dealt="0", reason="absent"), "instrument": "A069500"}
+            for _ in range(82)
+        ),
+        # One ordinary absence on an ordinary name: market behaviour, not a configuration error.
+        {**_fill(requested="1", dealt="0", reason="absent"), "instrument": "A000660"},
+        {**_fill(requested="1", dealt="1"), "instrument": "A000660"},
+    )
+
+    summary = fill_summary(rows)
+
+    assert summary["reasons"] == {"absent": 83}, "the fold this file is about, still there"
+    assert summary["never_filled"] == [
+        {"instrument": "A069500", "orders": 82, "dealt": 0, "reason": "absent"}
+    ], "and the name that never dealt once, beside it"
+
+
 def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
     """A run with no fill rows is an answer, not an absent field."""
     assert fill_summary(()) == {
@@ -104,6 +132,7 @@ def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
         "partial": 0,
         "zero_dealt": 0,
         "reasons": {},
+        "never_filled": [],
     }
 
 

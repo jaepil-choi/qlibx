@@ -23,6 +23,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
+from vqapr.declarations import AUTHORED_KINDS
 from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_records import (
     STATUS_COMPLETED,
@@ -48,6 +49,15 @@ KINDS = (
     "strategies",
     "datamodels",
 )
+
+COMPONENT_KINDS = (*AUTHORED_KINDS, "exchange")
+"""What `--kind` accepts: the three kinds an author registers by name, plus the one declared.
+
+Spelled the way `new` and `register` spell them and the way `list` reports them (`cli_kind`),
+so the value a reader copies off one row filters the next call. `docs/issues/083` is a reader
+handing `list components` to `show model` and breaking on the exchange because nothing could
+say "the strategies and datamodels only".
+"""
 
 _ACCESSORS = {
     "datasets": "datasets",
@@ -102,6 +112,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="identifier",
         default=None,
         help="substring filter applied to the declaration identity",
+    )
+    parser.add_argument(
+        "--kind",
+        dest="component_kind",
+        choices=COMPONENT_KINDS,
+        default=None,
+        help="`components` only: keep components of this kind, spelled as `new` and `register` "
+        "spell it",
     )
     parser.add_argument(
         "--store-root",
@@ -339,9 +357,19 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # 계속 시끄럽게 실패해야 하기 때문이다 — `Workspace.open`을 넓게 catch하면 그 구분이
         # 사라지고 손상이 "항목 0개"로 조용히 보고된다.
         return success("workspace.list", kind=args.kind, count=0, items=[])
+    component_kind = getattr(args, "component_kind", None)
+    if component_kind is not None and args.kind != "components":
+        raise InputError(
+            VALUE_INVALID,
+            requirement="`--kind` filters `list components`",
+            observed=f"--kind {component_kind!r} given with `list {args.kind}`",
+            retry="run `vqapr list components --kind <kind>`",
+        )
     workspace = Workspace.open(project_root)
     items = getattr(workspace, _ACCESSORS[args.kind])
     rows = [_summarize(item) for item in items]
+    if component_kind is not None:
+        rows = [row for row in rows if row.get("kind") == component_kind]
     if args.kind == "runs":
         # Beside each registered run, the member records the store holds for it: what ran, by
         # `<id>@<fp8>`, so a reader sees which tweaks of which models have been tried. A run

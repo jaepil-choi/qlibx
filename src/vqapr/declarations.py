@@ -46,6 +46,7 @@ from vqapr.exchange.execution_table import (
 )
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
+from vqapr.flow.run import RunDefinition
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.workspace import Transaction, Workspace
 from vqapr.workspace_document import (
@@ -884,6 +885,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             _component(str(component_id), body, project_root, transaction, base=base)
         )
 
+    definitions: list[tuple[str, RunDefinition]] = []
     for run_id, body in section("runs").items():
         # Shape by the codec, so a run reads the same way from a declaration and from the
         # document; every id it names is checked against the staged workspace by the merge.
@@ -927,11 +929,58 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             )
             found.done().raise_if_failed()
             raise  # unreachable
+        definitions.append((str(run_id), definition))
+
+    _refuse_a_run_fed_by_a_sibling(definitions)
+    for run_id, definition in definitions:
         transaction.register_run(definition)
-        registered.setdefault("runs", []).append(str(run_id))
+        registered.setdefault("runs", []).append(run_id)
 
     transaction.commit()
     return registered
+
+
+def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinition]]) -> None:
+    """A run whose sessions come from a dataset another run in this document will write.
+
+    `inputs()` and `sessions_from` are resolved at registration, so a document holding two runs
+    where the second takes its sessions from the first's output cannot be registered at all: the
+    dataset does not exist until the first has run, and the first cannot run until the document is
+    registered. The workspace refusal says only that the dataset is unregistered, and
+    `vqapr new run --out` scaffolds a `runs:` block that holds several runs and invites exactly
+    this. The reporter of `docs/issues/084` split one file per run and lost ten minutes. This
+    refusal can see the producer -- it is in the same document -- and names it.
+    """
+    produced: dict[str, str] = {}
+    for run_id, definition in definitions:
+        for entry in definition.datamodels:
+            produced.setdefault(str(entry.dataset_id), run_id)
+    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    for run_id, definition in definitions:
+        wanted = definition.sessions_from
+        producer = None if wanted is None else produced.get(str(wanted))
+        if producer is None or producer == run_id:
+            continue
+        found.add(
+            Failure.bounded(
+                f"{DECLARE_STAGE}.run_fed_by_sibling",
+                requirement=(
+                    "a run that takes its sessions from a dataset must be registered after "
+                    "that dataset exists"
+                ),
+                observed=(
+                    f"run {run_id!r} takes sessions from {wanted!r}, which run {producer!r} in "
+                    "this same document will write when it runs"
+                ),
+                source=_at(f"runs.{run_id}.sessions_from"),
+                fix=(
+                    f"split the document: register and run {producer!r} first, then register "
+                    f"{run_id!r} from its own file once {wanted!r} exists"
+                ),
+                explain=ExplainTopic.WORKSPACE_STATE,
+            )
+        )
+    found.done().raise_if_failed()
 
 
 def register_authored(

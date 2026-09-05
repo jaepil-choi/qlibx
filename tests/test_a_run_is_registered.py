@@ -159,6 +159,9 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.conflict"
     assert "run_id 'krx-2024'" in failure["requirement"]
+    # `docs/issues/084`: the two options the fix used to list were the two things an author
+    # editing a run during setup did not want. The third ships, and the refusal names it.
+    assert "vqapr rm run-definition krx-2024" in failure["fix"]
 
 
 @pytest.mark.parametrize(

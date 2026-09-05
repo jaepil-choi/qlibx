@@ -1,6 +1,11 @@
 # 084 — a run definition refuses re-registration and neither refusal names the verb that would allow it
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C1, and A4 for
+**Status:** **CLOSED 2026-09-05 -- record `156`, all three items.** The conflict's `fix` names
+`vqapr rm run-definition <id>`; the skill says a `runs:` declaration is the exception to
+replace-in-place; and a document holding a run fed by a sibling run's output is refused as
+`declaration.read.run_fed_by_sibling`, naming the producer and saying to split the document.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (C1, and A4 for
 the second half), editing a run declaration during setup. Confirmed in source on this branch.
 
 **Touches:** `src/vqapr/workspace.py:504-524` (`register_component`, which replaces in place and

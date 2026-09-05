@@ -1,6 +1,10 @@
 # 082 — nothing answers "who reads this dataset", and a dataset does not name the run that wrote it
 
-**Status:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B2), measured
+**Status:** **OPEN -- the `--kind` filter landed with record `156` (`083`); `--reads` and
+the producer `run_id` on a dataset remain.** The second belongs with one-shape campaign
+Step 5, where the dataset document is rewritten.
+
+**Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B2), measured
 at 36.3 seconds and 41 processes per question, on a workspace of 40 components. Confirmed in source
 on this branch.
 

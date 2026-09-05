@@ -839,6 +839,21 @@ class Workspace:
                     f"strategy {key!r} is already bound to agenda "
                     f"{getattr(existing, 'agenda_id', '?')!r}"
                 )
+            fix = (
+                f"keep the registered declaration for {key!r} unchanged, or choose a new {noun}"
+            )
+            if noun == "run_id":
+                # A run definition is the provenance of a result, so one id pointing at two
+                # configurations would be a lie -- but a component replaces in place, and the
+                # skill's "editing what you registered is the ordinary loop" reads as the rule
+                # for both. The author who edits a run during setup (start date, universe, the
+                # strategy list) hits this refusal, and its two options were the two things they
+                # did not want. The third option ships, and the refusal now names it
+                # (`docs/issues/084`).
+                fix += (
+                    f", or withdraw it first with `vqapr rm run-definition {key}` and register "
+                    "the edited declaration again"
+                )
             raise _workspace_error(
                 stage=stage,
                 code=f"{stage}.conflict",
@@ -846,10 +861,7 @@ class Workspace:
                     f"{noun} {key!r} must keep its existing declaration or use a new identity"
                 ),
                 observed=observed,
-                fix=(
-                    f"keep the registered declaration for {key!r} unchanged, or choose "
-                    f"a new {noun}"
-                ),
+                fix=fix,
                 explain=ExplainTopic.WORKSPACE_STATE,
                 retry=f"use the existing declaration or choose a new {noun}",
             )

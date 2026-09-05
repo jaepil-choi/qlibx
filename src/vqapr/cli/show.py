@@ -158,8 +158,29 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         }
     if kind is ComponentKind.DATA_MODEL:
         model = load_data_model(ref, project_root=project_root)
-    else:
+    elif kind is ComponentKind.STRATEGY_MODEL:
         model = load_strategy_model(ref, project_root=project_root)
+    else:
+        # A registered id of a kind this verb does not describe. It used to fall through to the
+        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then
+        # left as `stage: unhandled` -- a sentence that is false (this verb reads three kinds,
+        # and had just shown a datamodel) and unstructured (`docs/issues/083`). The mistake is
+        # the same one as an unregistered id, one line up, and gets the same answer.
+        shown = ", ".join(
+            cli_kind(item)
+            for item in (
+                ComponentKind.STRATEGY_MODEL, ComponentKind.DATA_MODEL, ComponentKind.CONSTRAINT
+            )
+        )
+        raise InputError(
+            "cli.input.value_invalid",
+            requirement=f"show model describes a component of kind {shown}",
+            observed=f"{component_id!r} is registered as {cli_kind(kind)}",
+            retry=(
+                "run `vqapr list components --kind <kind>` to pick a component this verb "
+                "describes"
+            ),
+        )
     # From the model's own declarations -- `inputs()`, `tables()`, `account_history()` -- which
     # are what the framework acts on. This read three private attributes nothing in the tree
     # assigned (`_aliases`, `_authored_tables`, `_authored_history`, relics of the shape records

@@ -1154,6 +1154,22 @@ class Constraint(ABC):
             for requirement in requirements_for(declaration)
         )
 
+    @property
+    def tolerance(self) -> Decimal | None:
+        """How far past a bound the realised book may land and still count as inside it.
+
+        `None`, the default, leaves it to the framework: ``max(bound * 1%, 10bp of NAV)``. A book
+        executes in whole lots and is marked after its fills, so the realised weight lands a
+        little off the target the optimiser put on the grid; without a tolerance that residue is
+        filed as a violation in the same counter as a real one (`docs/issues/086` -- 40 of 82
+        rebalances, worst 0.01%p, beside one real breach of 4.89%p). Override with a `Decimal`
+        share of NAV to tighten or loosen it. The comparison itself stays the author's:
+        `monitor` returns `passed`, `measured`, `bound`, `excess` as before, and the framework
+        judges the excess against this line once, for every constraint, and reports the verdict
+        beside the author's -- `held` / `within_tolerance` / `breached` -- so nothing is hidden.
+        """
+        return None
+
     @abstractmethod
     def project(self, call: ConstraintCall) -> ConstraintBounds:
         """Project deterministic per-instrument bounds for the current PIT cutoff.

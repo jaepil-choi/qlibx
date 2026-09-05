@@ -389,6 +389,12 @@ class ValuationPhase:
                     "measured": finding.measured,
                     "bound": finding.bound,
                     "excess": finding.excess,
+                    # The framework's verdict beside the author's `passed` (`docs/issues/086`):
+                    # `held`, `within_tolerance` or `breached`, and the tolerance it was judged
+                    # against, so a reader of this table can split the populations the way the
+                    # record's `contract` block does.
+                    "verdict": finding.verdict,
+                    "tolerance": finding.tolerance,
                     "offenders": " ".join(finding.offenders),
                     "account_version": report.account_version,
                 },

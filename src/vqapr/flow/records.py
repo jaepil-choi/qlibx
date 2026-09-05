@@ -16,6 +16,7 @@ this builds against. A run record is a flow artifact, and this is where it belon
 from __future__ import annotations
 
 from collections.abc import Mapping
+from decimal import Decimal
 from pathlib import Path
 
 from vqapr.flow.datamodel import DataModelResult
@@ -299,17 +300,43 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     not exist yet, and inventing entries for them here would report a promise nobody made.
     """
 
-    findings: dict[str, dict[str, int]] = {}
+    # Three populations, not one (`docs/issues/086`): what the author's own comparison held,
+    # what it failed inside the framework's tolerance, and what it failed beyond it. The run that
+    # filed the issue had 40 quantisation residues (worst 0.01%p) and one real breach (4.89%p),
+    # and `held 42/82` reported them as one fact. `ok` turns on `breached` alone; the other two
+    # counts and their worst excesses are filed beside it so a generous tolerance hides nothing.
+    findings: dict[str, dict[str, object]] = {}
     for trace in getattr(result, "occurrences", ()):
         report = getattr(getattr(trace, "result", None), "report", None)
         for stamped in getattr(report, "findings", ()) or ():
             constraint_id = str(getattr(stamped, "constraint_id", "") or "")
             if not constraint_id:
                 continue
-            counts = findings.setdefault(constraint_id, {"held": 0, "checked": 0})
-            counts["checked"] += 1
-            if stamped.passed:
-                counts["held"] += 1
+            counts = findings.setdefault(
+                constraint_id,
+                {
+                    "held": 0,
+                    "within_tolerance": 0,
+                    "breached": 0,
+                    "checked": 0,
+                    "tolerance": Decimal(0),
+                    "worst_within": None,
+                    "worst_breached": None,
+                },
+            )
+            counts["checked"] += 1  # type: ignore[operator]
+            verdict = getattr(stamped, "verdict", "held" if stamped.passed else "breached")
+            counts[verdict] += 1  # type: ignore[operator]
+            tolerance = getattr(stamped, "tolerance", None)
+            if isinstance(tolerance, Decimal) and tolerance > counts["tolerance"]:  # type: ignore[operator]
+                counts["tolerance"] = tolerance
+            if verdict == "held":
+                continue
+            key = "worst_within" if verdict == "within_tolerance" else "worst_breached"
+            excess = getattr(stamped, "excess", Decimal(0))
+            worst = counts[key]
+            if worst is None or excess > worst:  # type: ignore[operator]
+                counts[key] = excess
 
     accepted = sum(
         1
@@ -318,19 +345,31 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     )
     report: dict[str, object] = {}
     for constraint_id, counts in sorted(findings.items()):
-        violations = counts["checked"] - counts["held"]
+        checked = int(counts["checked"])  # type: ignore[call-overload]
+        breached = int(counts["breached"])  # type: ignore[call-overload]
         entry: dict[str, object] = {
             "held": counts["held"],
-            "checked": counts["checked"],
-            "ok": violations == 0 and counts["checked"] > 0,
+            "within_tolerance": counts["within_tolerance"],
+            "breached": breached,
+            "checked": checked,
+            "tolerance": str(counts["tolerance"]),
+            "worst_within": None if counts["worst_within"] is None else str(counts["worst_within"]),
+            "worst_breached": (
+                None if counts["worst_breached"] is None else str(counts["worst_breached"])
+            ),
+            "ok": breached == 0 and checked > 0,
         }
-        if violations:
-            entry["cause"] = f"{violations} of {counts['checked']} check(s) did not hold"
-            entry["fix"] = (
-                f"loosen {constraint_id} to a bound the book can stay inside, or change the "
-                "strategy so what it holds satisfies it"
+        if breached:
+            entry["cause"] = (
+                f"{breached} of {checked} check(s) breached beyond the tolerance "
+                f"{counts['tolerance']} (worst excess {counts['worst_breached']})"
             )
-        elif counts["checked"] == 0:
+            entry["fix"] = (
+                f"change the strategy so what it holds satisfies {constraint_id}, loosen the "
+                "bound, or -- if these are execution residue and not intent -- raise the "
+                "constraint's `tolerance`"
+            )
+        elif checked == 0:
             entry["cause"] = "declared but never checked, so nothing was proven about it"
             entry["fix"] = "remove the declaration, or run over a period where it is exercised"
         report[constraint_id] = entry

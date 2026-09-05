@@ -10,8 +10,8 @@
 
 | | |
 |---|---|
-| `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected** |
-| 브랜치 | 없음 — 다음은 `step-04-delete-materialize` |
+| `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
+| 브랜치 | 없음 — 다음은 `step-04-delete-materialize`. **실환경 아홉 중 여덟이 닫혔고 캠페인 순서는 그대로다**: Step 4 → 5(`082`의 나머지 — dataset이 producer run을 댄다 — 를 여기에 접는다) → 6 → 7 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -23,12 +23,32 @@
 > **§3의 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2·2b·3은 닫혔다(records `152`·`153`·`154`).
 > **§3의 record 번호는 전부 무효로 읽는다** — 번호는 브랜치를 딸 때 정한다. 손 위치는 유효하다.
 
+## 0b. 2026-09-05 세션이 남긴 것 — 캠페인 밖 브랜치 넷
+
+전부 `develop`에 `--no-ff`로 병합·푸시됐다. 각 record가 무엇·왜·검증을 든다.
+
+| record | 브랜치 | 닫은 이슈 | 한 줄 |
+|---|---|---|---|
+| `155` | `fix/078-size-down-and-leave-cash` | `078` | 지불 가능 수량이 **청구하는 채널**(`ExchangeRulesView.charge`)에서 rate를 읽고, 보정은 청구된 값으로 다시 풀고, 못 맞추면 거부 대신 현금을 남긴다. 척추 인접(`orders/planning.py`)이라 캠페인 밖 |
+| `156` | `fix/refusals-and-summaries-tell-the-truth` | `079`·`083`·`084`·`085` (+`082`의 `--kind` 절반) | datamodel 거부가 pyarrow 문장+확정 스키마를 인용하고 원인을 단정 안 함(`type_drift`→`schema_mismatch`); `show model`의 구조화 거부와 `list components --kind`; run conflict `fix`가 `rm run-definition`을 대고 같은 문서의 producer run을 거부가 이름으로 댐(`declaration.read.run_fed_by_sibling`); `fill_summary.never_filled` |
+| `157` | `fix/080-081-enumerate-then-cascade` | `080`·`081` | datamodel 쪽 `unfinished`/`running` 열거와 `rm datamodel`이 record 없는 디렉터리를 댐; `list runs`의 `orphaned` 행; `rm run-definition`의 `records_remaining`; **`rm run <id> --cascade`** (record → 정의 → materialized 출력 → component, 다른 run이 이름 대는 것은 `kept`+`held_by`) |
+| `158` | `fix/086-tolerance-and-three-buckets` | `086` | `StampedConstraintFinding`이 `excess`를 `max(bound×1%, 10bp)`(또는 `Constraint.tolerance`)로 판정해 `held`/`within_tolerance`/`breached`; contract 블록이 셋을 나눠 세고 `ok`는 `breached`만 봄; monitoring 행에 `verdict`·`tolerance`. **constraint·scaffold 코드 변경 0** |
+
+**함정 하나, 기록해 둔다.** `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
+문서화된 ~1/12 flake이고, `157`의 전체 스위트에서 한 번 실패했다(1,452 passed / 1 failed). 격리 재실행
+5/6, `develop`에서 5/5. **소스를 막 고친 직후에 돌리면 더 자주 실패한다** — 다섯 자식 프로세스가 바뀐
+모듈을 동시에 바이트컴파일하느라 창이 넓어진다(3/5 관측). 실패하면 두어 번 다시 돌려 보고, 세 번 연속이면
+그때 의심한다.
+
+**남은 실환경 이슈는 `082` 하나** — `--reads` 인덱스와 dataset의 producer `run_id`. 캠페인 Step 5에서 dataset
+문서를 다시 쓸 때 접는다. 원래부터 열려 있던 `023`·`027`은 그대로.
+
 ## 1. 소유자 결정 (전부 확정 — 다시 묻지 말 것)
 
 ### 1b. 2026-09-05 판정 다섯 — 실환경 아홉 중 다섯
 
 이슈 파일의 `**Status:**` 줄이 authority이고, ledger §1의 「2026-09-05 소유자 판정」이 색인이다.
-다섯 다 **아직 열려 있다** — 방향만 정해졌다.
+**같은 날 전부 구현됐다** — records `155`–`158`, 아래 §0b. 판정 자체는 그대로 유효하고, 다시 묻지 않는다.
 
 | | 결정 | 메모리 파일 |
 |---|---|---|

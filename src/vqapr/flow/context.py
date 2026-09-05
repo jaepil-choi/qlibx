@@ -282,7 +282,17 @@ DEFAULT_TABLES = (
     # counted them -- `held` and `checked` say how often, not what or by how much.
     TableSpec(
         f"{DEFAULT_TABLE_PREFIX}monitoring",
-        ("constraint", "passed", "measured", "bound", "excess", "offenders", "account_version"),
+        (
+            "constraint",
+            "passed",
+            "measured",
+            "bound",
+            "excess",
+            "verdict",
+            "tolerance",
+            "offenders",
+            "account_version",
+        ),
     ),
 
     TableSpec(

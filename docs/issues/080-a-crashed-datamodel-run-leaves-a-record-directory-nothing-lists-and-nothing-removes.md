@@ -1,6 +1,11 @@
 # 080 — a crashed datamodel run leaves a record directory nothing lists and nothing removes
 
-**Status:** **OPEN -- and now the prerequisite of `081`.** Owner ruled 2026-09-05 that
+**Status:** **CLOSED 2026-09-05 -- record `157`.** `unfinished_datamodel_refs` and
+`datamodel_progress` exist; `list datamodels --run` lists a record-less directory as
+`running`/`unfinished` with `chunks` and `last_event_time`; `rm datamodel` names it; the skill
+says count records, not directories. Landed before the cascade, as ruled.
+
+**Ruling 2026-09-05: the prerequisite of `081`.** Owner ruled 2026-09-05 that
 deletion must be easy and `rm run --cascade` gets built (`081`). A cascade standing on an
 enumeration that cannot see the crashed directories this file reports would delete what it can see
 and report success -- this defect amplified into a command that claims completeness. So the

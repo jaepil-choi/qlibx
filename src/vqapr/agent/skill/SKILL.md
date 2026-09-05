@@ -460,13 +460,23 @@ minutes and still has no record is `status: unfinished`: the strategy was killed
 ended in a refusal -- the run's own envelope says which. `vqapr show strategy` reads finished
 records only.
 
-**Tweaks are directories.** A strategy's record is named by its registered fingerprint, which
-folds the file bytes and the config: edit the strategy and re-register it under the same id,
-run again, and the new record lands BESIDE the old one. Counting `<strategy-id>@*` under
-`.vqapr/runs/<run-id>/strategies/` is how many times it was tweaked. Running the same
-fingerprint again is refused unless `--force` replaces that one record; `vqapr rm strategy
-<run-id>/<strategy-id>@<fp8>` and `vqapr rm run <run-id> [--keep-latest]` remove records, and
-both refuse while a writer may still hold the record.
+**Tweaks are records, not directories.** A strategy's record is named by its registered
+fingerprint, which folds the file bytes and the config: edit the strategy and re-register it under
+the same id, run again, and the new record lands BESIDE the old one. **Count records**: the rows
+`vqapr list strategies --run <run-id>` (or `list datamodels --run`) reports with
+`status: completed` are how many times it was tweaked. Counting directories over-counts by the
+crashes: a run killed or refused inside a callback leaves a directory with rows and no record,
+which `list` shows as `status: unfinished` and which `vqapr rm strategy|datamodel <run-id>/<ref>`
+removes. Running the same fingerprint again is refused unless `--force` replaces that one record;
+`vqapr rm strategy <run-id>/<strategy-id>@<fp8>` and `vqapr rm run <run-id> [--keep-latest]`
+remove records, and both refuse while a writer may still hold the record.
+
+**Removing a run entirely: `vqapr rm run <run-id> --cascade`.** One gesture removes its records,
+its registered definition, the materialized datasets its datamodels wrote, and the components it
+named -- keeping, and naming as `kept`, any dataset or component another registered run still
+names. The single-kind verbs still exist for the step-by-step case, `vqapr list runs` keeps
+showing a run whose definition was withdrawn but whose records remain (`status: orphaned`), and
+`rm run-definition` reports the records it left and the verb that removes them.
 
 ## Writing a strategy
 

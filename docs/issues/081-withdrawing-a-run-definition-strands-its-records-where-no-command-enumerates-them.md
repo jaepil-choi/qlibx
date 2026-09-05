@@ -1,6 +1,12 @@
 # 081 — withdrawing a run definition strands its records where no command enumerates them
 
-**Status:** **OPEN -- owner ruling 2026-09-05: build the cascade.** Deletion must be easy.
+**Status:** **CLOSED 2026-09-05 -- record `157`, all three items.** `vqapr rm run <id>
+--cascade` removes records, definition, materialized outputs and the components no other run
+names, reporting `kept` with `held_by` for the rest; `list runs` shows a withdrawn run as
+`status: orphaned`; `rm run-definition` reports `records_remaining` and the verb that removes
+them. Ruling below, as filed.
+
+**Ruling 2026-09-05 by owner: build the cascade.** Deletion must be easy.
 `vqapr rm run --cascade <id>` removes the definition, the records, the materialized output and the
 component in one gesture, instead of five commands in an order the surface does not state. Three
 conditions attach. **`080` first:** the crashed-directory enumeration lands before the cascade, or

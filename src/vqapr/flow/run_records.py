@@ -971,20 +971,70 @@ def unfinished_strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
     once it was finished, so an author counted parquet files by hand to learn whether a strategy
     was still advancing.
     """
-    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
+    return unfinished_member_refs(root, run_id, kind=STRATEGY_KIND)
+
+
+def unfinished_datamodel_refs(root: Path, run_id: str) -> tuple[str, ...]:
+    """Every datamodel directory of this run WITHOUT `datamodel.json`, as `<id>@<fp8>`, sorted.
+
+    The datamodel side of `074`. Record `148` gave datamodels `datamodel_refs` and neither of the
+    other two, so a datamodel run that died inside a callback left a directory nothing listed and
+    nothing could name (`docs/issues/080`) -- and the skill's "count the directories" then
+    over-counted a model's tunings by its crashes.
+    """
+    return unfinished_member_refs(root, run_id, kind=DATAMODEL_KIND)
+
+
+def unfinished_member_refs(root: Path, run_id: str, *, kind: str) -> tuple[str, ...]:
+    """Every member directory of `kind` without its record file, as `<id>@<fp8>`, sorted."""
+    members, filename, _, _ = MEMBER_KINDS[kind]
+    directory = root / RUNS_DIRECTORY / run_id / members
     if not directory.is_dir():
         return ()
     return tuple(
         sorted(
             child.name
             for child in directory.iterdir()
-            if child.is_dir() and not (child / STRATEGY_FILENAME).is_file()
+            if child.is_dir() and not (child / filename).is_file()
         )
     )
 
 
+def recorded_run_ids(root: Path) -> tuple[str, ...]:
+    """Every run this root holds ANY trace of: a run record, or a member directory of either kind.
+
+    `run_ids` is the finished set. This is the wider one `list runs` needs (`docs/issues/081`):
+    a run whose definition was withdrawn still has records, and a run that was killed before its
+    run record still has member directories, and both are findable only from here.
+    """
+    directory = root / RUNS_DIRECTORY
+    if not directory.is_dir():
+        return ()
+    found: set[str] = set(run_ids(root))
+    for child in directory.iterdir():
+        if not child.is_dir():
+            continue
+        for members, _, _, _ in MEMBER_KINDS.values():
+            member_dir = child / members
+            if member_dir.is_dir() and any(item.is_dir() for item in member_dir.iterdir()):
+                found.add(child.name)
+                break
+    return tuple(sorted(found))
+
+
 def strategy_progress(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
-    """What an unfinished strategy directory says about how far its run got.
+    """What an unfinished strategy directory says about how far its run got. See
+    `member_progress`."""
+    return member_progress(root, run_id, strategy_ref, kind=STRATEGY_KIND)
+
+
+def datamodel_progress(root: Path, run_id: str, datamodel_ref: str) -> dict[str, Any]:
+    """What an unfinished datamodel directory says about how far its run got (`080`)."""
+    return member_progress(root, run_id, datamodel_ref, kind=DATAMODEL_KIND)
+
+
+def member_progress(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str, Any]:
+    """What an unfinished member directory says about how far its run got.
 
     `status` is `running` or `unfinished` (see `STATUS_*`). `lock` is the holder's pid and how
     many seconds ago the run last touched its lock, or `None`; `chunks` is the most parts any of
@@ -993,7 +1043,7 @@ def strategy_progress(root: Path, run_id: str, strategy_ref: str) -> dict[str, A
     which is the last session the run accepted. One directory scan and one small parquet read per
     table; nothing here opens the whole record.
     """
-    directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY / strategy_ref
+    directory = record_directory(root, run_id, ref, kind=kind)
     claim = _lock_claim(directory / LOCK_FILENAME)
     tables = directory / TABLES_DIRECTORY
     parts: dict[str, tuple[Path, ...]] = {}

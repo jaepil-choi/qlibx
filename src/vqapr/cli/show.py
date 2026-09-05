@@ -36,6 +36,7 @@ from vqapr.flow.run_records import (
     run_ids,
     strategy_refs,
     table_ids,
+    unfinished_member_refs,
 )
 from vqapr.inputs import InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
@@ -256,12 +257,18 @@ def resolve_strategy(root: Path, identifier: str) -> tuple[str, str]:
     return resolve_member(root, identifier, kind="strategy")
 
 
-def resolve_member(root: Path, identifier: str, *, kind: str) -> tuple[str, str]:
+def resolve_member(
+    root: Path, identifier: str, *, kind: str, unfinished: bool = False
+) -> tuple[str, str]:
     """`<run-id>/<id>@<fp8>` -> (run_id, ref) for a strategy or a datamodel record.
 
     The short form is a convenience for the ordinary case of one record per model; with several
     fingerprints of one model the reader is shown them and asked to pick, because guessing the
     newest would answer a question about a tweak the reader did not name.
+
+    `unfinished` widens the known set to directories without a record. `show` reads finished
+    records only; `rm` is precisely the verb a reader wants for a directory a crashed run left
+    behind, and it could not name one (`docs/issues/080`).
     """
     plural = "strategies" if kind == "strategy" else "datamodels"
     run_id, slash, rest = identifier.partition("/")
@@ -273,6 +280,11 @@ def resolve_member(root: Path, identifier: str, *, kind: str) -> tuple[str, str]
             retry=f"run `vqapr list {plural} --run <run-id>` to see the records, then show one",
         )
     known = strategy_refs(root, run_id) if kind == "strategy" else datamodel_refs(root, run_id)
+    if unfinished:
+        known = (
+            *known,
+            *unfinished_member_refs(root, run_id, kind=kind),
+        )
     if rest in known:
         return run_id, rest
     matching = [ref for ref in known if ref.rsplit("@", 1)[0] == rest]

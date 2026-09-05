@@ -27,11 +27,14 @@ from vqapr.declarations import AUTHORED_KINDS
 from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_records import (
     STATUS_COMPLETED,
+    datamodel_progress,
     datamodel_refs,
     read_datamodel_record,
     read_strategy_record,
+    recorded_run_ids,
     strategy_progress,
     strategy_refs,
+    unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
 from vqapr.inputs import VALUE_INVALID, InputError
@@ -232,7 +235,13 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
 
 
 def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """Every finished datamodel record of one run (record `148`): what it wrote, and when."""
+    """Every datamodel record of one run (record `148`), finished or not (`docs/issues/080`).
+
+    Finished records first, `status: completed`. Then every datamodel directory without a
+    record, the way `_strategies` lists them: `running` while its lock is fresh, `unfinished`
+    once it is stale -- a datamodel run that died inside a callback, which used to leave a
+    directory nothing listed and `rm datamodel` could not name.
+    """
     since = _instant(getattr(args, "since", None), name="--since")
     rows: list[dict[str, Any]] = []
     for ref in datamodel_refs(root, run_id):
@@ -245,6 +254,7 @@ def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             "fingerprint": record.get("fingerprint"),
             "dataset_id": record.get("dataset_id"),
             "rows": record.get("rows"),
+            "status": STATUS_COMPLETED,
             "period": period,
         }
         wanted = getattr(args, "strategy", None)
@@ -258,6 +268,30 @@ def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             if ended is None or ended < since:
                 continue
         rows.append(row)
+    wanted = getattr(args, "strategy", None)
+    prefix = getattr(args, "fingerprint", None)
+    for ref in unfinished_datamodel_refs(root, run_id):
+        datamodel_id, _, fp8 = ref.rpartition("@")
+        if wanted and datamodel_id != wanted:
+            continue
+        if prefix and not fp8.startswith(prefix):
+            continue
+        progress = datamodel_progress(root, run_id, ref)
+        if since is not None:
+            last = _instant(progress.get("last_event_time"), name="last_event_time")
+            if last is None or last < since:
+                continue
+        rows.append(
+            {
+                "run_id": run_id,
+                "datamodel_ref": ref,
+                "datamodel_id": datamodel_id,
+                "fingerprint": None,
+                "dataset_id": None,
+                "rows": None,
+                **progress,
+            }
+        )
     return rows
 
 
@@ -380,6 +414,30 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 *strategy_refs(store_root, run_id),
                 *datamodel_refs(store_root, run_id),
             ]
+            row["status"] = "registered"
+        # And every run the STORE holds that the workspace no longer registers
+        # (`docs/issues/081`): withdrawing a definition left its records readable but not
+        # findable, because this walked the registrations only. An orphan is an entry point to
+        # `list strategies|datamodels --run` and to `rm run`, which is all that was missing.
+        registered = {str(row["run_id"]) for row in rows}
+        for run_id in recorded_run_ids(store_root):
+            if run_id in registered:
+                continue
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "status": "orphaned",
+                    "definition": None,
+                    "recorded": [
+                        *strategy_refs(store_root, run_id),
+                        *datamodel_refs(store_root, run_id),
+                    ],
+                    "unfinished": [
+                        *unfinished_strategy_refs(store_root, run_id),
+                        *unfinished_datamodel_refs(store_root, run_id),
+                    ],
+                }
+            )
     if args.identifier:
         needle = args.identifier
         rows = [row for row in rows if any(needle in str(value) for value in row.values())]

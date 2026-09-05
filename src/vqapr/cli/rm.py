@@ -11,6 +11,14 @@ run"*, and `Workspace.remove()` had no caller. Record `139` is the verb.
 the other declaration kinds withdraw theirs. Neither reaches across: withdrawing a registration
 leaves its records readable (a finished run pins what it used inside its own record), and removing
 records leaves the run registered to run again.
+
+**`rm run <id> --cascade` is the one gesture that says *remove all of it*** (owner ruling,
+2026-09-05, `docs/issues/081`: deletion must be easy). Records first -- the only step that can
+refuse, on a live lock, and it refuses before anything is touched -- then the run definition, then
+the materialized outputs its datamodels wrote, then the components it named. A dataset or a
+component that another registered run still names is kept and reported as kept, with the run that
+holds it. Nothing is rolled back on a failure part-way: deleted evidence cannot be restored, so the
+payload names what went and what remains instead.
 """
 
 from __future__ import annotations
@@ -26,12 +34,16 @@ from vqapr.flow.datamodel import MATERIALIZED_DIRECTORY
 from vqapr.flow.run_records import (
     DATAMODEL_KIND,
     RunRecordLive,
+    datamodel_refs,
+    recorded_run_ids,
     remove_run_record,
     remove_strategy_record,
-    run_ids,
+    strategy_refs,
+    unfinished_datamodel_refs,
+    unfinished_strategy_refs,
 )
 from vqapr.inputs import VALUE_INVALID, InputError
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {
@@ -64,6 +76,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="`run` only: keep the newest record of each strategy; remove older fingerprints",
     )
     parser.add_argument(
+        "--cascade",
+        dest="cascade",
+        action="store_true",
+        help=(
+            "`run` only: remove everything of this run -- its records, its registered "
+            "definition, the materialized datasets its datamodels wrote, and the components it "
+            "named that no other run still names"
+        ),
+    )
+    parser.add_argument(
         "--store-root",
         dest="store_root",
         type=Path,
@@ -76,13 +98,25 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
     kind = str(args.kind)
     identifier = str(args.identifier)
+    cascade = bool(getattr(args, "cascade", False))
+    if cascade and kind != "run":
+        raise InputError(
+            VALUE_INVALID,
+            requirement="`--cascade` belongs to `rm run`",
+            observed=f"--cascade given with `rm {kind}`",
+            retry="run `vqapr rm run <run-id> --cascade`",
+        )
     try:
         if kind == "run":
-            if identifier not in run_ids(root):
+            if cascade:
+                return _cascade(project_root, root, identifier)
+            if identifier not in recorded_run_ids(root):
                 raise InputError(
                     VALUE_INVALID,
                     requirement="rm run requires the id of a run this store holds records for",
-                    observed=f"{identifier!r}; known: {', '.join(run_ids(root)) or '(none)'}",
+                    observed=(
+                        f"{identifier!r}; known: {', '.join(recorded_run_ids(root)) or '(none)'}"
+                    ),
                     retry="run `vqapr list runs` to see what this store holds",
                 )
             removed = remove_run_record(
@@ -90,13 +124,19 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             )
             return success("record.removed", kind=kind, run_id=identifier, removed=list(removed))
         if kind == "strategy":
-            run_id, strategy_ref = resolve_member(root, identifier, kind="strategy")
+            run_id, strategy_ref = resolve_member(
+                root, identifier, kind="strategy", unfinished=True
+            )
             remove_strategy_record(root, run_id, strategy_ref)
             return success("record.removed", kind=kind, run_id=run_id, removed=[strategy_ref])
         if kind == "datamodel":
             # The record only. The dataset it registered stays registered: a record is what a
-            # run wrote about itself, and a dataset is what other runs may already read.
-            run_id, datamodel_ref = resolve_member(root, identifier, kind="datamodel")
+            # run wrote about itself, and a dataset is what other runs may already read. A
+            # directory WITHOUT a record -- what a crashed datamodel run leaves -- is precisely
+            # the one a reader wants to remove, and this could not name it (`docs/issues/080`).
+            run_id, datamodel_ref = resolve_member(
+                root, identifier, kind="datamodel", unfinished=True
+            )
             remove_strategy_record(root, run_id, datamodel_ref, kind=DATAMODEL_KIND)
             return success("record.removed", kind=kind, run_id=run_id, removed=[datamodel_ref])
     except RunRecordLive as live:
@@ -135,4 +175,114 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if removed and materialized is not None:
         shutil.rmtree(materialized, ignore_errors=True)
         payload["deleted"] = str(materialized)
+    if kind == "run-definition":
+        # What the withdrawal left behind, and the verb that removes it. The refusals on the
+        # way here name the next step; this names the last one, which otherwise had to be
+        # performed from memory once `list runs` stopped showing the id (`docs/issues/081`).
+        remaining = _records_of(root, identifier)
+        payload["records_remaining"] = remaining
+        if remaining:
+            payload["remove_records_with"] = f"vqapr rm run {identifier}"
     return payload
+
+
+def _records_of(root: Path, run_id: str) -> list[str]:
+    """Every member directory this run holds, finished or not, as `<id>@<fp8>`."""
+    return [
+        *strategy_refs(root, run_id),
+        *datamodel_refs(root, run_id),
+        *unfinished_strategy_refs(root, run_id),
+        *unfinished_datamodel_refs(root, run_id),
+    ]
+
+
+def _materialized_path(project_root: Path, workspace: Workspace, dataset_id: str) -> Path | None:
+    """Where a registered dataset's rows live, if they live under the package's own directory."""
+    registered = {str(item.dataset_id): item for item in workspace.datasets}
+    item = registered.get(dataset_id)
+    if item is None:
+        return None
+    path = workspace.source(str(item.source)).path.resolve()
+    own = (project_root / WORKSPACE_DIRECTORY / MATERIALIZED_DIRECTORY).resolve()
+    return path if own in path.parents else None
+
+
+def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
+    """Everything of one run, in the order that lets a refusal happen before any deletion.
+
+    1. Records. `remove_run_record` checks every live lock before it removes anything, so a
+       `RunRecordLive` here leaves the run exactly as it was.
+    2. The registered definition, read first so its members are known after it is gone.
+    3. The materialized datasets its datamodels wrote. Kept when another registered run takes
+       its sessions from one, which is what `Workspace.remove` refuses.
+    4. The components it named. Kept when another registered run still names one.
+
+    A step that fails after records are gone is reported, not rolled back: the payload says what
+    went and what remains, and the reader finishes with the single-kind verbs.
+    """
+    workspace = (
+        Workspace.open(project_root)
+        if (project_root / WORKSPACE_DIRECTORY / WORKSPACE_FILENAME).exists()
+        else None
+    )
+    definition = None
+    if workspace is not None:
+        definition = next(
+            (item for item in workspace.run_definitions if item.run_id == run_id), None
+        )
+    if definition is None and run_id not in recorded_run_ids(root):
+        raise InputError(
+            VALUE_INVALID,
+            requirement="rm run --cascade requires a run this workspace registers or holds "
+            "records for",
+            observed=f"{run_id!r}; recorded: {', '.join(recorded_run_ids(root)) or '(none)'}",
+            retry="run `vqapr list runs` to see what this workspace holds",
+        )
+    removed: dict[str, Any] = {
+        "records": list(remove_run_record(root, run_id)),
+        "run_definition": False,
+        "datasets": [],
+        "components": [],
+    }
+    kept: list[dict[str, str]] = []
+    if definition is None or workspace is None:
+        return success("workspace.removed", kind="run", identifier=run_id, cascade=True,
+                       removed=removed, kept=kept)
+    removed["run_definition"] = bool(workspace.remove("run", run_id))
+    outputs = [str(entry.dataset_id) for entry in definition.datamodels]
+    for dataset_id in outputs:
+        blockers = workspace.references_to("dataset", dataset_id)
+        if blockers:
+            kept.append(
+                {"kind": "dataset", "id": dataset_id, "held_by": ", ".join(blockers)}
+            )
+            continue
+        materialized = _materialized_path(project_root, workspace, dataset_id)
+        if workspace.remove("dataset", dataset_id):
+            removed["datasets"].append(dataset_id)
+            if materialized is not None:
+                shutil.rmtree(materialized, ignore_errors=True)
+    named: list[str] = []
+    for entry in definition.strategies:
+        named.append(entry.component_id)
+        named.extend(entry.constraints)
+    named.extend(entry.component_id for entry in definition.datamodels)
+    if definition.exchange is not None:
+        named.append(definition.exchange)
+    for component_id in dict.fromkeys(named):
+        blockers = workspace.references_to("component", component_id)
+        if blockers:
+            kept.append(
+                {"kind": "component", "id": component_id, "held_by": ", ".join(blockers)}
+            )
+            continue
+        if workspace.remove("component", component_id):
+            removed["components"].append(component_id)
+    return success(
+        "workspace.removed",
+        kind="run",
+        identifier=run_id,
+        cascade=True,
+        removed=removed,
+        kept=kept,
+    )

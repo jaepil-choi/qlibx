@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-05.** 이 디렉터리에 86개 파일이 있고 **80개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-05.** 이 디렉터리에 86개 파일이 있고 **82개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -15,7 +15,7 @@
 
 ---
 
-## 1. 열린 것 — 여섯 (`023`·`027` + 실환경 `080`·`081`·`082`·`086`; `078`은 record `155`, `079`·`083`·`084`·`085`는 record `156`이 닫았다)
+## 1. 열린 것 — 넷 (`023`·`027` + 실환경 `082`·`086`; `078`은 record `155`, `079`·`083`·`084`·`085`는 `156`, `080`·`081`은 `157`이 닫았다)
 
 | # | 제목 | 상태 (2026-09-03 재확인) | 어디로 가는가 |
 |---|---|---|---|
@@ -38,8 +38,8 @@
 |---|---|---|---|
 | ~~`078`~~ | 지불 가능 수량 추정이 **category-driven venue가 쓰지 말라고 안내받은 채널**에서 비용을 읽고, 안 맞으면 venue를 탓한다 | **닫힘 2026-09-05 — record `155`.** 추정이 `charge`를 읽고, 보정은 청구된 값으로 다시 풀고, 못 맞추면 거부 대신 현금을 남긴다 | C4 |
 | ~~`079`~~ | materialized dataset의 schema가 **첫 세션이 추론한 것**이고, 거부는 다른 것을 지목한다 | **닫힘 2026-09-05 — record `156`.** 거부가 pyarrow 문장과 확정된 스키마를 그대로 인용하고 원인을 단정하지 않는다(판정 C) | A1 |
-| `080` | 크래시한 datamodel run이 **아무도 열거하지 않고 아무도 지우지 못하는** record 디렉터리를 남긴다 | `074`가 strategy에 준 것을 datamodel은 못 받았다. skill이 광고하는 "디렉터리를 세라"가 그래서 틀린 수를 준다 | A5 |
-| `081` | run 정의를 withdraw하면 그 record를 **열거하는 명령이 없어진다** | `rm run`이 요구하는 id를 기억으로만 댈 수 있는 상태로 거부들이 안내한다. `run_ids()`는 이미 있다 | B1 |
+| ~~`080`~~ | 크래시한 datamodel run이 **아무도 열거하지 않고 아무도 지우지 못하는** record 디렉터리를 남긴다 | **닫힘 2026-09-05 — record `157`.** `list datamodels`가 `unfinished`로 보이고 `rm datamodel`이 이름을 댄다; skill은 "record를 세라" | A5 |
+| ~~`081`~~ | run 정의를 withdraw하면 그 record를 **열거하는 명령이 없어진다** | **닫힘 2026-09-05 — record `157`.** `list runs`가 고아를 `orphaned`로 보이고, `rm run-definition`이 남긴 것을 대고, `rm run --cascade`가 전부를 한 번에 지운다 | B1 |
 | `082` | "이 dataset을 읽는 게 누구인가"에 답하는 것이 없고, dataset이 자기를 만든 run을 대지 못한다 | 실측 36.3초/질문. 등록 시점에 `inputs()`를 평가하므로 정보는 이미 있다 | B2 |
 | ~~`083`~~ | `show model`은 component 세 종류를 읽는데 거부는 하나만 댄다 — 게다가 `unhandled` | **닫힘 2026-09-05 — record `156`.** 구조화된 거부가 세 kind를 대고, `list components --kind`가 생겼다 | B3 |
 | ~~`084`~~ | run 정의는 재등록이 거부되는데, **거부도 skill도 그것을 가능케 하는 verb를 대지 않는다** | **닫힘 2026-09-05 — record `156`.** `fix`가 `rm run-definition`을 대고, skill이 예외를 말하고, 같은 문서 안의 producer run을 거부가 이름으로 댄다 | C1 (+A4) |
@@ -55,8 +55,8 @@
 |---|---|---|
 | `078` ✔ | 두 번째 절반: **거부하지 않는다** (record `155`, 2026-09-05) | 지불 가능 수량이 안 맞으면 한 단위 덜 사고 잔액은 현금으로 남긴다. 실제 펀드는 현금을 꽤 들고 운용한다. 첫 번째 절반(청구하는 채널에서 비용을 읽기)은 그대로 버그이고 더 무겁다 |
 | `079` ✔ | **C — 데이터와 타입은 사용자 책임** (record `156`) | 스키마를 선언하게 하지 않고(A 기각), precision을 지목하지도 않는다(B 기각). 구분 못 하는 자리에서는 pyarrow 문장을 그대로 낸다. skill이 "연속량은 `float`"을 말한다 |
-| `080` | **`081`의 선행 조건이 됐다** | 열거가 불완전한 채로 cascade를 얹으면 "보이는 것만 지우고 성공했다"가 된다 |
-| `081` | **cascade를 만든다** | 삭제는 쉬워야 한다. `rm run --cascade`. 부분 실패는 되돌리지 않고 남은 것을 이름으로 보고한다. 작은 절반 둘(`list runs`의 고아 표시, `rm run-definition`의 payload)도 함께 |
+| `080` ✔ | **`081`의 선행 조건이 됐다** (record `157`) | 열거가 불완전한 채로 cascade를 얹으면 "보이는 것만 지우고 성공했다"가 된다 |
+| `081` ✔ | **cascade를 만든다** (record `157`) | 삭제는 쉬워야 한다. `rm run --cascade`. 부분 실패는 되돌리지 않고 남은 것을 이름으로 보고한다. 작은 절반 둘(`list runs`의 고아 표시, `rm run-definition`의 payload)도 함께 |
 | `085` ✔ ·`086` | **후한 허용오차 + 기록을 셋으로** (`085`는 record `156`) | 기본 `max(bound × 1%, 10bp)`, override 가능. 판정은 `constraints/evaluation.py` 한 자리 — 기존 constraint·scaffold·저자 코드 **변경 0**. 기록은 `held`/`within_tolerance`/`breached`와 각각의 worst excess. `085`도 같은 규칙(카운터를 나눈다, `never_filled`를 성공 payload에) |
 
 판정을 정한 수치: `086`이 실측한 오탐 최악 **0.01%p(1bp)** 대 같은 run의 진짜 위반 **4.89%p(489bp)**
@@ -207,6 +207,7 @@ annotation이 붙었다. **Phase 2(`arb-k0k5`, 2×2 grid + profiling)까지 끝�
 | `050` | CLOSED 2026-09-01 |
 | `055` `056` `057` `060` `062` `063` `066` `067` `068` `069` `070` | **record `149`, 2026-09-04, 한 브랜치.** skill이 코드를 따라간다(`062`·`067`), scaffold alias가 dataset을 따른다(`063`), 미등록 dataset은 한 번만 보고(`056`), 없는 record는 이름을 대며 거절(`057`), 모든 envelope에 `workspace_root`와 상위 workspace 발견 시 거절(`066`), `show model`은 모델의 선언을 읽는다(`055`), `vqapr rm dataset`(`060`), 파생 agenda는 날짜로 먼저 자르고 명령당 한 번(`069`), `run`은 workspace를 한 번 연다(`070`), snapshot은 Arrow이고 기록에 `timing` 블록(`068`) |
 | `072` | record `151` — `PanelWindow.current()`, 한 모양 캠페인 Step 1 |
+| `080` `081` | **record `157`, 2026-09-05, 한 브랜치.** 열거 완비 뒤 cascade — datamodel 쪽이 strategy 쪽과 같은 세 상태(`completed`/`running`/`unfinished`)를 갖고 `rm datamodel`이 record 없는 디렉터리를 댄다(`080`); `list runs`의 `orphaned` 행, `rm run-definition`의 `records_remaining`, `rm run --cascade`(record → 정의 → materialized 출력 → component, 다른 run이 이름 대는 것은 `kept`로 보고)(`081`) |
 | `079` `083` `084` `085` | **record `156`, 2026-09-05, 한 브랜치.** 거부와 요약이 사실만 말한다 — datamodel 스키마 불일치는 pyarrow 문장+확정 스키마를 인용하고 원인을 단정하지 않는다(`079`, 판정 C); `show model`이 못 그리는 kind를 구조화된 거부로 대고 `list components --kind`(`083`); run conflict의 `fix`가 `rm run-definition`을 대고 같은 문서의 producer run을 거부가 이름으로 댄다(`084`); `fill_summary`에 `never_filled`(`085`) |
 | `078` | record `155` — 지불 가능 수량이 **청구하는 채널**에서 rate를 읽는다(`terms_by_kind`를 쓴 venue가 큰 주문을 낼 수 있다, `013`의 재발 차단); 보정은 lot 하나씩이 아니라 청구된 값으로 다시 푼다; 못 맞추면 거부가 아니라 **현금을 남긴다**(2026-09-05 소유자 판정) |
 | `075` | record `154` — signed book이 신호대로 나뉜다(`Rebalance.signed`), `of`는 `rescale`을 부른다, 한 모양 캠페인 Step 3 |

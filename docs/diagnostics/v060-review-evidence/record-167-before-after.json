@@ -1,0 +1,149 @@
+{
+  "baseline": "before = review run at 7d2ab0ee (v0.6.0) kept under .agent/runs/v060-call-flow-review/before; after = the same registered review-bounded run re-executed by probe.py on the record 167 tree",
+  "economic_envelope_equal_excluding_timing_and_paths": true,
+  "strategy_record_keys_differing_excluding_timing": [],
+  "timing_keys_equal": true,
+  "tables": {
+    "vqapr.weight": {
+      "rows_before": 30,
+      "rows_after": 30,
+      "schema_equal": true,
+      "data_equal": true
+    },
+    "vqapr.account": {
+      "rows_before": 40,
+      "rows_after": 40,
+      "schema_equal": true,
+      "data_equal": true
+    },
+    "vqapr.fill": {
+      "rows_before": 42,
+      "rows_after": 42,
+      "schema_equal": true,
+      "data_equal": true
+    }
+  },
+  "package_frames_at_first_call": {
+    "_load": {
+      "before": 7,
+      "after": 7,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/judgments.py:57:judgments",
+        "flow/judgments.py:103:judgments.<locals>.<genexpr>.<lambda>",
+        "flow/judgments.py:301:_judge_member_datasets",
+        "extension/loading.py:289:load_strategy_model",
+        "extension/loading.py:55:_load"
+      ]
+    },
+    "CallbackPhase.dispatch": {
+      "before": 10,
+      "after": 8,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/orchestration.py:191:run",
+        "flow/orchestration.py:523:_run_strategy",
+        "flow/simulation.py:201:SimulationFlow.run",
+        "flow/loop.py:70:OccurrenceFlow.run",
+        "flow/simulation.py:221:SimulationFlow._dispatch_static",
+        "flow/callback.py:70:CallbackPhase.dispatch"
+      ]
+    },
+    "SampleReversal5d.decide": {
+      "before": 13,
+      "after": 9,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/orchestration.py:191:run",
+        "flow/orchestration.py:523:_run_strategy",
+        "flow/simulation.py:201:SimulationFlow.run",
+        "flow/loop.py:70:OccurrenceFlow.run",
+        "flow/simulation.py:221:SimulationFlow._dispatch_static",
+        "flow/callback.py:70:CallbackPhase.dispatch",
+        "agent/sample/reversal_5d.py:52:SampleReversal5d.decide"
+      ]
+    },
+    "ExecutionPhase.execute_due": {
+      "before": 13,
+      "after": 9,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/orchestration.py:191:run",
+        "flow/orchestration.py:523:_run_strategy",
+        "flow/simulation.py:201:SimulationFlow.run",
+        "flow/loop.py:70:OccurrenceFlow.run",
+        "flow/simulation.py:233:SimulationFlow._dispatch_due",
+        "flow/simulation.py:275:SimulationFlow._dispatch_pending",
+        "flow/execution.py:40:ExecutionPhase.execute_due"
+      ]
+    },
+    "plan_orders": {
+      "before": 17,
+      "after": 10,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/orchestration.py:191:run",
+        "flow/orchestration.py:523:_run_strategy",
+        "flow/simulation.py:201:SimulationFlow.run",
+        "flow/loop.py:70:OccurrenceFlow.run",
+        "flow/simulation.py:233:SimulationFlow._dispatch_due",
+        "flow/simulation.py:275:SimulationFlow._dispatch_pending",
+        "flow/execution.py:40:ExecutionPhase.execute_due",
+        "orders/planning.py:375:plan_orders"
+      ]
+    },
+    "Account.prepare_fill": {
+      "before": 17,
+      "after": 10,
+      "after_stack": [
+        "cli/main.py:256:main",
+        "cli/run.py:220:run",
+        "flow/orchestration.py:191:run",
+        "flow/orchestration.py:523:_run_strategy",
+        "flow/simulation.py:201:SimulationFlow.run",
+        "flow/loop.py:70:OccurrenceFlow.run",
+        "flow/simulation.py:233:SimulationFlow._dispatch_due",
+        "flow/simulation.py:275:SimulationFlow._dispatch_pending",
+        "flow/execution.py:40:ExecutionPhase.execute_due",
+        "account/account.py:196:Account.prepare_fill"
+      ]
+    }
+  },
+  "boundary_calls_note": "generator-based context managers register one call on enter and one on exit under sys.setprofile, so their counts double while the boundaries themselves are unchanged",
+  "boundary_calls": {
+    "FlowContext.timed": {
+      "before": 170,
+      "after": 340
+    },
+    "FlowContext.guard": {
+      "before": 92,
+      "after": 184
+    },
+    "FlowContext.due_boundary": {
+      "before": 150,
+      "after": 300
+    },
+    "CallbackPhase._callback_intent_boundary": {
+      "before": 80,
+      "after": 160
+    }
+  },
+  "lambda_calls_under_flow": {
+    "before": 337,
+    "after": 16
+  },
+  "distinct_code_labels": {
+    "before": 628,
+    "after": 593
+  },
+  "loads_after": {
+    "extension/loading.py:289:load_strategy_model": 4,
+    "extension/loading.py:55:_load": 6,
+    "extension/loading.py:381:load_exchange": 2
+  }
+}

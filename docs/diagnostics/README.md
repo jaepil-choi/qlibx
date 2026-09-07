@@ -3,6 +3,9 @@
 > **2026-09-07 · 0.6.0 추가 리뷰:** [호출 흐름과 객체 생성](2026-09-07-v060-call-flow-review.md).
 > 현재 working tree의 AST/Vulture, CLI 10세션 profile, 생성자 실패 주입에 근거한다.
 > 아래 2026-09-03 색인은 당시 캠페인의 기록이며, 최신 리뷰의 작업 목록이 아니다.
+> 그 색인의 "run 기록이 메모리에 쌓였다가 끝에 쓰인다 — 죽으면 전부 없음"은 당시 관측이다. 기록 `164`
+> 이후 기록은 run이 끝날 때 한 번 쓰고, 정상·예외 종료는 모두 flush하며, hard kill만 spill 밸브가 이미
+> 쓴 부분을 남긴다 (`docs/design/run-record-layout.md`). 리뷰 R1의 생성 중 자원 누락은 기록 `167`이 닫았다.
 
 **이 디렉터리는 관측만 담는다.** 무엇을 할 것인가는 `docs/refactoring/`에 있고, 무엇을 했는가는
 `docs/implementations/`에, 무엇이 열려 있는가는 `docs/issues/README.md`에 있다. 진단이 계획과

@@ -693,8 +693,7 @@ class CallbackPhase:
             start = frozen.start
             if start is None:
                 raise ValueError("an execution horizon requires a frozen run start")
-            self._context.horizon = execution_input.fill.build_horizon(  # type: ignore[attr-defined]
-                execution_input,
+            self._context.horizon = execution_input.build_horizon(
                 start_time=start,
                 end_time=frozen.end,
                 # The run owns a scan session; the horizon is the one query that reads every
@@ -727,8 +726,7 @@ class CallbackPhase:
             # is a legitimate configuration -- a research run that only exercises callbacks -- and
             # a Hold in it stays exactly what it was.
             return None
-        target = execution_input.fill.select_target(
-            execution_input,
+        target = execution_input.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=self._context.frozen_run.end,
             horizon=self.execution_horizon(execution_input),
@@ -761,8 +759,7 @@ class CallbackPhase:
         execution_input = self._context.frozen_run.execution_input
         if execution_input is None or self._context.frozen_run.end is None:
             raise ValueError("an accepted intent requires frozen execution input and run end")
-        target = execution_input.fill.select_target(
-            execution_input,
+        target = execution_input.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=self._context.frozen_run.end,
             horizon=self.execution_horizon(execution_input),

@@ -11,6 +11,7 @@ from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.data import scan
+from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import ExecutionInputId
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
@@ -189,26 +190,29 @@ class FillConvention:
 
     def build_horizon(
         self,
-        execution_input: object,
+        source: SourceSpec,
         *,
+        trade_at_field: str,
         start_time: datetime,
         end_time: datetime,
         session: object | None = None,
     ) -> ExecutionHorizon:
-        """Read the run's candidate instants once.
+        """Read the run's candidate instants once from an execution table's source.
+
+        A convention reads a source and the field that stamps a fill; it does not know the
+        registration that pairs it with a table. `ExecutionInputRegistration.build_horizon`
+        passes its own table's binding here (one-shape Step 7, record 162: this was the
+        `conventions <-> execution_table` import cycle).
 
         The execution table is frozen for the run, so this set cannot change between callbacks.
         `start_time` must not be later than the earliest decision the run will make, or the
         horizon would omit instants a callback is entitled to select.
         """
-        from vqapr.exchange.execution_table import ExecutionInputRegistration
-
-        if not isinstance(execution_input, ExecutionInputRegistration):
-            raise TypeError("execution_input must be an ExecutionInputRegistration")
-        table = execution_input.table
+        if not isinstance(source, SourceSpec):
+            raise TypeError("source must be a SourceSpec")
         candidates = scan.candidate_instants(
-            table.source,
-            trade_at_field=table.trade_at_field,
+            source,
+            trade_at_field=trade_at_field,
             decision_time=start_time,
             end_time=end_time,
             session=session,
@@ -219,28 +223,32 @@ class FillConvention:
 
     def select_target(
         self,
-        execution_input: object,
+        source: SourceSpec,
         *,
+        trade_at_field: str,
+        execution_input_id: ExecutionInputId,
         decision_time: datetime,
         end_time: datetime,
         horizon: ExecutionHorizon | None = None,
     ) -> ExactExecutionTarget | None:
-        """Select the first strictly-later eligible execution instant in the run horizon."""
+        """Select the first strictly-later eligible execution instant in the run horizon.
 
-        from vqapr.exchange.execution_table import ExecutionInputRegistration
+        `source`/`trade_at_field` are the execution table's binding and `execution_input_id` the
+        registration the target is stamped with; a registration passes its own through
+        `ExecutionInputRegistration.select_target`.
+        """
 
-        if not isinstance(execution_input, ExecutionInputRegistration):
-            raise TypeError("execution_input must be an ExecutionInputRegistration")
+        if not isinstance(source, SourceSpec):
+            raise TypeError("source must be a SourceSpec")
         if decision_time.tzinfo is None or end_time.tzinfo is None:
             raise ValueError("decision_time and end_time must be timezone-aware")
         if decision_time.astimezone(UTC) > end_time.astimezone(UTC):
             raise ValueError("decision_time must not be after end_time")
 
-        table = execution_input.table
         if horizon is None:
             candidates = scan.candidate_instants(
-                table.source,
-                trade_at_field=table.trade_at_field,
+                source,
+                trade_at_field=trade_at_field,
                 decision_time=decision_time,
                 end_time=end_time,
             )
@@ -281,7 +289,7 @@ class FillConvention:
                 _IDENTITY_NAMESPACE,
                 "|".join(
                     (
-                        str(execution_input.execution_input_id),
+                        str(execution_input_id),
                         *(
                             "" if value is None else str(value)
                             for value in self.declaration_identity
@@ -292,7 +300,7 @@ class FillConvention:
             )
             return ExactExecutionTarget(
                 identity=identity,
-                execution_input_id=execution_input.execution_input_id,
+                execution_input_id=execution_input_id,
                 target_at=target_at,
                 selector=self.selector,
                 trade_price=self.trade_price,

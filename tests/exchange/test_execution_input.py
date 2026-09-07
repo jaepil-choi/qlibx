@@ -130,16 +130,16 @@ def test_fill_selects_one_exact_same_day_target_with_stable_identity(tmp_path: P
     decision_time = datetime.fromisoformat("2024-03-05T04:00:00+09:00")
     end_time = datetime.fromisoformat("2024-03-06T16:00:00+09:00")
 
-    selected = registration.fill.select_target(
-        registration, decision_time=decision_time, end_time=end_time
+    selected = registration.select_target(
+        decision_time=decision_time, end_time=end_time
     )
 
     assert selected is not None
     assert selected.target_at == datetime.fromisoformat("2024-03-05T06:30:00+00:00")
     assert selected.selector is FillSelector.SAME_DAY
     assert selected.trade_price == "close"
-    assert selected == registration.fill.select_target(
-        registration, decision_time=decision_time, end_time=end_time
+    assert selected == registration.select_target(
+        decision_time=decision_time, end_time=end_time
     )
 
 

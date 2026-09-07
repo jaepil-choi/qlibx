@@ -20,7 +20,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
-from vqapr.exchange.conventions import FillConvention
+from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillConvention
 
 _REGISTER_SCHEMA = "execution_input.register.schema"
 _REGISTER_KEY = "execution_input.register.key"
@@ -81,6 +81,39 @@ class ExecutionInputRegistration:
             f"{fill.timezone}, "
             f"at that row's {fill.trade_price!r}",
         ]
+
+    def build_horizon(
+        self,
+        *,
+        start_time: datetime,
+        end_time: datetime,
+        session: object | None = None,
+    ) -> ExecutionHorizon:
+        """The run's candidate instants, read once from this table by this fill convention."""
+        return self.fill.build_horizon(
+            self.table.source,
+            trade_at_field=self.table.trade_at_field,
+            start_time=start_time,
+            end_time=end_time,
+            session=session,
+        )
+
+    def select_target(
+        self,
+        *,
+        decision_time: datetime,
+        end_time: datetime,
+        horizon: ExecutionHorizon | None = None,
+    ) -> ExactExecutionTarget | None:
+        """When a decision at `decision_time` fills, by this table's binding and this convention."""
+        return self.fill.select_target(
+            self.table.source,
+            trade_at_field=self.table.trade_at_field,
+            execution_input_id=self.execution_input_id,
+            decision_time=decision_time,
+            end_time=end_time,
+            horizon=horizon,
+        )
 
     def __post_init__(self) -> None:
         if not isinstance(self.table, ExecutionTableSpec):

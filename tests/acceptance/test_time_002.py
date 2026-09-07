@@ -856,8 +856,7 @@ def test_fill_target_is_strictly_later_exact_and_uses_venue_local_date(tmp_path:
     """,
         )
     )
-    selected = registration.fill.select_target(
-        registration,
+    selected = registration.select_target(
         decision_time=datetime(2024, 3, 5, 4, tzinfo=KST),
         end_time=datetime(2024, 3, 6, 16, tzinfo=KST),
     )
@@ -881,11 +880,10 @@ def test_no_equal_or_after_end_target_is_not_accepted(tmp_path: Path) -> None:
     close = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
     assert (
-        registration.fill.select_target(registration, decision_time=close, end_time=close) is None
+        registration.select_target(decision_time=close, end_time=close) is None
     )
     assert (
-        registration.fill.select_target(
-            registration,
+        registration.select_target(
             decision_time=datetime(2024, 3, 5, 4, tzinfo=KST),
             end_time=datetime(2024, 3, 5, 15, tzinfo=KST),
         )

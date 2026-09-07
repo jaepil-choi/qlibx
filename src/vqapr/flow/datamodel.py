@@ -30,7 +30,8 @@ from vqapr.authoring import DataModel
 from vqapr.calls import DataModelContext
 from vqapr.data.datasets import DatasetRegistration, Grain, validate
 from vqapr.data.sources import SourceSpec
-from vqapr.data.windows import AccessRecord, ModelWindow
+from vqapr.data.store import AccessRecord
+from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows

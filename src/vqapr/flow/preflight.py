@@ -490,16 +490,14 @@ def _validate_execution_targets(
     table once per occurrence -- both slower and vulnerable to observing different bytes while
     preflight is supposed to be proving one run.
     """
-    horizon = execution_input.fill.build_horizon(
-        execution_input,
+    horizon = execution_input.build_horizon(
         start_time=start,
         end_time=end,
     )
     missing = tuple(
         occurrence
         for occurrence in strategy_agenda.occurrences
-        if execution_input.fill.select_target(
-            execution_input,
+        if execution_input.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=end,
             horizon=horizon,

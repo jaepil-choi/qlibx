@@ -27,7 +27,8 @@ from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.data.windows import ModelWindow, ObservationBatch
+from vqapr.data.store import ObservationBatch
+from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
 from vqapr.declarations import register_execution_input as register_execution_input
 from vqapr.domain.errors import VqaprError

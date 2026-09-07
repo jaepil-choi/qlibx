@@ -56,13 +56,11 @@ def test_same_day_uses_venue_local_date_and_is_deterministic(tmp_path: Path) -> 
     decision = datetime.fromisoformat("2024-03-04T16:00:00+00:00")
     end = datetime.fromisoformat("2024-03-06T12:00:00+00:00")
 
-    first = registration.fill.select_target(
-        registration,
+    first = registration.select_target(
         decision_time=decision,
         end_time=end,
     )
-    second = registration.fill.select_target(
-        registration,
+    second = registration.select_target(
         decision_time=decision,
         end_time=end,
     )
@@ -97,16 +95,14 @@ def test_next_eligible_and_strict_bounds_have_no_fallback(tmp_path: Path) -> Non
     equality = datetime.fromisoformat("2024-03-05T06:30:00+00:00")
     end = datetime.fromisoformat("2024-03-06T06:30:00+00:00")
 
-    target = registration.fill.select_target(
-        registration,
+    target = registration.select_target(
         decision_time=equality,
         end_time=end,
     )
     assert target is not None
     assert target.target_at == end
     assert (
-        registration.fill.select_target(
-            registration,
+        registration.select_target(
             decision_time=end,
             end_time=end,
         )
@@ -141,18 +137,25 @@ def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> N
     end = datetime.fromisoformat("2024-11-03T07:00:00+00:00")
 
     with pytest.raises(ValueError, match="ambiguous"):
-        registration.fill.select_target(registration, decision_time=decision, end_time=end)
+        registration.select_target(decision_time=decision, end_time=end)
     wrong = FillConvention(
         FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close", 0, "-05:00"
     )
     with pytest.raises(ValueError, match="does not resolve"):
-        wrong.select_target(registration, decision_time=decision, end_time=end)
+        wrong.select_target(
+            registration.table.source,
+            trade_at_field=registration.table.trade_at_field,
+            execution_input_id=registration.execution_input_id,
+            decision_time=decision,
+            end_time=end,
+        )
 
     proven = FillConvention(
         FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close", 1, "-05:00"
     )
-    target = proven.select_target(
-        ExecutionInputRegistration(registration.execution_input_id, registration.table, proven),
+    target = ExecutionInputRegistration(
+        registration.execution_input_id, registration.table, proven
+    ).select_target(
         decision_time=decision,
         end_time=end,
     )
@@ -185,8 +188,7 @@ def test_nonexistent_dst_target_is_rejected_instead_of_skipped(tmp_path: Path) -
     )
 
     with pytest.raises(ValueError, match="does not exist"):
-        registration.fill.select_target(
-            registration,
+        registration.select_target(
             decision_time=datetime.fromisoformat("2024-03-10T05:00:00+00:00"),
             end_time=datetime.fromisoformat("2024-03-10T08:00:00+00:00"),
         )

@@ -274,7 +274,7 @@ def test_real_execution_snapshot_selects_the_exact_close(
     decision = _instant(decision_session, time(8, 30))
     horizon = _instant(sessions[-1], time(23, 0))
 
-    target = registration.fill.select_target(registration, decision_time=decision, end_time=horizon)
+    target = registration.select_target(decision_time=decision, end_time=horizon)
     assert target is not None
     assert target.target_at > decision
     assert target.target_at.astimezone(decision.tzinfo).date() == decision_session

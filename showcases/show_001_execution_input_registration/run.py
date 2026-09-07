@@ -46,8 +46,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.5.0"
+LAST_VERIFIED_AT = "2026-09-07"
 
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))
 KST = "Asia/Seoul"

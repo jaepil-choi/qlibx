@@ -77,8 +77,8 @@ INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
 """Single-name cap above the index weight, in the shipped constraint's own config spelling."""
 
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.5.0"
+LAST_VERIFIED_AT = "2026-09-07"
 
 
 def _sessions(path: Path) -> list[date]:

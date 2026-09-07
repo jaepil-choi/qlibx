@@ -100,8 +100,8 @@ REVERSAL_LOOKBACK = 6
 MOMENTUM_LOOKBACK = 11
 """Eleven closes span a ten-session return."""
 
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.5.0"
+LAST_VERIFIED_AT = "2026-09-07"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:

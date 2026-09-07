@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료.** 다음은 **0.5.0 릴리스**(stamp → stepper 재생성 → show_003 수동 → testbed 갱신 안내). 남은 이슈는 `023`(HELD) 하나 |
+| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료. 0.5.0 릴리스 2026-09-07**(stamp `pyproject`·`uv.lock`·showcase ×8·README ×2, stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.5.0.html`, show_003 수동 exit 0, 태그 `v0.5.0`). 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -267,7 +267,7 @@ import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_stat
 
 순환 3→0(`cli↔cli.main`은 entry point를 `vqapr.cli.main:main`으로, `store↔windows`는 두 shape을 store로, `conventions↔execution_table`은 convention이 `source`·`trade_at_field`·`execution_input_id`를 받고 registration이 위임). `domain/` 10→**5**(`errors`·`identifiers`·`instruments`·`values`·`agendas`), `constraints/` 7→**5**, `valuation/`·`runtime/` 삭제(`flow/marking.py`, `domain/values.py`, `domain/agendas.py`, `flow/loop.py`로). ratchet 18→13. 표의 숫자와 다른 곳은 record `162` "Corrections"에 이유가 있다.
 
-**다음 손 = 0.5.0 릴리스.** 순서: (1) `pyproject`·`uv.lock`·showcase `VERIFIED_AGAINST` stamp(0.4.1 때 `080a275b` 참조), (2) spine stepper를 실제 트레이스로 재생성(메모리 규칙), (3) `show_003`을 손으로 실행(DW 창고, 릴리스 전 수동), (4) 태그·푸시 뒤 testbed(kwam-enhanced-index)와 Reporting 세션에 갱신 안내. 0.4.1 대비 변경 요약은 이 세션의 보고에 있고, record `151`~`162`가 전부다.
+**0.5.0 릴리스 완료(2026-09-07).** 순서였던 것: (1) `pyproject`·`uv.lock`·showcase `VERIFIED_AGAINST` stamp(0.4.1 때 `080a275b` 참조), (2) spine stepper를 실제 트레이스로 재생성(메모리 규칙), (3) `show_003`을 손으로 실행(DW 창고, 릴리스 전 수동), (4) 태그·푸시 뒤 testbed(kwam-enhanced-index)와 Reporting 세션에 갱신 안내. 0.4.1 대비 변경 요약은 이 세션의 보고에 있고, record `151`~`162`가 전부다.
 
 ## 4. 열린 질문 (소유자에게, 막지는 않음)
 

@@ -24,8 +24,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.instruments import instrument
-from vqapr.domain.roster import InstrumentRoster
+from vqapr.domain.instruments import InstrumentRoster, instrument
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ListingAccess, TradeRule

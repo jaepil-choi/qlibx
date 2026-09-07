@@ -1,4 +1,7 @@
-"""Closed valuation service: every held position needs an explicit selected mark."""
+"""Closed valuation service: every held position needs an explicit selected mark.
+
+Moved from `valuation/marking.py` beside `flow/valuation.py`, its consumer (one-shape Step 7,
+record 162); `Mark`/`MarkBatch` are values and live in `domain/values.py`."""
 
 from __future__ import annotations
 
@@ -8,8 +11,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.timestamps import require_tz_aware
-from vqapr.valuation.marks import Mark, MarkBatch
+from vqapr.domain.values import Mark, MarkBatch, require_tz_aware
 
 
 class ValuationError(ValueError):

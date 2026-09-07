@@ -1,5 +1,8 @@
 """Finite operation agenda declarations.
 
+Moved from `runtime/agendas.py` (one-shape Step 7, record 162): an occurrence is a value a Model
+is handed (`calls.py` imports it), so it lives with the other values, below `flow/`.
+
 Agendas are resolved input, never a recurrence or calendar source.  Their local
 clock proof is retained with each occurrence so the canonical UTC ordering is
 reproducible across timezone transitions.
@@ -16,7 +19,7 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.identifiers import AgendaId, OccurrenceId
-from vqapr.domain.timestamps import (
+from vqapr.domain.values import (
     LocalInstantDeclaration,
     declare_local_instant,
     require_tz_aware,

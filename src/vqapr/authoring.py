@@ -33,9 +33,7 @@ from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHist
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.memory import ModelMemory
-from vqapr.domain.rows import Rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import ModelMemory, Rows, require_tz_aware
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.portfolio.budgets import Budget, PortfolioDirection

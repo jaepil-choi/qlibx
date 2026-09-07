@@ -10,18 +10,18 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import StrategyModel
-from vqapr.constraints.constraint import Constraint
+from vqapr.authoring import Constraint, StrategyModel
 from vqapr.data.datasets import lookback_fits_grain, require_grain
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.agendas import OperationAgenda, OperationRole
 from vqapr.domain.errors import (
     ExplainTopic,
     Failure,
     FailureFamily,
     VqaprError,
 )
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     validate_execution_input,
@@ -43,7 +43,6 @@ from vqapr.flow.run import (
     StrategyConfig,
     StrategyEntry,
 )
-from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace import Workspace
 
 
@@ -490,16 +489,14 @@ def _validate_execution_targets(
     table once per occurrence -- both slower and vulnerable to observing different bytes while
     preflight is supposed to be proving one run.
     """
-    horizon = execution_input.fill.build_horizon(
-        execution_input,
+    horizon = execution_input.build_horizon(
         start_time=start,
         end_time=end,
     )
     missing = tuple(
         occurrence
         for occurrence in strategy_agenda.occurrences
-        if execution_input.fill.select_target(
-            execution_input,
+        if execution_input.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=end,
             horizon=horizon,

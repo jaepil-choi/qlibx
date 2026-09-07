@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.evaluation import (
+    ConstraintReport,
     evaluate_constraints,
     project_constraints,
 )
-from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.values import MarkBatch
 from vqapr.evidence.artifacts import (
     MonitoringEvidence,
     SimulationFailureFamily,
@@ -38,9 +40,7 @@ from vqapr.flow.context import (
     PendingValuation,
     ValuationResult,
 )
-from vqapr.runtime.agendas import OperationOccurrence, OperationRole
-from vqapr.valuation.marking import SelectedMark
-from vqapr.valuation.marks import MarkBatch
+from vqapr.flow.marking import SelectedMark
 
 if TYPE_CHECKING:
     from vqapr.flow.callback import CallbackPhase

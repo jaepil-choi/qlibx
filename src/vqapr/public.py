@@ -17,19 +17,32 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
-from vqapr.authoring import DataModel, DatasetInput, Hold, Rebalance, StrategyModel
+from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
+    ConstraintFinding,
+    DataModel,
+    DatasetInput,
+    Hold,
+    Rebalance,
+    StrategyModel,
+)
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
+from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.data.windows import ModelWindow, ObservationBatch
+from vqapr.data.store import ObservationBatch
+from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
 from vqapr.declarations import register_execution_input as register_execution_input
+from vqapr.domain.agendas import (
+    OperationOccurrence,
+    OperationRole,
+)
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.instruments import (
     EtfInstrument,
@@ -37,13 +50,14 @@ from vqapr.domain.instruments import (
     IndexInstrument,
     Instrument,
     InstrumentKind,
+    InstrumentRoster,
     StockInstrument,
+    build_roster,
+    export_roster,
     instrument,
     instruments,
 )
-from vqapr.domain.roster import InstrumentRoster, build_roster
-from vqapr.domain.roster_export import export_roster
-from vqapr.domain.timestamps import LocalInstantDeclaration, declare_local_instant
+from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
@@ -120,15 +134,10 @@ from vqapr.portfolio.weighting import (
     rescale,
     signal_weight,
 )
-from vqapr.runtime.agendas import (
-    OperationOccurrence,
-    OperationRole,
-)
 from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
-from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
 __all__ = (

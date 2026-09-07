@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -14,14 +15,15 @@ from vqapr.data.datasets import Grain, lookback_fits_grain, require_grain
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
+    Lookback,
     RowsLookback,
 )
 from vqapr.data.panel import Panel, panel_identity
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.rows import Rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.identifiers import DatasetId
+from vqapr.domain.values import Rows, normalize_rows, require_tz_aware
 
 
 class DatasetCatalog(Protocol):
@@ -46,16 +48,89 @@ def physical_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _window_types():
-    """The one deferred import of `windows`' types: `windows` imports this module, so its record
-    and batch types are reached at call time, by the row read and the panel read alike."""
-    from vqapr.data.windows import AccessRecord, ObservationBatch
+@dataclass(frozen=True, slots=True)
+class AccessRecord:
+    consumer_id: str
+    dataset_id: DatasetId
+    source_id: str
+    source_digest: str
+    fields: tuple[str, ...]
+    lookback: Lookback
+    evaluation_time: datetime
+    instruments: tuple[str, ...]
+    lower_bound: datetime | None
+    actual_rows: Mapping[str, Mapping[str, int]]
+    max_available_at: datetime | None
 
-    return AccessRecord, ObservationBatch
 
+@dataclass(frozen=True, slots=True)
+class ObservationBatch:
+    """What one declared requirement returned, and the record of how it was read.
 
-def _access_record(**fields: object):
-    return _window_types()[0](**fields)
+    This is the only shape a Model ever receives data in, and until 2026-08-30 it was not
+    importable from `vqapr.public` and had no docstring -- so an author could read its name in
+    `observations()`'s signature and had no way to learn what it holds without opening installed
+    source. One journey answered the questions below by registering a throwaway DataModel that
+    reported `sorted(rows[0].keys())`, which is a full register-materialize-show cycle spent on one
+    type's field names (`docs/issues/031`).
+
+    **`rows` is a flat tuple of dicts, one per (instant, instrument) observation.** Every row
+    carries:
+
+    * `available_at` -- a timezone-aware `datetime`, the row's OWN point-in-time stamp rather than
+      the window's evaluation time. Rows do not share one instant, so this is what a cross-section
+      is built on.
+    * `instrument` -- the instrument id, as a string. **Absent** on a dataset registered with no
+      `instrument_field`: those rows are not keyed by instrument, the declared instrument list is
+      not applied to them, and there is no name to put here (`docs/issues/038`).
+    * the field the requirement named, under its own id -- a requirement names one field and a
+      lookback, and nothing else (`docs/issues/049`). A value is `None` where the source has no
+      value; an `InstantsLookback` also nulls it on rows outside that field's own last-N instants
+      (see `InstantsLookback`).
+
+    **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a
+    `DECIMAL` column as `Decimal`; nothing here converts between them, because a conversion either
+    way would be this package deciding how precise somebody else's measurement is. So a model must
+    not assume either: `Decimal(str(value))` is correct for both and is what the scaffolds emit,
+    while `Decimal(value)` on a float inherits the binary expansion and mixing the two in one
+    arithmetic expression raises.
+
+    **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
+    It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
+    every lookback and every instrument count, and `tests/data/test_observation_batch_shape.py`
+    pins it. A dataset whose fields aggregate within an instant orders by `available_at` then
+    `instrument` instead, because the key fields were consumed making the group and are not in
+    what came out of it. Instruments therefore INTERLEAVE within an instant rather than being
+    grouped by name:
+    a per-instrument series is built by the reader, and a cross-section is `rows` filtered on one
+    `available_at`. `ModelWindow.snapshot` returns the newest cross-section directly.
+
+    `access` is the `AccessRecord` the framework stamps -- source digest, declared fields, the
+    lookback, the bound it resolved, per-instrument non-null counts. It is provenance, not data,
+    and a Model normally reads only `rows`.
+    """
+
+    rows: Rows
+    access: AccessRecord
+
+    def __init__(self, rows: object, access: AccessRecord) -> None:
+        object.__setattr__(self, "rows", normalize_rows(rows))
+        if not isinstance(access, AccessRecord):
+            raise TypeError("access must be an AccessRecord")
+        object.__setattr__(self, "access", access)
+
+    @classmethod
+    def _trusted(cls, rows: Rows, access: AccessRecord) -> ObservationBatch:
+        """Build from rows this module already normalized.
+
+        The public constructor validates every cell because it accepts outside input. Rows taken
+        from a batch this module produced have passed that check once already, and checking them
+        again costs the same as the query that produced them.
+        """
+        batch = cls.__new__(cls)
+        object.__setattr__(batch, "rows", rows)
+        object.__setattr__(batch, "access", access)
+        return batch
 
 
 class DuckDbObservationStore:
@@ -177,7 +252,7 @@ class DuckDbObservationStore:
                 source_digest=source_digest,
             )
         window = panel.window(field, evaluation_time=evaluation_time, lookback=first.lookback)
-        access = _access_record(
+        access = AccessRecord(
             consumer_id=consumer_id,
             dataset_id=first.dataset_id,
             source_id=str(source.source_id),
@@ -248,8 +323,6 @@ class DuckDbObservationStore:
         rows the joined reads did: one row per (instant, instrument) any field admitted, each
         field null outside its own window. One access is recorded, naming every field.
         """
-        ObservationBatch = _window_types()[1]
-
         require_tz_aware(evaluation_time, name="evaluation_time")
         declared = tuple(requirements)
         if not declared:
@@ -332,7 +405,7 @@ class DuckDbObservationStore:
                 raise TypeError("registered available_at values must be datetimes")
             if max_available_at is None or available_at > max_available_at:
                 max_available_at = available_at
-        access = _access_record(
+        access = AccessRecord(
             # Stamped, not declared. The component reading is the consumer, and the framework is
             # the only one that knows which component is running.
             consumer_id=consumer_id,

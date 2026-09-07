@@ -29,7 +29,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.memory import normalize_memory
+from vqapr.domain.values import normalize_memory
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.execution_table import validate_execution_input
 from vqapr.extension.component import ComponentRef

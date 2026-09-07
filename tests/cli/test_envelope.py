@@ -150,9 +150,9 @@ def test_a_dump_that_cannot_be_written_still_reports_the_failure(tmp_path: Path)
 
 
 def test_the_declared_entry_point_builds_every_command() -> None:
-    """`pyproject` promises `vqapr.cli:main`, so importing it must yield a usable parser."""
-    from vqapr.cli import main as entry_point
+    """`pyproject` promises `vqapr.cli.main:main`, so importing it must yield a usable parser."""
     from vqapr.cli.main import build_parser
+    from vqapr.cli.main import main as entry_point
 
     assert callable(entry_point)
     actions = build_parser()._subparsers

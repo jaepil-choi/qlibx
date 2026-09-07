@@ -8,16 +8,15 @@ from typing import ClassVar
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side
-from vqapr.domain.instruments import InstrumentKind, instrument
-from vqapr.domain.roster import InstrumentRoster
+from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
+from vqapr.domain.values import Side
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, TradeRule
+from vqapr.flow.marking import ValuationService
 from vqapr.orders.batches import OrderBatch, OrderRequest
-from vqapr.valuation.marking import ValuationService
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 

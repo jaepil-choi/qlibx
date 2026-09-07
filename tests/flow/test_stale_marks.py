@@ -19,10 +19,10 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountMark
+from vqapr.domain.values import Mark, MarkBatch
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
+from vqapr.flow.marking import SelectedMark
 from vqapr.flow.simulation import _marks_from_execution_snapshot
-from vqapr.valuation.marking import SelectedMark
-from vqapr.valuation.marks import Mark, MarkBatch
 
 QUOTED = datetime(2024, 1, 4, 6, 30, tzinfo=UTC)
 """The last instant the venue published a price for the halted name."""

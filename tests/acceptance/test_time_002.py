@@ -14,22 +14,24 @@ import vqapr.flow.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
     ConstraintCall,
+    ConstraintFinding,
     EconomicAccountView,
     Hold,
     Rebalance,
     StrategyModel,
 )
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.findings import ConstraintFinding
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
@@ -62,7 +64,6 @@ from vqapr.portfolio.intents import (
     validate_economic_intent,
 )
 from vqapr.public import register_dataset
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -856,8 +857,7 @@ def test_fill_target_is_strictly_later_exact_and_uses_venue_local_date(tmp_path:
     """,
         )
     )
-    selected = registration.fill.select_target(
-        registration,
+    selected = registration.select_target(
         decision_time=datetime(2024, 3, 5, 4, tzinfo=KST),
         end_time=datetime(2024, 3, 6, 16, tzinfo=KST),
     )
@@ -881,11 +881,10 @@ def test_no_equal_or_after_end_target_is_not_accepted(tmp_path: Path) -> None:
     close = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
     assert (
-        registration.fill.select_target(registration, decision_time=close, end_time=close) is None
+        registration.select_target(decision_time=close, end_time=close) is None
     )
     assert (
-        registration.fill.select_target(
-            registration,
+        registration.select_target(
             decision_time=datetime(2024, 3, 5, 4, tzinfo=KST),
             end_time=datetime(2024, 3, 5, 15, tzinfo=KST),
         )

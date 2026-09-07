@@ -41,7 +41,7 @@ from vqapr.authoring import (
 from vqapr.data.datasets import Grain
 from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
-from vqapr.runtime.agendas import OperationOccurrence
+from vqapr.domain.agendas import OperationOccurrence
 
 
 def observations(

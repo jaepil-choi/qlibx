@@ -7,8 +7,8 @@ from decimal import Decimal
 from enum import StrEnum
 
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
+from vqapr.domain.values import MarkBatch
 from vqapr.exchange.fills import Fill, FillBatch
-from vqapr.valuation.marks import MarkBatch
 
 
 class AccountMode(StrEnum):

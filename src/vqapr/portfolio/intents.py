@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from uuid import UUID
 
-from vqapr.domain.references import ModelStateRef
+from vqapr.domain.identifiers import ModelStateRef
 from vqapr.portfolio.budgets import Budget
 
 

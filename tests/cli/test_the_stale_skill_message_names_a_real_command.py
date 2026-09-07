@@ -68,6 +68,7 @@ def test_the_named_command_is_accepted_and_updates_the_install(
         [sys.executable, "-m", "vqapr", "--project-root", str(tmp_path), *argv[1:]],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 
@@ -99,6 +100,7 @@ def test_install_gained_no_no_op_force_flag(
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 

@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side
 from vqapr.domain.instruments import base_quantity_for
+from vqapr.domain.values import Side
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.orders.batches import OrderBatch, OrderRequest, ZeroDeltaDiagnostic
 from vqapr.portfolio.budgets import Budget, PortfolioDirection

@@ -7,8 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 
-from vqapr.domain.rows import Row, Rows, normalize_rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import Row, Rows, normalize_rows, require_tz_aware
 from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS, TableSpec
 
 

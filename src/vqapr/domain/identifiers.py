@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import NewType
 
 DatasetId = NewType("DatasetId", str)
@@ -81,3 +82,18 @@ def instrument_id(raw: str) -> InstrumentId:
     if any(c.isspace() for c in value):
         raise ValueError(f"instrument_id must not contain whitespace: {value!r}")
     return InstrumentId(value)
+
+
+# ------------------------------------------------------------------------------------------
+# references.py, folded in (one-shape Step 7, record 162)
+#
+# Portable references to committed framework-managed state and artifacts.
+# ------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
+class ModelStateRef:
+    digest: str
+
+    def __post_init__(self) -> None:
+        if len(self.digest) != 64 or any(c not in "0123456789abcdef" for c in self.digest):
+            raise ValueError("ModelStateRef digest must be a lowercase SHA-256 hex digest")

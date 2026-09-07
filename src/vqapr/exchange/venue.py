@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import ClassVar, Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side, side_of
+from vqapr.domain.values import Side, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionRow,
     ExactExecutionSnapshot,

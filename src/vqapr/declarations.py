@@ -412,8 +412,7 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
     """
     import hashlib
 
-    from vqapr.domain.roster import build_roster
-    from vqapr.domain.roster_export import read_roster_table
+    from vqapr.domain.instruments import build_roster, read_roster_table
 
     name = "instruments"
     retired = bool(bodies) and all(

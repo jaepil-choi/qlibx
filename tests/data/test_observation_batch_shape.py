@@ -34,8 +34,8 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow, ObservationBatch
+from vqapr.data.store import DuckDbObservationStore, ObservationBatch
+from vqapr.data.windows import ModelWindow
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")

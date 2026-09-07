@@ -30,14 +30,14 @@ from vqapr.authoring import DataModel
 from vqapr.calls import DataModelContext
 from vqapr.data.datasets import DatasetRegistration, Grain, validate
 from vqapr.data.sources import SourceSpec
-from vqapr.data.windows import AccessRecord, ModelWindow
+from vqapr.data.store import AccessRecord
+from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.domain.identifiers import instrument_id
-from vqapr.domain.rows import Row, Rows, normalize_rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import Row, Rows, normalize_rows, require_tz_aware
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.loop import OccurrenceFlow
-from vqapr.runtime.agendas import OperationOccurrence
 from vqapr.workspace import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"

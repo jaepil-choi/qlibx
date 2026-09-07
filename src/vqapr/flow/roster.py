@@ -30,8 +30,7 @@ from vqapr.domain.errors import (
 # `flow/orchestration.py` already imports `vqapr.workspace` at module scope. An architecture
 # review of VB002 found them being carried at full weight against a ratchet whose stated point
 # is that lowering it is the goal.
-from vqapr.domain.roster import InstrumentRoster, build_roster
-from vqapr.domain.roster_export import read_roster_table
+from vqapr.domain.instruments import InstrumentRoster, build_roster, read_roster_table
 from vqapr.workspace import OPEN_STAGE, Workspace
 
 WORKSPACE_ABSENT = f"{OPEN_STAGE}.missing"

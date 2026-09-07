@@ -7,18 +7,19 @@ import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
     ConstraintCall,
+    ConstraintFinding,
     EconomicAccountView,
 )
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
 from vqapr.constraints.evaluation import evaluate_constraints, project_constraints
-from vqapr.constraints.findings import ConstraintFinding
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.flow.marking import ValuationService
 from vqapr.portfolio.intents import PortfolioTarget
-from vqapr.valuation.marking import ValuationService
 
 
 class _Constraint(Constraint):

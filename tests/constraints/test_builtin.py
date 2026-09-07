@@ -35,10 +35,9 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch
 from vqapr.portfolio.allocation import AllocationViolation
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.valuation.marks import Mark, MarkBatch
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 VENUE = "Asia/Seoul"
@@ -403,7 +402,7 @@ from vqapr.authoring import (
     EconomicAccountView,
     Rebalance,
 )
-from vqapr.constraints.findings import ConstraintFinding
+from vqapr.authoring import ConstraintFinding
 
 
 class LocalCap(Constraint):

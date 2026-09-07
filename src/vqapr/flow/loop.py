@@ -9,10 +9,50 @@ loop returns. Those are the hooks; the walk is written once.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from vqapr.runtime.agendas import OperationOccurrence
-from vqapr.runtime.events import DueExecutionEnvelope, OperationEnvelope
+from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.values import require_tz_aware
+
+# ------------------------------------------------------------------------------------------
+# events.py, folded in (one-shape Step 7, record 162)
+#
+# Internal envelopes for deterministic static and due dispatch.
+# ------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True, slots=True)
+class OperationEnvelope:
+    """Internal static agenda item for the deterministic merged dispatcher."""
+
+    occurrence: OperationOccurrence
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.occurrence, OperationOccurrence):
+            raise TypeError("occurrence must be an OperationOccurrence")
+
+    def sort_key(self) -> tuple[datetime, int, str]:
+        return self.occurrence.sort_key()
+
+
+@dataclass(frozen=True, slots=True)
+class DueExecutionEnvelope:
+    """Internal dynamic execution item.
+
+    The negative priority deliberately orders an already-pending execution
+    before every static operation at the same UTC instant.
+    """
+
+    due_time: datetime
+    pending_id: str
+
+    def __post_init__(self) -> None:
+        require_tz_aware(self.due_time, name="due_time")
+        if not isinstance(self.pending_id, str) or not self.pending_id:
+            raise ValueError("pending_id must be a non-empty string")
+
+    def sort_key(self) -> tuple[datetime, int, str]:
+        return (self.due_time.astimezone(UTC), -1, self.pending_id)
 
 
 class OccurrenceFlow:

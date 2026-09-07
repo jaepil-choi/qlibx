@@ -6,9 +6,8 @@ import pytest
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
-from vqapr.domain.enums import Side
-from vqapr.domain.instruments import InstrumentKind, instrument
-from vqapr.domain.roster import InstrumentRoster
+from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
+from vqapr.domain.values import Side
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
@@ -18,9 +17,9 @@ from vqapr.exchange.listings import (
     TradeTerms,
     rules_view,
 )
+from vqapr.flow.marking import ValuationService
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.valuation.marking import ValuationService
 
 
 def decimal(value: str) -> Decimal:

@@ -29,7 +29,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
 
-from vqapr.domain.enums import Side
 from vqapr.domain.instruments import (
     INSTRUMENT_TYPES,
     Instrument,
@@ -37,6 +36,7 @@ from vqapr.domain.instruments import (
     base_notional,
     base_quantity_for,
 )
+from vqapr.domain.values import Side
 from vqapr.exchange.costs import FREE, FillCost, SideCost
 
 
@@ -379,7 +379,7 @@ class ExchangeRulesView:
         if registry is None or hasattr(registry, "instrument"):
             return registry
         if isinstance(registry, Mapping):
-            from vqapr.domain.roster import InstrumentRoster
+            from vqapr.domain.instruments import InstrumentRoster
 
             return InstrumentRoster(registry)
         raise TypeError("registry must expose instrument(id), or be a mapping of them")

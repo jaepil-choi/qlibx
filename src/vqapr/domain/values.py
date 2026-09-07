@@ -1,17 +1,33 @@
-"""Timezone-aware timestamp primitives.
+"""Portable values every layer shares and none owns.
 
-Time is kept as ordinary ``datetime``/``date``/``time`` values.  This module
-validates and combines them; it deliberately does not add a timestamp wrapper.
+Folded from five modules (one-shape Step 7, record 162): typed valuation results
+(`valuation/marks` -- `Mark`/`MarkBatch`, imported by `account/` and `constraints/` below
+`flow/`), timezone-aware instants and the local
+instant declaration (`timestamps`), row and scalar normalisation at the Model boundary (`rows`),
+the detached Model memory committed at a callback (`memory`), and `Side` (`enums`). Each section
+below keeps its former module's docstring as a comment. Nothing here imports above `domain/`.
 """
 
 from __future__ import annotations
 
 import calendar
+import math
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
+from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+# ------------------------------------------------------------------------------------------
+# timestamps.py, folded in (one-shape Step 7, record 162)
+#
+# Timezone-aware timestamp primitives.
+#
+# Time is kept as ordinary ``datetime``/``date``/``time`` values.  This module
+# validates and combines them; it deliberately does not add a timestamp wrapper.
+# ------------------------------------------------------------------------------------------
 
 def require_tz_aware(value: datetime, *, name: str = "timestamp") -> datetime:
     """Return *value* after rejecting naive or non-datetime values."""
@@ -226,3 +242,182 @@ def shift_calendar(
     if isinstance(value.tzinfo, ZoneInfo):
         return at_local(shifted_day, wall_time, value.tzinfo.key)
     return datetime.combine(shifted_day, wall_time).replace(tzinfo=value.tzinfo)
+
+
+# ------------------------------------------------------------------------------------------
+# rows.py, folded in (one-shape Step 7, record 162)
+#
+# Portable row values shared by Model input, output, and publication.
+# ------------------------------------------------------------------------------------------
+
+type Scalar = bool | int | float | Decimal | str | date | datetime | None
+type Row = dict[str, Scalar]
+type Rows = tuple[Row, ...]
+
+
+def normalize_scalar(value: object) -> Scalar:
+    """Validate one portable scalar without silently stringifying unknown objects."""
+    if value is None or isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("row float values must be finite")
+        return value
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("row decimal values must be finite")
+        return value
+    if isinstance(value, datetime):
+        return require_tz_aware(value, name="row datetime")
+    if isinstance(value, date):
+        return value
+    raise TypeError(f"row values must be portable scalars; got {type(value).__name__}")
+
+
+def normalize_rows(value: object) -> Rows:
+    """Return detached rows after strict key and scalar validation."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise TypeError("rows must be a sequence of mappings")
+    normalized: list[Row] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            raise TypeError(f"row {index} must be a mapping")
+        row: Row = {}
+        for key, scalar in item.items():
+            if not isinstance(key, str) or not key or any(char.isspace() for char in key):
+                raise ValueError(f"row {index} field names must be non-empty without whitespace")
+            row[key] = normalize_scalar(scalar)
+        normalized.append(row)
+    return tuple(normalized)
+
+
+# ------------------------------------------------------------------------------------------
+# memory.py, folded in (one-shape Step 7, record 162)
+#
+# Portable, detached Model memory used at the callback commit boundary.
+# ------------------------------------------------------------------------------------------
+
+type ModelMemory = bool | int | float | str | list["ModelMemory"] | dict[str, "ModelMemory"] | None
+
+
+def normalize_memory(value: object) -> ModelMemory:
+    """Validate strict JSON memory and return a detached recursive copy."""
+
+    active: set[int] = set()
+
+    def visit(item: object) -> ModelMemory:
+        if item is None or isinstance(item, (bool, str)):
+            return item
+        if isinstance(item, int):
+            return item
+        if isinstance(item, float):
+            if not math.isfinite(item):
+                raise ValueError("Model memory floats must be finite")
+            return item
+        if isinstance(item, list):
+            identity = id(item)
+            if identity in active:
+                raise ValueError("Model memory must not contain cycles")
+            active.add(identity)
+            try:
+                return [visit(child) for child in item]
+            finally:
+                active.remove(identity)
+        if isinstance(item, dict):
+            identity = id(item)
+            if identity in active:
+                raise ValueError("Model memory must not contain cycles")
+            if any(not isinstance(key, str) for key in item):
+                raise TypeError("Model memory object keys must be strings")
+            active.add(identity)
+            try:
+                return {key: visit(child) for key, child in item.items()}
+            finally:
+                active.remove(identity)
+        raise TypeError(f"Model memory must contain strict JSON values; got {type(item).__name__}")
+
+    return visit(value)
+
+
+# ------------------------------------------------------------------------------------------
+# enums.py, folded in (one-shape Step 7, record 162)
+#
+# Vocabulary every layer may depend on and that depends on nothing.
+# ------------------------------------------------------------------------------------------
+
+class Side(StrEnum):
+    """The direction of one executed or requested quantity."""
+
+    BUY = "buy"
+    SELL = "sell"
+
+
+def side_of(quantity: object) -> Side | None:
+    """Return the side implied by a signed quantity, or ``None`` for an exact zero."""
+    if quantity > 0:  # type: ignore[operator]
+        return Side.BUY
+    if quantity < 0:  # type: ignore[operator]
+        return Side.SELL
+    return None
+
+
+# ------------------------------------------------------------------------------------------
+# marks.py, folded in (one-shape Step 7, record 162)
+#
+# Typed valuation results.
+# ------------------------------------------------------------------------------------------
+
+def _decimal(value: Decimal, *, name: str) -> None:
+    if not isinstance(value, Decimal):
+        raise TypeError(f"{name} must be a Decimal")
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class Mark:
+    """The explicitly selected value of one residual holding."""
+
+    instrument_id: str
+    quantity: Decimal
+    price: Decimal
+    value: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.instrument_id, str) or not self.instrument_id:
+            raise ValueError("instrument_id must be a non-empty string")
+        _decimal(self.quantity, name="quantity")
+        _decimal(self.price, name="price")
+        _decimal(self.value, name="value")
+        if self.quantity == 0:
+            raise ValueError("a Mark must represent a residual holding")
+        if self.price <= 0:
+            raise ValueError("price must be positive")
+        if self.value != self.quantity * self.price:
+            raise ValueError("value must equal quantity * price")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkBatch:
+    """A complete, non-estimated valuation of all residual holdings."""
+
+    marks: tuple[Mark, ...]
+    total_value: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.marks, tuple) or any(
+            not isinstance(mark, Mark) for mark in self.marks
+        ):
+            raise TypeError("marks must be a tuple of Mark")
+        _decimal(self.total_value, name="total_value")
+        instruments = tuple(mark.instrument_id for mark in self.marks)
+        if len(instruments) != len(set(instruments)):
+            raise ValueError("a MarkBatch may contain each instrument only once")
+        if self.total_value != sum((mark.value for mark in self.marks), Decimal("0")):
+            raise ValueError("total_value must equal the sum of marks")
+
+    def quantities(self) -> dict[str, Decimal]:
+        """Return the complete immutable batch's explicitly marked quantities."""
+        return {mark.instrument_id: mark.quantity for mark in self.marks}

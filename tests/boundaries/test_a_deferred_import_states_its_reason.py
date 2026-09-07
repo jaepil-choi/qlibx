@@ -23,8 +23,15 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 18  # record `149` removed `cli/run.py`'s `_registered_roster_for_report` (`070`)
+CEILING = 13  # record `162`: two cycles' deferrals gone; two roster deferrals merged by the fold
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+Was 18 after record `149`. Record `162` (one-shape Step 7) removed `data/store.py`'s
+`_window_types` and the two `ExecutionInputRegistration` guards in `exchange/conventions.py`:
+each deferred an import that was a cycle, and the cycle is gone rather than deferred.
+Then 15 -> 13 in the same record: `domain/roster.py` and `roster_export.py` folded into
+`domain/instruments.py`, so the two deferred `build_roster`/`read_roster_table` pairs in
+`cli/list_.py` and `declarations.py` became one statement each. The deferrals stayed; the count
+is statements.
 
 Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in
 `declarations._instruments`: the roster is staged on the transaction `_apply` already holds.

@@ -1324,7 +1324,7 @@ class RunRecordMissing(ValueError):
     """
 
 
-def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | None:
+def resolve_strategy_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | None:
     """The member directory a table read means, or a refusal that names what exists.
 
     `None` reads the run directory when that directory holds tables of its own (a record written
@@ -1385,7 +1385,7 @@ def _resolve_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | Non
 
 
 def _parts(root: Path, run_id: str, table_id: str, strategy_ref: str | None) -> tuple[Path, ...]:
-    resolved = _resolve_ref(root, run_id, strategy_ref)
+    resolved = resolve_strategy_ref(root, run_id, strategy_ref)
     directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY / table_id
     if not directory.is_dir():
         return ()
@@ -1462,7 +1462,7 @@ construction now; kept so a caller written against record `135` reads on."""
 
 
 def table_ids(root: Path, run_id: str, strategy_ref: str | None = None) -> tuple[str, ...]:
-    resolved = _resolve_ref(root, run_id, strategy_ref)
+    resolved = resolve_strategy_ref(root, run_id, strategy_ref)
     directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY
     if not directory.is_dir():
         return ()

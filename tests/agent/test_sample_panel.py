@@ -118,13 +118,39 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
     panel = journey.install(root)
     result = journey.execute(root, panel)
 
-    # One callback per session (record `148`): the 1470 standalone valuation occurrences the
-    # journey used to dispatch are gone, because the book is valued at the instant it fills.
-    assert result.occurrences == 1470
+    # One callback and one due item per session (record `148`): the standalone valuation
+    # occurrences the journey used to dispatch are gone, because the book is valued at the
+    # instant it fills. 734 sessions since record `167` left the first one out of the horizon,
+    # so that the first decision has a published close behind it and `vqapr check` accepts
+    # what `install` registered.
+    assert result.occurrences == 1468
     # The Account is what the economics live in, and valuing the book at a fill does not add a
-    # commit of its own: a mark values the book, it does not trade it.
+    # commit of its own: a mark values the book, it does not trade it. Unchanged by the shorter
+    # horizon: the strategy Held through the first session either way.
     assert result.account_version == 729
     # The run state advances on every publication. It stood at 3664 with the valuation clock;
-    # the 735 standalone valuation publications are gone, and the NAV each fill measures now
-    # rides the mark transition instead of a publication of its own.
-    assert result.run_state_version == 2929
+    # the standalone valuation publications are gone, and the NAV each fill measures now
+    # rides the mark transition instead of a publication of its own. The dropped session took
+    # its callback publication and its held valuation with it (2929 before record `167`).
+    assert result.run_state_version == 2927
+
+
+@pytest.mark.slow
+def test_the_installed_sample_is_accepted_by_the_products_own_check(tmp_path: Path) -> None:
+    """`vqapr check` and `vqapr run` ask the judgments before the freeze; `execute` does not.
+
+    The 0.6.0 call-flow review (record `167`) ran the installed sample through the CLI and was
+    refused with `check.lookback.uncovered`: the horizon opened on the first session, whose close
+    is published at 15:30, after the 08:00 decision. The registered run is one declaration, and
+    the door a reader is told to use must accept what `install` registered.
+    """
+    from vqapr.agent.sample import journey
+    from vqapr.flow.judgments import judgments
+    from vqapr.workspace import Workspace
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    journey.install(root)
+    workspace = Workspace.open(root)
+    found, blocked = judgments(workspace.run_definition(journey.RUN_ID), workspace)
+    assert (found, blocked) == ([], [])

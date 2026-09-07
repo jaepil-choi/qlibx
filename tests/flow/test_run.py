@@ -16,9 +16,9 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
+from vqapr.domain.agendas import OperationRole
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig, StrategyEntry
-from vqapr.runtime.agendas import OperationRole
 
 KST = ZoneInfo("Asia/Seoul")
 

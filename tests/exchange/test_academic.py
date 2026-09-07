@@ -15,8 +15,8 @@ from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnap
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, TradeRule
+from vqapr.flow.marking import ValuationService
 from vqapr.orders.batches import OrderBatch, OrderRequest
-from vqapr.valuation.marking import ValuationService
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 

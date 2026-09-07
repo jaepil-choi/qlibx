@@ -39,6 +39,10 @@ from vqapr.data.store import ObservationBatch
 from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
 from vqapr.declarations import register_execution_input as register_execution_input
+from vqapr.domain.agendas import (
+    OperationOccurrence,
+    OperationRole,
+)
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.instruments import (
     EtfInstrument,
@@ -53,7 +57,7 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
-from vqapr.domain.values import LocalInstantDeclaration, declare_local_instant
+from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
@@ -130,15 +134,10 @@ from vqapr.portfolio.weighting import (
     rescale,
     signal_weight,
 )
-from vqapr.runtime.agendas import (
-    OperationOccurrence,
-    OperationRole,
-)
 from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
-from vqapr.valuation.marks import Mark, MarkBatch
 from vqapr.workspace import Workspace
 
 __all__ = (

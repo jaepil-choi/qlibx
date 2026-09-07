@@ -14,6 +14,7 @@ from vqapr.authoring import Constraint, StrategyModel
 from vqapr.data.datasets import lookback_fits_grain, require_grain
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.agendas import OperationAgenda, OperationRole
 from vqapr.domain.errors import (
     ExplainTopic,
     Failure,
@@ -42,7 +43,6 @@ from vqapr.flow.run import (
     StrategyConfig,
     StrategyEntry,
 )
-from vqapr.runtime.agendas import OperationAgenda, OperationRole
 from vqapr.workspace import Workspace
 
 

@@ -17,9 +17,9 @@ from vqapr.exchange.listings import (
     TradeTerms,
     rules_view,
 )
+from vqapr.flow.marking import ValuationService
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.valuation.marking import ValuationService
 
 
 def decimal(value: str) -> Decimal:

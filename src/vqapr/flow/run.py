@@ -36,11 +36,11 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.requirements import DataRequirement
+from vqapr.domain.agendas import OperationRole
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run_state import prepare_model_state
-from vqapr.runtime.agendas import OperationRole
 
 FINGERPRINT_PREFIX = 8
 """How much of a component fingerprint names a strategy record's directory: `<id>@<fp8>`.

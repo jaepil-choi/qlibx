@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from decimal import Decimal
 
-from vqapr.valuation.marks import MarkBatch
+from vqapr.domain.values import MarkBatch
 
 __all__ = ["drawdown", "nav_series", "returns"]
 

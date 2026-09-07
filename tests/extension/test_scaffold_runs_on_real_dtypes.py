@@ -43,12 +43,12 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationOccurrence, OperationRole
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
-from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
 KST = ZoneInfo("Asia/Seoul")
 

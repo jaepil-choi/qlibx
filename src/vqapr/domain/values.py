@@ -1,6 +1,8 @@
 """Portable values every layer shares and none owns.
 
-Folded from four modules (one-shape Step 7, record 162): timezone-aware instants and the local
+Folded from five modules (one-shape Step 7, record 162): typed valuation results
+(`valuation/marks` -- `Mark`/`MarkBatch`, imported by `account/` and `constraints/` below
+`flow/`), timezone-aware instants and the local
 instant declaration (`timestamps`), row and scalar normalisation at the Model boundary (`rows`),
 the detached Model memory committed at a callback (`memory`), and `Side` (`enums`). Each section
 below keeps its former module's docstring as a comment. Nothing here imports above `domain/`.
@@ -359,3 +361,63 @@ def side_of(quantity: object) -> Side | None:
     if quantity < 0:  # type: ignore[operator]
         return Side.SELL
     return None
+
+
+# ------------------------------------------------------------------------------------------
+# marks.py, folded in (one-shape Step 7, record 162)
+#
+# Typed valuation results.
+# ------------------------------------------------------------------------------------------
+
+def _decimal(value: Decimal, *, name: str) -> None:
+    if not isinstance(value, Decimal):
+        raise TypeError(f"{name} must be a Decimal")
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite")
+
+
+@dataclass(frozen=True, slots=True)
+class Mark:
+    """The explicitly selected value of one residual holding."""
+
+    instrument_id: str
+    quantity: Decimal
+    price: Decimal
+    value: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.instrument_id, str) or not self.instrument_id:
+            raise ValueError("instrument_id must be a non-empty string")
+        _decimal(self.quantity, name="quantity")
+        _decimal(self.price, name="price")
+        _decimal(self.value, name="value")
+        if self.quantity == 0:
+            raise ValueError("a Mark must represent a residual holding")
+        if self.price <= 0:
+            raise ValueError("price must be positive")
+        if self.value != self.quantity * self.price:
+            raise ValueError("value must equal quantity * price")
+
+
+@dataclass(frozen=True, slots=True)
+class MarkBatch:
+    """A complete, non-estimated valuation of all residual holdings."""
+
+    marks: tuple[Mark, ...]
+    total_value: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.marks, tuple) or any(
+            not isinstance(mark, Mark) for mark in self.marks
+        ):
+            raise TypeError("marks must be a tuple of Mark")
+        _decimal(self.total_value, name="total_value")
+        instruments = tuple(mark.instrument_id for mark in self.marks)
+        if len(instruments) != len(set(instruments)):
+            raise ValueError("a MarkBatch may contain each instrument only once")
+        if self.total_value != sum((mark.value for mark in self.marks), Decimal("0")):
+            raise ValueError("total_value must equal the sum of marks")
+
+    def quantities(self) -> dict[str, Decimal]:
+        """Return the complete immutable batch's explicitly marked quantities."""
+        return {mark.instrument_id: mark.quantity for mark in self.marks}

@@ -18,8 +18,8 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.flow.marking import ValuationService
 from vqapr.portfolio.intents import PortfolioTarget
-from vqapr.valuation.marking import ValuationService
 
 
 class _Constraint(Constraint):

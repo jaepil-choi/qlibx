@@ -19,6 +19,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.agendas import OperationOccurrence, OperationRole
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.execution_table import ExecutionInputRegistration
@@ -37,7 +38,6 @@ from vqapr.flow.run import (
     _require_requirements,
     _require_value_fields,
 )
-from vqapr.runtime.agendas import OperationOccurrence, OperationRole
 
 
 @dataclass(frozen=True, slots=True)

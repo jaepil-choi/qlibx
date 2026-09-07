@@ -12,7 +12,7 @@ from vqapr.authoring import Constraint, ConstraintBounds, ConstraintFinding, Eco
 from vqapr.calls import ConstraintContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
-from vqapr.valuation.marks import MarkBatch
+from vqapr.domain.values import MarkBatch
 
 # ------------------------------------------------------------------------------------------
 # findings.py, folded in (one-shape Step 7, record 162)

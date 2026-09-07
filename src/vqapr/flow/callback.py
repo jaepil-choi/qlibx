@@ -22,6 +22,7 @@ from vqapr.constraints.evaluation import (
     project_constraints,
 )
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.evidence.artifacts import (
@@ -58,7 +59,6 @@ from vqapr.portfolio.intents import (
     PortfolioTarget,
     validate_economic_intent,
 )
-from vqapr.runtime.agendas import OperationOccurrence
 
 
 class CallbackPhase:

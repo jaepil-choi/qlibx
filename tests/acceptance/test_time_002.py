@@ -29,6 +29,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
@@ -63,7 +64,6 @@ from vqapr.portfolio.intents import (
     validate_economic_intent,
 )
 from vqapr.public import register_dataset
-from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")

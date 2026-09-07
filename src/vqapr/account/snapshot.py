@@ -9,8 +9,7 @@ from decimal import Decimal
 from itertools import pairwise
 from types import MappingProxyType
 
-from vqapr.domain.values import require_tz_aware
-from vqapr.valuation.marks import MarkBatch
+from vqapr.domain.values import MarkBatch, require_tz_aware
 
 
 def _decimal(value: object, *, name: str, nonnegative: bool = False) -> Decimal:

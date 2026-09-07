@@ -13,6 +13,7 @@ from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.agendas import OperationRole
 from vqapr.domain.errors import FailureFamily, VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
@@ -24,7 +25,6 @@ from vqapr.flow.preflight import derived_agenda, preflight_run
 from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.flow.run_state import prepare_model_state
 from vqapr.public import register_dataset
-from vqapr.runtime.agendas import OperationRole
 from vqapr.workspace import Workspace
 
 _ZONE = ZoneInfo("Asia/Seoul")

@@ -91,6 +91,23 @@ strategy config names both a component and an agenda that must already exist. Ap
 file order would make a valid document fail because of the order the user typed it in.
 """
 
+_SECTION_NOTES: dict[str, tuple[str, str]] = {
+    "sources": (
+        ". Note: there is no top-level sources: section. A source is declared "
+        "inline under its dataset (source_id + path), because a dataset and its "
+        "file register as a pair",
+        "move each source under its dataset as source_id + path, then delete the "
+        "sources: section",
+    ),
+}
+"""A note and a fix for a section an author reasonably expects to exist, but that does not.
+
+Only for names `_nearest_hint` cannot reach. A typo (`dataset`, `run`) is a near miss and the
+nearest permitted name answers it; `sources` is not a misspelling of anything -- it is a section
+the author was right to look for and that this package deliberately does not have, so the answer
+has to be written out. Everything reachable by spelling stays out of this table.
+"""
+
 
 
 
@@ -138,18 +155,32 @@ def _mapping(value: object, *, name: str) -> dict[str, Any]:
     return value
 
 
-def _nearest_hint(written: str, permitted: Sequence[str], key_path: str) -> str:
+def _nearest_hint(
+    written: str, permitted: Sequence[str], key_path: str, *, removable: bool = False
+) -> str:
     """What to write instead, naming the closest legal value when the written one is a near miss.
 
     A refusal that repeats the permitted set has told the reader nothing new -- `requirement`
     already listed it. What the reader cannot see is which of those values they were reaching for,
     and a one-character typo is invisible precisely to the person who typed it.
+
+    `removable` says whether deleting what was written is one of the answers. It is for a key the
+    author invented -- an unknown section, an unknown field -- and it is not for a value in a
+    closed set, where the field is required and deleting the value leaves the declaration
+    incomplete. Only the caller knows which of the two it holds, so only the caller can say.
     """
     close = get_close_matches(written.lower(), [value.lower() for value in permitted], n=1)
     if close:
         return (
             f"set {key_path} to {close[0]!r}, which is the closest permitted value "
             f"to {written!r}"
+        )
+    if removable:
+        # A top-level section IS its own key path, and "remove 'agendas' at agendas" says the
+        # name twice. Deeper, `runs.r.foo` is where a bare `foo` would leave the reader looking.
+        where = "" if key_path == written else f" at {key_path}"
+        return (
+            f"remove {written!r}{where}, or replace it with one of: {', '.join(permitted)}"
         )
     return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
 
@@ -225,9 +256,9 @@ def refusals_from(
                     examples=[key],
                     source=_at(f"{parent}.{key}"),
                     fix=(
-                        _nearest_hint(key, permitted, f"{parent}.{key}").replace(
-                            "set ", "rename ", 1
-                        )
+                        _nearest_hint(
+                            key, permitted, f"{parent}.{key}", removable=True
+                        ).replace("set ", "rename ", 1)
                         if permitted
                         else f"remove {key} from {parent}"
                     ),
@@ -822,26 +853,28 @@ def apply(
 def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, list[str]]:
     unknown = sorted(set(document) - set(SECTIONS))
     if unknown:
-        hint = ""
-        if "sources" in unknown:
-            hint = (
-                ". Note: there is no top-level sources: section. A source is declared "
-                "inline under its dataset (source_id + path), because a dataset and its "
-                "file register as a pair"
-            )
+        # One refusal per unknown section, each pointing at its own key and each saying what to
+        # write instead -- the same shape `refusals_from` gives an unknown key one level down. It
+        # was one lumped refusal with no `source` and a `fix` that only repeated the names back,
+        # so `dataset:` -- the typo this package's own test names -- was reported without ever
+        # saying `datasets`.
         found = collector(DECLARE_STAGE, FailureFamily.DATA)
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.unknown_section",
-                requirement=(
-                    f"a declaration may contain: {', '.join(SECTIONS)}"
-                ),
-                observed=f"unknown: {', '.join(unknown)}{hint}",
-                examples=unknown,
-                fix=f"remove or rename the unrecognized section(s): {', '.join(unknown)}",
-                explain=ExplainTopic.DECLARATION_SHAPE,
+        for section_name in unknown:
+            note, remedy = _SECTION_NOTES.get(section_name, ("", ""))
+            found.add(
+                Failure.bounded(
+                    f"{DECLARE_STAGE}.unknown_section",
+                    requirement=f"a declaration may contain: {', '.join(SECTIONS)}",
+                    observed=f"unknown section: {section_name}{note}",
+                    examples=[section_name],
+                    source=_at(section_name),
+                    fix=remedy
+                    or _nearest_hint(
+                        section_name, SECTIONS, section_name, removable=True
+                    ).replace("set ", "rename ", 1),
+                    explain=ExplainTopic.DECLARATION_SHAPE,
+                )
             )
-        )
         found.done().raise_if_failed()
     transaction = Workspace.transaction(project_root)
     registered = Registered()

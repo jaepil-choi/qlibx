@@ -852,17 +852,18 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
         "        return None\n",
         encoding="utf-8",
     )
-    Workspace.create(tmp_path).register_component(
-        ComponentRef.of(
-            "limit",
-            ComponentKind.CONSTRAINT,
-            source,
-            "Limit",
-            fingerprint=fingerprint_component(
-                source, kind=ComponentKind.CONSTRAINT, object_name="Limit"
-            ),
+    with Workspace.transaction(tmp_path) as t:
+        t.register_component(
+            ComponentRef.of(
+                "limit",
+                ComponentKind.CONSTRAINT,
+                source,
+                "Limit",
+                fingerprint=fingerprint_component(
+                    source, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+                ),
+            )
         )
-    )
     # Registering the run is a reference check only -- `limit` IS a registered constraint -- so
     # the mismatch is still the two verbs' to refuse, exactly as before.
     code, registered_run = _register_run(tmp_path, capsys, "limited", constraints=["limit"])

@@ -96,17 +96,18 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     source = root / "evil.py"
     source.write_text(evil_body.format(marker=str(marker).replace("\\", "\\\\")), encoding="utf-8")
     workspace = Workspace.open(root)
-    workspace.register_component(
-        ComponentRef.of(
-            "evil",
-            ComponentKind.STRATEGY_MODEL,
-            source,
-            "Strategy",
-            fingerprint=fingerprint_component(
-                source, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
-            ),
+    with Workspace.transaction(workspace) as t:
+        t.register_component(
+            ComponentRef.of(
+                "evil",
+                ComponentKind.STRATEGY_MODEL,
+                source,
+                "Strategy",
+                fingerprint=fingerprint_component(
+                    source, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
+                ),
+            )
         )
-    )
 
     venue_source = root / "venue.py"
     venue_source.write_text(
@@ -119,17 +120,18 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         "            ListingAccess.LONG_ONLY)})\n",
         encoding="utf-8",
     )
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            "venue",
-            ComponentKind.EXCHANGE,
-            venue_source,
-            "Venue",
-            fingerprint=fingerprint_component(
-                venue_source, kind=ComponentKind.EXCHANGE, object_name="Venue"
-            ),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                "venue",
+                ComponentKind.EXCHANGE,
+                venue_source,
+                "Venue",
+                fingerprint=fingerprint_component(
+                    venue_source, kind=ComponentKind.EXCHANGE, object_name="Venue"
+                ),
+            )
         )
-    )
 
     exec_dir = root / "prepared" / "exec"
     exec_dir.mkdir(parents=True)
@@ -144,43 +146,45 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         )
     finally:
         con.close()
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime(2024, 1, 1, 15, 30).time(),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
+    with Workspace.transaction(root) as t:
+        t.register_execution_input(
+            ExecutionInputRegistration.of(
+                "my-exec",
+                ExecutionTableSpec(
+                    source=SourceSpec.of("exec-src", exec_dir),
+                    trade_at_field="trade_at",
+                    instrument_field="instrument",
+                    is_tradable_field="is_tradable",
+                    price_fields={"close": "close"},
+                ),
+                FillConvention(
+                    selector=FillSelector.NEXT_ELIGIBLE,
+                    local_time=datetime(2024, 1, 1, 15, 30).time(),
+                    timezone="Asia/Seoul",
+                    trade_price="close",
+                ),
+            )
         )
-    )
 
     # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
     # (record `148`), so nothing about the agenda is registered separately.
-    Workspace.open(root).register_run(
-        RunDefinition(
-            run_id="probe",
-            strategies=(StrategyEntry("evil"),),
-            timezone="Asia/Seoul",
-            at=time(9, 0),
-            sessions=(date(2024, 1, 2),),
-            instruments=("A",),
-            exchange="venue",
-            execution_input_id="my-exec",
-            start=datetime(2024, 1, 2, tzinfo=UTC),
-            end=datetime(2024, 1, 5, tzinfo=UTC),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(root) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="probe",
+                strategies=(StrategyEntry("evil"),),
+                timezone="Asia/Seoul",
+                at=time(9, 0),
+                sessions=(date(2024, 1, 2),),
+                instruments=("A",),
+                exchange="venue",
+                execution_input_id="my-exec",
+                start=datetime(2024, 1, 2, tzinfo=UTC),
+                end=datetime(2024, 1, 5, tzinfo=UTC),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+            )
         )
-    )
     return "probe"
 
 

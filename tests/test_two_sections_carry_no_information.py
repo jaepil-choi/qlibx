@@ -78,7 +78,8 @@ def test_a_workspace_written_by_0_3_0_opens_and_the_next_write_drops_the_four_se
     tmp_path: Path,
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_component(_strategy("alpha", tmp_path))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_strategy("alpha", tmp_path))
     # What 0.3.0 wrote beside that component: an agenda, the strategy's binding to it, and the
     # agenda's role restated twice more.
     path = workspace.path
@@ -92,9 +93,11 @@ def test_a_workspace_written_by_0_3_0_opens_and_the_next_write_drops_the_four_se
 
     # An idempotent re-registration writes nothing, so the sections outlive it; the next write
     # that changes the document rewrites all of it, and they are gone.
-    assert reopened.register_component(_strategy("alpha", tmp_path)) is False
+    with Workspace.transaction(reopened) as t:
+        assert t.register_component(_strategy("alpha", tmp_path)) is False
     assert set(RETIRED_KEYS) <= set(yaml.safe_load(path.read_text(encoding="utf-8")))
-    reopened.register_run(_run("daily", "alpha"))
+    with Workspace.transaction(reopened) as t:
+        t.register_run(_run("daily", "alpha"))
     rewritten = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert not set(RETIRED_KEYS) & set(rewritten), sorted(set(RETIRED_KEYS) & set(rewritten))
     assert set(rewritten["runs"]) == {"daily"}
@@ -109,7 +112,8 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
     and 0.3.0 did not write them.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_component(_strategy("alpha", tmp_path))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_strategy("alpha", tmp_path))
     path = workspace.path
     path.write_text(
         path.read_text(encoding="utf-8")

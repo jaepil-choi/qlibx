@@ -53,7 +53,7 @@ from vqapr.workspace_document import (
     ComponentDeclaration,
     DatasetDeclaration,
     ExecutionInputDeclaration,
-    RunDocument,
+    InstrumentsDeclaration,
 )
 
 _COMPONENT_KINDS = {
@@ -118,7 +118,8 @@ def register_dataset(
     # `measured` is the registration with its span filled in from the scan validation just ran.
     # Registering the caller's copy instead would persist a declaration missing the one fact only
     # a full read can establish, and the next reader would have to read the file again to get it.
-    return Workspace.create(project_root).register_dataset(measured, source)
+    with Workspace.transaction(project_root) as transaction:
+        return transaction.register_dataset(measured, source)
 
 def register_execution_input(
     project_root: str | Path,
@@ -127,7 +128,8 @@ def register_execution_input(
     """준비된 execution parquet과 fill binding을 검증하고 project에 등록한다."""
     diagnosis = validate_execution_input(registration)
     diagnosis.raise_if_failed()
-    return Workspace.create(project_root).register_execution_input(registration)
+    with Workspace.transaction(project_root) as transaction:
+        return transaction.register_execution_input(registration)
 
 
 def _mapping(value: object, *, name: str) -> dict[str, Any]:
@@ -379,47 +381,6 @@ def _shape_words(line: Mapping[str, Any]) -> str:
     return words.get(kind, "a valid value")
 
 
-def _require_keys(body: dict[str, Any], keys: Sequence[str], *, name: str) -> None:
-    """Name every key this declaration is missing, in one refusal.
-
-    Raising on the first absent key costs one round trip per key: a reader fixes `fields`, re-runs,
-    is told about `source_id`, re-runs, and learns the required set one exception at a time with no
-    way to see it whole. Measured on a first-time reader, that pattern produced three failed
-    attempts at the same command before they stopped.
-
-    This is the same reason `Diagnosis` carries a tuple of `Failure` rather than one: an agent
-    fixing its own declaration must receive the problems together.
-    """
-    missing = [key for key in keys if key not in body]
-    if not missing:
-        return
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
-    for key in missing:
-        found.add(
-            Failure.bounded(
-                f"{DECLARE_STAGE}.key_missing",
-                requirement=f"{name} must declare {key}",
-                observed=f"{name} declares: {', '.join(sorted(body)) or '(nothing)'}",
-                source=_at(name),
-                fix=f"add {key} under {name} in the declaration YAML",
-                explain=ExplainTopic.DECLARATION_SHAPE,
-            )
-        )
-    found.done().raise_if_failed()
-
-
-def _required(body: dict[str, Any], key: str, *, name: str) -> Any:
-    """Read a key that `_require_keys` has already proven present.
-
-    The typed refusal is raised by `_require_keys` so that every missing key in a declaration is
-    named at once. This still refuses rather than trusting the caller, because a builder reached
-    through a path that forgot to pre-check must not read a `KeyError` into the envelope.
-    """
-    if key not in body:
-        _require_keys(body, (key,), name=name)
-    return body[key]
-
-
 _declaration_path: ContextVar[Path | None] = ContextVar("_declaration_path", default=None)
 """The declaration file the current `apply` is reading, for `FailureSource.file`.
 
@@ -455,12 +416,20 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
     from vqapr.domain.roster_export import read_roster_table
 
     name = "instruments"
-    if "tables" not in bodies:
+    retired = bool(bodies) and all(
+        isinstance(body, dict) and "tables" in body for body in bodies.values()
+    )
+    if "tables" not in bodies and retired:
         # The old shape named the roster: `instruments: {<id>: {tables: ...}}`. The workspace has
         # one roster slot and stores no id, so that id was echoed back and discarded -- a
         # declaration syntax inviting something the product cannot hold. Refused outright rather
         # than accepted-and-ignored, because accepting it would be a compatibility shim for a
         # statement that was never true.
+        #
+        # Narrowed to the shape it names (one-shape campaign Step 5). It used to fire on any
+        # document without a `tables` key, so a reader who typed `tabels:` was told to lift
+        # `tables:` up one level -- advice for a mistake they had not made. Anything that is not
+        # this shape now goes to the model below and is answered by the permitted key set.
         named = ", ".join(sorted(str(key) for key in bodies)) or "nothing"
         raise InputError(
             VALUE_INVALID,
@@ -474,7 +443,15 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
             ),
             explain=ExplainTopic.DECLARATION_SHAPE,
         )
-    tables = _mapping(_required(bodies, "tables", name=name), name=f"{name}.tables")
+    try:
+        declared = InstrumentsDeclaration.model_validate(bodies)
+    except ValidationError as invalid:
+        # The same door every other section's shape refusal comes out of, so a misspelled or
+        # unknown key under `instruments:` names the permitted set instead of being answered by
+        # the retired-shape refusal above.
+        refusals_from(invalid, model=InstrumentsDeclaration, name=name).raise_if_failed()
+        raise  # unreachable
+    tables = declared.tables
 
     resolved: dict[str, Path] = {}
     rows: dict[str, dict[str, str]] = {}
@@ -802,6 +779,19 @@ def _component(
     return str(ref.component_id)
 
 
+class Registered(dict[str, list[str]]):
+    """What one declaration registered, by section -- a plain mapping to every caller that
+    indexes it -- plus `spoken`, the point-in-time meaning of what was just declared, one
+    sentence per PIT-bearing concept (`docs/issues/027`). Rendered by `vqapr register` as
+    `spoken`, beside `registered`."""
+
+    spoken: list[str]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.spoken = []
+
+
 def apply(
     document: dict[str, Any],
     project_root: Path,
@@ -855,7 +845,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         )
         found.done().raise_if_failed()
     transaction = Workspace.transaction(project_root)
-    registered: dict[str, list[str]] = {}
+    registered = Registered()
 
     def section(key: str) -> dict[str, Any]:
         return _mapping(document.get(key) or {}, name=key)
@@ -873,12 +863,14 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         diagnosis.raise_if_failed()
         transaction.register_dataset(measured, source)
         registered.setdefault("datasets", []).append(str(dataset_id))
+        registered.spoken.extend(measured.spoken())
 
     for input_id, body in section("execution_inputs").items():
         registration = _execution_input(str(input_id), body, base=base)
         validate_execution_input(registration).raise_if_failed()
         transaction.register_execution_input(registration)
         registered.setdefault("execution_inputs", []).append(str(input_id))
+        registered.spoken.extend(registration.spoken())
 
     for component_id, body in section("components").items():
         registered.setdefault("components", []).append(
@@ -898,7 +890,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             # (`docs/issues/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
         try:
-            definition = RunDocument.model_validate(declared_run).to_domain(str(run_id))
+            definition = RunDefinition.model_validate({"run_id": str(run_id), **declared_run})
         except (ValidationError, TypeError, ValueError) as invalid:
             observed = (
                 "; ".join(
@@ -935,6 +927,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
     for run_id, definition in definitions:
         transaction.register_run(definition)
         registered.setdefault("runs", []).append(run_id)
+        registered.spoken.extend(definition.spoken())
 
     transaction.commit()
     return registered

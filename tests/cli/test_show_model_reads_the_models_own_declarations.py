@@ -54,15 +54,16 @@ def _register(
     object_name: str = "Wide",
 ) -> None:
     space = Workspace.create(root) if not (root / ".vqapr").exists() else Workspace.open(root)
-    space.register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            object_name,
-            fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+    with Workspace.transaction(space) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
 
 
 EXCHANGE = """

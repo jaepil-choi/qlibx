@@ -9,12 +9,12 @@ the one wall time a run declares, and the valuation and monitoring declarations 
 
 from __future__ import annotations
 
-from dataclasses import fields
 from datetime import date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig, StrategyEntry
@@ -72,8 +72,8 @@ def test_a_run_names_its_strategies_and_each_strategy_its_constraints() -> None:
     assert [entry.component_id for entry in run.strategies] == ["a", "b"]
     assert run.strategy("a").constraints == ("no-short",)
     assert run.strategy("b").constraints == ()
-    assert "constraints" not in {field.name for field in fields(RunDefinition)}
-    assert "strategy" not in {field.name for field in fields(RunDefinition)}
+    assert "constraints" not in set(RunDefinition.model_fields)
+    assert "strategy" not in set(RunDefinition.model_fields)
     with pytest.raises(KeyError, match="does not name strategy 'c'"):
         run.strategy("c")
 
@@ -90,7 +90,9 @@ def test_a_strategy_entry_is_ids_and_memory_only() -> None:
     assert entry.initial_model_memory == {"cadence": [1]}
     with pytest.raises(ValueError, match="repeat"):
         StrategyEntry("a", ("x", "x"))
-    with pytest.raises(TypeError, match="component ids"):
+    # pydantic owns the shape now (one-shape campaign Step 5): a ComponentRef where an id belongs
+    # is pydantic's own shape error, not a hand-written TypeError.
+    with pytest.raises(ValidationError, match="valid string"):
         StrategyEntry("a", (_component(ComponentKind.CONSTRAINT, "x"),))  # type: ignore[arg-type]
 
 
@@ -119,8 +121,10 @@ def test_a_run_declares_its_zone_and_one_naive_wall_time() -> None:
         _definition(timezone="Mars/Olympus_Mons")
     with pytest.raises(ValueError, match="at must be declared"):
         _definition(at=None)
-    with pytest.raises(TypeError, match=r"at must be a datetime\.time"):
-        _definition(at="15:29")
+    # A string is coerced by pydantic ("15:29" is a valid time); a non-time is a shape error.
+    assert _definition(at="15:29").at == time(15, 29)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="at"):
+        _definition(at=object())  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="timezone-naive wall time"):
         _definition(at=time(15, 29, tzinfo=KST))
 
@@ -138,26 +142,26 @@ def test_a_run_declares_exactly_one_source_of_sessions() -> None:
         _definition(sessions=())
     with pytest.raises(ValueError, match="declare exactly one of sessions_from or sessions"):
         _definition(sessions_from="prices")
-    with pytest.raises(TypeError, match="sessions_from must be a non-empty identifier"):
+    with pytest.raises(ValueError, match="sessions_from must be a non-empty identifier"):
         _definition(sessions=(), sessions_from="")
-    with pytest.raises(TypeError, match="sessions must be a tuple of dates"):
-        _definition(sessions=(datetime(2024, 1, 2, tzinfo=KST),))
-    with pytest.raises(TypeError, match="sessions must be a tuple of dates"):
-        _definition(sessions=[date(2024, 1, 2)])
-    with pytest.raises(TypeError, match="sessions must be a tuple of dates"):
-        _definition(sessions=("2024-01-02",))
+    # pydantic owns the shape: a datetime is not a date, and a list of dates becomes a tuple of
+    # dates rather than being refused for its container type (a declaration writes a list).
+    with pytest.raises(ValidationError, match="sessions"):
+        _definition(sessions=(datetime(2024, 1, 2, 9, 30, tzinfo=KST),))
+    assert _definition(sessions=[date(2024, 1, 2)]).sessions == (date(2024, 1, 2),)
+    assert _definition(sessions=("2024-01-02",)).sessions == (date(2024, 1, 2),)  # type: ignore[arg-type]
 
 
 def test_the_agenda_a_run_derives_is_named_after_the_run_and_is_not_a_field() -> None:
     """The one agenda is preflight's to build; the definition only knows what it will be called."""
     assert _definition(run_id="alpha").agenda_id == "alpha.sessions"
-    assert "agenda_id" not in {field.name for field in fields(RunDefinition)}
-    assert "agenda_role" not in {field.name for field in fields(RunDefinition)}
+    assert "agenda_id" not in set(RunDefinition.model_fields)
+    assert "agenda_role" not in set(RunDefinition.model_fields)
 
 
 def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
     """Record `148` pins the surface: valued where it fills, judged after each commit."""
-    assert {field.name for field in fields(RunDefinition)} == {
+    assert set(RunDefinition.model_fields) == {
         "run_id",
         "strategies",
         "instruments",

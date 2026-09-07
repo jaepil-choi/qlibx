@@ -223,8 +223,13 @@ class Workspace:
         return cls._from_state(project_root, *candidate._read())
 
     @classmethod
-    def transaction(cls, project_root: str | Path) -> Transaction:
+    def transaction(cls, project_root: str | Path | Workspace) -> Transaction:
         """Start applying several registrations as one write.
+
+        Handed an open `Workspace` rather than a root, the transaction stages against THAT
+        object and refreshes it on commit, so a caller who holds a workspace sees what it just
+        registered -- the guarantee the direct `Workspace.register_*` doors gave and the one
+        door keeps (one-shape campaign Step 5, decision D3).
 
         The transaction stages every registration against a snapshot of the workspace -- or
         against nothing, where no workspace exists yet -- so a later declaration can look up an
@@ -234,8 +239,11 @@ class Workspace:
         item therefore leaves the workspace exactly as it found it; a valid document costs one
         lock, one read and one write however many items it declares.
         """
+        if isinstance(project_root, Workspace):
+            return Transaction(project_root)
         candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
-        return Transaction(cls._from_state(project_root, *candidate._read_or_empty()))
+        fresh = not candidate.path.exists()
+        return Transaction(cls._from_state(project_root, *candidate._read_or_empty()), fresh=fresh)
 
     def _state(self) -> _State:
         return _State(
@@ -480,63 +488,6 @@ class Workspace:
             "run",
             noun="run_id",
         )
-
-    def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
-        """물리·의미 선언을 보관한다. 새 dataset이면 True, 동일하면 False다.
-
-        같은 ``dataset_id``가 다른 선언을 뜻하도록 조용히 바꾸지 않는다. replace는 이 slice의
-        지원 범위가 아니다.
-        """
-        with self._exclusive():
-            merged, changed = self._merge_dataset(self._read(), registration, source)
-            self._commit(merged, changed)
-            return changed
-
-    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
-        """검증을 통과한 execution table + fill declaration을 원자적으로 보관한다."""
-        if not isinstance(registration, ExecutionInputRegistration):
-            raise TypeError("registration must be an ExecutionInputRegistration")
-        with self._exclusive():
-            merged, changed = self._merge_execution_input(self._read(), registration)
-            self._commit(merged, changed)
-            return changed
-
-    def register_component(self, ref: ComponentRef) -> bool:
-        """검증과 fingerprinting을 통과한 component reference를 원자적으로 보관한다.
-
-        An edited source re-registered under its id REPLACES the registration in place; there is
-        no flag. Editing a registered component is the ordinary loop (`docs/issues/009`, Decision
-        2), and a refusal the caller must pass an argument to bypass, on an event that is
-        ordinary, is the same friction with an extra step. The `force` parameter this method
-        carried after that decision was a no-op the CLI never exposed, while the shipped skill
-        kept promising `register --force` (`docs/issues/067`); it is gone so the two cannot
-        disagree again.
-
-        Replacing does not lose provenance: a finished run pins the fingerprint it ran under in
-        its own record, so what a past run used is testified to by that run and not by whichever
-        registration currently holds the id.
-        """
-        if not isinstance(ref, ComponentRef):
-            raise TypeError("ref must be a ComponentRef")
-        with self._exclusive():
-            merged, changed = self._merge_component(self._read(), ref)
-            self._commit(merged, changed)
-            return changed
-
-    def register_run(self, definition: RunDefinition) -> bool:
-        """Register a run: the configuration every model in it shares, and which models.
-
-        Every id the definition names must already be registered -- components of the right
-        kind, the execution input, the dataset its sessions come from -- so a registered run is
-        one `vqapr run <run-id>` can freeze. The output dataset of a datamodel run is NOT
-        checked here: it exists once the run has happened, and the run stays registered.
-        """
-        if not isinstance(definition, RunDefinition):
-            raise TypeError("definition must be a RunDefinition")
-        with self._exclusive():
-            merged, changed = self._merge_run(self._read(), definition)
-            self._commit(merged, changed)
-            return changed
 
     # ------------------------------------------------------------------------------------------
     # Merges: one registration folded into one state. Pure in the sense that matters -- they read
@@ -880,26 +831,6 @@ class Workspace:
         this file would want to audit.
         """
         return self.path.parent / "instruments.json"
-
-    def register_instruments(
-        self, tables: Mapping[str, Path | str], *, digest: str
-    ) -> dict[str, object]:
-        """Record which files declare this project's instruments, and what they hashed to.
-
-        Stores a POINTER plus a digest, never a frozen copy. Issue 009 settles why: a roster grows
-        as a matter of course -- a daily batch lists new tickers, issuers delist, a name is
-        reclassified -- so a run is never refused for reading a roster that differs from the one
-        recorded. The digest is STATED in the run record and compared against nothing.
-
-        Re-registration is ordinary, unlike a dataset's. A dataset registration is immutable
-        because changing it would rewrite provenance; a roster correction is a statement about the
-        world ("069500 is an ETF"), and what a past run treated an instrument as is testified to
-        by that run's own fills.
-        """
-        payload = _roster_payload(tables, digest=digest)
-        with self._exclusive():
-            self._write_roster(payload)
-        return payload
 
     def _write_roster(self, payload: Mapping[str, object]) -> None:
         import json
@@ -1318,10 +1249,34 @@ class Transaction:
     after the document and inside the same lock.
     """
 
-    def __init__(self, staging: Workspace) -> None:
+    def __init__(self, staging: Workspace, *, fresh: bool = False) -> None:
         self._staging = staging
         self._ops: list[Callable[[_State], tuple[_State, bool]]] = []
         self._rosters: list[Mapping[str, object]] = []
+        # `fresh`: this transaction began from a ROOT on a project with no document yet, so its
+        # first registration writes the document. A `Workspace` handed in was created or opened
+        # against a document that existed; if that document has VANISHED since, it is damage,
+        # and a registration against it refuses by name (`workspace.open.missing`) rather than
+        # quietly recreating an empty one underneath the caller -- the guarantee the direct
+        # doors had, kept by the one door. Decided by who started the transaction, not by
+        # whether the file happens to exist at that moment.
+        self._fresh = fresh
+
+    def __enter__(self) -> Transaction:
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        """Commit on a clean exit; leave the workspace untouched on an exception.
+
+        The one door (one-shape campaign Step 5, decision D3). A single registration reads
+        `with Workspace.transaction(root) as t: t.register_run(definition)`, the same merge
+        the document path runs, staged and written once. A refusal raised inside the block
+        propagates and nothing is written, which is the property `docs/issues/A3` (record `134`)
+        made of the document path and which the direct `Workspace.register_*` doors could not
+        share: each of those took its own lock and wrote its own item.
+        """
+        if exc_type is None:
+            self.commit()
 
     @property
     def view(self) -> Workspace:
@@ -1369,12 +1324,16 @@ class Transaction:
             return
         ws = self._staging
         with ws._exclusive():
-            state = ws._read_or_empty()
+            state = ws._read_or_empty() if self._fresh else ws._read()
             changed = False
             for merge in self._ops:
                 state, merged_changed = merge(state)
                 changed = changed or merged_changed
-            if changed:
+            # A project that holds a roster is a workspace: the first thing registered in an
+            # empty directory may be the roster alone, and a sidecar beside no document is
+            # what `open` refuses as damage. `Workspace.create` used to write the empty
+            # document as a side effect of the direct door; the one door writes it here.
+            if changed or self._fresh:
                 ws._write(*state)
             ws._replace_state(*state)
             for payload in self._rosters:

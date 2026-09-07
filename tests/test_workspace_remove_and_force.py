@@ -51,18 +51,19 @@ def _workspace(tmp_path: Path) -> tuple[Workspace, Path]:
 
 
 def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
-    workspace.register_run(
-        RunDefinition(
-            run_id="daily",
-            strategies=(StrategyEntry(str(ref.component_id)),),
-            instruments=("A",),
-            timezone=ZONE,
-            at=time(9, 0),
-            sessions=(date(2026, 4, 1),),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="daily",
+                strategies=(StrategyEntry(str(ref.component_id)),),
+                instruments=("A",),
+                timezone=ZONE,
+                at=time(9, 0),
+                sessions=(date(2026, 4, 1),),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+            )
         )
-    )
 
 
 def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
@@ -75,13 +76,15 @@ def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
     """
     workspace, source = _workspace(tmp_path)
     first = _ref(source)
-    workspace.register_component(first)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(first)
 
     source.write_text("class S:\n    value = 1\n", encoding="utf-8")
     second = _ref(source)
     assert second.fingerprint != first.fingerprint
 
-    assert workspace.register_component(second) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(second) is True
     assert workspace.component("mom").fingerprint == second.fingerprint
     assert len(workspace.components) == 1, "an edit must not mint a second component id"
 
@@ -92,22 +95,25 @@ def test_there_is_no_force_parameter_left_to_promise(tmp_path: Path) -> None:
     dead spelling is gone so a docstring cannot cite it again."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    with pytest.raises(TypeError):
-        workspace.register_component(ref, force=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError), Workspace.transaction(workspace) as t:
+        t.register_component(ref, force=True)  # type: ignore[call-arg]
 
 
 def test_re_registering_an_unchanged_component_stays_idempotent(tmp_path: Path) -> None:
     """A second registration of the same bytes writes nothing and says so."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
 
-    assert workspace.register_component(ref) is False
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(ref) is False
 
 
 def test_remove_withdraws_a_registration_and_is_idempotent(tmp_path: Path) -> None:
     workspace, source = _workspace(tmp_path)
-    workspace.register_component(_ref(source))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_ref(source))
 
     assert workspace.remove("component", "mom") is True
     assert workspace.remove("component", "mom") is False
@@ -121,7 +127,8 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
     with pytest.raises(VqaprError, match=r"workspace\.remove\.referenced") as error:
@@ -147,7 +154,8 @@ def test_references_to_reports_every_edge_that_blocks_a_removal(tmp_path: Path) 
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
     assert workspace.references_to("component", "mom") == ("run 'daily'",)
@@ -159,7 +167,8 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     """A run is the top of the document: nothing names a run, so it is always removable."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
     assert workspace.references_to("run", "daily") == ()
@@ -178,23 +187,25 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
 
     assert workspace.references_to("dataset", "prices") == ()
     assert workspace.remove("dataset", "prices") is False, "absent is idempotent, not an error"
 
-    workspace.register_run(
-        RunDefinition(
-            run_id="daily",
-            strategies=(StrategyEntry(str(ref.component_id)),),
-            instruments=("A",),
-            timezone=ZONE,
-            at=time(9, 0),
-            sessions=(date(2026, 4, 1),),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="daily",
+                strategies=(StrategyEntry(str(ref.component_id)),),
+                instruments=("A",),
+                timezone=ZONE,
+                at=time(9, 0),
+                sessions=(date(2026, 4, 1),),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+            )
         )
-    )
     assert workspace.references_to("dataset", "prices") == ()
     # `sessions_from` a dataset that is not registered is refused at `register_run`, so the
     # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.

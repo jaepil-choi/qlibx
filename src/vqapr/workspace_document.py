@@ -20,8 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from datetime import date, datetime, time
-from decimal import Decimal
+from datetime import datetime, time
 from typing import Any, Literal
 
 import yaml
@@ -30,14 +29,11 @@ from pydantic import (
     ConfigDict,
     SerializerFunctionWrapHandler,
     ValidationError,
-    field_serializer,
     field_validator,
     model_serializer,
     model_validator,
 )
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.scan import ColumnType, ProjectionSchema
 from vqapr.data.sources import SourceSpec
@@ -45,31 +41,13 @@ from vqapr.domain.identifiers import component_id, dataset_id, execution_input_i
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition
 
 
 class Document(BaseModel):
     """Every section model: frozen, and an unknown key is a refusal rather than a warning."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
-
-
-class SourceDocument(Document):
-    """`sources.<source_id>` on disk, and the inline `source:` block of a dataset declaration.
-
-    `path` is a string here: on disk it is whatever the registration recorded, in a declaration
-    it is relative to the declaration file, and resolving it is the declaration reader's job.
-    """
-
-    path: str
-    hive_partitioned: bool = False
-
-    def to_domain(self, source_id: str) -> SourceSpec:
-        return SourceSpec.of(source_id, self.path, hive_partitioned=self.hive_partitioned)
-
-    @classmethod
-    def from_domain(cls, source: SourceSpec) -> SourceDocument:
-        return cls(path=str(source.path), hive_partitioned=source.hive_partitioned)
 
 
 class DatasetDocument(Document):
@@ -95,6 +73,7 @@ class DatasetDocument(Document):
     field_types: dict[str, ColumnType] | None = None
     aggregated: bool | None = None
     span: tuple[datetime, datetime] | None = None
+    produced_by: str | None = None
 
     @model_validator(mode="after")
     def _measurements_travel_together(self) -> DatasetDocument:
@@ -111,7 +90,7 @@ class DatasetDocument(Document):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         body = handler(self)
-        for measured in ("grain", "field_types", "aggregated", "span"):
+        for measured in ("grain", "field_types", "aggregated", "span", "produced_by"):
             if body.get(measured) is None:
                 del body[measured]
         if "span" in body:
@@ -136,6 +115,8 @@ class DatasetDocument(Document):
             )
         if self.span is not None:
             registration = registration.with_span(*self.span)
+        if self.produced_by is not None:
+            registration = registration.with_producer(self.produced_by)
         return registration
 
     @classmethod
@@ -152,6 +133,7 @@ class DatasetDocument(Document):
             ),
             aggregated=None if registration.field_types is None else registration.aggregated,
             span=registration.span,
+            produced_by=registration.produced_by,
         )
 
 
@@ -235,258 +217,6 @@ class ExecutionInputDocument(Document):
         )
 
 
-class ComponentDocument(Document):
-    """`components.<component_id>` on disk: where the code is, what it is, and its fingerprint."""
-
-    kind: ComponentKind
-    path: str
-    object_name: str
-    config: dict[str, Any]
-    fingerprint: str
-
-    def to_domain(self, component_id: str) -> ComponentRef:
-        return ComponentRef.of(
-            component_id,
-            self.kind,
-            self.path,
-            self.object_name,
-            config=self.config,
-            fingerprint=self.fingerprint,
-        )
-
-    @classmethod
-    def from_domain(cls, ref: ComponentRef) -> ComponentDocument:
-        return cls(
-            kind=ref.kind,
-            path=str(ref.path),
-            object_name=ref.object_name,
-            config=dict(ref.config),
-            fingerprint=ref.fingerprint,
-        )
-
-
-class InitialAccountDocument(Document):
-    """`runs.<id>.initial_account`: the declaration every strategy's own Account starts from."""
-
-    cash: Decimal
-    mode: AccountMode
-    positions: dict[str, Decimal] = {}
-    version: int = 0
-
-    @field_validator("mode", mode="before")
-    @classmethod
-    def _by_name_as_written(cls, value: object) -> object:
-        # Written and read by member NAME (`LONG_ONLY`), which is what the template shows and
-        # `vqapr new run` derives its comment from; the enum's value is the lower-case spelling.
-        if isinstance(value, str):
-            try:
-                return AccountMode[value.upper()]
-            except KeyError:
-                return value
-        return value
-
-    @field_serializer("mode")
-    def _name(self, mode: AccountMode) -> str:
-        return mode.name
-
-    @field_serializer("cash")
-    def _cash(self, cash: Decimal) -> str:
-        return str(cash)
-
-    @field_serializer("positions")
-    def _positions(self, positions: dict[str, Decimal]) -> dict[str, str]:
-        return {name: str(quantity) for name, quantity in sorted(positions.items())}
-
-
-class StrategyEntryDocument(Document):
-    """`runs.<id>.strategies.<component_id>`: constraints and opening memory, both optional."""
-
-    constraints: list[str] = []
-    initial_model_memory: Any = None
-
-    @model_serializer(mode="wrap")
-    def _only_what_was_declared(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        body = handler(self)
-        if not body.get("constraints"):
-            body.pop("constraints", None)
-        if body.get("initial_model_memory") is None:
-            body.pop("initial_model_memory", None)
-        return body
-
-
-class DataModelEntryDocument(Document):
-    """`runs.<id>.datamodels.<component_id>`: the dataset this datamodel writes (record `148`)."""
-
-    dataset_id: str
-    value_fields: list[str]
-    initial_model_memory: Any = None
-
-    @model_serializer(mode="wrap")
-    def _only_what_was_declared(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        body = handler(self)
-        if body.get("initial_model_memory") is None:
-            body.pop("initial_model_memory", None)
-        return body
-
-
-class RunDocument(Document):
-    """`runs.<run_id>` on disk and in a declaration -- the same shape, so a run can be copied
-    out of `workspace.yaml` into a declaration and back.
-
-    A registered run is run-ready: everything `vqapr run` cannot execute without is required
-    here, nullable only where `RunDefinition` keeps it optional for in-process callers. The
-    sessions come from exactly one of `sessions_from` (a registered dataset's days) or `sessions`.
-    """
-
-    instruments: list[str]
-    start: datetime | None
-    end: datetime | None
-    timezone: str
-    at: time
-    exchange: str | None = None
-    execution_input: str | None = None
-    initial_account: InitialAccountDocument | None = None
-    strategies: dict[str, StrategyEntryDocument | None] | None = None
-    datamodels: dict[str, DataModelEntryDocument] | None = None
-    sessions_from: str | None = None
-    sessions: list[date] | None = None
-
-    @model_validator(mode="after")
-    def _one_kind_and_one_session_source(self) -> RunDocument:
-        if bool(self.strategies) == bool(self.datamodels):
-            raise ValueError(
-                "must name at least one model under exactly one of `strategies:` or "
-                "`datamodels:` (record 148: a run holds one kind)"
-            )
-        if self.datamodels:
-            declared = [
-                key
-                for key, value in (
-                    ("exchange", self.exchange),
-                    ("execution_input", self.execution_input),
-                    ("initial_account", self.initial_account),
-                )
-                if value is not None
-            ]
-            if declared:
-                raise ValueError(
-                    f"a datamodel run declares no {', '.join(declared)}: a datamodel sees no "
-                    "account and passes through no venue"
-                )
-        if (self.sessions_from is None) == (self.sessions is None):
-            raise ValueError(
-                "must declare exactly one of sessions_from (a registered dataset's days) or "
-                "sessions (a list of dates)"
-            )
-        if self.sessions is not None and not self.sessions:
-            raise ValueError("sessions must list at least one date")
-        return self
-
-    @field_validator("start", "end")
-    @classmethod
-    def _one_instant(cls, value: datetime | None) -> datetime | None:
-        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
-            raise ValueError("must include a UTC offset; a naive datetime is not one instant")
-        return value
-
-    @model_serializer(mode="wrap")
-    def _monitoring_only_when_declared(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, Any]:
-        body = handler(self)
-        optionals = ("sessions_from", "sessions", "initial_account", "strategies", "datamodels")
-        for optional in optionals:
-            if body.get(optional) is None:
-                body.pop(optional, None)
-        if "strategies" in body:
-            body["strategies"] = {
-                name: (entry or {}) for name, entry in body["strategies"].items()
-            }
-        return body
-
-    def to_domain(self, run_id: str) -> RunDefinition:
-        account = self.initial_account
-        return RunDefinition(
-            run_id=run_id,
-            strategies=tuple(
-                StrategyEntry(
-                    name,
-                    tuple(entry.constraints) if entry else (),
-                    entry.initial_model_memory if entry else None,
-                )
-                for name, entry in (self.strategies or {}).items()
-            ),
-            datamodels=tuple(
-                DataModelEntry(
-                    name,
-                    entry.dataset_id,
-                    tuple(entry.value_fields),
-                    entry.initial_model_memory,
-                )
-                for name, entry in (self.datamodels or {}).items()
-            ),
-            instruments=tuple(self.instruments),
-            timezone=self.timezone,
-            at=self.at,
-            sessions_from=self.sessions_from,
-            sessions=tuple(self.sessions or ()),
-            exchange=self.exchange,
-            execution_input_id=self.execution_input,
-            start=self.start,
-            end=self.end,
-            initial_account_snapshot=(
-                None
-                if account is None
-                else AccountSnapshot(
-                    version=account.version, cash=account.cash, positions=account.positions
-                )
-            ),
-            initial_account_mode=None if account is None else account.mode,
-        )
-
-    @classmethod
-    def from_domain(cls, definition: RunDefinition) -> RunDocument:
-        snapshot, mode = definition.initial_account_snapshot, definition.initial_account_mode
-        return cls(
-            instruments=list(definition.instruments),
-            start=definition.start,
-            end=definition.end,
-            timezone=definition.timezone,
-            at=definition.at,  # type: ignore[arg-type]
-            sessions_from=definition.sessions_from,
-            sessions=list(definition.sessions) or None,
-            exchange=definition.exchange,
-            execution_input=definition.execution_input_id,
-            initial_account=(
-                None
-                if snapshot is None or mode is None
-                else InitialAccountDocument(
-                    cash=snapshot.cash,
-                    mode=mode,
-                    positions=dict(snapshot.positions),
-                    version=snapshot.version,
-                )
-            ),
-            strategies={
-                entry.component_id: StrategyEntryDocument(
-                    constraints=list(entry.constraints),
-                    initial_model_memory=entry.initial_model_memory,
-                )
-                for entry in definition.strategies
-            }
-            or None,
-            datamodels={
-                entry.component_id: DataModelEntryDocument(
-                    dataset_id=entry.dataset_id,
-                    value_fields=list(entry.value_fields),
-                    initial_model_memory=entry.initial_model_memory,
-                )
-                for entry in definition.datamodels
-            }
-            or None,
-        )
-
-
 # ---------------------------------------------------------------------------------------------
 # The declaration document: what an author writes and `vqapr register` reads. Same sections,
 # fewer keys (nothing measured, nothing derived) and, for a dataset and an execution input, the
@@ -543,6 +273,24 @@ class ExecutionInputDeclaration(Document):
     fill: FillDeclaration
 
 
+class InstrumentsDeclaration(Document):
+    """`instruments:` in a declaration: one roster's tables, keyed by instrument kind.
+
+    The last section that was parsed by hand. Every other section's key set is this file's
+    business and its refusals come out of `declarations.refusals_from`; this one checked
+    `tables` with `_require_keys` and then took whatever mapping it found, so a typo under
+    `instruments:` was answered by the refusal written for the retired `instruments: {<id>:
+    {tables: ...}}` shape -- which told the reader to lift `tables:` up one level, when what
+    they had done was misspell it (one-shape campaign Step 5).
+
+    A project holds ONE roster and stores no id for it, which is why `tables` sits directly
+    under `instruments:` with nothing between. The values are paths, resolved against the
+    declaration's own directory by the caller.
+    """
+
+    tables: dict[str, str]
+
+
 class ComponentDeclaration(Document):
     """`components.<component_id>`: where the code is and what it is, in the CLI's spelling."""
 
@@ -589,11 +337,15 @@ class WorkspaceDocument(Document):
     refused at open naming the run and the keys it now needs.
     """
 
-    sources: dict[str, SourceDocument]
+    sources: dict[str, dict[str, Any]]
+    """Each entry is a `SourceSpec` read under its own key by `_linked` (one-shape Step 5)."""
     datasets: dict[str, DatasetDocument]
     execution_inputs: dict[str, ExecutionInputDocument] = {}
-    components: dict[str, ComponentDocument] = {}
-    runs: dict[str, RunDocument] = {}
+    components: dict[str, dict[str, Any]] = {}
+    """Each entry is a `ComponentRef` read under its own key by `_linked` (one-shape Step 5)."""
+    runs: dict[str, dict[str, Any]] = {}
+    """Each entry is a `RunDefinition` read under its own key by `_linked`, so the refusal
+    names the run; the model is the domain type (one-shape campaign Step 5)."""
     valuation_configs: Any = None
     monitoring_policies: Any = None
     agendas: Any = None
@@ -649,7 +401,7 @@ def _linked(raw: object) -> tuple[dict, ...]:
 
     sources = {}
     for raw_id, entry in document.sources.items():
-        source = entry.to_domain(raw_id)
+        source = _decoded("source", raw_id, SourceSpec, {"source_id": raw_id, **entry})
         sources[source.source_id] = source
 
     datasets = {}
@@ -673,12 +425,12 @@ def _linked(raw: object) -> tuple[dict, ...]:
 
     components = {}
     for raw_id, entry in document.components.items():
-        ref = entry.to_domain(raw_id)
+        ref = _decoded("component", raw_id, ComponentRef, {"component_id": raw_id, **entry})
         components[ref.component_id] = ref
 
     runs = {}
     for raw_id, entry in document.runs.items():
-        definition = entry.to_domain(raw_id)
+        definition = _decoded("run", raw_id, RunDefinition, {"run_id": raw_id, **entry})
         for strategy in definition.strategies:
             component = components.get(component_id(strategy.component_id))
             if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
@@ -723,14 +475,20 @@ def write_workspace(
         return sorted(items, key=lambda item: str(item[0]))
 
     document = WorkspaceDocument(
-        sources={str(k): SourceDocument.from_domain(v) for k, v in by_id(sources.items())},
+        sources={
+            str(k): v.model_dump(mode="json", exclude={"source_id"})
+            for k, v in by_id(sources.items())
+        },
         datasets={str(k): DatasetDocument.from_domain(v) for k, v in by_id(datasets.items())},
         execution_inputs={
             str(k): ExecutionInputDocument.from_domain(v)
             for k, v in by_id(execution_inputs.items())
         },
-        components={str(k): ComponentDocument.from_domain(v) for k, v in by_id(components.items())},
-        runs={k: RunDocument.from_domain(v) for k, v in sorted((runs or {}).items())},
+        components={
+            str(k): v.model_dump(mode="json", exclude={"component_id"})
+            for k, v in by_id(components.items())
+        },
+        runs={k: v.model_dump(mode="json") for k, v in sorted((runs or {}).items())},
     )
     body = document.model_dump(
         mode="json",
@@ -744,8 +502,6 @@ def write_workspace(
 
 __all__ = [
     "ComponentDeclaration",
-    "ComponentDocument",
-    "DataModelEntryDocument",
     "DatasetDeclaration",
     "DatasetDocument",
     "Document",
@@ -753,10 +509,6 @@ __all__ = [
     "ExecutionInputDocument",
     "FillDeclaration",
     "FillDocument",
-    "InitialAccountDocument",
-    "RunDocument",
-    "SourceDocument",
-    "StrategyEntryDocument",
     "TableDeclaration",
     "WorkspaceDocument",
     "read_workspace",

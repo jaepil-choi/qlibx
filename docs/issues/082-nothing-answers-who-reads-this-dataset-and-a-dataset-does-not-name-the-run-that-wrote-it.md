@@ -1,8 +1,13 @@
 # 082 — nothing answers "who reads this dataset", and a dataset does not name the run that wrote it
 
-**Status:** **OPEN -- the `--kind` filter landed with record `156` (`083`); `--reads` and
-the producer `run_id` on a dataset remain.** The second belongs with one-shape campaign
-Step 5, where the dataset document is rewritten.
+**Status:** **CLOSED 2026-09-05 -- record `160` (one-shape campaign Step 5, M5e).**
+`vqapr list components --reads <dataset-id>` keeps the strategies, datamodels and constraints
+whose `inputs()` name the dataset, each row carrying `reads: {<dataset>: [<fields>]}` -- by
+loading every component in this one process, which is where the 36 seconds went (41 process
+starts, not 41 loads); no index and no new field. And a materialized dataset carries
+`produced_by`, the run that wrote it, set by `DataModelOutput.register` from the run it serves
+and reported by `show dataset` and `list datasets`; a dataset from the author's own file names
+no run. The `--kind` filter landed earlier with record `156` (`083`).
 
 **Status when filed:** OPEN. Found 2026-09-04 by `kwam-enhanced-index/vqapr-enhanced-index-3` (B2), measured
 at 36.3 seconds and 41 processes per question, on a workspace of 40 components. Confirmed in source

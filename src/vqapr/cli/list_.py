@@ -24,6 +24,8 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.declarations import AUTHORED_KINDS
+from vqapr.extension.component import ComponentKind
+from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
 from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_records import (
     STATUS_COMPLETED,
@@ -86,7 +88,7 @@ def _summarize(item: object) -> dict[str, Any]:
         value = getattr(item, field, None)
         if value is not None:
             summary[field] = str(value)
-    for field in ("kind", "fingerprint", "object_name", "timezone"):
+    for field in ("kind", "fingerprint", "object_name", "timezone", "produced_by"):
         value = getattr(item, field, None)
         if value is None:
             continue
@@ -123,6 +125,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="`components` only: keep components of this kind, spelled as `new` and `register` "
         "spell it",
+    )
+    parser.add_argument(
+        "--reads",
+        dest="reads",
+        default=None,
+        help=(
+            "`components` only: keep the strategies, datamodels and constraints whose `inputs()` "
+            "name this dataset id. Loads each component to ask it, in this one process"
+        ),
     )
     parser.add_argument(
         "--store-root",
@@ -295,6 +306,43 @@ def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
     return rows
 
 
+def _reading(
+    project_root: Path, workspace: Workspace, rows: list[dict[str, Any]], dataset_id: str
+) -> list[dict[str, Any]]:
+    """The components whose declared reads name `dataset_id`, and what each reads from it.
+
+    The reverse of `show model` (`docs/issues/082`): "who reads this dataset" had no verb, so it
+    was `list components` then `show model` per component -- 41 processes and 36 seconds on a
+    forty-component workspace. The cost was the process starts, not the loads: this asks every
+    component in this one process, the way `show model` asks one. An exchange declares no
+    reads and is not asked.
+    """
+    loaders = {
+        ComponentKind.STRATEGY_MODEL: load_strategy_model,
+        ComponentKind.DATA_MODEL: load_data_model,
+        ComponentKind.CONSTRAINT: load_constraint,
+    }
+    by_id = {str(ref.component_id): ref for ref in workspace.components}
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        ref = by_id.get(str(row.get("component_id")))
+        loader = None if ref is None else loaders.get(ref.kind)
+        if loader is None:
+            continue
+        declared = loader(ref, project_root=project_root).inputs()
+        fields = sorted(
+            {
+                field
+                for declaration in declared.values()
+                if str(declaration.dataset_id) == dataset_id
+                for field in declaration.fields
+            }
+        )
+        if fields:
+            kept.append({**row, "reads": {dataset_id: fields}})
+    return kept
+
+
 def _instant(value: object, *, name: str) -> datetime | None:
     if value is None:
         return None
@@ -404,6 +452,16 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     rows = [_summarize(item) for item in items]
     if component_kind is not None:
         rows = [row for row in rows if row.get("kind") == component_kind]
+    reads = getattr(args, "reads", None)
+    if reads is not None:
+        if args.kind != "components":
+            raise InputError(
+                VALUE_INVALID,
+                requirement="`--reads` filters `list components`",
+                observed=f"--reads {reads!r} given with `list {args.kind}`",
+                retry="run `vqapr list components --reads <dataset-id>`",
+            )
+        rows = _reading(project_root, workspace, rows, reads)
     if args.kind == "runs":
         # Beside each registered run, the member records the store holds for it: what ran, by
         # `<id>@<fp8>`, so a reader sees which tweaks of which models have been tried. A run

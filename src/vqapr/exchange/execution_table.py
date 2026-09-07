@@ -66,6 +66,22 @@ class ExecutionInputRegistration:
     table: ExecutionTableSpec
     fill: FillConvention
 
+    def spoken(self) -> list[str]:
+        """The point-in-time meaning of this declaration, in two sentences (`docs/issues/027`).
+
+        One for the table's clock, one for the fill -- the fill's four fields (selector, wall
+        time, zone, price) mean nothing apart, so they are one sentence rather than four.
+        """
+        fill = self.fill
+        return [
+            f"execution input {self.execution_input_id!r}: a row is a fact about the instant in "
+            f"{self.table.trade_at_field!r}; a decision fills at a later row, never at its own",
+            f"execution input {self.execution_input_id!r}: a decision fills on the "
+            f"{fill.selector.value.lower()} session at {fill.local_time.isoformat()} "
+            f"{fill.timezone}, "
+            f"at that row's {fill.trade_price!r}",
+        ]
+
     def __post_init__(self) -> None:
         if not isinstance(self.table, ExecutionTableSpec):
             raise TypeError("table must be an ExecutionTableSpec")

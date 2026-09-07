@@ -64,9 +64,10 @@ def workspace(tmp_path: Path) -> Workspace:
         ("reversal", ComponentKind.DATA_MODEL),
         ("ou-k0", ComponentKind.STRATEGY_MODEL),
     ):
-        space.register_component(
-            ComponentRef.of(name, kind, tmp_path / f"{name}.py", "Thing", fingerprint="a" * 64)
-        )
+        with Workspace.transaction(space) as t:
+            t.register_component(
+                ComponentRef.of(name, kind, tmp_path / f"{name}.py", "Thing", fingerprint="a" * 64)
+            )
     return Workspace.open(tmp_path)
 
 
@@ -145,8 +146,10 @@ def test_a_datamodel_run_registers_reads_back_and_is_idempotent(workspace: Works
         )
     )
 
-    assert workspace.register_run(definition) is True
-    assert workspace.register_run(definition) is False, "the same run again changes nothing"
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is False, "the same run again changes nothing"
 
     reopened = Workspace.open(workspace.project_root)
     assert reopened.run_definition("factors") == definition
@@ -186,9 +189,10 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
     """Unregistered, or registered as a strategy: either way `vqapr run` would meet an id it
     cannot freeze, so registration refuses it first."""
     with pytest.raises(VqaprError) as refused:
-        workspace.register_run(
-            _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
-        )
+        with Workspace.transaction(workspace) as t:
+            t.register_run(
+                _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
+            )
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.reference"
     assert names in failure["requirement"], failure["requirement"]

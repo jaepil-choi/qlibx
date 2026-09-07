@@ -69,7 +69,8 @@ def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
     expected = _registration()
     workspace = Workspace.create(tmp_path)
 
-    assert workspace.register_dataset(expected, _source()) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(expected, _source()) is True
 
     reopened = Workspace.open(tmp_path)
     assert reopened.dataset("price_daily") == expected
@@ -80,8 +81,10 @@ def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
     second = _registration("price_adjusted", fields={"close": "adjusted_close"})
     workspace = Workspace.create(tmp_path)
 
-    workspace.register_dataset(first, _source())
-    workspace.register_dataset(second, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(first, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(second, _source())
 
     reopened = Workspace.open(tmp_path)
     assert {item.dataset_id: item for item in reopened.datasets} == {
@@ -93,21 +96,25 @@ def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
 def test_identical_reregistration_is_an_idempotent_noop(tmp_path: Path) -> None:
     registration = _registration()
     workspace = Workspace.create(tmp_path)
-    assert workspace.register_dataset(registration, _source()) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(registration, _source()) is True
     before = workspace.path.read_bytes()
 
-    assert workspace.register_dataset(_registration(), _source()) is False
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(_registration(), _source()) is False
     assert workspace.path.read_bytes() == before
 
 
 def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> None:
     original = _registration()
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(original, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(original, _source())
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(_registration(fields={"open": "open"}), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(fields={"open": "open"}), _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -147,8 +154,10 @@ def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
     first = Workspace.create(first_root)
     second = Workspace.create(second_root)
 
-    first.register_dataset(_registration(), _source())
-    second.register_dataset(_registration("fundamentals"), _source())
+    with Workspace.transaction(first) as t:
+        t.register_dataset(_registration(), _source())
+    with Workspace.transaction(second) as t:
+        t.register_dataset(_registration("fundamentals"), _source())
 
     assert [str(item.dataset_id) for item in Workspace.open(first_root).datasets] == ["price_daily"]
     assert [str(item.dataset_id) for item in Workspace.open(second_root).datasets] == [
@@ -158,7 +167,8 @@ def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
 
 def test_direct_construction_cannot_bypass_an_existing_workspace(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
     before = workspace.path.read_bytes()
 
     with pytest.raises(TypeError, match=r"Workspace\.create.*Workspace\.open"):
@@ -169,11 +179,14 @@ def test_direct_construction_cannot_bypass_an_existing_workspace(tmp_path: Path)
 
 def test_stale_instance_merges_with_current_durable_state(tmp_path: Path) -> None:
     current = Workspace.create(tmp_path)
-    current.register_dataset(_registration("one"), _source())
+    with Workspace.transaction(current) as t:
+        t.register_dataset(_registration("one"), _source())
     stale = Workspace.open(tmp_path)
 
-    current.register_dataset(_registration("two"), _source())
-    stale.register_dataset(_registration("three"), _source())
+    with Workspace.transaction(current) as t:
+        t.register_dataset(_registration("two"), _source())
+    with Workspace.transaction(stale) as t:
+        t.register_dataset(_registration("three"), _source())
 
     assert [str(item.dataset_id) for item in Workspace.open(tmp_path).datasets] == [
         "one",
@@ -185,11 +198,13 @@ def test_stale_instance_merges_with_current_durable_state(tmp_path: Path) -> Non
 def test_idempotent_registration_rechecks_that_workspace_still_exists(tmp_path: Path) -> None:
     registration = _registration()
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(registration, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(registration, _source())
     workspace.path.unlink()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(registration, _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(registration, _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -201,7 +216,8 @@ def test_source_spec_survives_reopening_the_workspace(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
     source = _source()
 
-    workspace.register_dataset(_registration(), source)
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), source)
 
     assert Workspace.open(tmp_path).source("prices") == source
 
@@ -235,7 +251,8 @@ def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Pat
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
 
     payload = caught.value.as_dict()
     assert payload["stage"] == "workspace.dataset.register"
@@ -246,14 +263,16 @@ def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Pat
 
 def test_conflicting_source_spec_fails_without_mutation(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(
-            _registration("price_adjusted"),
-            _source(hive_partitioned=False),
-        )
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(
+                _registration("price_adjusted"),
+                _source(hive_partitioned=False),
+            )
 
     payload = caught.value.as_dict()
     assert payload["stage"] == "workspace.dataset.register"
@@ -289,7 +308,8 @@ def test_execution_input_round_trips_through_workspace(
     workspace = Workspace.create(tmp_path)
     expected = _execution(execution_parquet)
 
-    assert workspace.register_execution_input(expected) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_execution_input(expected) is True
 
     reopened = Workspace.open(tmp_path)
     assert reopened.execution_input("krx-daily") == expected
@@ -315,7 +335,8 @@ def test_execution_input_round_trips_fill_dst_proof(
         ),
     )
 
-    assert workspace.register_execution_input(expected) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_execution_input(expected) is True
     assert Workspace.open(tmp_path).execution_input("krx-daily") == expected
 
 
@@ -323,7 +344,8 @@ def test_workspace_rejects_old_fill_schema_without_dst_proof(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_execution_input(_execution(execution_parquet))
+    with Workspace.transaction(workspace) as t:
+        t.register_execution_input(_execution(execution_parquet))
     path = workspace.path
     path.write_text(
         path.read_text(encoding="utf-8")
@@ -342,9 +364,11 @@ def test_execution_input_registration_is_idempotent(
     workspace = Workspace.create(tmp_path)
     registration = _execution(execution_parquet)
 
-    assert workspace.register_execution_input(registration) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_execution_input(registration) is True
     before = workspace.path.read_bytes()
-    assert workspace.register_execution_input(registration) is False
+    with Workspace.transaction(workspace) as t:
+        assert t.register_execution_input(registration) is False
     assert workspace.path.read_bytes() == before
 
 
@@ -352,11 +376,13 @@ def test_conflicting_execution_input_fails_without_mutation(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_execution_input(_execution(execution_parquet))
+    with Workspace.transaction(workspace) as t:
+        t.register_execution_input(_execution(execution_parquet))
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        workspace.register_execution_input(_execution(execution_parquet, trade_price="open"))
+        with Workspace.transaction(workspace) as t:
+            t.register_execution_input(_execution(execution_parquet, trade_price="open"))
 
     assert caught.value.stage == "workspace.execution_input.register"
     assert caught.value.mutation is False
@@ -386,7 +412,8 @@ def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> No
         fingerprint="a" * 64,
     )
 
-    assert workspace.register_component(expected) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(expected) is True
     assert Workspace.open(tmp_path).component("reversal") == expected
     assert Workspace.open(tmp_path).components == (expected,)
 
@@ -435,7 +462,8 @@ def test_a_workspace_holding_a_pre_span_registration_still_opens(tmp_path: Path)
     """
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "beta", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 2)
 
     reopened = Workspace.open(tmp_path)
@@ -453,7 +481,8 @@ def test_using_a_quarantined_registration_names_the_command_that_repairs_it(
     """Admitted at decode, refused at use. Nothing may consume a registration without a span."""
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 1)
     reopened = Workspace.open(tmp_path)
 
@@ -479,10 +508,12 @@ def test_the_advertised_repair_command_actually_runs(tmp_path: Path) -> None:
     """
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "beta", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 2)
 
-    Workspace.open(tmp_path).register_dataset(_registration("alpha"), _source())
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(_registration("alpha"), _source())
 
     repaired = Workspace.open(tmp_path)
     assert repaired.span("alpha") == _SPAN
@@ -491,7 +522,8 @@ def test_the_advertised_repair_command_actually_runs(tmp_path: Path) -> None:
         repaired.dataset("beta")
     assert still_stale.value.failures[0].code == "dataset.register.span.absent"
 
-    Workspace.open(tmp_path).register_dataset(_registration("beta"), _source())
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(_registration("beta"), _source())
     final = Workspace.open(tmp_path)
     assert all(final.span(name) == _SPAN for name in ("alpha", "beta", "gamma"))
 
@@ -506,11 +538,12 @@ def test_repairing_a_quarantined_registration_may_not_change_its_declaration(
     dataset under cover of the migration.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration("alpha"), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration("alpha"), _source())
     _make_legacy(workspace, 1)
 
-    with pytest.raises(VqaprError) as refused:
-        Workspace.open(tmp_path).register_dataset(
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(tmp_path) as t:
+        t.register_dataset(
             _registration("alpha", key_fields=("instrument",)), _source()
         )
 
@@ -529,7 +562,8 @@ def test_reading_a_span_does_not_touch_the_source(
     reaching one is the failure, not merely being slow.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
 
     def _trap(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("reading a persisted span must not open the source")
@@ -561,7 +595,8 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
     )
 
     with pytest.raises(VqaprError) as refused:
-        workspace.register_dataset(unmeasured, _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(unmeasured, _source())
 
     assert refused.value.failures[0].code == "dataset.register.span.absent"
     assert "register_dataset" in (refused.value.retry_precondition or "")

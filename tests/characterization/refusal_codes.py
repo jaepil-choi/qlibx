@@ -706,7 +706,8 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
             key_fields=("available_at", "instrument"), fields={"close": "close"},
         )
     )
-    workspace.register_dataset(registration, SourceSpec.of("s", prices))
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(registration, SourceSpec.of("s", prices))
 
     other = _write_parquet(
         tmp_path / "other.parquet",
@@ -721,12 +722,14 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
         )
     )
     try:
-        workspace.register_dataset(conflicting, SourceSpec.of("s", prices))
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(conflicting, SourceSpec.of("s", prices))
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 
     try:
-        workspace.register_dataset(registration, SourceSpec.of("s", other))
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(registration, SourceSpec.of("s", other))
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 
@@ -751,28 +754,30 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
         "        return Hold(reason='inventory')\n",
         encoding="utf-8",
     )
-    workspace.register_component(
-        ComponentRef.of(
-            "strategy",
-            ComponentKind.STRATEGY_MODEL,
-            strategy,
-            "Strategy",
-            fingerprint=fingerprint_component(
-                strategy, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
-            ),
-        )
-    )
-    try:
-        workspace.register_run(
-            RunDefinition(
-                run_id="unsourced",
-                strategies=(StrategyEntry("strategy"),),
-                instruments=("A",),
-                timezone="Asia/Seoul",
-                at=time(15, 30),
-                sessions_from="does-not-exist",
+    with Workspace.transaction(workspace) as t:
+        t.register_component(
+            ComponentRef.of(
+                "strategy",
+                ComponentKind.STRATEGY_MODEL,
+                strategy,
+                "Strategy",
+                fingerprint=fingerprint_component(
+                    strategy, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
+                ),
             )
         )
+    try:
+        with Workspace.transaction(workspace) as t:
+            t.register_run(
+                RunDefinition(
+                    run_id="unsourced",
+                    strategies=(StrategyEntry("strategy"),),
+                    instruments=("A",),
+                    timezone="Asia/Seoul",
+                    at=time(15, 30),
+                    sessions_from="does-not-exist",
+                )
+            )
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 
@@ -797,16 +802,17 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
         "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, "
         "'A' AS instrument, 1.0 AS close",
     )
-    workspace.register_dataset(
-        _with_span(
-            DatasetRegistration.of(
-                "prices", "s", instrument_field="instrument", available_at="available_at",
-                grain="instrument_instant",
-                key_fields=("available_at", "instrument"), fields={"close": "close"},
-            )
-        ),
-        SourceSpec.of("s", prices),
-    )
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(
+            _with_span(
+                DatasetRegistration.of(
+                    "prices", "s", instrument_field="instrument", available_at="available_at",
+                    grain="instrument_instant",
+                    key_fields=("available_at", "instrument"), fields={"close": "close"},
+                )
+            ),
+            SourceSpec.of("s", prices),
+        )
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 5, 12, tzinfo=UTC),
         instruments=("A",),

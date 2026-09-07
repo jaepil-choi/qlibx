@@ -110,6 +110,11 @@ class DatasetRegistration:
     read on it is refused (`require_grain`) until it is registered again with one.
     """
     span: tuple[datetime, datetime] | None = None
+    produced_by: str | None = None
+    """The run that wrote this dataset, when a datamodel run did (`docs/issues/082`). Set by
+    `DataModelOutput.register` from the run it serves; `None` for a dataset registered from the
+    author's own file. A fact about provenance a reader could otherwise only reconstruct by
+    opening every run record."""
     """첫 · 마지막 `available_at`. **선언이 아니라 측정값**이다.
 
     author가 쓰는 값이 아니다. `validate`가 등록 중에 재어 `with_span`으로 붙인다 -- author가
@@ -231,6 +236,26 @@ class DatasetRegistration:
         if not schema.ok:
             raise ValueError("a projection that did not bind carries no schema to attach")
         return replace(self, field_types=dict(schema.field_types), aggregated=schema.aggregated)
+
+    def with_producer(self, run_id: str) -> DatasetRegistration:
+        """The same registration, naming the run that wrote it."""
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("produced_by must be a non-empty run id")
+        return replace(self, produced_by=run_id)
+
+    def spoken(self) -> list[str]:
+        """The point-in-time meaning of this declaration, in one sentence (`docs/issues/027`).
+
+        `available_at` is a column name and a rule at once: a row is knowable to a model at the
+        instant that column says, and not one second earlier. Said once here, when the
+        declaration is registered, so an author who wrote the column name has heard what it
+        commits them to.
+        """
+        return [
+            f"dataset {self.dataset_id!r}: a row is knowable at its {self.available_at!r} value "
+            "and never earlier; a model reading it at instant t sees rows with "
+            f"{self.available_at} <= t"
+        ]
 
     def with_span(self, first: datetime, last: datetime) -> DatasetRegistration:
         """측정된 span을 붙인 사본. 재는 쪽은 `validate`, 쓰는 쪽은 `register_dataset`이다."""

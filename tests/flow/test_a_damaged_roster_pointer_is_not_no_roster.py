@@ -38,9 +38,10 @@ def _project_with_a_roster(tmp_path: Path) -> Path:
     digest = hashlib.sha256()
     for _, path in sorted(written.items()):
         digest.update(Path(path).read_bytes())
-    Workspace.create(tmp_path).register_instruments(
-        {kind: path for kind, path in written.items()}, digest=digest.hexdigest()
-    )
+    with Workspace.transaction(tmp_path) as t:
+        t.register_instruments(
+            {kind: path for kind, path in written.items()}, digest=digest.hexdigest()
+        )
     return tmp_path
 
 

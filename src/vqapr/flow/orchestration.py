@@ -437,7 +437,7 @@ def _run_datamodel(
     if store is not None:
         writer = RunRecordWriter(store, frozen.run_id, layer.record_ref, member_kind=DATAMODEL_KIND)
         writer.open(replace=replace_record)
-    output = DataModelOutput(root_path, layer)
+    output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
     flow = DataModelFlow(
         frozen,
         layer,

@@ -1,7 +1,18 @@
 # 027 — Nothing in the tooling makes a point-in-time convention be spoken aloud
 
-**Status:** **REOPENED 2026-08-31 by the owner**, who asked why nothing puts the `available_at`
-question to them at registration time. That is this file's proposal, so it is scheduled rather than
+**Status:** **CLOSED 2026-09-05 -- record `160` (one-shape campaign Step 5, M5e).** `vqapr
+register` returns `spoken` beside `registered`: one sentence per point-in-time concept, or
+nothing. A dataset says what its `available_at` column commits the reader to ("knowable at
+its value and never earlier"); an execution input says what its `trade_at` is a fact about
+and, in one sentence rather than four, how a decision fills (`selector`, `at`, `timezone`,
+`trade_price` -- apart they mean nothing); a run says when every model is called and that it
+sees only rows knowable before that instant. The sentences live on the declarations
+themselves (`DatasetRegistration.spoken()`, `ExecutionInputRegistration.spoken()`,
+`RunDefinition.spoken()`), so the thing that carries the field is the thing that says what
+it means. A components-only declaration says nothing, which is the rule's other half.
+
+**Status before closing:** **REOPENED 2026-08-31 by the owner**, who asked why nothing puts the
+`available_at` question to them at registration time. That is this file's proposal, so it is scheduled rather than
 held. It composes with `docs/issues/034`: this makes the convention be spoken at the moment it is
 declared, and 034 records which convention a run actually executed under. Neither substitutes for
 the other.

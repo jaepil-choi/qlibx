@@ -1,9 +1,23 @@
 # 087 — a finished run keeps one parquet file per occurrence, so a table is six hundred 8 KB files
 
-**Status:** OPEN. Filed 2026-09-07 from two 0.4.1 workspaces
-(`kaist-thesis/vqapr-scenario-testbed`, `kwam-enhanced-index/vqapr-enhanced-index-3`).
-Owner ruling 2026-09-07: **fix on its own branch, after the reporting API** — compaction on
-`release()`, not a change to the chunk the flow hands the writer.
+**Status:** **CLOSED 2026-09-07 -- record `164`.** The writer holds each table as Arrow
+batches and writes one `all.parquet` per table when the run ends -- normally, or on the failure
+path (an exception, an interrupt) -- with a 256 MB spill valve for very large runs; the
+datamodel's output does the same at registration. A hard kill keeps only what had spilled: the
+owner accepted that narrowing of record `135`'s promise (2026-09-07, second ruling below), in
+exchange for zero physical writes per loop. Sample journey: 7.8 s to 5.4 s, 1,465 files to 3.
+Filed 2026-09-07 from two 0.4.1 workspaces (`kaist-thesis/vqapr-scenario-testbed`,
+`kwam-enhanced-index/vqapr-enhanced-index-3`).
+
+**Second ruling 2026-09-07, which replaced the first.** The first ruling below (compaction on
+`release()`, keep writing a file per occurrence) left the write per loop in place -- measured at
+1.5 ms of file cost per append plus the row conversion, roughly a fifth of a real strategy's wall
+clock. The owner asked why a run had to write per loop at all, and ruled: write once at the end,
+save what was recorded when the run dies -- and accepted that a hard kill cannot be answered by
+any code, so it keeps only what the spill valve had written.
+
+**First ruling 2026-09-07 (superseded):** fix on its own branch, after the reporting API --
+compaction on `release()`, not a change to the chunk the flow hands the writer.
 
 ## What was observed
 

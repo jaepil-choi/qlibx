@@ -129,15 +129,16 @@ def test_a_cold_process_reads_every_record_it_never_saw_written(tmp_path: Path) 
 
 
 def test_an_unfinished_run_is_not_listed_as_a_finished_one(tmp_path: Path) -> None:
-    """A killed run leaves rows and no record. Listing it would claim facts nobody wrote."""
+    """A run that ended without its record leaves rows and no record. Listing it would claim
+    facts nobody wrote."""
     writer = RunRecordWriter(tmp_path, "killed")
     writer.open()
     writer.append("vqapr.account", [{"instrument": "_ACCOUNT", "nav": "1000"}])
+    # What the failure path does (`087`): the rows land, the record never does.
+    writer.release()
 
     assert run_ids(tmp_path) == ()
     assert not (tmp_path / "runs" / "killed" / RECORD_FILENAME).exists()
-    # The rows it did write are still there, which is the point of appending as it goes rather
-    # than flushing at the end.
     assert list(read_table(tmp_path, "killed", "vqapr.account"))
 
 

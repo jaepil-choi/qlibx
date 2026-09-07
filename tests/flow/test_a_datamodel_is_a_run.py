@@ -303,39 +303,33 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
     )
 
 
-def test_each_session_lands_as_one_chunk_the_moment_it_completes(
+def test_the_output_lands_as_one_file_when_the_dataset_registers(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """A run killed midway leaves the sessions that completed; that requires writing as it goes.
+    """Sessions stay in memory and land once, at registration (`docs/issues/087`).
 
-    The model itself counts the chunks in its output directory at compute time: the first
-    session sees an empty directory, the second sees the first session's chunk already landed.
+    The model itself counts the files in its output directory at compute time: both sessions
+    see an empty directory, and the finished dataset is one `all.parquet`.
     """
     _prepared(tmp_path, model_price_parquet, ("watcher", "ChunkWatcherModel"))
 
     _run(tmp_path, _definition("watch", DataModelEntry("watcher", "watched", ("chunks",))))
 
-    assert [path.name for path in _chunks(tmp_path, "watched")] == [
-        "000000.parquet",
-        "000001.parquet",
-    ]
+    assert [path.name for path in _chunks(tmp_path, "watched")] == ["all.parquet"]
     assert not list(output_directory(tmp_path, "watched").glob(".*.tmp")), "staging is moved away"
     assert _by_day(tmp_path, "watched", "chunks") == [
         (date(2024, 3, 6), "A", 0),
         (date(2024, 3, 6), "B", 0),
-        (date(2024, 3, 7), "A", 1),
-        (date(2024, 3, 7), "B", 1),
+        (date(2024, 3, 7), "A", 0),
+        (date(2024, 3, 7), "B", 0),
     ]
 
 
-def test_a_compute_failure_keeps_the_landed_chunk_and_registers_nothing(
+def test_a_compute_failure_leaves_no_output_and_registers_nothing(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Killed-midway survival, provoked by the model instead of the OS.
-
-    The first session's chunk is on disk and stays there; the workspace never learns of a dataset
-    that was not completed. A retry starts clean because `open()` clears the directory.
-    """
+    """A failed datamodel run leaves nothing readable: a partial dataset registers with nothing,
+    so nothing is written for it (`087`), and the workspace never learns of it."""
     _prepared(tmp_path, model_price_parquet, ("failing", "FailingSecondModel"))
     before = Workspace.open(tmp_path).path.read_bytes()
 
@@ -347,7 +341,7 @@ def test_a_compute_failure_keeps_the_landed_chunk_and_registers_nothing(
     (failure,) = caught.value.failures
     assert failure.code == "datamodel.compute.failed"
     assert "intentional second-session failure" in failure.observed
-    assert [path.name for path in _chunks(tmp_path, "partial")] == ["000000.parquet"]
+    assert _chunks(tmp_path, "partial") == []
     assert "partial" not in _dataset_ids(tmp_path)
     assert Workspace.open(tmp_path).path.read_bytes() == before
 
@@ -530,7 +524,7 @@ def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
     for component_id, dataset_id in (("reversal", "reversal_2d"), ("momentum", "momentum_2d")):
         assert outcome.records[component_id]["dataset_id"] == dataset_id
         assert outcome.records[component_id]["rows"] == 4
-        assert len(_chunks(tmp_path, dataset_id)) == 2
+        assert [path.name for path in _chunks(tmp_path, dataset_id)] == ["all.parquet"]
     opposite = _query(
         f"SELECT max(abs(r.score + m.score)) FROM {_parquet(tmp_path, 'reversal_2d')} r "
         f"JOIN {_parquet(tmp_path, 'momentum_2d')} m USING (available_at, instrument)"

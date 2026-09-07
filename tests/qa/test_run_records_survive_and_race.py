@@ -1,25 +1,30 @@
 """Adversarial attack on claim 4: run records survive their process, and races are refused.
 
-Three attacks, each stronger than what `tests/flow/test_run_records.py` already covers:
+Four attacks, each stronger than what `tests/flow/test_run_records.py` already covers:
 
-1. A run killed mid-write, via `subprocess` + `terminate()` rather than a hand-written partial
-   record -- a real killed process leaves rows and no `record.json`, and `run_ids` must not list
-   it.
-2. Five processes racing to write the SAME run id concurrently -- the collision must be refused
+1. A run INTERRUPTED mid-write -- a real OS signal to a separate process, not a hand-written
+   partial record -- leaves every row it recorded and no `record.json`, and `run_ids` must not
+   list it. Since `docs/issues/087` the rows live in memory until the run ends, and an interrupt
+   IS an end: the writer's `release` runs on the failure path and writes them.
+2. A run hard-KILLED mid-write (`terminate()`, which no code can answer) keeps what the spill
+   valve had already forced to disk and loses the rest -- the promise as `087` narrowed it,
+   stated here so nobody reads it as the old one.
+3. Five processes racing to write the SAME run id concurrently -- the collision must be refused
    (one writer wins, four raise `FileExistsError`), never interleaved into a record that belongs
    to neither.
-3. A `record.json` deliberately corrupted after a successful `finish()` -- truncated to invalid
+4. A `record.json` deliberately corrupted after a successful `finish()` -- truncated to invalid
    JSON, and separately, valid JSON that is not a mapping -- and `read_record` must fail loudly
    rather than return a half-answer or silently coerce.
 
-`multiprocessing.spawn` needs picklable top-level functions on Windows, so the killed-process and
-racing-processes attacks each drive a standalone script via `subprocess.Popen` instead of
+`multiprocessing.spawn` needs picklable top-level functions on Windows, so the interrupted,
+killed and racing attacks each drive a standalone script via `subprocess.Popen` instead of
 `multiprocessing.Process` with a lambda or closure.
 """
 
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import sys
 import time
@@ -27,11 +32,19 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.flow.record import RECORD_FILENAME, RunRecordWriter, read_record, run_ids
+from vqapr.flow.record import (
+    COMPACT_FILENAME,
+    RECORD_FILENAME,
+    RunRecordWriter,
+    read_record,
+    read_table,
+    run_ids,
+)
 
 pytestmark = pytest.mark.concurrency
 
-_KILL_SCRIPT = """
+_WRITE_SCRIPT = """
+import signal
 import sys
 import time
 from pathlib import Path
@@ -40,19 +53,33 @@ sys.path.insert(0, {src!r})
 from vqapr.flow.record import RunRecordWriter
 
 
+def interrupted(*_):
+    raise KeyboardInterrupt
+
+
 def main() -> None:
-    root, run_id = sys.argv[1], sys.argv[2]
-    writer = RunRecordWriter(Path(root), run_id)
+    root, run_id, spill = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    # What the console does on Ctrl+C, wired to the one signal a test can send to a single
+    # process: CTRL_BREAK on Windows (delivered as SIGBREAK), SIGTERM elsewhere.
+    signal.signal(getattr(signal, "SIGBREAK", signal.SIGTERM), interrupted)
+    writer = RunRecordWriter(Path(root), run_id, spill_bytes=spill)
     writer.open()
-    for i in range(2000):
-        writer.append("vqapr.account", [{{"instrument": "_ACCOUNT", "nav": str(1000 + i)}}])
-        time.sleep(0.02)
-    writer.finish({{"account": {{"version": 2000}}}})
+    try:
+        for i in range(2000):
+            writer.append("vqapr.account", [{{"instrument": "_ACCOUNT", "nav": str(1000 + i)}}])
+            time.sleep(0.02)
+        writer.finish({{"account": {{"version": 2000}}}})
+    except BaseException:
+        # What `flow/orchestration.py` does on a strategy's failure path.
+        writer.release()
+        raise
 
 
 if __name__ == "__main__":
     main()
 """
+
+_NO_SPILL = 1 << 40
 
 _RACE_SCRIPT = """
 import sys
@@ -91,32 +118,80 @@ def _write_script(tmp_path: Path, name: str, template: str, src_root: str) -> Pa
     return script
 
 
-def test_a_process_killed_mid_write_leaves_rows_and_no_record(
+def _start_writer(tmp_path: Path, src_root: str, store: Path, run_id: str, spill: int):
+    script = _write_script(tmp_path, "write_probe.py", _WRITE_SCRIPT, src_root)
+    # Its own process group, so CTRL_BREAK reaches it and nothing else (Windows).
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    return subprocess.Popen(
+        [sys.executable, str(script), str(store), run_id, str(spill)], creationflags=flags
+    )
+
+
+def _wait_until_writing(proc: subprocess.Popen, store: Path, run_id: str) -> None:
+    """Until the child holds its lock -- imports done, handler installed, rows arriving. A
+    signal sent before the handler exists is a hard kill, which is the other test."""
+    lock = store / "runs" / run_id / ".running"
+    deadline = time.monotonic() + 120
+    while not lock.exists():
+        assert proc.poll() is None, "the child ended before it started writing"
+        assert time.monotonic() < deadline, "the child never claimed its run id"
+        time.sleep(0.05)
+    time.sleep(1.0)
+
+
+def _interrupt(proc: subprocess.Popen) -> None:
+    if sys.platform == "win32":
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+    else:
+        proc.send_signal(signal.SIGTERM)
+
+
+def test_a_process_interrupted_mid_write_leaves_every_row_and_no_record(
     tmp_path: Path, _src_root: str
 ) -> None:
-    """A real `terminate()`, not a hand-authored partial record.
+    """A real signal to a separate OS process, not a hand-authored partial record.
 
     `tests/flow/test_run_records.py::test_an_unfinished_run_is_not_listed_as_a_finished_one`
-    writes rows and then simply never calls `finish()` in the same process -- it never actually
-    kills anything. This drives a genuinely separate OS process and kills it externally, which is
-    the scenario `finish()`'s "atomic replace, last" design is actually defending against.
+    calls `release()` itself in the same process. This drives a genuinely separate process and
+    interrupts it externally: the rows were in memory when the signal arrived (`087`), the
+    failure path's `release` wrote them, and the record was never written.
     """
     store = tmp_path / "store"
     store.mkdir()
-    script = _write_script(tmp_path, "kill_probe.py", _KILL_SCRIPT, _src_root)
+    proc = _start_writer(tmp_path, _src_root, store, "interrupted-run", _NO_SPILL)
+    _wait_until_writing(proc, store, "interrupted-run")
+    _interrupt(proc)
+    proc.wait(timeout=180)
 
-    proc = subprocess.Popen([sys.executable, str(script), str(store), "killed-run"])
-    time.sleep(0.6)
+    assert proc.returncode != 0, "the interrupt ended the run"
+    assert run_ids(store) == (), "an interrupted run must not be listed as finished"
+    assert not (store / "runs" / "interrupted-run" / RECORD_FILENAME).exists()
+    table = store / "runs" / "interrupted-run" / "tables" / "vqapr.account"
+    assert [path.name for path in table.iterdir()] == [COMPACT_FILENAME]
+    rows = list(read_table(store, "interrupted-run", "vqapr.account"))
+    assert len(rows) >= 10, "everything recorded before the signal is on disk"
+    assert [row["nav"] for row in rows] == [str(1000 + i) for i in range(len(rows))]
+
+
+def test_a_process_hard_killed_mid_write_keeps_only_what_had_spilled(
+    tmp_path: Path, _src_root: str
+) -> None:
+    """`terminate()` runs no code in the victim. What the spill valve had already written
+    survives; what was buffered after it is gone; no record, no compact file."""
+    store = tmp_path / "store"
+    store.mkdir()
+    proc = _start_writer(tmp_path, _src_root, store, "killed-run", 1)
+    _wait_until_writing(proc, store, "killed-run")
     proc.terminate()
     proc.wait(timeout=180)
 
-    assert run_ids(store) == (), "a killed run must not be listed as finished"
+    assert run_ids(store) == ()
     assert not (store / "runs" / "killed-run" / RECORD_FILENAME).exists()
-    tables_dir = store / "runs" / "killed-run" / "tables"
-    assert tables_dir.exists() and any(tables_dir.rglob("*.parquet")), (
-        "the rows written before the kill should still be on disk -- append-as-you-go, not "
-        "flush-at-the-end, is the whole point of the layout"
-    )
+    table = store / "runs" / "killed-run" / "tables" / "vqapr.account"
+    names = sorted(path.name for path in table.iterdir())
+    assert names and COMPACT_FILENAME not in names, "spill parts only: the run never ended"
+    rows = list(read_table(store, "killed-run", "vqapr.account"))
+    assert [row["nav"] for row in rows] == [str(1000 + i) for i in range(len(rows))]
 
 
 def test_five_processes_racing_the_same_run_id_refuse_rather_than_interleave(

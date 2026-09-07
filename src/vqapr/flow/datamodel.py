@@ -8,10 +8,11 @@ same `OccurrenceFlow`, recorded under the same `runs/<run-id>/` directory -- wit
 `DataModelPhase` in the callback's place and no execution or valuation phase, because a datamodel
 sees no account and passes through no venue (architecture 4.4).
 
-What leaves the process as it goes: each session's rows land as one parquet chunk under
-`.vqapr/materialized/<dataset_id>/` the moment that session completes, so a run killed midway
-leaves the chunks that landed and a re-run starts clean. The dataset registers once, after the
-last session, through the registration path every other dataset takes.
+What leaves the process: the sessions' rows, typed as they come and held in memory, land as one
+parquet file under `.vqapr/materialized/<dataset_id>/` when the last session completes
+(`docs/issues/087`; a file per session was a physical write per loop), and the dataset registers
+right after, through the registration path every other dataset takes. A run that fails first
+leaves no readable output -- a partial dataset registers with nothing -- and a re-run starts clean.
 """
 
 from __future__ import annotations
@@ -41,7 +42,8 @@ from vqapr.flow.loop import OccurrenceFlow
 from vqapr.workspace import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"
-"""Under `.vqapr/`: one directory per output dataset, one parquet chunk per session."""
+"""Under `.vqapr/`: one directory per output dataset, one parquet file (`all.parquet`) once
+the run has registered it; spill parts beside it only while a large run is still computing."""
 
 COMPUTE_STAGE = "datamodel.compute"
 OUTPUT_STAGE = "datamodel.output"
@@ -263,16 +265,37 @@ def output_source_id(dataset_id: str) -> str:
     return f"materialized-{dataset_id}"
 
 
-class DataModelOutput:
-    """One output dataset's chunks, written a session at a time, and registered once at the end.
+COMPACT_FILENAME = "all.parquet"
+"""The one file a finished table or dataset is: written when the run ends, after which any spill
+part beside it is stale input. Shared with `vqapr.flow.record` (`docs/issues/087`)."""
 
-    The directory is the source: `SourceSpec` reads every parquet beneath a directory, so one file
-    per session is one dataset. Each chunk is written beside its target and moved into place, so
-    a reader listing the directory never opens a file whose footer is not there yet.
+SPILL_BYTES = 256 * 1024 * 1024
+"""The safety valve, for both writers: buffered Arrow bytes above this are written as one spill
+part. A run of a few million rows would otherwise hold them all; at this size a part is a few
+seconds of disk and the buffer never exceeds a quarter gigabyte. It is not a flush cadence -- a
+run below the line writes nothing until it ends -- and a hard kill loses at most this much."""
+
+
+class DataModelOutput:
+    """One output dataset, typed a session at a time in memory and written once at the end.
+
+    The directory is the source: `SourceSpec` reads every parquet beneath a directory. Sessions
+    are held as Arrow tables and land as one `all.parquet` when the run registers
+    (`docs/issues/087`:
+    a file per session was a physical write per loop); above `spill_bytes` a spill part is
+    written first and folded into the compact file at the end. Each file is written beside its
+    target and moved into place, so a reader listing the directory never opens a file whose
+    footer is not there yet. A run that fails before registering leaves nothing readable -- a
+    partial dataset registers with nothing and `open()` clears it on retry.
     """
 
     def __init__(
-        self, project_root: str | Path, layer: FrozenDataModel, *, run_id: str | None = None
+        self,
+        project_root: str | Path,
+        layer: FrozenDataModel,
+        *,
+        run_id: str | None = None,
+        spill_bytes: int = SPILL_BYTES,
     ) -> None:
         self._root = Path(project_root)
         self._layer = layer
@@ -280,7 +303,11 @@ class DataModelOutput:
         self._directory = output_directory(project_root, layer.dataset_id)
         self._schema: pa.Schema | None = None
         self._parts = 0
+        self._sessions = 0
         self._rows = 0
+        self._buffered: list[pa.Table] = []
+        self._buffered_bytes = 0
+        self._spill_bytes = spill_bytes
 
     @property
     def directory(self) -> Path:
@@ -301,7 +328,8 @@ class DataModelOutput:
             shutil.rmtree(self._directory)
 
     def append(self, rows: Sequence[Row]) -> None:
-        """Write one session's rows as one complete parquet chunk."""
+        """Type one session's rows and hold them; they land at `register`, or at a spill."""
+        self._sessions += 1
         if not rows:
             return
         try:
@@ -327,14 +355,11 @@ class DataModelOutput:
             # schema the first session fixed, is the accurate statement (owner ruling
             # 2026-09-05: the data and its types are the author's, and the framework asserts
             # nothing it cannot tell).
-            established = ", ".join(
-                f"{field.name}: {field.type}" for field in self._schema
-            )
+            established = ", ".join(f"{field.name}: {field.type}" for field in self._schema)
             raise refusal(
                 OUTPUT_STAGE,
                 f"{OUTPUT_STAGE}.schema_mismatch",
-                "every session's rows must fit the schema the first non-empty session "
-                "established",
+                "every session's rows must fit the schema the first non-empty session established",
                 f"{type(error).__name__}: {error}; established schema: {established}",
                 fix=(
                     "return values that fit that schema on every session. A Decimal's precision "
@@ -346,13 +371,25 @@ class DataModelOutput:
             ) from error
         if self._schema is None:
             self._schema = table.schema
-        target = self._directory / f"{self._parts:06d}.parquet"
-        staging = self._directory / f".{self._parts:06d}.parquet.tmp"
+        self._buffered.append(table)
+        self._buffered_bytes += table.nbytes
+        self._rows += len(rows)
+        if self._buffered_bytes >= self._spill_bytes:
+            self._write(self._directory / f"{self._parts:06d}.parquet", self._buffered)
+            self._parts += 1
+            self._buffered = []
+            self._buffered_bytes = 0
+
+    def _write(self, target: Path, tables: Sequence[pa.Table]) -> None:
+        """Several sessions as one complete file, beside its target and moved into place."""
+        staging = target.with_name(f".{target.name}.tmp")
         try:
-            # Created by the first chunk, not at open: a run refused before any row leaves no
+            # Created by the first file, not at open: a run refused before any row leaves no
             # empty directory behind to be mistaken for an output.
             self._directory.mkdir(parents=True, exist_ok=True)
-            pq.write_table(table, staging, compression="zstd", use_dictionary=False)
+            pq.write_table(
+                pa.concat_tables(tables), staging, compression="zstd", use_dictionary=False
+            )
             os.replace(staging, target)
         except (OSError, pa.ArrowException) as error:
             raise refusal(
@@ -366,8 +403,21 @@ class DataModelOutput:
                 retry="repair project filesystem access, then retry",
                 source=FailureSource(file=str(target)),
             ) from error
-        self._parts += 1
-        self._rows += len(rows)
+
+    def _seal(self) -> None:
+        """Everything as `all.parquet`: the spill parts, then what is buffered; parts removed
+        once the compact file is in place, so an interruption between the two repeats nothing
+        for a reader that prefers the compact file (`read_table` does; a duckdb glob sees both
+        only inside that window)."""
+        parts = sorted(self._directory.glob("[0-9]*.parquet")) if self._directory.is_dir() else []
+        tables = [pq.read_table(part) for part in parts] + self._buffered
+        if not tables:
+            return
+        self._write(self._directory / COMPACT_FILENAME, tables)
+        for part in parts:
+            part.unlink()
+        self._buffered = []
+        self._buffered_bytes = 0
 
     def register(self, workspace: Workspace) -> DatasetRegistration:
         """Register the directory as the declared dataset, through the one registration path.
@@ -381,7 +431,7 @@ class DataModelOutput:
                 OUTPUT_STAGE,
                 f"{OUTPUT_STAGE}.empty",
                 "a datamodel run must produce at least one output row",
-                f"all {self._parts} session(s) returned zero rows",
+                f"all {self._sessions} session(s) returned zero rows",
                 fix=(
                     "a lookback longer than the available history makes every window short and "
                     "every session empty: check that each input dataset holds enough rows before "
@@ -409,6 +459,8 @@ class DataModelOutput:
             registration = registration.with_producer(self._run_id)
         source = SourceSpec.of(source_id, self._directory)
         try:
+            # The rows land here, once, and only now: a dataset that is registered is complete.
+            self._seal()
             diagnosis, _, registration = validate(registration, source)
             diagnosis.raise_if_failed()
             with Workspace.transaction(workspace.project_root) as transaction:

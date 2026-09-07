@@ -20,6 +20,7 @@ import duckdb
 import pytest
 
 from vqapr.flow.record import (
+    COMPACT_FILENAME,
     PART_SUFFIX,
     TABLES_DIRECTORY,
     RunRecordWriter,
@@ -40,10 +41,16 @@ def test_decimals_and_instants_come_back_as_what_they_were(tmp_path: Path) -> No
     writer.append(
         "vqapr.account",
         [
-            {"instrument": "_ACCOUNT", "nav": Decimal("1000.25"), "observed_at": AT, "event_time": AT},
+            {
+                "instrument": "_ACCOUNT",
+                "nav": Decimal("1000.25"),
+                "observed_at": AT,
+                "event_time": AT,
+            },
             {"instrument": "A", "nav": None, "observed_at": None, "event_time": AT},
         ],
     )
+    writer.release()
 
     rows = list(read_typed_table(tmp_path, "typed", "vqapr.account"))
 
@@ -65,17 +72,18 @@ def test_the_instant_is_not_shifted_by_its_offset_through_duckdb_either(tmp_path
     writer = RunRecordWriter(tmp_path, "tz")
     writer.open()
     writer.append("probe", [{"event_time": AT, "nav": Decimal("1")}])
+    writer.release()
 
     (row,) = read_typed_table(tmp_path, "tz", "probe")
     assert row["event_time"].hour == 15
     assert row["event_time"] == AT.astimezone(UTC)
 
-    parts = (writer.directory / TABLES_DIRECTORY / "probe").glob(f"*{PART_SUFFIX}")
+    compact = writer.directory / TABLES_DIRECTORY / "probe" / COMPACT_FILENAME
     (through_duckdb,) = (
         duckdb.connect()
         .execute(
             "SELECT epoch_us(event_time), typeof(event_time), nav "
-            f"FROM read_parquet('{next(parts).as_posix()}')"
+            f"FROM read_parquet('{compact.as_posix()}')"
         )
         .fetchall()
     )
@@ -90,13 +98,17 @@ def test_a_decimal_weight_of_one_third_keeps_every_digit(tmp_path: Path) -> None
     writer = RunRecordWriter(tmp_path, "third")
     writer.open()
     writer.append("vqapr.weight", [{"instrument": "A", "weight": third, "event_time": AT}])
+    writer.release()
 
     (row,) = read_table(tmp_path, "third", "vqapr.weight")
     assert row["weight"] == third
 
 
-def test_each_chunk_is_one_complete_file_and_a_column_keeps_its_first_type(tmp_path: Path) -> None:
-    """A killed run leaves every chunk that landed; a null-first column is typed by the first value."""
+def test_a_table_is_one_file_written_when_the_run_ends_and_a_column_keeps_its_first_type(
+    tmp_path: Path,
+) -> None:
+    """Nothing reaches the disk per chunk (`087`); at `release` every chunk is one file, and a
+    null-first column is typed by the first value that typed it."""
     writer = RunRecordWriter(tmp_path, "chunks")
     writer.open()
     writer.append("probe", [{"n": 1, "when": None}])
@@ -104,15 +116,57 @@ def test_each_chunk_is_one_complete_file_and_a_column_keeps_its_first_type(tmp_p
     writer.append("probe", [{"n": 3, "when": AT + timedelta(days=1)}])
 
     directory = writer.directory / TABLES_DIRECTORY / "probe"
-    assert sorted(path.name for path in directory.iterdir()) == [
-        "000000.parquet",
-        "000001.parquet",
-        "000002.parquet",
-    ]
+    assert not directory.exists(), "a running writer holds its rows in memory"
+    assert list(read_table(tmp_path, "chunks", "probe")) == []
+
+    writer.release()
+
+    assert sorted(path.name for path in directory.iterdir()) == [COMPACT_FILENAME]
     rows = list(read_table(tmp_path, "chunks", "probe"))
     assert [row["n"] for row in rows] == [1, 2, 3]
     assert rows[0]["when"] is None and rows[1]["when"] == AT
     assert table_types(tmp_path, "chunks", "probe") == {"n": "int", "when": "datetime"}
+
+
+def test_a_buffer_over_the_spill_line_lands_as_parts_that_the_end_folds_into_one_file(
+    tmp_path: Path,
+) -> None:
+    """The safety valve: above `spill_bytes` a part is written, and `release` folds every part
+    and what is still buffered into `all.parquet`, in order, then removes the parts."""
+    writer = RunRecordWriter(tmp_path, "spilled", spill_bytes=1)
+    writer.open()
+    writer.append("probe", [{"n": 1, "when": None}])
+    writer.append("probe", [{"n": 2, "when": AT}])
+    directory = writer.directory / TABLES_DIRECTORY / "probe"
+    assert sorted(path.name for path in directory.iterdir()) == [
+        "000000.parquet",
+        "000001.parquet",
+    ]
+    assert [row["n"] for row in read_table(tmp_path, "spilled", "probe")] == [1, 2], (
+        "a hard-killed run keeps its spill parts, and a reader reads them"
+    )
+
+    writer.release()
+
+    assert sorted(path.name for path in directory.iterdir()) == [COMPACT_FILENAME]
+    rows = list(read_table(tmp_path, "spilled", "probe"))
+    assert [row["n"] for row in rows] == [1, 2] and rows[1]["when"] == AT
+    assert table_types(tmp_path, "spilled", "probe") == {"n": "int", "when": "datetime"}
+
+
+def test_a_compact_file_beside_leftover_parts_is_read_alone(tmp_path: Path) -> None:
+    """A seal interrupted between writing `all.parquet` and removing the parts must not double
+    the rows: the compact file is the table, the parts were its input."""
+    writer = RunRecordWriter(tmp_path, "interrupted", spill_bytes=1)
+    writer.open()
+    writer.append("probe", [{"n": 1}])
+    writer.append("probe", [{"n": 2}])
+    directory = writer.directory / TABLES_DIRECTORY / "probe"
+    leftover = (directory / "000000.parquet").read_bytes()
+    writer.release()
+    (directory / "000000.parquet").write_bytes(leftover)
+
+    assert [row["n"] for row in read_table(tmp_path, "interrupted", "probe")] == [1, 2]
 
 
 def test_a_column_seen_under_two_kinds_is_refused_at_the_write(tmp_path: Path) -> None:
@@ -131,6 +185,7 @@ def test_a_damaged_chunk_is_reported_not_skipped(tmp_path: Path) -> None:
     writer = RunRecordWriter(tmp_path, "damaged")
     writer.open()
     writer.append("probe", [{"n": 1}])
+    writer.release()
     (part,) = (writer.directory / TABLES_DIRECTORY / "probe").glob(f"*{PART_SUFFIX}")
     part.write_bytes(b"not parquet")
 

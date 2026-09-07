@@ -311,9 +311,7 @@ def run(
         results[layer.component_id] = result
         if record is not None:
             records[layer.component_id] = record
-        outcomes[layer.component_id] = StrategyOutcome(
-            layer.component_id, COMPLETED, record=record
-        )
+        outcomes[layer.component_id] = StrategyOutcome(layer.component_id, COMPLETED, record=record)
     return RunResult(
         frozen.run_id,
         MappingProxyType(results),
@@ -423,35 +421,36 @@ def _run_datamodel(
     invisibility `059` measured.
     """
     model = load_data_model(layer.component, project_root=root_path)
-    as_loaded = {
-        layer.component_id: as_loaded_fingerprint(layer.component, project_root=root_path)
-    }
+    as_loaded = {layer.component_id: as_loaded_fingerprint(layer.component, project_root=root_path)}
     if tuple(model.requirements()) != layer.requirements:
         raise ValueError("loaded DataModel requirements drifted from FrozenRun")
     model.memory = normalize_memory(layer.initial_model_memory)
     catalog = _FrozenCatalog(frozen)
     session = ScanSession()
-    observation_store = DuckDbObservationStore(catalog, session=session)
     writer = None
-    if store is not None:
-        writer = RunRecordWriter(store, frozen.run_id, layer.record_ref, member_kind=DATAMODEL_KIND)
-        writer.open(replace=replace_record)
-    output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
-    flow = DataModelFlow(
-        frozen,
-        layer,
-        model,
-        window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
-            instruments=frozen.instruments,
-            store=observation_store,
-            allowed_requirements=layer.requirements,
-            consumer_id=layer.component_id,
-        ),
-        output=output,
-        on_progress=writer.heartbeat if writer is not None else None,
-    )
     try:
+        observation_store = DuckDbObservationStore(catalog, session=session)
+        if store is not None:
+            opened_writer = RunRecordWriter(
+                store, frozen.run_id, layer.record_ref, member_kind=DATAMODEL_KIND
+            )
+            opened_writer.open(replace=replace_record)
+            writer = opened_writer
+        output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
+        flow = DataModelFlow(
+            frozen,
+            layer,
+            model,
+            window_for_occurrence=lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=frozen.instruments,
+                store=observation_store,
+                allowed_requirements=layer.requirements,
+                consumer_id=layer.component_id,
+            ),
+            output=output,
+            on_progress=writer.heartbeat if writer is not None else None,
+        )
         result = flow.run()
         registration = output.register(Workspace.open(root_path))
         result = DataModelResult(
@@ -557,79 +556,79 @@ def _run_strategy(
     # One physical handle for the whole strategy. duckdb caches parquet metadata for a
     # connection's lifetime, and closing per query threw that away on every observation.
     session = ScanSession()
-    observation_store = DuckDbObservationStore(catalog, session=session)
-    strategy_requirements = strategy.requirements()
-    if strategy_requirements != layer.requirements:
-        raise ValueError("loaded Strategy requirements drifted from FrozenRun")
-    constraint_requirements = declared_constraint_requirements(constraints)
-    if constraint_requirements != layer.constraint_requirements:
-        raise ValueError("loaded Constraint requirements drifted from FrozenRun")
-    root = AccountState(frozen.initial_account_snapshot)
-    strategy.memory = normalize_memory(layer.initial_model_memory)
-    strategy.load_payload(BytesIO(layer.initial_payload))
     writer = None
-    if store is not None:
-        writer = RunRecordWriter(store, frozen.run_id, layer.record_ref)
-        writer.open(replace=replace_record)
-    state = RunStateRepository(
-        initial_account=root,
-        initial_model_memory=layer.initial_model_memory,
-        initial_payload=layer.initial_payload,
-        # Rows leave the run as each occurrence is accepted, into this strategy's own directory;
-        # a killed run keeps everything up to its last accepted occurrence, and the heap holds
-        # one occurrence's rows rather than the run's. Without a store, roots keep rows as before.
-        row_sink=None if writer is None else writer.append,
-    )
-    if state.root.current_model_state_ref != layer.initial_model_state_ref:
-        raise RuntimeError("initial Model state does not match frozen run authority")
-    initial_ref = state.root.current_model_state_ref
-    if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
-        raise RuntimeError("initial Strategy payload does not match frozen run authority")
-    flow = SimulationFlow(
-        frozen,
-        strategy,
-        state,
-        layer=layer,
-        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
-            instruments=frozen.instruments,
-            store=observation_store,
-            allowed_requirements=layer.requirements,
-            consumer_id=layer.component_id,
-        ),
-        constraint_window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
-            instruments=frozen.instruments,
-            store=observation_store,
-            # No consumer: this window serves every loaded constraint, and which one is reading
-            # is known only inside the loop that calls them.
-            allowed_requirements=layer.constraint_requirements,
-        ),
-        # Monitoring reads as of the fill instant it judges (record `148`).
-        constraint_window_at=lambda instant: ModelWindow(
-            evaluation_time=instant,
-            instruments=frozen.instruments,
-            store=observation_store,
-            allowed_requirements=layer.constraint_requirements,
-        ),
-        # Each strategy has its own Account (design §7-4): the run shares the initial
-        # DECLARATION, not the book. It retains exactly the marks this strategy declared it would
-        # read; declaring nothing keeps one.
-        account=Account(
-            mode=frozen.initial_account_mode,
-            retained_marks=retained_marks(strategy.account_history()),
-        ),
-        exchange=exchange,
-        constraints=constraints,
-        scan_session=session,
-        # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
-        # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
-        # STILL EXECUTING, and a peer takes its id and deletes its tables.
-        on_progress=writer.heartbeat if writer is not None else None,
-        registry=registry,
-        record_account_positions=record_account_positions,
-    )
     try:
+        observation_store = DuckDbObservationStore(catalog, session=session)
+        strategy_requirements = strategy.requirements()
+        if strategy_requirements != layer.requirements:
+            raise ValueError("loaded Strategy requirements drifted from FrozenRun")
+        constraint_requirements = declared_constraint_requirements(constraints)
+        if constraint_requirements != layer.constraint_requirements:
+            raise ValueError("loaded Constraint requirements drifted from FrozenRun")
+        root = AccountState(frozen.initial_account_snapshot)
+        strategy.memory = normalize_memory(layer.initial_model_memory)
+        strategy.load_payload(BytesIO(layer.initial_payload))
+        if store is not None:
+            opened_writer = RunRecordWriter(store, frozen.run_id, layer.record_ref)
+            opened_writer.open(replace=replace_record)
+            writer = opened_writer
+        state = RunStateRepository(
+            initial_account=root,
+            initial_model_memory=layer.initial_model_memory,
+            initial_payload=layer.initial_payload,
+            # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
+            # A hard kill preserves only spilled rows. Without a store, roots retain rows.
+            row_sink=None if writer is None else writer.append,
+        )
+        if state.root.current_model_state_ref != layer.initial_model_state_ref:
+            raise RuntimeError("initial Model state does not match frozen run authority")
+        initial_ref = state.root.current_model_state_ref
+        if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
+            raise RuntimeError("initial Strategy payload does not match frozen run authority")
+        flow = SimulationFlow(
+            frozen,
+            strategy,
+            state,
+            layer=layer,
+            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=frozen.instruments,
+                store=observation_store,
+                allowed_requirements=layer.requirements,
+                consumer_id=layer.component_id,
+            ),
+            constraint_window_for_occurrence=lambda occurrence: ModelWindow(
+                evaluation_time=occurrence.evaluation_time,
+                instruments=frozen.instruments,
+                store=observation_store,
+                # No consumer: this window serves every loaded constraint, and which one is reading
+                # is known only inside the loop that calls them.
+                allowed_requirements=layer.constraint_requirements,
+            ),
+            # Monitoring reads as of the fill instant it judges (record `148`).
+            constraint_window_at=lambda instant: ModelWindow(
+                evaluation_time=instant,
+                instruments=frozen.instruments,
+                store=observation_store,
+                allowed_requirements=layer.constraint_requirements,
+            ),
+            # Each strategy has its own Account (design §7-4): the run shares the initial
+            # DECLARATION, not the book. It retains the marks this strategy declared it would
+            # read; declaring nothing keeps one.
+            account=Account(
+                mode=frozen.initial_account_mode,
+                retained_marks=retained_marks(strategy.account_history()),
+            ),
+            exchange=exchange,
+            constraints=constraints,
+            scan_session=session,
+            # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
+            # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
+            # STILL EXECUTING, and a peer takes its id and deletes its tables.
+            on_progress=writer.heartbeat if writer is not None else None,
+            registry=registry,
+            record_account_positions=record_account_positions,
+        )
         result = flow.run()
         if writer is not None:
             # `roster_report` is evaluated HERE, after the run returned and outside the argument

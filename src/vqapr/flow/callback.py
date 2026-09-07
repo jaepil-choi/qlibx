@@ -6,7 +6,8 @@ authority checked, the package's own rows recorded, and the accepted intent publ
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
@@ -52,7 +53,6 @@ from vqapr.flow.run_state import (
     LifecycleTrace,
     prepare_model_state,
 )
-from vqapr.flow.valuation import ValuationPhase
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
     IntentSourceRef,
@@ -64,84 +64,72 @@ from vqapr.portfolio.intents import (
 class CallbackPhase:
     """One strategy callback, from the model's visible state to a published, accepted intent."""
 
-    def __init__(self, context: FlowContext, valuation: ValuationPhase) -> None:
+    def __init__(self, context: FlowContext) -> None:
         self._context = context
-        self._valuation = valuation
 
     def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
-        current_ref, before, payload_before = self._context.guard(
+        with self._context.guard(
             SimulationStage.CALLBACK_STATE,
             occurrence.evaluation_time,
-            self._visible_callback_state,
             family=SimulationFailureFamily.DATA,
             owner=self._context.layer.config,
-        )
+        ):
+            current_ref, before, payload_before = self._visible_callback_state()
         previous_recorder = self._context.strategy.recorder
         try:
-            self._context.guard(
+            with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                lambda: self._restore_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
-            )
-            window = self._context.guard(
+            ):
+                self._restore_callback_state(before, payload_before)
+            with self._context.guard(
                 SimulationStage.CALLBACK_WINDOW,
                 occurrence.evaluation_time,
-                lambda: self._strategy_window(occurrence),
                 family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.requirements,
-            )
+            ):
+                window = self._strategy_window(occurrence)
             state_account = self._context.state.current.account
             if not isinstance(state_account, AccountState):
-                self._context.guard(
+                with self._context.guard(
                     SimulationStage.CALLBACK_STATE,
                     occurrence.evaluation_time,
-                    lambda: self._raise_callback_account_state_error(),
                     family=SimulationFailureFamily.DATA,
                     owner=self._context.layer.config,
-                )
+                ):
+                    self._raise_callback_account_state_error()
             account = state_account.snapshot
-            recorder = self._callback_intent_boundary(
-                occurrence,
-                self._context.layer.config,
-                lambda: self._callback_recorder(occurrence),
-            )
-            self._context.guard(
+            with self._callback_intent_boundary(occurrence, self._context.layer.config):
+                recorder = self._callback_recorder(occurrence)
+            with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                lambda: self._set_callback_recorder(recorder),
                 family=SimulationFailureFamily.PUBLICATION,
                 owner=recorder,
-            )
+            ):
+                self._set_callback_recorder(recorder)
             projected = ()
             if self._context.constraints:
-                constraint_window = self._context.guard(
+                with self._context.guard(
                     SimulationStage.CALLBACK_WINDOW,
                     occurrence.evaluation_time,
-                    lambda: self._constraint_window(occurrence),
                     family=SimulationFailureFamily.DATA,
                     owner=self._context.layer.constraint_requirements,
-                )
-                projected = tuple(
-                    self._callback_intent_boundary(
-                        occurrence,
-                        constraint,
-                        lambda constraint=constraint: project_constraints(
-                            (constraint,), constraint_window
-                        )[0],
-                    )
-                    for constraint in self._context.constraints
-                )
-            constraint_bounds = self._callback_intent_boundary(
-                occurrence,
-                projected,
-                lambda: merged_constraint_bounds(projected),
-            )
-            result = self._callback_intent_boundary(
-                occurrence,
-                self._context.layer.config,
-                lambda: self._context.strategy.decide(
+                ):
+                    constraint_window = self._constraint_window(occurrence)
+                projections = []
+                for constraint in self._context.constraints:
+                    with self._callback_intent_boundary(occurrence, constraint):
+                        projections.append(project_constraints((constraint,), constraint_window)[0])
+                projected = tuple(projections)
+            with self._callback_intent_boundary(occurrence, projected):
+                constraint_bounds = merged_constraint_bounds(projected)
+            with self._callback_intent_boundary(
+                occurrence, self._context.layer.config, data_owner=self._context.layer.requirements
+            ):
+                result = self._context.strategy.decide(
                     StrategyModelContext(
                         occurrence=occurrence,
                         window=window,
@@ -150,9 +138,7 @@ class CallbackPhase:
                         constraint_bounds=constraint_bounds,
                         account_history=self._account_history(),
                     )
-                ),
-                data_owner=self._context.layer.requirements,
-            )
+                )
             # The envelope, stamped here rather than asked of the callback. Every field it
             # adds is one the Flow already had to derive in order to check the author's copy of
             # it, so this replaces a comparison rather than adding a step. Record `125`.
@@ -161,101 +147,77 @@ class CallbackPhase:
             # the decision: the five fields stamping adds are facts about the run, and a rule
             # about weights has no business reading any of them.
             if not isinstance(result, (Hold, Rebalance)):
-                self._callback_intent_boundary(
-                    occurrence,
-                    self._context.layer.config,
-                    lambda: _raise_callback_return_type(result),
-                )
+                with self._callback_intent_boundary(occurrence, self._context.layer.config):
+                    _raise_callback_return_type(result)
             if isinstance(result, Rebalance):
-                result = self._callback_intent_boundary(
-                    occurrence,
-                    self._context.layer.config,
-                    lambda: self._stamp_intent(result, occurrence, account, window),
-                )
+                with self._callback_intent_boundary(occurrence, self._context.layer.config):
+                    result = self._stamp_intent(result, occurrence, account, window)
 
             pending_valuation: PendingValuation | None = None
             if isinstance(result, Hold):
                 accepted: Hold | AcceptedIntent = result
                 # A Hold still reaches the execution instant, because the book is still
                 # worth something there and the venue still publishes prices for it.
-                pending_valuation = self._callback_intent_boundary(
-                    occurrence,
-                    self._context.frozen_run.execution_input,
-                    lambda: self._accept_valuation(occurrence),
-                )
+                with self._callback_intent_boundary(
+                    occurrence, self._context.frozen_run.execution_input
+                ):
+                    pending_valuation = self._accept_valuation(occurrence)
             else:
-                intent = self._callback_intent_boundary(
-                    occurrence, result, lambda: validate_economic_intent(result)
-                )
-                self._callback_intent_boundary(
-                    occurrence,
-                    intent,
-                    lambda: self._validate_intent_authority(intent, account, window),
-                )
+                with self._callback_intent_boundary(occurrence, result):
+                    intent = validate_economic_intent(result)
+                with self._callback_intent_boundary(occurrence, intent):
+                    self._validate_intent_authority(intent, account, window)
                 # No constraint check here, deliberately. Construction had the projected bounds
                 # and did its best inside them; whether the book actually breached a limit is a
                 # question about the committed account, and monitoring asks it (PRD 7.1,
                 # architecture 5.7). Judging the decision here also could not see the breach that
                 # matters most -- rounding a weight into whole shares moves it, and no fills exist
                 # yet.
-                accepted = self._callback_intent_boundary(
-                    occurrence,
-                    self._context.frozen_run.execution_input,
-                    lambda: self._accept_intent(intent, occurrence),
-                )
+                with self._callback_intent_boundary(
+                    occurrence, self._context.frozen_run.execution_input
+                ):
+                    accepted = self._accept_intent(intent, occurrence)
             # The package's own account of this occurrence, written without the Strategy asking.
             # Both values are package-computed, so recording them is a statement of what the run
             # did rather than a claim the Strategy made.
             self._record_defaults(recorder, accepted, account)
-            candidate, payload_candidate, committed_ref = self._context.guard(
+            with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                lambda: self._candidate_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
-            )
-            evidence, lifecycle = self._callback_intent_boundary(
-                occurrence,
-                accepted,
-                lambda: self._callback_evidence(
-                    occurrence,
-                    account,
-                    current_ref,
-                    committed_ref,
-                    window,
-                    accepted,
-                    projected,
-                ),
-            )
-            prepared = self._context.guard(
+            ):
+                candidate, payload_candidate, committed_ref = self._candidate_callback_state(
+                    before, payload_before
+                )
+            with self._callback_intent_boundary(occurrence, accepted):
+                evidence, lifecycle = self._callback_evidence(
+                    occurrence, account, current_ref, committed_ref, window, accepted, projected
+                )
+            with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                lambda: self._prepare_callback_publication(
-                    candidate,
-                    payload_candidate,
-                    lifecycle,
-                    recorder,
-                    accepted,
-                    pending_valuation,
-                ),
                 family=SimulationFailureFamily.PUBLICATION,
                 owner=evidence,
-            )
-            root = self._context.guard(
+            ):
+                prepared = self._prepare_callback_publication(
+                    candidate, payload_candidate, lifecycle, recorder, accepted, pending_valuation
+                )
+            with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                lambda: self._context.state.publish(prepared),
                 family=SimulationFailureFamily.PUBLICATION,
                 owner=prepared,
-            )
+            ):
+                root = self._context.state.publish(prepared)
         except Exception:
-            self._context.guard(
+            with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                lambda: self._restore_callback_state(before, payload_before),
                 family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
-            )
+            ):
+                self._restore_callback_state(before, payload_before)
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
@@ -269,17 +231,17 @@ class CallbackPhase:
         self._context.strategy.memory = self._context.state.load_model_state(current_ref)
         self._context.strategy.load_payload(BytesIO(self._context.state.load_payload(current_ref)))
 
+    @contextmanager
     def _callback_intent_boundary(
         self,
         occurrence: OperationOccurrence,
         owner: object,
-        operation: Callable[[], object],
         *,
         data_owner: object | None = None,
-    ) -> object:
+    ) -> Iterator[None]:
         """Keep callback data-access failures out of the intent boundary."""
         try:
-            return operation()
+            yield
         except SimulationFailure:
             raise
         except VqaprError as error:
@@ -391,7 +353,8 @@ class CallbackPhase:
         # the null-pairing 056 measured as HML 0.9726 -> 0.6877. A row with nothing to add is now
         # simply not written here; the decision-time facts it also carried moved to their own
         # table below, where no measurement claim competes with them. See `docs/issues/010`.
-        mark = self._valuation.committed_mark()
+        account_state = self._context.state.current.account
+        mark = account_state.latest_mark if isinstance(account_state, AccountState) else None
         marked_at = getattr(mark, "marked_at", None)
         if (
             mark is not None
@@ -569,13 +532,13 @@ class CallbackPhase:
     def _callback_actual_source_refs(
         self, occurrence: OperationOccurrence, window: ModelWindow
     ) -> tuple[IntentSourceRef, ...]:
-        return self._context.guard(
+        with self._context.guard(
             SimulationStage.CALLBACK_WINDOW,
             occurrence.evaluation_time,
-            lambda: self._actual_source_refs(window),
             family=SimulationFailureFamily.DATA,
             owner=self._context.layer.requirements,
-        )
+        ):
+            return self._actual_source_refs(window)
 
     def _validate_candidate_payload(
         self,
@@ -777,6 +740,7 @@ class CallbackPhase:
                 "selected target execution input provenance does not match frozen input"
             )
         return accepted
+
     def _account_history(self) -> AccountHistory:
         """The Strategy's declared window onto marks the Account already committed.
 
@@ -786,4 +750,3 @@ class CallbackPhase:
         state = self._context.state.current.account
         marks = state.mark_history if isinstance(state, AccountState) else ()
         return AccountHistory(marks, self._context.account_history_declaration)
-

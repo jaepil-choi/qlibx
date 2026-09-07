@@ -13,7 +13,8 @@ from __future__ import annotations
 import inspect
 import time
 import unicodedata
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -295,7 +296,6 @@ DEFAULT_TABLES = (
             "account_version",
         ),
     ),
-
     TableSpec(
         FILL_TABLE,
         (
@@ -400,8 +400,6 @@ def _raise_callback_return_type(returned: object) -> None:
     )
 
 
-
-
 def _component_id_of(layer: object) -> str:
     """The component id of a strategy layer (`config.component`) or a datamodel layer
     (`component`); the failure envelope names the member either way."""
@@ -449,41 +447,39 @@ def _resolved(filename: str) -> Path:
         return Path(filename)
 
 
+@dataclass(kw_only=True, slots=True)
 class FlowContext:
     """What every phase of one strategy's run shares: the frozen run, this strategy's layer, the run
-state, the account and venue, and the failure envelope. Built by `SimulationFlow`, read by
-`CallbackPhase`, `ExecutionPhase` and `ValuationPhase`; nothing here dispatches."""
+    state, the account and venue, and the failure envelope. Built by `SimulationFlow`, read by
+    `CallbackPhase`, `ExecutionPhase` and `ValuationPhase`; nothing here dispatches."""
 
-    def __init__(self) -> None:
-        self.frozen_run: FrozenRun
-        self.layer: FrozenStrategy
-        self.state: RunStateRepository
-        self.account: Account
-        self.exchange: Exchange
-        self.strategy: StrategyModel
-        self.constraints: tuple[Constraint, ...]
-        self.valuation_service: ValuationService
-        self.scan_session: object | None = None
-        self.registry: object | None = None
-        self.reference_price: str | None = None
-        self.record_account_positions: bool = True
-        self.account_history_declaration: AccountHistoryInput | None = None
-        self.recorded_measurements: set[object] = set()
-        self.horizon: ExecutionHorizon | None = None
-        self.static_occurrences: tuple[OperationOccurrence, ...] = ()
-        self.on_progress: Callable[[], None] | None = None
-        self.strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
-        self.constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
-        self.constraint_window_at: Callable[[datetime], ModelWindow]
-        # Seconds by phase, accumulated by `due_boundary` per due stage and by the flow per
-        # dispatch kind (`docs/issues/068`); `SimulationResult.timing` is this at the end.
-        self.timing: dict[str, float] = {}
+    frozen_run: FrozenRun
+    layer: FrozenStrategy
+    state: RunStateRepository
+    account: Account
+    exchange: Exchange
+    strategy: StrategyModel
+    constraints: tuple[Constraint, ...]
+    valuation_service: ValuationService
+    strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
+    constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
+    constraint_window_at: Callable[[datetime], ModelWindow]
+    scan_session: object | None = None
+    registry: object | None = None
+    reference_price: str | None = None
+    record_account_positions: bool = True
+    account_history_declaration: AccountHistoryInput | None = None
+    # Mutable bookkeeping is local to this strategy; authorities above are supplied once.
+    recorded_measurements: set[object] = field(default_factory=set)
+    horizon: ExecutionHorizon | None = None
+    timing: dict[str, float] = field(default_factory=dict)
 
-    def timed(self, phase: str, operation: Callable[[], object]) -> object:
-        """Run `operation`, adding its wall-clock seconds to `phase`."""
+    @contextmanager
+    def timed(self, phase: str) -> Iterator[None]:
+        """Measure a lexical phase without adding frames to the operation it contains."""
         started = time.perf_counter()
         try:
-            return operation()
+            yield
         finally:
             self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
 
@@ -497,17 +493,17 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         zone = self.layer.agenda.timezone
         return instant.astimezone(ZoneInfo(zone)) if zone else instant
 
+    @contextmanager
     def guard(
         self,
         stage: SimulationStage,
         cutoff: datetime,
-        operation: Callable[[], object],
         *,
         family: SimulationFailureFamily,
         owner: object,
-    ) -> object:
+    ) -> Iterator[None]:
         try:
-            return operation()
+            yield
         except SimulationFailure:
             raise
         except Exception as error:
@@ -567,6 +563,7 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
             source=_author_frame(cause, self.strategy, component_id),
         )
 
+    @contextmanager
     def due_boundary(
         self,
         *,
@@ -575,12 +572,12 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
         owner: object,
         family: SimulationFailureFamily,
         kind: SimulationFailureKind,
-        operation: Callable[[], object],
-    ) -> object:
+    ) -> Iterator[None]:
         try:
             # The due stages run one after another inside one due item, never nested, so their
             # seconds add up to the due item's and each is reported under its own name.
-            return self.timed(stage.value, operation)
+            with self.timed(stage.value):
+                yield
         except SimulationFailure:
             raise
         except Exception as error:
@@ -592,4 +589,3 @@ state, the account and venue, and the failure envelope. Built by `SimulationFlow
                 cause=error,
                 kind=kind,
             ) from error
-

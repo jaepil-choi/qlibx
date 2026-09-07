@@ -496,12 +496,6 @@ class Workspace:
     # Every refusal a registration can raise lives here, once.
     # ------------------------------------------------------------------------------------------
 
-    def _commit(self, state: _State, changed: bool) -> None:
-        """Write the merged state if anything changed, and adopt it either way."""
-        if changed:
-            self._write(*state)
-        self._replace_state(*state)
-
     def _merge_dataset(
         self, state: _State, registration: DatasetRegistration, source: SourceSpec
     ) -> tuple[_State, bool]:

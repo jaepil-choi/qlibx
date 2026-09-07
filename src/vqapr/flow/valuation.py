@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.evaluation import (
@@ -41,10 +40,6 @@ from vqapr.flow.context import (
     ValuationResult,
 )
 from vqapr.flow.marking import SelectedMark
-
-if TYPE_CHECKING:
-    from vqapr.flow.callback import CallbackPhase
-
 
 
 def _marks_from_execution_snapshot(
@@ -97,15 +92,13 @@ def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
     return mark.marked_at
 
 
-
 class ValuationPhase:
     """Values the book at each execution instant from the venue snapshot, commits the mark with
     the NAV it measured, and judges the committed account right after each commit (record `148`:
     valuation and monitoring have no clock of their own)."""
 
-    def __init__(self, context: FlowContext, callback: CallbackPhase) -> None:
+    def __init__(self, context: FlowContext) -> None:
         self._context = context
-        self._callback = callback
 
     def value_due(self, pending: PendingValuation) -> object:
         """Value the book at an execution instant that carried no orders.
@@ -122,42 +115,42 @@ class ValuationPhase:
         before = account_state.snapshot
         held_instruments = tuple(before.positions)
 
-        snapshot = self._context.due_boundary(
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_SNAPSHOT,
             cutoff=pending.target.target_at,
             owner=execution_input,
             family=SimulationFailureFamily.DATA,
             kind=SimulationFailureKind.PRE_COMMIT,
-            operation=lambda: exact_execution_snapshot(
+        ):
+            snapshot = exact_execution_snapshot(
                 execution_input.table,
                 target_at=pending.target.target_at,
                 target_instruments=(),
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
                 session=self._context.scan_session,
-            ),
-        )
-        selected_marks = self._context.due_boundary(
+            )
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.PRE_COMMIT,
-            operation=lambda: _marks_from_execution_snapshot(
+        ):
+            selected_marks = _marks_from_execution_snapshot(
                 snapshot,
                 pending.target.target_at,
                 previous=account_state.latest_mark,
                 held=before.positions,
-            ),
-        )
-        mark = self._context.due_boundary(
+            )
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.PRE_COMMIT,
-            operation=lambda: self._context.valuation_service.mark(before, selected_marks),
-        )
+        ):
+            mark = self._context.valuation_service.mark(before, selected_marks)
         evidence = ValuationEvidence(
             run_identity=self._context.frozen_run.identity,
             agenda=self._context.layer.agenda,
@@ -168,13 +161,14 @@ class ValuationPhase:
             root_version=self._context.state.current.version,
             account_version=before.version,
         )
-        prepared_account = self._context.due_boundary(
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
             family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
-            operation=lambda: self._context.account.prepare_valuation(
+        ):
+            prepared_account = self._context.account.prepare_valuation(
                 account_state,
                 mark,
                 expected_version=before.version,
@@ -183,15 +177,15 @@ class ValuationPhase:
                 observed_at={
                     selected.instrument_id: selected.observed_at for selected in selected_marks
                 },
-            ),
-        )
-        prepared_root = self._context.due_boundary(
+            )
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
             family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
-            operation=lambda: self._context.state.prepare_valuation_only(
+        ):
+            prepared_root = self._context.state.prepare_valuation_only(
                 pending_id=pending.pending_id,
                 account=prepared_account,
                 mark=mark,
@@ -202,24 +196,23 @@ class ValuationPhase:
                     mark=prepared_account.next_state.latest_mark,
                     selected=selected_marks,
                 ),
-            ),
-        )
-        self._context.due_boundary(
+            )
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
             family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-            operation=lambda: self._context.account.commit_valuation(prepared_account),
-        )
-        self._context.due_boundary(
+        ):
+            self._context.account.commit_valuation(prepared_account)
+        with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
             family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-            operation=lambda: self._context.state.publish_valuation_only(prepared_root),
-        )
+        ):
+            self._context.state.publish_valuation_only(prepared_root)
         return HeldResult(evidence, self.monitor_after_commit(pending))
 
     def measurement_recorder(
@@ -311,14 +304,14 @@ class ValuationPhase:
             return None
         occurrence = pending.occurrence
         cutoff = pending.target.target_at
-        return self._context.due_boundary(
+        with self._context.due_boundary(
             stage=SimulationStage.MONITORING,
             cutoff=cutoff,
             owner=self._context.layer.agenda,
             family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-            operation=lambda: self._monitor(occurrence, cutoff),
-        )
+        ):
+            return self._monitor(occurrence, cutoff)
 
     def _monitor(self, occurrence: OperationOccurrence, cutoff: datetime) -> MonitoringResult:
         state = self._context.state.current.account
@@ -399,9 +392,6 @@ class ValuationPhase:
                     "account_version": report.account_version,
                 },
             )
-        self._context.state.publish_monitoring(self._context.state.prepare_monitoring(recorder=recorder))
-
-    def committed_mark(self) -> object | None:
-        state = self._context.state.current.account
-        return state.latest_mark if isinstance(state, AccountState) else None
-
+        self._context.state.publish_monitoring(
+            self._context.state.prepare_monitoring(recorder=recorder)
+        )

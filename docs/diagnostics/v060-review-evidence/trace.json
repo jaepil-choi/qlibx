@@ -1,0 +1,5167 @@
+{
+  "exit_code": 0,
+  "modules": 115,
+  "lines": 33411,
+  "largest_modules": [
+    {
+      "file": "src/vqapr/flow/record.py",
+      "lines": 1976
+    },
+    {
+      "file": "src/vqapr/workspace.py",
+      "lines": 1409
+    },
+    {
+      "file": "src/vqapr/data/scan.py",
+      "lines": 1382
+    },
+    {
+      "file": "src/vqapr/authoring.py",
+      "lines": 1193
+    },
+    {
+      "file": "src/vqapr/declarations.py",
+      "lines": 1185
+    },
+    {
+      "file": "src/vqapr/report/measure.py",
+      "lines": 860
+    },
+    {
+      "file": "src/vqapr/cli/new.py",
+      "lines": 837
+    },
+    {
+      "file": "src/vqapr/data/datasets.py",
+      "lines": 804
+    },
+    {
+      "file": "src/vqapr/flow/callback.py",
+      "lines": 789
+    },
+    {
+      "file": "src/vqapr/flow/preflight.py",
+      "lines": 787
+    },
+    {
+      "file": "src/vqapr/flow/run_state.py",
+      "lines": 759
+    },
+    {
+      "file": "src/vqapr/flow/orchestration.py",
+      "lines": 697
+    }
+  ],
+  "largest_functions": [
+    {
+      "file": "src/vqapr/flow/execution.py",
+      "name": "execute_due",
+      "line": 40,
+      "span": 296,
+      "branches": 4
+    },
+    {
+      "file": "src/vqapr/data/scan.py",
+      "name": "observation_rows",
+      "line": 1145,
+      "span": 238,
+      "branches": 19
+    },
+    {
+      "file": "src/vqapr/flow/callback.py",
+      "name": "dispatch",
+      "line": 71,
+      "span": 192,
+      "branches": 6
+    },
+    {
+      "file": "src/vqapr/data/datasets.py",
+      "name": "check_schema",
+      "line": 360,
+      "span": 179,
+      "branches": 12
+    },
+    {
+      "file": "src/vqapr/authoring.py",
+      "name": "of",
+      "line": 594,
+      "span": 157,
+      "branches": 12
+    },
+    {
+      "file": "src/vqapr/portfolio/optimize.py",
+      "name": "optimize",
+      "line": 109,
+      "span": 136,
+      "branches": 16
+    },
+    {
+      "file": "src/vqapr/flow/orchestration.py",
+      "name": "run",
+      "line": 191,
+      "span": 134,
+      "branches": 16
+    },
+    {
+      "file": "src/vqapr/flow/orchestration.py",
+      "name": "_run_strategy",
+      "line": 524,
+      "span": 133,
+      "branches": 12
+    },
+    {
+      "file": "src/vqapr/flow/simulation.py",
+      "name": "__init__",
+      "line": 96,
+      "span": 127,
+      "branches": 19
+    },
+    {
+      "file": "src/vqapr/workspace.py",
+      "name": "_merge_dataset",
+      "line": 505,
+      "span": 125,
+      "branches": 8
+    },
+    {
+      "file": "src/vqapr/data/store.py",
+      "name": "query_many",
+      "line": 307,
+      "span": 119,
+      "branches": 16
+    },
+    {
+      "file": "src/vqapr/orders/planning.py",
+      "name": "plan_orders",
+      "line": 375,
+      "span": 119,
+      "branches": 16
+    },
+    {
+      "file": "src/vqapr/flow/preflight.py",
+      "name": "_validate_initial_account",
+      "line": 207,
+      "span": 117,
+      "branches": 10
+    },
+    {
+      "file": "src/vqapr/flow/datamodel.py",
+      "name": "validated_output",
+      "line": 141,
+      "span": 116,
+      "branches": 11
+    },
+    {
+      "file": "src/vqapr/flow/judgments.py",
+      "name": "_judge_member_datasets",
+      "line": 301,
+      "span": 116,
+      "branches": 9
+    }
+  ],
+  "called_functions": 660,
+  "called_modules": 66,
+  "calls": {
+    "cli/main.py:256:main": 1,
+    "cli/main.py:188:build_parser": 1,
+    "cli/new.py:261:add_arguments": 1,
+    "cli/register.py:49:add_arguments": 1,
+    "cli/check.py:215:add_arguments": 1,
+    "cli/run.py:44:add_arguments": 1,
+    "cli/list_.py:109:add_arguments": 1,
+    "cli/show.py:70:add_arguments": 1,
+    "cli/rm.py:60:add_arguments": 1,
+    "cli/skill.py:227:add_arguments": 1,
+    "cli/main.py:223:_resolve_project_root": 1,
+    "cli/run.py:220:run": 1,
+    "cli/run.py:200:refuse_a_path": 1,
+    "workspace.py:219:Workspace.open": 1,
+    "workspace.py:186:Workspace._from_state": 2,
+    "workspace.py:159:Workspace.__init__": 2,
+    "workspace.py:1090:Workspace._read": 1,
+    "workspace.py:206:Workspace.path": 2,
+    "workspace_document.py:375:read_workspace": 1,
+    "workspace_document.py:392:_linked": 1,
+    "workspace_document.py:359:_decoded": 7,
+    "workspace_document.py:82:DatasetCodec._measurements_travel_together": 1,
+    "workspace_document.py:154:FillCodec._the_two_shapes_this_is_not": 1,
+    "data/sources.py:37:SourceSpec._clean_id": 2,
+    "domain/identifiers.py:35:source_id": 6,
+    "domain/identifiers.py:17:_clean": 140,
+    "domain/identifiers.py:38:source_id.<locals>.<genexpr>": 135,
+    "workspace_document.py:104:DatasetCodec.to_domain": 1,
+    "data/datasets.py:153:DatasetRegistration.of": 1,
+    "data/datasets.py:293:parse_grain": 1,
+    "data/datasets.py:181:DatasetRegistration.of.<locals>.<genexpr>": 27,
+    "domain/identifiers.py:27:dataset_id": 20,
+    "domain/identifiers.py:30:dataset_id.<locals>.<genexpr>": 280,
+    "data/datasets.py:234:DatasetRegistration.with_schema": 1,
+    "data/scan.py:428:ProjectionSchema.ok": 1,
+    "data/datasets.py:260:DatasetRegistration.with_span": 1,
+    "workspace_document.py:198:ExecutionInputCodec.to_domain": 1,
+    "exchange/execution_table.py:47:ExecutionTableSpec.__post_init__": 1,
+    "exchange/execution_table.py:31:_field": 5,
+    "workspace_document.py:166:FillCodec.to_domain": 1,
+    "exchange/conventions.py:121:FillConvention.__post_init__": 1,
+    "exchange/execution_table.py:128:ExecutionInputRegistration.of": 1,
+    "domain/identifiers.py:43:execution_input_id": 5,
+    "domain/identifiers.py:46:execution_input_id.<locals>.<genexpr>": 85,
+    "exchange/execution_table.py:118:ExecutionInputRegistration.__post_init__": 1,
+    "extension/component.py:58:ComponentRef._clean_id": 2,
+    "domain/identifiers.py:51:component_id": 9,
+    "domain/identifiers.py:53:component_id.<locals>.<genexpr>": 159,
+    "extension/component.py:63:ComponentRef._named": 2,
+    "extension/component.py:77:ComponentRef._normalized": 2,
+    "domain/values.py:305:normalize_memory": 77,
+    "domain/values.py:310:normalize_memory.<locals>.visit": 121,
+    "domain/values.py:332:normalize_memory.<locals>.visit.<locals>.<genexpr>": 14,
+    "extension/component.py:85:ComponentRef._read_only": 2,
+    "extension/component.py:70:ComponentRef._hex_digest": 2,
+    "extension/component.py:73:ComponentRef._hex_digest.<locals>.<genexpr>": 130,
+    "flow/run.py:361:RunDefinition._from_the_stored_spelling": 2,
+    "flow/run.py:370:RunDefinition._from_the_stored_spelling.<locals>.<genexpr>": 4,
+    "flow/run.py:284:_InitialAccount._by_name_as_written": 2,
+    "account/snapshot.py:33:AccountSnapshot.__post_init__": 15,
+    "account/snapshot.py:15:_decimal": 55,
+    "flow/run.py:447:RunDefinition._wall_time": 2,
+    "flow/run.py:307:_naive_wall_time": 2,
+    "flow/run.py:452:RunDefinition._declared_sessions": 2,
+    "flow/run.py:464:RunDefinition._dates_only": 2,
+    "flow/run.py:472:RunDefinition._one_instant": 4,
+    "flow/run.py:481:RunDefinition._whole_declaration": 2,
+    "flow/run.py:76:_require_timezone": 2,
+    "flow/run.py:85:_require_period": 3,
+    "domain/values.py:32:require_tz_aware": 214,
+    "flow/run.py:95:_require_account": 3,
+    "flow/run.py:111:_require_instruments": 3,
+    "flow/run.py:114:_require_instruments.<locals>.<genexpr>": 33,
+    "workspace_document.py:389:read_workspace.<locals>.<genexpr>": 6,
+    "workspace.py:482:Workspace.run_definition": 1,
+    "workspace.py:1011:Workspace._config_lookup": 1,
+    "flow/judgments.py:57:judgments": 1,
+    "workspace.py:268:Workspace.datasets": 1,
+    "workspace.py:271:Workspace.datasets.<locals>.<genexpr>": 2,
+    "flow/judgments.py:213:_agenda_once": 1,
+    "flow/judgments.py:293:_members": 1,
+    "flow/judgments.py:296:_members.<locals>.<genexpr>": 2,
+    "flow/judgments.py:297:_members.<locals>.<genexpr>": 1,
+    "flow/judgments.py:100:judgments.<locals>.<genexpr>": 2,
+    "flow/judgments.py:86:judgments.<locals>.<lambda>": 1,
+    "flow/judgments.py:137:_judge_universe": 1,
+    "flow/judgments.py:87:judgments.<locals>.<lambda>": 1,
+    "flow/judgments.py:184:_judge_period": 1,
+    "flow/judgments.py:90:judgments.<locals>.<lambda>": 1,
+    "flow/judgments.py:242:_judge_execution_ordering": 1,
+    "workspace.py:416:Workspace.execution_input": 2,
+    "flow/judgments.py:228:_agenda_once.<locals>.once": 2,
+    "flow/preflight.py:49:derived_agenda": 2,
+    "flow/preflight.py:81:derived_agenda.<locals>.<genexpr>": 22,
+    "flow/preflight.py:76:derived_agenda.<locals>._local_date": 20,
+    "flow/run.py:552:RunDefinition.agenda_id": 2,
+    "domain/agendas.py:234:OperationAgenda.daily": 2,
+    "domain/agendas.py:288:OperationAgenda.daily.<locals>.<genexpr>": 22,
+    "domain/values.py:169:declare_local_instant": 20,
+    "domain/values.py:55:_zone": 259,
+    "domain/values.py:106:_format_offset": 20,
+    "domain/values.py:126:LocalInstantDeclaration.__post_init__": 20,
+    "domain/values.py:41:_require_date": 20,
+    "domain/values.py:47:_require_wall_time": 20,
+    "domain/values.py:92:_parse_offset": 20,
+    "domain/agendas.py:92:OperationOccurrence.__post_init__": 20,
+    "domain/agendas.py:69:_require_identifier": 22,
+    "domain/agendas.py:72:_require_identifier.<locals>.<genexpr>": 748,
+    "domain/agendas.py:146:OperationAgenda.__post_init__": 2,
+    "domain/agendas.py:59:_require_timezone": 2,
+    "domain/agendas.py:154:OperationAgenda.__post_init__.<locals>.<genexpr>": 22,
+    "domain/agendas.py:156:OperationAgenda.__post_init__.<locals>.<genexpr>": 22,
+    "domain/agendas.py:158:OperationAgenda.__post_init__.<locals>.<genexpr>": 22,
+    "domain/agendas.py:123:OperationOccurrence.sort_key": 39,
+    "domain/agendas.py:103:OperationOccurrence.utc_evaluation_time": 49,
+    "domain/values.py:155:LocalInstantDeclaration.utc_instant": 49,
+    "domain/values.py:148:LocalInstantDeclaration.instant": 219,
+    "domain/agendas.py:42:operation_role_priority": 39,
+    "flow/judgments.py:103:judgments.<locals>.<genexpr>.<lambda>": 1,
+    "flow/judgments.py:301:_judge_member_datasets": 1,
+    "flow/judgments.py:133:_key": 1,
+    "workspace.py:448:Workspace.component": 3,
+    "extension/loading.py:289:load_strategy_model": 4,
+    "extension/loading.py:55:_load": 6,
+    "extension/fingerprint.py:27:fingerprint_component": 8,
+    "agent/sample/reversal_5d.py:1:<module>": 4,
+    "portfolio/budgets.py:58:Budget.__post_init__": 4,
+    "portfolio/budgets.py:10:_finite_decimal": 16,
+    "agent/sample/reversal_5d.py:40:SampleReversal5d": 4,
+    "extension/loading.py:206:_validate_callback_signature": 4,
+    "extension/loading.py:195:accepts_contract_call": 4,
+    "extension/loading.py:165:positional_arity": 8,
+    "extension/loading.py:237:_requirements": 6,
+    "authoring.py:313:Model.requirements": 7,
+    "agent/sample/reversal_5d.py:43:SampleReversal5d.inputs": 17,
+    "data/lookback.py:35:RowsLookback.__post_init__": 17,
+    "authoring.py:186:DatasetInput.__post_init__": 17,
+    "authoring.py:113:_identifier": 118,
+    "authoring.py:114:_identifier.<locals>.<genexpr>": 1012,
+    "authoring.py:119:_unique_identifiers": 17,
+    "authoring.py:122:_unique_identifiers.<locals>.<genexpr>": 34,
+    "authoring.py:130:_reject_reserved": 17,
+    "authoring.py:315:Model.requirements.<locals>.<genexpr>": 14,
+    "authoring.py:264:requirements_for": 17,
+    "authoring.py:273:requirements_for.<locals>.<genexpr>": 34,
+    "data/requirements.py:46:DataRequirement.of": 17,
+    "data/requirements.py:13:_name": 17,
+    "data/requirements.py:16:_name.<locals>.<genexpr>": 102,
+    "extension/loading.py:259:_requirements.<locals>.<genexpr>": 8,
+    "flow/judgments.py:447:_first_decision": 1,
+    "flow/judgments.py:465:_first_decision.<locals>.<genexpr>": 11,
+    "flow/judgments.py:158:_instant": 1,
+    "flow/judgments.py:109:judgments.<locals>.<lambda>": 1,
+    "flow/judgments.py:471:_judge_weights": 1,
+    "flow/judgments.py:110:judgments.<locals>.<lambda>": 1,
+    "flow/judgments.py:419:_judge_outputs": 1,
+    "cli/run.py:161:_refuse_if_judged": 1,
+    "flow/orchestration.py:62:preflight_run": 1,
+    "flow/preflight.py:664:preflight_run": 1,
+    "flow/preflight.py:429:_require_execution_authority": 1,
+    "flow/preflight.py:655:_registered_exchange": 1,
+    "extension/loading.py:381:load_exchange": 2,
+    "agent/sample/exchange.py:1:<module>": 2,
+    "agent/sample/exchange.py:20:SampleExchange": 2,
+    "agent/sample/exchange.py:23:SampleExchange.__init__": 2,
+    "exchange/listings.py:97:TradeRule.__post_init__": 20,
+    "exchange/venue.py:55:AcademicExchange.__post_init__": 2,
+    "extension/loading.py:384:load_exchange.<locals>.<genexpr>": 4,
+    "exchange/venue.py:81:AcademicExchange.rules": 22,
+    "exchange/listings.py:359:ExchangeRulesView.__post_init__": 22,
+    "exchange/listings.py:370:ExchangeRulesView._as_registry": 22,
+    "exchange/execution_table.py:276:validate_execution_input": 2,
+    "exchange/execution_table.py:194:_schema_diagnosis": 2,
+    "exchange/execution_table.py:138:_schema_failures": 2,
+    "data/scan.py:364:describe": 2,
+    "data/scan.py:205:_open": 7,
+    "data/scan.py:210:_require_path": 19,
+    "data/scan.py:177:_configure": 9,
+    "data/scan.py:157:_relation": 19,
+    "data/scan.py:65:_normalize": 8,
+    "domain/errors.py:179:Diagnosis.ok": 6,
+    "exchange/execution_table.py:203:_key_diagnosis": 2,
+    "data/scan.py:704:key_check": 2,
+    "data/scan.py:712:key_check.<locals>.<genexpr>": 6,
+    "data/scan.py:151:_quote": 108,
+    "data/scan.py:713:key_check.<locals>.<genexpr>": 6,
+    "domain/errors.py:268:collector": 4,
+    "domain/errors.py:258:_Collector.done": 4,
+    "exchange/execution_table.py:243:_price_diagnosis": 2,
+    "data/scan.py:775:positive_finite_when_true": 2,
+    "data/scan.py:788:positive_finite_when_true.<locals>.<genexpr>": 6,
+    "domain/errors.py:183:Diagnosis.raise_if_failed": 2,
+    "flow/preflight.py:326:_validate_execution_requirements": 1,
+    "flow/preflight.py:372:_validate_instrument_universe": 1,
+    "flow/preflight.py:385:_validate_instrument_universe.<locals>.<genexpr>": 1,
+    "flow/preflight.py:386:_validate_instrument_universe.<locals>.<genexpr>": 1,
+    "exchange/listings.py:149:TradeRule.tradable": 88,
+    "flow/preflight.py:207:_validate_initial_account": 1,
+    "flow/preflight.py:708:preflight_run.<locals>.<genexpr>": 2,
+    "flow/preflight.py:544:_freeze_strategy": 1,
+    "flow/run.py:164:StrategyConfig.__post_init__": 1,
+    "flow/preflight.py:156:_validate_initial_model_state": 1,
+    "authoring.py:977:StrategyModel.save_payload": 22,
+    "authoring.py:985:StrategyModel.load_payload": 23,
+    "flow/preflight.py:569:_freeze_strategy.<locals>.<genexpr>": 1,
+    "flow/preflight.py:571:_freeze_strategy.<locals>.<genexpr>": 1,
+    "flow/preflight.py:575:_freeze_strategy.<locals>.<genexpr>": 1,
+    "flow/preflight.py:94:_freeze_agenda": 1,
+    "domain/agendas.py:203:OperationAgenda.inclusive_slice": 1,
+    "domain/agendas.py:210:OperationAgenda.inclusive_slice.<locals>.<genexpr>": 11,
+    "domain/agendas.py:169:OperationAgenda.content_identity": 2,
+    "domain/agendas.py:107:OperationOccurrence.content_identity": 10,
+    "domain/values.py:159:LocalInstantDeclaration.identity": 20,
+    "domain/agendas.py:48:_identity": 12,
+    "domain/agendas.py:187:OperationAgenda.provenance_identity": 1,
+    "flow/frozen.py:54:FrozenAgenda.__post_init__": 1,
+    "flow/preflight.py:474:_validate_execution_targets": 1,
+    "exchange/execution_table.py:85:ExecutionInputRegistration.build_horizon": 2,
+    "exchange/conventions.py:191:FillConvention.build_horizon": 2,
+    "data/scan.py:596:candidate_instants": 2,
+    "data/scan.py:351:_Borrowed.__init__": 13,
+    "data/scan.py:359:_Borrowed.close": 13,
+    "data/scan.py:635:candidate_instants.<locals>.<genexpr>": 22,
+    "exchange/conventions.py:221:FillConvention.build_horizon.<locals>.<genexpr>": 22,
+    "exchange/conventions.py:52:ExecutionHorizon.__init__": 2,
+    "flow/preflight.py:496:_validate_execution_targets.<locals>.<genexpr>": 1,
+    "domain/agendas.py:99:OperationOccurrence.evaluation_time": 150,
+    "exchange/execution_table.py:101:ExecutionInputRegistration.select_target": 20,
+    "exchange/conventions.py:224:FillConvention.select_target": 20,
+    "exchange/conventions.py:61:ExecutionHorizon.after": 20,
+    "exchange/conventions.py:261:FillConvention.select_target.<locals>.<genexpr>": 130,
+    "exchange/conventions.py:89:ExecutionHorizon.validate_calendar": 20,
+    "exchange/conventions.py:83:ExecutionHorizon.local_target": 40,
+    "exchange/conventions.py:160:FillConvention.resolve_local_target": 20,
+    "exchange/conventions.py:265:FillConvention.select_target.<locals>.resolve": 20,
+    "exchange/conventions.py:148:FillConvention.declaration_identity": 22,
+    "exchange/conventions.py:293:FillConvention.select_target.<locals>.<genexpr>": 140,
+    "flow/run.py:142:ConstraintSet.__post_init__": 1,
+    "flow/frozen.py:128:FrozenStrategy.__post_init__": 1,
+    "flow/run.py:122:_require_requirements": 3,
+    "flow/run.py:123:_require_requirements.<locals>.<genexpr>": 5,
+    "flow/run.py:66:_model_state_ref": 1,
+    "flow/run_state.py:45:prepare_model_state": 23,
+    "domain/identifiers.py:97:ModelStateRef.__post_init__": 23,
+    "domain/identifiers.py:98:ModelStateRef.__post_init__.<locals>.<genexpr>": 1495,
+    "flow/preflight.py:143:_freeze_sources": 1,
+    "flow/preflight.py:122:_validate_requirement": 1,
+    "workspace.py:291:Workspace.dataset": 2,
+    "workspace.py:1345:_require_span": 2,
+    "data/datasets.py:331:require_grain": 21,
+    "data/datasets.py:309:lookback_fits_grain": 11,
+    "workspace.py:389:Workspace.source": 2,
+    "flow/preflight.py:153:_freeze_sources.<locals>.<genexpr>": 3,
+    "flow/preflight.py:727:preflight_run.<locals>.<genexpr>": 2,
+    "flow/frozen.py:288:FrozenRun.__post_init__": 1,
+    "flow/run.py:70:_require_id": 1,
+    "flow/frozen.py:290:FrozenRun.__post_init__.<locals>.<genexpr>": 2,
+    "flow/frozen.py:294:FrozenRun.__post_init__.<locals>.<genexpr>": 1,
+    "flow/frozen.py:150:FrozenStrategy.component_id": 22,
+    "flow/frozen.py:330:FrozenRun.__post_init__.<locals>.<genexpr>": 2,
+    "flow/frozen.py:340:FrozenRun.__post_init__.<locals>.<genexpr>": 2,
+    "flow/frozen.py:365:FrozenRun.__post_init__.<locals>.<genexpr>": 3,
+    "flow/orchestration.py:191:run": 1,
+    "flow/roster.py:61:registered_roster": 1,
+    "workspace.py:842:Workspace.registered_instruments": 1,
+    "workspace.py:822:Workspace.roster_path": 1,
+    "flow/orchestration.py:248:run.<locals>.<genexpr>": 1,
+    "flow/orchestration.py:519:_source_digests": 1,
+    "data/store.py:35:physical_digest": 3,
+    "data/store.py:47:physical_digest.<locals>.<lambda>": 3,
+    "flow/record.py:1647:freeze_run_record": 1,
+    "flow/frozen.py:414:FrozenRun.identity": 82,
+    "flow/frozen.py:421:FrozenRun._derive_identity": 1,
+    "flow/frozen.py:456:FrozenRun._derive_identity.<locals>.<genexpr>": 1,
+    "flow/run.py:129:_encoded_requirements": 3,
+    "flow/run.py:53:_identity": 2,
+    "flow/frozen.py:154:FrozenStrategy.record_ref": 3,
+    "flow/record.py:1074:write_run_record": 1,
+    "flow/record.py:1050:run_record_path": 1,
+    "flow/record.py:184:_Record.as_record": 2,
+    "flow/record.py:403:_encode": 109,
+    "_internal/atomic.py:75:write_atomically": 3,
+    "_internal/atomic.py:62:_swap": 3,
+    "flow/orchestration.py:524:_run_strategy": 1,
+    "flow/orchestration.py:541:_run_strategy.<locals>.<genexpr>": 1,
+    "flow/orchestration.py:682:_as_loaded_fingerprints": 1,
+    "extension/loading.py:129:as_loaded_fingerprint": 2,
+    "flow/orchestration.py:85:_FrozenCatalog.__init__": 1,
+    "data/scan.py:252:ScanSession.__init__": 1,
+    "data/store.py:141:DuckDbObservationStore.__init__": 1,
+    "constraints/evaluation.py:225:constraint_requirements": 1,
+    "constraints/evaluation.py:201:_loaded": 1,
+    "constraints/evaluation.py:205:_loaded.<locals>.<genexpr>": 1,
+    "constraints/evaluation.py:207:_loaded.<locals>.<genexpr>": 1,
+    "account/snapshot.py:101:AccountState.__post_init__": 31,
+    "account/snapshot.py:104:AccountState.__post_init__.<locals>.<genexpr>": 59,
+    "flow/record.py:686:RunRecordWriter.open": 1,
+    "flow/record.py:666:RunRecordWriter.directory": 110,
+    "flow/record.py:1036:record_directory": 113,
+    "flow/record.py:767:RunRecordWriter._open": 1,
+    "flow/record.py:905:RunRecordWriter._claim": 1,
+    "flow/run_state.py:285:RunStateRepository.__init__": 1,
+    "flow/run_state.py:114:AcceptedRunState.__post_init__": 42,
+    "flow/run_state.py:322:RunStateRepository.root": 2,
+    "flow/run_state.py:329:RunStateRepository.load_payload": 12,
+    "flow/run_state.py:183:AcceptedRunState.load_payload": 12,
+    "authoring.py:969:StrategyModel.account_history": 2,
+    "account/history.py:44:retained_marks": 1,
+    "account/account.py:164:Account.__init__": 1,
+    "flow/simulation.py:96:SimulationFlow.__init__": 1,
+    "flow/context.py:457:FlowContext.__init__": 1,
+    "flow/simulation.py:140:SimulationFlow.__init__.<locals>.<genexpr>": 1,
+    "flow/context.py:339:_require_constraint_identity": 1,
+    "flow/context.py:358:_require_constraint_identity.<locals>.<genexpr>": 1,
+    "flow/context.py:359:_require_constraint_identity.<locals>.<genexpr>": 1,
+    "flow/frozen.py:404:FrozenRun.dispatch_order": 1,
+    "flow/frozen.py:95:merged_occurrences": 1,
+    "flow/frozen.py:99:merged_occurrences.<locals>.<genexpr>": 11,
+    "flow/valuation.py:106:ValuationPhase.__init__": 1,
+    "flow/callback.py:67:CallbackPhase.__init__": 1,
+    "flow/execution.py:36:ExecutionPhase.__init__": 1,
+    "flow/execution.py:343:ExecutionPhase.bind_registry_to_venue": 1,
+    "flow/run_state.py:318:RunStateRepository.current": 137,
+    "account/account.py:177:Account.mode": 1,
+    "account/account.py:188:Account.bind": 1,
+    "flow/simulation.py:224:SimulationFlow.run": 1,
+    "flow/loop.py:70:OccurrenceFlow.run": 1,
+    "flow/simulation.py:235:SimulationFlow._start": 1,
+    "flow/context.py:500:FlowContext.guard": 92,
+    "flow/callback.py:264:CallbackPhase.load_visible_strategy_state": 1,
+    "flow/run_state.py:326:RunStateRepository.load_model_state": 11,
+    "flow/run_state.py:175:AcceptedRunState.load_model_state": 11,
+    "flow/loop.py:74:OccurrenceFlow.run.<locals>.<genexpr>": 11,
+    "flow/loop.py:30:OperationEnvelope.__post_init__": 10,
+    "flow/record.py:836:RunRecordWriter.heartbeat": 101,
+    "flow/record.py:849:RunRecordWriter.checkpoint": 1,
+    "flow/simulation.py:291:SimulationFlow._pending_due": 22,
+    "flow/simulation.py:244:SimulationFlow._dispatch_static": 10,
+    "flow/context.py:482:FlowContext.timed": 170,
+    "flow/simulation.py:250:SimulationFlow._dispatch_static.<locals>.<lambda>": 10,
+    "flow/callback.py:71:CallbackPhase.dispatch": 10,
+    "flow/callback.py:473:CallbackPhase._visible_callback_state": 10,
+    "flow/callback.py:84:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:358:CallbackPhase._restore_callback_state": 10,
+    "flow/callback.py:91:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:487:CallbackPhase._strategy_window": 10,
+    "flow/orchestration.py:593:_run_strategy.<locals>.<lambda>": 10,
+    "data/windows.py:30:ModelWindow.__init__": 10,
+    "data/windows.py:40:ModelWindow.__init__.<locals>.<genexpr>": 110,
+    "domain/identifiers.py:72:instrument_id": 100,
+    "domain/identifiers.py:82:instrument_id.<locals>.<genexpr>": 800,
+    "data/windows.py:48:ModelWindow.__init__.<locals>.<genexpr>": 20,
+    "flow/callback.py:272:CallbackPhase._callback_intent_boundary": 80,
+    "flow/callback.py:108:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:499:CallbackPhase._callback_recorder": 10,
+    "authoring.py:965:StrategyModel.tables": 10,
+    "flow/callback.py:501:CallbackPhase._callback_recorder.<locals>.<genexpr>": 10,
+    "flow/callback.py:506:CallbackPhase._callback_recorder.<locals>.<genexpr>": 10,
+    "evidence/recorder.py:26:InvocationRecorder.__init__": 20,
+    "evidence/recorder.py:43:InvocationRecorder.__init__.<locals>.<genexpr>": 100,
+    "flow/callback.py:113:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:470:CallbackPhase._set_callback_recorder": 10,
+    "flow/callback.py:139:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "constraints/evaluation.py:266:merged_constraint_bounds": 10,
+    "constraints/evaluation.py:270:merged_constraint_bounds.<locals>.<genexpr>": 10,
+    "authoring.py:462:ConstraintBounds.__post_init__": 20,
+    "authoring.py:168:_copy_weights": 69,
+    "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:449:CallbackPhase._callback_account_view": 10,
+    "account/snapshot.py:131:AccountState.latest_mark": 60,
+    "authoring.py:398:EconomicAccountView.__post_init__": 10,
+    "authoring.py:99:_finite_decimal": 113,
+    "flow/callback.py:780:CallbackPhase._account_history": 10,
+    "account/history.py:63:AccountHistory.__init__": 10,
+    "calls.py:244:StrategyModelContext.__post_init__": 10,
+    "authoring.py:481:ConstraintBounds.detached": 10,
+    "agent/sample/reversal_5d.py:52:SampleReversal5d.decide": 10,
+    "calls.py:132:_DeclaredReads.read": 10,
+    "calls.py:121:_DeclaredReads._declaration": 10,
+    "data/windows.py:127:ModelWindow.grain": 10,
+    "data/store.py:280:DuckDbObservationStore.grain": 10,
+    "flow/orchestration.py:89:_FrozenCatalog.dataset": 20,
+    "data/windows.py:102:ModelWindow.panel": 10,
+    "data/store.py:177:DuckDbObservationStore.panel_window": 10,
+    "data/store.py:198:DuckDbObservationStore.panel_window.<locals>.<genexpr>": 20,
+    "data/store.py:200:DuckDbObservationStore.panel_window.<locals>.<genexpr>": 20,
+    "data/store.py:202:DuckDbObservationStore.panel_window.<locals>.<genexpr>": 20,
+    "flow/orchestration.py:92:_FrozenCatalog.source": 10,
+    "data/store.py:285:DuckDbObservationStore._digest": 10,
+    "data/panel.py:41:panel_identity": 10,
+    "data/resolution.py:12:resolve_field": 1,
+    "data/scan.py:1145:observation_rows": 1,
+    "data/scan.py:433:identity_projections": 1,
+    "data/scan.py:446:value_projections": 1,
+    "data/scan.py:452:value_projections.<locals>.<genexpr>": 2,
+    "data/scan.py:1195:observation_rows.<locals>.<genexpr>": 11,
+    "data/scan.py:1279:observation_rows.<locals>.<genexpr>": 3,
+    "data/scan.py:1288:observation_rows.<locals>.<genexpr>": 2,
+    "data/scan.py:259:ScanSession.connection": 12,
+    "data/scan.py:1341:observation_rows.<locals>.<genexpr>": 4,
+    "data/scan.py:1369:observation_rows.<locals>.<genexpr>": 6901,
+    "data/panel.py:80:Panel.from_rows": 1,
+    "data/panel.py:127:Panel.window": 10,
+    "data/panel.py:269:PanelWindow.lower_bound": 10,
+    "data/panel.py:256:PanelWindow.counts": 10,
+    "data/panel.py:201:PanelWindow._column": 200,
+    "data/panel.py:265:PanelWindow.max_available_at": 10,
+    "data/panel.py:184:PanelWindow.instruments": 10,
+    "data/panel.py:211:PanelWindow.values": 100,
+    "data/panel.py:284:_LazyColumns.__init__": 100,
+    "data/panel.py:290:_LazyColumns.__getitem__": 100,
+    "data/panel.py:191:PanelWindow.series": 100,
+    "agent/sample/reversal_5d.py:72:SampleReversal5d.decide.<locals>.<lambda>": 90,
+    "authoring.py:846:Rebalance.__post_init__": 10,
+    "portfolio/budgets.py:72:Budget.validates_cash": 30,
+    "portfolio/budgets.py:76:Budget.validates_target": 102,
+    "flow/callback.py:173:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:603:CallbackPhase._stamp_intent": 10,
+    "flow/callback.py:623:CallbackPhase._stamp_intent.<locals>.<genexpr>": 40,
+    "portfolio/intents.py:25:PortfolioTarget.__post_init__": 30,
+    "flow/callback.py:663:CallbackPhase._actual_source_refs": 20,
+    "data/windows.py:86:ModelWindow.accesses": 30,
+    "flow/callback.py:681:CallbackPhase._actual_source_refs.<locals>.<genexpr>": 40,
+    "portfolio/intents.py:39:IntentSourceRef.__post_init__": 20,
+    "portfolio/intents.py:43:IntentSourceRef.__post_init__.<locals>.<genexpr>": 420,
+    "portfolio/intents.py:49:IntentSourceRef.__post_init__.<locals>.<genexpr>": 1300,
+    "flow/callback.py:188:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "portfolio/intents.py:68:validate_economic_intent": 10,
+    "portfolio/intents.py:80:validate_economic_intent.<locals>.<genexpr>": 190,
+    "portfolio/intents.py:85:validate_economic_intent.<locals>.<genexpr>": 40,
+    "portfolio/intents.py:96:validate_economic_intent.<locals>.<genexpr>": 40,
+    "portfolio/intents.py:97:validate_economic_intent.<locals>.<genexpr>": 40,
+    "portfolio/intents.py:103:validate_economic_intent.<locals>.<genexpr>": 20,
+    "flow/callback.py:193:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:638:CallbackPhase._validate_intent_authority": 10,
+    "flow/callback.py:653:CallbackPhase._validate_intent_authority.<locals>.<genexpr>": 10,
+    "flow/callback.py:204:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:756:CallbackPhase._accept_intent": 10,
+    "flow/callback.py:683:CallbackPhase.execution_horizon": 10,
+    "flow/context.py:73:AcceptedIntent.__post_init__": 10,
+    "flow/callback.py:362:CallbackPhase._record_defaults": 10,
+    "evidence/recorder.py:54:InvocationRecorder.append": 70,
+    "evidence/recorder.py:57:InvocationRecorder.append_batch": 70,
+    "domain/values.py:279:normalize_rows": 70,
+    "domain/values.py:289:normalize_rows.<locals>.<genexpr>": 3060,
+    "domain/values.py:258:normalize_scalar": 340,
+    "flow/valuation.py:404:ValuationPhase.committed_mark": 10,
+    "flow/callback.py:213:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:521:CallbackPhase._candidate_callback_state": 10,
+    "flow/callback.py:580:CallbackPhase._validate_candidate_payload": 10,
+    "flow/callback.py:220:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:532:CallbackPhase._callback_evidence": 10,
+    "flow/callback.py:569:CallbackPhase._callback_actual_source_refs": 10,
+    "flow/callback.py:575:CallbackPhase._callback_actual_source_refs.<locals>.<lambda>": 10,
+    "evidence/artifacts.py:288:CallbackEvidence.__post_init__": 10,
+    "flow/run_state.py:75:LifecycleTrace.__post_init__": 40,
+    "flow/callback.py:233:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/callback.py:323:CallbackPhase._prepare_callback_publication": 10,
+    "flow/run_state.py:366:RunStateRepository.prepare_callback": 10,
+    "evidence/recorder.py:90:InvocationRecorder.staged_rows": 20,
+    "evidence/recorder.py:98:InvocationRecorder.staged_rows.<locals>.<genexpr>": 150,
+    "flow/run_state.py:332:RunStateRepository._stage_rows": 20,
+    "flow/run_state.py:347:RunStateRepository._stage_rows.<locals>.<genexpr>": 150,
+    "evidence/recorder.py:101:InvocationRecorder.manifests": 20,
+    "evidence/recorder.py:102:InvocationRecorder.manifests.<locals>.<genexpr>": 100,
+    "flow/callback.py:247:CallbackPhase.dispatch.<locals>.<lambda>": 10,
+    "flow/run_state.py:423:RunStateRepository.publish": 11,
+    "flow/run_state.py:354:RunStateRepository._deliver": 41,
+    "flow/record.py:939:RunRecordWriter.append": 81,
+    "flow/record.py:351:_arrow_table": 21,
+    "flow/record.py:302:_arrow_type": 205,
+    "flow/record.py:290:_zone_name": 31,
+    "flow/context.py:86:AcceptedIntent.pending_id": 51,
+    "flow/loop.py:49:DueExecutionEnvelope.__post_init__": 11,
+    "flow/loop.py:54:DueExecutionEnvelope.sort_key": 9,
+    "flow/loop.py:34:OperationEnvelope.sort_key": 9,
+    "flow/simulation.py:257:SimulationFlow._dispatch_due": 10,
+    "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>": 10,
+    "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>": 10,
+    "flow/simulation.py:299:SimulationFlow._dispatch_pending": 10,
+    "flow/execution.py:40:ExecutionPhase.execute_due": 10,
+    "flow/execution.py:57:ExecutionPhase.execute_due.<locals>.<genexpr>": 40,
+    "flow/context.py:570:FlowContext.due_boundary": 150,
+    "flow/execution.py:60:ExecutionPhase.execute_due.<locals>.select_snapshot": 10,
+    "exchange/execution_table.py:316:exact_execution_snapshot": 10,
+    "exchange/execution_table.py:343:exact_execution_snapshot.<locals>.<genexpr>": 67,
+    "data/scan.py:638:exact_snapshot_rows": 10,
+    "data/scan.py:656:exact_snapshot_rows.<locals>.<genexpr>": 52,
+    "data/scan.py:660:exact_snapshot_rows.<locals>.<genexpr>": 30,
+    "data/scan.py:679:exact_snapshot_rows.<locals>.<genexpr>": 50,
+    "data/scan.py:677:exact_snapshot_rows.<locals>.<genexpr>": 52,
+    "exchange/execution_table.py:368:exact_execution_snapshot.<locals>.<genexpr>": 52,
+    "exchange/execution_table.py:385:exact_execution_snapshot.<locals>.<genexpr>": 10,
+    "exchange/execution_table.py:388:exact_execution_snapshot.<locals>.<genexpr>": 10,
+    "exchange/execution_table.py:391:exact_execution_snapshot.<locals>.<genexpr>": 10,
+    "flow/execution.py:96:ExecutionPhase.execute_due.<locals>.<genexpr>": 37,
+    "flow/execution.py:110:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/execution.py:376:ExecutionPhase._bound_rules": 10,
+    "orders/planning.py:375:plan_orders": 10,
+    "orders/planning.py:16:_decimal": 92,
+    "orders/planning.py:37:_prices": 10,
+    "orders/planning.py:26:_targets": 10,
+    "exchange/listings.py:487:ExchangeRulesView.quantity_for": 30,
+    "exchange/listings.py:541:_sizing_is_uniform": 159,
+    "exchange/listings.py:557:_sizing_is_uniform.<locals>.<genexpr>": 795,
+    "domain/instruments.py:90:base_quantity_for": 30,
+    "orders/planning.py:180:_apply_venue_rules": 10,
+    "exchange/listings.py:452:ExchangeRulesView.tradable": 42,
+    "exchange/listings.py:457:ExchangeRulesView.quantize": 42,
+    "exchange/listings.py:413:ExchangeRulesView.listing": 150,
+    "exchange/listings.py:116:TradeRule.quantize": 42,
+    "orders/planning.py:230:_apply_venue_rules.<locals>._delta": 126,
+    "orders/planning.py:138:_buy_order": 10,
+    "orders/planning.py:210:_apply_venue_rules.<locals>._fillable": 93,
+    "orders/planning.py:170:_buy_order.<locals>.<lambda>": 21,
+    "exchange/listings.py:460:ExchangeRulesView.notional": 129,
+    "domain/instruments.py:81:base_notional": 129,
+    "exchange/listings.py:493:ExchangeRulesView.charge": 108,
+    "exchange/listings.py:209:TradeRule.charge": 108,
+    "exchange/listings.py:206:TradeRule.cost": 108,
+    "exchange/costs.py:79:SideCost.charge": 108,
+    "exchange/costs.py:47:FillCost.__post_init__": 114,
+    "exchange/costs.py:32:_rate": 228,
+    "exchange/costs.py:51:FillCost.total": 150,
+    "orders/planning.py:299:_settle_payable": 10,
+    "orders/planning.py:272:_projected_cash": 10,
+    "orders/batches.py:41:OrderRequest.__post_init__": 42,
+    "orders/batches.py:18:_instrument": 48,
+    "orders/batches.py:9:_decimal": 186,
+    "orders/planning.py:483:plan_orders.<locals>.<lambda>": 42,
+    "orders/batches.py:97:OrderBatch.__post_init__": 10,
+    "orders/batches.py:102:OrderBatch.__post_init__.<locals>.<genexpr>": 52,
+    "orders/batches.py:106:OrderBatch.__post_init__.<locals>.<genexpr>": 16,
+    "orders/batches.py:111:OrderBatch.__post_init__.<locals>.<genexpr>": 52,
+    "orders/batches.py:114:OrderBatch.__post_init__.<locals>.<genexpr>": 16,
+    "flow/execution.py:127:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "exchange/venue.py:104:AcademicExchange.execute": 10,
+    "exchange/execution_table.py:434:accepted_requests": 10,
+    "exchange/execution_table.py:457:accepted_requests.<locals>.<lambda>": 42,
+    "exchange/execution_table.py:397:requested_rows": 10,
+    "exchange/venue.py:169:AcademicExchange._validate_rules": 10,
+    "exchange/venue.py:44:_side": 42,
+    "domain/values.py:357:side_of": 78,
+    "exchange/listings.py:167:TradeRule.permits_position": 36,
+    "exchange/listings.py:163:TradeRule.short_allowed": 36,
+    "exchange/listings.py:178:TradeRule.permits_quantity": 36,
+    "exchange/listings.py:434:ExchangeRulesView.stamped_kind": 36,
+    "exchange/fills.py:60:Fill.__post_init__": 42,
+    "exchange/fills.py:34:_decimal": 120,
+    "exchange/fills.py:114:FillBatch.__post_init__": 10,
+    "exchange/fills.py:115:FillBatch.__post_init__.<locals>.<genexpr>": 52,
+    "exchange/fills.py:125:FillBatch.__post_init__.<locals>.<genexpr>": 52,
+    "flow/execution.py:135:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "account/account.py:196:Account.prepare_fill": 10,
+    "exchange/fills.py:99:Fill.cash_delta": 78,
+    "account/account.py:228:Account.prepare_fill.<locals>.<genexpr>": 40,
+    "account/account.py:243:Account.prepare_fill.<locals>.<genexpr>": 52,
+    "account/account.py:39:PreparedAccountFill.__post_init__": 10,
+    "account/account.py:56:PreparedAccountFill.__post_init__.<locals>.<genexpr>": 52,
+    "account/account.py:60:PreparedAccountFill.__post_init__.<locals>.<genexpr>": 52,
+    "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/context.py:490:FlowContext.in_agenda_zone": 20,
+    "flow/run_state.py:445:RunStateRepository.prepare_account_commit": 10,
+    "flow/run_state.py:221:_fill_rows": 10,
+    "flow/execution.py:195:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "account/account.py:330:Account.commit_fill": 10,
+    "account/account.py:181:Account.state": 50,
+    "flow/execution.py:203:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/execution.py:337:ExecutionPhase._publish_account_commit": 10,
+    "flow/run_state.py:494:RunStateRepository.publish_account_commit": 10,
+    "flow/run_state.py:435:RunStateRepository._publish_infallible": 30,
+    "flow/execution.py:213:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/valuation.py:50:_marks_from_execution_snapshot": 10,
+    "flow/marking.py:45:SelectedMark.__post_init__": 42,
+    "flow/valuation.py:86:_marks_from_execution_snapshot.<locals>.<genexpr>": 52,
+    "flow/execution.py:226:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/marking.py:66:ValuationService.mark": 10,
+    "flow/marking.py:116:ValuationService._prices": 10,
+    "flow/marking.py:122:ValuationService._prices.<locals>.<genexpr>": 52,
+    "flow/marking.py:127:ValuationService._prices.<locals>.<genexpr>": 52,
+    "flow/marking.py:78:ValuationService.mark.<locals>.<genexpr>": 40,
+    "domain/values.py:388:Mark.__post_init__": 30,
+    "domain/values.py:372:_decimal": 100,
+    "flow/marking.py:114:ValuationService.mark.<locals>.<genexpr>": 40,
+    "domain/values.py:409:MarkBatch.__post_init__": 10,
+    "domain/values.py:410:MarkBatch.__post_init__.<locals>.<genexpr>": 40,
+    "domain/values.py:415:MarkBatch.__post_init__.<locals>.<genexpr>": 40,
+    "domain/values.py:418:MarkBatch.__post_init__.<locals>.<genexpr>": 40,
+    "flow/execution.py:236:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "account/account.py:248:Account.prepare_mark": 10,
+    "account/account.py:104:_require_marks_within": 10,
+    "domain/values.py:421:MarkBatch.quantities": 10,
+    "account/account.py:119:_require_marks_within.<locals>.<genexpr>": 10,
+    "account/snapshot.py:72:AccountMark.__post_init__": 10,
+    "account/snapshot.py:111:AccountState.__post_init__.<locals>.<genexpr>": 56,
+    "account/snapshot.py:115:AccountState.__post_init__.<locals>.<genexpr>": 28,
+    "account/snapshot.py:117:AccountState.__post_init__.<locals>.<genexpr>": 56,
+    "account/snapshot.py:120:AccountState.__post_init__.<locals>.<genexpr>": 28,
+    "account/account.py:71:PreparedAccountTransition.__post_init__": 10,
+    "account/account.py:90:_appends_one_mark": 10,
+    "flow/execution.py:273:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/valuation.py:225:ValuationPhase.measurement_recorder": 10,
+    "flow/run_state.py:512:RunStateRepository.prepare_marked": 10,
+    "flow/run_state.py:497:RunStateRepository._staged": 10,
+    "flow/execution.py:291:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "account/account.py:343:Account.commit_mark": 10,
+    "flow/execution.py:299:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/valuation.py:283:ValuationPhase.publish_marked": 10,
+    "flow/run_state.py:555:RunStateRepository.publish_marked": 10,
+    "flow/execution.py:307:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/valuation.py:300:ValuationPhase.monitor_after_commit": 10,
+    "evidence/artifacts.py:360:DueExecutionEvidence.__post_init__": 10,
+    "flow/execution.py:328:ExecutionPhase.execute_due.<locals>.<lambda>": 10,
+    "flow/run_state.py:652:RunStateRepository.prepare_feedback": 10,
+    "flow/run_state.py:680:RunStateRepository.publish_feedback": 10,
+    "flow/context.py:185:DueExecutionResult.__post_init__": 10,
+    "constraints/evaluation.py:361:build_account_view": 9,
+    "authoring.py:107:_tz_aware": 9,
+    "orders/batches.py:78:ZeroDeltaDiagnostic.__post_init__": 6,
+    "orders/planning.py:488:plan_orders.<locals>.<lambda>": 6,
+    "flow/simulation.py:269:SimulationFlow._finish": 1,
+    "flow/simulation.py:285:SimulationFlow._finish.<locals>.<lambda>": 1,
+    "flow/run_state.py:748:RunStateRepository.finalize": 1,
+    "flow/run_state.py:720:RunStateRepository.prepare_finalization": 1,
+    "flow/orchestration.py:659:_roster_report_or_stale": 1,
+    "flow/roster.py:152:roster_report": 2,
+    "flow/record.py:1727:freeze_strategy_record": 1,
+    "flow/run_state.py:160:AcceptedRunState.recorder_rows": 1,
+    "flow/record.py:679:RunRecordWriter.counts": 1,
+    "flow/record.py:1876:contract_report": 1,
+    "flow/context.py:180:DueExecutionResult.report": 10,
+    "flow/record.py:1937:contract_report.<locals>.<genexpr>": 11,
+    "flow/frozen.py:165:FrozenStrategy.identity": 1,
+    "flow/frozen.py:79:FrozenAgenda.encoded": 1,
+    "flow/record.py:973:RunRecordWriter.finish": 1,
+    "flow/record.py:883:RunRecordWriter._seal": 1,
+    "flow/record.py:622:_write_parquet": 3,
+    "flow/record.py:596:_unified_schema": 3,
+    "flow/record.py:610:_conform": 21,
+    "flow/record.py:675:RunRecordWriter.record_filename": 2,
+    "flow/record.py:932:RunRecordWriter._unlock": 1,
+    "data/scan.py:324:ScanSession.close": 1,
+    "flow/record.py:1312:read_strategy_record": 1,
+    "flow/record.py:1322:read_member_record": 1,
+    "flow/record.py:1342:_mapping_at": 1,
+    "flow/orchestration.py:117:StrategyOutcome.__post_init__": 1,
+    "cli/run.py:374:_strategy_envelope": 1,
+    "flow/record.py:1565:read_table": 43,
+    "flow/record.py:1547:_parts": 1,
+    "flow/record.py:1487:resolve_strategy_ref": 1,
+    "flow/record.py:1515:resolve_strategy_ref.<locals>.<genexpr>": 2,
+    "flow/record.py:1553:_table_files": 1,
+    "flow/record.py:391:_python_rows": 43,
+    "analysis/execution.py:19:fill_summary": 1,
+    "analysis/execution.py:97:_PerInstrument.__init__": 42,
+    "cli/run.py:428:_roster_envelope": 1,
+    "flow/orchestration.py:147:RunResult.ok": 1,
+    "flow/orchestration.py:150:RunResult.ok.<locals>.<genexpr>": 2,
+    "cli/envelope.py:102:success": 1,
+    "cli/envelope.py:146:emit": 1
+  },
+  "constructors": {
+    "workspace.py:159:Workspace.__init__": 2,
+    "exchange/execution_table.py:47:ExecutionTableSpec.__post_init__": 1,
+    "exchange/conventions.py:121:FillConvention.__post_init__": 1,
+    "exchange/execution_table.py:118:ExecutionInputRegistration.__post_init__": 1,
+    "account/snapshot.py:33:AccountSnapshot.__post_init__": 15,
+    "domain/values.py:126:LocalInstantDeclaration.__post_init__": 20,
+    "domain/agendas.py:92:OperationOccurrence.__post_init__": 20,
+    "domain/agendas.py:146:OperationAgenda.__post_init__": 2,
+    "portfolio/budgets.py:58:Budget.__post_init__": 4,
+    "data/lookback.py:35:RowsLookback.__post_init__": 17,
+    "authoring.py:186:DatasetInput.__post_init__": 17,
+    "agent/sample/exchange.py:23:SampleExchange.__init__": 2,
+    "exchange/listings.py:97:TradeRule.__post_init__": 20,
+    "exchange/venue.py:55:AcademicExchange.__post_init__": 2,
+    "exchange/listings.py:359:ExchangeRulesView.__post_init__": 22,
+    "flow/run.py:164:StrategyConfig.__post_init__": 1,
+    "flow/frozen.py:54:FrozenAgenda.__post_init__": 1,
+    "data/scan.py:351:_Borrowed.__init__": 13,
+    "exchange/conventions.py:52:ExecutionHorizon.__init__": 2,
+    "flow/run.py:142:ConstraintSet.__post_init__": 1,
+    "flow/frozen.py:128:FrozenStrategy.__post_init__": 1,
+    "domain/identifiers.py:97:ModelStateRef.__post_init__": 23,
+    "flow/frozen.py:288:FrozenRun.__post_init__": 1,
+    "flow/orchestration.py:85:_FrozenCatalog.__init__": 1,
+    "data/scan.py:252:ScanSession.__init__": 1,
+    "data/store.py:141:DuckDbObservationStore.__init__": 1,
+    "account/snapshot.py:101:AccountState.__post_init__": 31,
+    "flow/run_state.py:285:RunStateRepository.__init__": 1,
+    "flow/run_state.py:114:AcceptedRunState.__post_init__": 42,
+    "account/account.py:164:Account.__init__": 1,
+    "flow/simulation.py:96:SimulationFlow.__init__": 1,
+    "flow/context.py:457:FlowContext.__init__": 1,
+    "flow/valuation.py:106:ValuationPhase.__init__": 1,
+    "flow/callback.py:67:CallbackPhase.__init__": 1,
+    "flow/execution.py:36:ExecutionPhase.__init__": 1,
+    "flow/loop.py:30:OperationEnvelope.__post_init__": 10,
+    "data/windows.py:30:ModelWindow.__init__": 10,
+    "evidence/recorder.py:26:InvocationRecorder.__init__": 20,
+    "authoring.py:462:ConstraintBounds.__post_init__": 20,
+    "authoring.py:398:EconomicAccountView.__post_init__": 10,
+    "account/history.py:63:AccountHistory.__init__": 10,
+    "calls.py:244:StrategyModelContext.__post_init__": 10,
+    "data/panel.py:284:_LazyColumns.__init__": 100,
+    "authoring.py:846:Rebalance.__post_init__": 10,
+    "portfolio/intents.py:25:PortfolioTarget.__post_init__": 30,
+    "portfolio/intents.py:39:IntentSourceRef.__post_init__": 20,
+    "flow/context.py:73:AcceptedIntent.__post_init__": 10,
+    "evidence/artifacts.py:288:CallbackEvidence.__post_init__": 10,
+    "flow/run_state.py:75:LifecycleTrace.__post_init__": 40,
+    "flow/loop.py:49:DueExecutionEnvelope.__post_init__": 11,
+    "exchange/costs.py:47:FillCost.__post_init__": 114,
+    "orders/batches.py:41:OrderRequest.__post_init__": 42,
+    "orders/batches.py:97:OrderBatch.__post_init__": 10,
+    "exchange/fills.py:60:Fill.__post_init__": 42,
+    "exchange/fills.py:114:FillBatch.__post_init__": 10,
+    "account/account.py:39:PreparedAccountFill.__post_init__": 10,
+    "flow/marking.py:45:SelectedMark.__post_init__": 42,
+    "domain/values.py:388:Mark.__post_init__": 30,
+    "domain/values.py:409:MarkBatch.__post_init__": 10,
+    "account/snapshot.py:72:AccountMark.__post_init__": 10,
+    "account/account.py:71:PreparedAccountTransition.__post_init__": 10,
+    "evidence/artifacts.py:360:DueExecutionEvidence.__post_init__": 10,
+    "flow/context.py:185:DueExecutionResult.__post_init__": 10,
+    "orders/batches.py:78:ZeroDeltaDiagnostic.__post_init__": 6,
+    "flow/orchestration.py:117:StrategyOutcome.__post_init__": 1,
+    "analysis/execution.py:97:_PerInstrument.__init__": 42
+  },
+  "edges": [
+    {
+      "caller": "cli/main.py:256:main",
+      "callee": "cli/main.py:188:build_parser",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/new.py:261:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/register.py:49:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/check.py:215:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/run.py:44:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/list_.py:109:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/show.py:70:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/rm.py:60:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:188:build_parser",
+      "callee": "cli/skill.py:227:add_arguments",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:256:main",
+      "callee": "cli/main.py:223:_resolve_project_root",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:256:main",
+      "callee": "cli/run.py:220:run",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "cli/run.py:200:refuse_a_path",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "workspace.py:219:Workspace.open",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:219:Workspace.open",
+      "callee": "workspace.py:186:Workspace._from_state",
+      "count": 2
+    },
+    {
+      "caller": "workspace.py:186:Workspace._from_state",
+      "callee": "workspace.py:159:Workspace.__init__",
+      "count": 2
+    },
+    {
+      "caller": "workspace.py:219:Workspace.open",
+      "callee": "workspace.py:1090:Workspace._read",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:1090:Workspace._read",
+      "callee": "workspace.py:206:Workspace.path",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:1090:Workspace._read",
+      "callee": "workspace_document.py:375:read_workspace",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:375:read_workspace",
+      "callee": "workspace_document.py:392:_linked",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "workspace_document.py:359:_decoded",
+      "count": 7
+    },
+    {
+      "caller": "data/sources.py:37:SourceSpec._clean_id",
+      "callee": "domain/identifiers.py:35:source_id",
+      "count": 2
+    },
+    {
+      "caller": "domain/identifiers.py:35:source_id",
+      "callee": "domain/identifiers.py:17:_clean",
+      "count": 6
+    },
+    {
+      "caller": "domain/identifiers.py:35:source_id",
+      "callee": "domain/identifiers.py:38:source_id.<locals>.<genexpr>",
+      "count": 135
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "workspace_document.py:104:DatasetCodec.to_domain",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:104:DatasetCodec.to_domain",
+      "callee": "data/datasets.py:153:DatasetRegistration.of",
+      "count": 1
+    },
+    {
+      "caller": "data/datasets.py:153:DatasetRegistration.of",
+      "callee": "data/datasets.py:293:parse_grain",
+      "count": 1
+    },
+    {
+      "caller": "data/datasets.py:153:DatasetRegistration.of",
+      "callee": "data/datasets.py:181:DatasetRegistration.of.<locals>.<genexpr>",
+      "count": 27
+    },
+    {
+      "caller": "data/datasets.py:153:DatasetRegistration.of",
+      "callee": "domain/identifiers.py:27:dataset_id",
+      "count": 1
+    },
+    {
+      "caller": "domain/identifiers.py:27:dataset_id",
+      "callee": "domain/identifiers.py:17:_clean",
+      "count": 20
+    },
+    {
+      "caller": "domain/identifiers.py:27:dataset_id",
+      "callee": "domain/identifiers.py:30:dataset_id.<locals>.<genexpr>",
+      "count": 280
+    },
+    {
+      "caller": "data/datasets.py:153:DatasetRegistration.of",
+      "callee": "domain/identifiers.py:35:source_id",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:104:DatasetCodec.to_domain",
+      "callee": "data/datasets.py:234:DatasetRegistration.with_schema",
+      "count": 1
+    },
+    {
+      "caller": "data/datasets.py:234:DatasetRegistration.with_schema",
+      "callee": "data/scan.py:428:ProjectionSchema.ok",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:104:DatasetCodec.to_domain",
+      "callee": "data/datasets.py:260:DatasetRegistration.with_span",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "domain/identifiers.py:35:source_id",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "workspace_document.py:198:ExecutionInputCodec.to_domain",
+      "count": 1
+    },
+    {
+      "caller": "exchange/execution_table.py:47:ExecutionTableSpec.__post_init__",
+      "callee": "exchange/execution_table.py:31:_field",
+      "count": 5
+    },
+    {
+      "caller": "workspace_document.py:198:ExecutionInputCodec.to_domain",
+      "callee": "workspace_document.py:166:FillCodec.to_domain",
+      "count": 1
+    },
+    {
+      "caller": "workspace_document.py:198:ExecutionInputCodec.to_domain",
+      "callee": "exchange/execution_table.py:128:ExecutionInputRegistration.of",
+      "count": 1
+    },
+    {
+      "caller": "exchange/execution_table.py:128:ExecutionInputRegistration.of",
+      "callee": "domain/identifiers.py:43:execution_input_id",
+      "count": 1
+    },
+    {
+      "caller": "domain/identifiers.py:43:execution_input_id",
+      "callee": "domain/identifiers.py:17:_clean",
+      "count": 5
+    },
+    {
+      "caller": "domain/identifiers.py:43:execution_input_id",
+      "callee": "domain/identifiers.py:46:execution_input_id.<locals>.<genexpr>",
+      "count": 85
+    },
+    {
+      "caller": "extension/component.py:58:ComponentRef._clean_id",
+      "callee": "domain/identifiers.py:51:component_id",
+      "count": 2
+    },
+    {
+      "caller": "domain/identifiers.py:51:component_id",
+      "callee": "domain/identifiers.py:17:_clean",
+      "count": 9
+    },
+    {
+      "caller": "domain/identifiers.py:51:component_id",
+      "callee": "domain/identifiers.py:53:component_id.<locals>.<genexpr>",
+      "count": 159
+    },
+    {
+      "caller": "extension/component.py:77:ComponentRef._normalized",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 2
+    },
+    {
+      "caller": "domain/values.py:305:normalize_memory",
+      "callee": "domain/values.py:310:normalize_memory.<locals>.visit",
+      "count": 77
+    },
+    {
+      "caller": "domain/values.py:310:normalize_memory.<locals>.visit",
+      "callee": "domain/values.py:332:normalize_memory.<locals>.visit.<locals>.<genexpr>",
+      "count": 14
+    },
+    {
+      "caller": "domain/values.py:310:normalize_memory.<locals>.visit",
+      "callee": "domain/values.py:310:normalize_memory.<locals>.visit",
+      "count": 44
+    },
+    {
+      "caller": "extension/component.py:70:ComponentRef._hex_digest",
+      "callee": "extension/component.py:73:ComponentRef._hex_digest.<locals>.<genexpr>",
+      "count": 130
+    },
+    {
+      "caller": "flow/run.py:361:RunDefinition._from_the_stored_spelling",
+      "callee": "flow/run.py:370:RunDefinition._from_the_stored_spelling.<locals>.<genexpr>",
+      "count": 4
+    },
+    {
+      "caller": "account/snapshot.py:33:AccountSnapshot.__post_init__",
+      "callee": "account/snapshot.py:15:_decimal",
+      "count": 45
+    },
+    {
+      "caller": "flow/run.py:447:RunDefinition._wall_time",
+      "callee": "flow/run.py:307:_naive_wall_time",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:481:RunDefinition._whole_declaration",
+      "callee": "flow/run.py:76:_require_timezone",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:481:RunDefinition._whole_declaration",
+      "callee": "flow/run.py:85:_require_period",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:85:_require_period",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 6
+    },
+    {
+      "caller": "flow/run.py:481:RunDefinition._whole_declaration",
+      "callee": "flow/run.py:95:_require_account",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:481:RunDefinition._whole_declaration",
+      "callee": "flow/run.py:111:_require_instruments",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:111:_require_instruments",
+      "callee": "flow/run.py:114:_require_instruments.<locals>.<genexpr>",
+      "count": 33
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "domain/identifiers.py:51:component_id",
+      "count": 4
+    },
+    {
+      "caller": "workspace_document.py:392:_linked",
+      "callee": "domain/identifiers.py:43:execution_input_id",
+      "count": 2
+    },
+    {
+      "caller": "workspace_document.py:375:read_workspace",
+      "callee": "workspace_document.py:389:read_workspace.<locals>.<genexpr>",
+      "count": 6
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "workspace.py:482:Workspace.run_definition",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:482:Workspace.run_definition",
+      "callee": "workspace.py:1011:Workspace._config_lookup",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "flow/judgments.py:57:judgments",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "workspace.py:268:Workspace.datasets",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:268:Workspace.datasets",
+      "callee": "workspace.py:271:Workspace.datasets.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:213:_agenda_once",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:293:_members",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:293:_members",
+      "callee": "flow/judgments.py:296:_members.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/judgments.py:293:_members",
+      "callee": "flow/judgments.py:297:_members.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:100:judgments.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:86:judgments.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:86:judgments.<locals>.<lambda>",
+      "callee": "flow/judgments.py:137:_judge_universe",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:87:judgments.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:87:judgments.<locals>.<lambda>",
+      "callee": "flow/judgments.py:184:_judge_period",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:90:judgments.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:90:judgments.<locals>.<lambda>",
+      "callee": "flow/judgments.py:242:_judge_execution_ordering",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:242:_judge_execution_ordering",
+      "callee": "workspace.py:416:Workspace.execution_input",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:416:Workspace.execution_input",
+      "callee": "domain/identifiers.py:43:execution_input_id",
+      "count": 2
+    },
+    {
+      "caller": "flow/judgments.py:242:_judge_execution_ordering",
+      "callee": "flow/judgments.py:228:_agenda_once.<locals>.once",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:228:_agenda_once.<locals>.once",
+      "callee": "flow/preflight.py:49:derived_agenda",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:49:derived_agenda",
+      "callee": "flow/preflight.py:81:derived_agenda.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "flow/preflight.py:81:derived_agenda.<locals>.<genexpr>",
+      "callee": "flow/preflight.py:76:derived_agenda.<locals>._local_date",
+      "count": 20
+    },
+    {
+      "caller": "flow/preflight.py:49:derived_agenda",
+      "callee": "flow/run.py:552:RunDefinition.agenda_id",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:49:derived_agenda",
+      "callee": "domain/agendas.py:234:OperationAgenda.daily",
+      "count": 2
+    },
+    {
+      "caller": "domain/agendas.py:234:OperationAgenda.daily",
+      "callee": "domain/agendas.py:288:OperationAgenda.daily.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "domain/agendas.py:288:OperationAgenda.daily.<locals>.<genexpr>",
+      "callee": "domain/values.py:169:declare_local_instant",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:169:declare_local_instant",
+      "callee": "domain/values.py:55:_zone",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:169:declare_local_instant",
+      "callee": "domain/values.py:106:_format_offset",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:126:LocalInstantDeclaration.__post_init__",
+      "callee": "domain/values.py:41:_require_date",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:126:LocalInstantDeclaration.__post_init__",
+      "callee": "domain/values.py:47:_require_wall_time",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:126:LocalInstantDeclaration.__post_init__",
+      "callee": "domain/values.py:92:_parse_offset",
+      "count": 20
+    },
+    {
+      "caller": "domain/values.py:126:LocalInstantDeclaration.__post_init__",
+      "callee": "domain/values.py:55:_zone",
+      "count": 20
+    },
+    {
+      "caller": "domain/agendas.py:92:OperationOccurrence.__post_init__",
+      "callee": "domain/agendas.py:69:_require_identifier",
+      "count": 20
+    },
+    {
+      "caller": "domain/agendas.py:69:_require_identifier",
+      "callee": "domain/agendas.py:72:_require_identifier.<locals>.<genexpr>",
+      "count": 748
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:69:_require_identifier",
+      "count": 2
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:59:_require_timezone",
+      "count": 2
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:154:OperationAgenda.__post_init__.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:156:OperationAgenda.__post_init__.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:158:OperationAgenda.__post_init__.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "domain/agendas.py:146:OperationAgenda.__post_init__",
+      "callee": "domain/agendas.py:123:OperationOccurrence.sort_key",
+      "count": 20
+    },
+    {
+      "caller": "domain/agendas.py:123:OperationOccurrence.sort_key",
+      "callee": "domain/agendas.py:103:OperationOccurrence.utc_evaluation_time",
+      "count": 39
+    },
+    {
+      "caller": "domain/agendas.py:103:OperationOccurrence.utc_evaluation_time",
+      "callee": "domain/values.py:155:LocalInstantDeclaration.utc_instant",
+      "count": 49
+    },
+    {
+      "caller": "domain/values.py:155:LocalInstantDeclaration.utc_instant",
+      "callee": "domain/values.py:148:LocalInstantDeclaration.instant",
+      "count": 49
+    },
+    {
+      "caller": "domain/values.py:148:LocalInstantDeclaration.instant",
+      "callee": "domain/values.py:55:_zone",
+      "count": 219
+    },
+    {
+      "caller": "domain/agendas.py:123:OperationOccurrence.sort_key",
+      "callee": "domain/agendas.py:42:operation_role_priority",
+      "count": 39
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:103:judgments.<locals>.<genexpr>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:103:judgments.<locals>.<genexpr>.<lambda>",
+      "callee": "flow/judgments.py:301:_judge_member_datasets",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "flow/judgments.py:133:_key",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "workspace.py:448:Workspace.component",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:448:Workspace.component",
+      "callee": "domain/identifiers.py:51:component_id",
+      "count": 3
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "extension/loading.py:289:load_strategy_model",
+      "count": 1
+    },
+    {
+      "caller": "extension/loading.py:289:load_strategy_model",
+      "callee": "extension/loading.py:55:_load",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:55:_load",
+      "callee": "extension/fingerprint.py:27:fingerprint_component",
+      "count": 6
+    },
+    {
+      "caller": "extension/fingerprint.py:27:fingerprint_component",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 8
+    },
+    {
+      "caller": "portfolio/budgets.py:58:Budget.__post_init__",
+      "callee": "portfolio/budgets.py:10:_finite_decimal",
+      "count": 16
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:1:<module>",
+      "callee": "agent/sample/reversal_5d.py:40:SampleReversal5d",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:289:load_strategy_model",
+      "callee": "extension/loading.py:206:_validate_callback_signature",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:206:_validate_callback_signature",
+      "callee": "extension/loading.py:195:accepts_contract_call",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:195:accepts_contract_call",
+      "callee": "extension/loading.py:165:positional_arity",
+      "count": 8
+    },
+    {
+      "caller": "extension/loading.py:289:load_strategy_model",
+      "callee": "extension/loading.py:237:_requirements",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:237:_requirements",
+      "callee": "authoring.py:313:Model.requirements",
+      "count": 4
+    },
+    {
+      "caller": "authoring.py:313:Model.requirements",
+      "callee": "agent/sample/reversal_5d.py:43:SampleReversal5d.inputs",
+      "count": 7
+    },
+    {
+      "caller": "authoring.py:186:DatasetInput.__post_init__",
+      "callee": "authoring.py:113:_identifier",
+      "count": 17
+    },
+    {
+      "caller": "authoring.py:113:_identifier",
+      "callee": "authoring.py:114:_identifier.<locals>.<genexpr>",
+      "count": 1012
+    },
+    {
+      "caller": "authoring.py:186:DatasetInput.__post_init__",
+      "callee": "authoring.py:119:_unique_identifiers",
+      "count": 17
+    },
+    {
+      "caller": "authoring.py:119:_unique_identifiers",
+      "callee": "authoring.py:122:_unique_identifiers.<locals>.<genexpr>",
+      "count": 34
+    },
+    {
+      "caller": "authoring.py:122:_unique_identifiers.<locals>.<genexpr>",
+      "callee": "authoring.py:113:_identifier",
+      "count": 17
+    },
+    {
+      "caller": "authoring.py:186:DatasetInput.__post_init__",
+      "callee": "authoring.py:130:_reject_reserved",
+      "count": 17
+    },
+    {
+      "caller": "authoring.py:313:Model.requirements",
+      "callee": "authoring.py:315:Model.requirements.<locals>.<genexpr>",
+      "count": 14
+    },
+    {
+      "caller": "authoring.py:315:Model.requirements.<locals>.<genexpr>",
+      "callee": "authoring.py:264:requirements_for",
+      "count": 7
+    },
+    {
+      "caller": "authoring.py:264:requirements_for",
+      "callee": "authoring.py:273:requirements_for.<locals>.<genexpr>",
+      "count": 34
+    },
+    {
+      "caller": "authoring.py:273:requirements_for.<locals>.<genexpr>",
+      "callee": "data/requirements.py:46:DataRequirement.of",
+      "count": 17
+    },
+    {
+      "caller": "data/requirements.py:46:DataRequirement.of",
+      "callee": "data/requirements.py:13:_name",
+      "count": 17
+    },
+    {
+      "caller": "data/requirements.py:13:_name",
+      "callee": "data/requirements.py:16:_name.<locals>.<genexpr>",
+      "count": 102
+    },
+    {
+      "caller": "data/requirements.py:46:DataRequirement.of",
+      "callee": "domain/identifiers.py:27:dataset_id",
+      "count": 17
+    },
+    {
+      "caller": "extension/loading.py:237:_requirements",
+      "callee": "extension/loading.py:259:_requirements.<locals>.<genexpr>",
+      "count": 8
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "flow/judgments.py:447:_first_decision",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:447:_first_decision",
+      "callee": "flow/judgments.py:228:_agenda_once.<locals>.once",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:447:_first_decision",
+      "callee": "flow/judgments.py:465:_first_decision.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "flow/judgments.py:465:_first_decision.<locals>.<genexpr>",
+      "callee": "domain/values.py:148:LocalInstantDeclaration.instant",
+      "count": 10
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "authoring.py:313:Model.requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:301:_judge_member_datasets",
+      "callee": "flow/judgments.py:158:_instant",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:109:judgments.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:109:judgments.<locals>.<lambda>",
+      "callee": "flow/judgments.py:471:_judge_weights",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:57:judgments",
+      "callee": "flow/judgments.py:110:judgments.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/judgments.py:110:judgments.<locals>.<lambda>",
+      "callee": "flow/judgments.py:419:_judge_outputs",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "cli/run.py:161:_refuse_if_judged",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "flow/orchestration.py:62:preflight_run",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:62:preflight_run",
+      "callee": "flow/preflight.py:664:preflight_run",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:429:_require_execution_authority",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:49:derived_agenda",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:655:_registered_exchange",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:655:_registered_exchange",
+      "callee": "workspace.py:448:Workspace.component",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "extension/loading.py:381:load_exchange",
+      "count": 1
+    },
+    {
+      "caller": "extension/loading.py:381:load_exchange",
+      "callee": "extension/loading.py:55:_load",
+      "count": 2
+    },
+    {
+      "caller": "agent/sample/exchange.py:1:<module>",
+      "callee": "agent/sample/exchange.py:20:SampleExchange",
+      "count": 2
+    },
+    {
+      "caller": "extension/loading.py:55:_load",
+      "callee": "agent/sample/exchange.py:23:SampleExchange.__init__",
+      "count": 2
+    },
+    {
+      "caller": "extension/loading.py:381:load_exchange",
+      "callee": "extension/loading.py:384:load_exchange.<locals>.<genexpr>",
+      "count": 4
+    },
+    {
+      "caller": "extension/loading.py:381:load_exchange",
+      "callee": "exchange/venue.py:81:AcademicExchange.rules",
+      "count": 2
+    },
+    {
+      "caller": "exchange/listings.py:359:ExchangeRulesView.__post_init__",
+      "callee": "exchange/listings.py:370:ExchangeRulesView._as_registry",
+      "count": 22
+    },
+    {
+      "caller": "extension/loading.py:381:load_exchange",
+      "callee": "extension/loading.py:237:_requirements",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "workspace.py:416:Workspace.execution_input",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "exchange/execution_table.py:276:validate_execution_input",
+      "count": 1
+    },
+    {
+      "caller": "exchange/execution_table.py:276:validate_execution_input",
+      "callee": "exchange/execution_table.py:194:_schema_diagnosis",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:194:_schema_diagnosis",
+      "callee": "exchange/execution_table.py:138:_schema_failures",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:138:_schema_failures",
+      "callee": "data/scan.py:364:describe",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:364:describe",
+      "callee": "data/scan.py:205:_open",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:205:_open",
+      "callee": "data/scan.py:210:_require_path",
+      "count": 7
+    },
+    {
+      "caller": "data/scan.py:205:_open",
+      "callee": "data/scan.py:177:_configure",
+      "count": 7
+    },
+    {
+      "caller": "data/scan.py:364:describe",
+      "callee": "data/scan.py:157:_relation",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:364:describe",
+      "callee": "data/scan.py:65:_normalize",
+      "count": 8
+    },
+    {
+      "caller": "exchange/execution_table.py:276:validate_execution_input",
+      "callee": "domain/errors.py:179:Diagnosis.ok",
+      "count": 6
+    },
+    {
+      "caller": "exchange/execution_table.py:276:validate_execution_input",
+      "callee": "exchange/execution_table.py:203:_key_diagnosis",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:203:_key_diagnosis",
+      "callee": "data/scan.py:704:key_check",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:704:key_check",
+      "callee": "data/scan.py:712:key_check.<locals>.<genexpr>",
+      "count": 6
+    },
+    {
+      "caller": "data/scan.py:712:key_check.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:704:key_check",
+      "callee": "data/scan.py:713:key_check.<locals>.<genexpr>",
+      "count": 6
+    },
+    {
+      "caller": "data/scan.py:713:key_check.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:704:key_check",
+      "callee": "data/scan.py:205:_open",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:704:key_check",
+      "callee": "data/scan.py:157:_relation",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:203:_key_diagnosis",
+      "callee": "domain/errors.py:268:collector",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:203:_key_diagnosis",
+      "callee": "domain/errors.py:258:_Collector.done",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:276:validate_execution_input",
+      "callee": "exchange/execution_table.py:243:_price_diagnosis",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:243:_price_diagnosis",
+      "callee": "data/scan.py:775:positive_finite_when_true",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:775:positive_finite_when_true",
+      "callee": "data/scan.py:151:_quote",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:775:positive_finite_when_true",
+      "callee": "data/scan.py:788:positive_finite_when_true.<locals>.<genexpr>",
+      "count": 6
+    },
+    {
+      "caller": "data/scan.py:788:positive_finite_when_true.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:775:positive_finite_when_true",
+      "callee": "data/scan.py:205:_open",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:775:positive_finite_when_true",
+      "callee": "data/scan.py:157:_relation",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:243:_price_diagnosis",
+      "callee": "domain/errors.py:268:collector",
+      "count": 2
+    },
+    {
+      "caller": "exchange/execution_table.py:243:_price_diagnosis",
+      "callee": "domain/errors.py:258:_Collector.done",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "domain/errors.py:183:Diagnosis.raise_if_failed",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:326:_validate_execution_requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:372:_validate_instrument_universe",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:372:_validate_instrument_universe",
+      "callee": "flow/preflight.py:385:_validate_instrument_universe.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:372:_validate_instrument_universe",
+      "callee": "flow/preflight.py:386:_validate_instrument_universe.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:386:_validate_instrument_universe.<locals>.<genexpr>",
+      "callee": "exchange/listings.py:149:TradeRule.tradable",
+      "count": 10
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:207:_validate_initial_account",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:708:preflight_run.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:708:preflight_run.<locals>.<genexpr>",
+      "callee": "flow/preflight.py:544:_freeze_strategy",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "workspace.py:448:Workspace.component",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "extension/loading.py:289:load_strategy_model",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:156:_validate_initial_model_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:156:_validate_initial_model_state",
+      "callee": "authoring.py:977:StrategyModel.save_payload",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:156:_validate_initial_model_state",
+      "callee": "extension/loading.py:289:load_strategy_model",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:156:_validate_initial_model_state",
+      "callee": "authoring.py:985:StrategyModel.load_payload",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:569:_freeze_strategy.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "authoring.py:313:Model.requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:571:_freeze_strategy.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:575:_freeze_strategy.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:94:_freeze_agenda",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:94:_freeze_agenda",
+      "callee": "domain/values.py:148:LocalInstantDeclaration.instant",
+      "count": 10
+    },
+    {
+      "caller": "flow/preflight.py:94:_freeze_agenda",
+      "callee": "domain/agendas.py:203:OperationAgenda.inclusive_slice",
+      "count": 1
+    },
+    {
+      "caller": "domain/agendas.py:203:OperationAgenda.inclusive_slice",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 2
+    },
+    {
+      "caller": "domain/agendas.py:203:OperationAgenda.inclusive_slice",
+      "callee": "domain/agendas.py:210:OperationAgenda.inclusive_slice.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "domain/agendas.py:210:OperationAgenda.inclusive_slice.<locals>.<genexpr>",
+      "callee": "domain/agendas.py:103:OperationOccurrence.utc_evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/preflight.py:94:_freeze_agenda",
+      "callee": "domain/agendas.py:169:OperationAgenda.content_identity",
+      "count": 1
+    },
+    {
+      "caller": "domain/agendas.py:169:OperationAgenda.content_identity",
+      "callee": "domain/agendas.py:107:OperationOccurrence.content_identity",
+      "count": 10
+    },
+    {
+      "caller": "domain/agendas.py:107:OperationOccurrence.content_identity",
+      "callee": "domain/values.py:159:LocalInstantDeclaration.identity",
+      "count": 10
+    },
+    {
+      "caller": "domain/agendas.py:107:OperationOccurrence.content_identity",
+      "callee": "domain/agendas.py:48:_identity",
+      "count": 10
+    },
+    {
+      "caller": "domain/agendas.py:169:OperationAgenda.content_identity",
+      "callee": "domain/agendas.py:48:_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:94:_freeze_agenda",
+      "callee": "domain/agendas.py:187:OperationAgenda.provenance_identity",
+      "count": 1
+    },
+    {
+      "caller": "domain/agendas.py:187:OperationAgenda.provenance_identity",
+      "callee": "domain/agendas.py:169:OperationAgenda.content_identity",
+      "count": 1
+    },
+    {
+      "caller": "domain/agendas.py:187:OperationAgenda.provenance_identity",
+      "callee": "domain/agendas.py:48:_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:544:_freeze_strategy",
+      "callee": "flow/preflight.py:474:_validate_execution_targets",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:474:_validate_execution_targets",
+      "callee": "exchange/execution_table.py:85:ExecutionInputRegistration.build_horizon",
+      "count": 1
+    },
+    {
+      "caller": "exchange/execution_table.py:85:ExecutionInputRegistration.build_horizon",
+      "callee": "exchange/conventions.py:191:FillConvention.build_horizon",
+      "count": 2
+    },
+    {
+      "caller": "exchange/conventions.py:191:FillConvention.build_horizon",
+      "callee": "data/scan.py:596:candidate_instants",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:596:candidate_instants",
+      "callee": "data/scan.py:151:_quote",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:596:candidate_instants",
+      "callee": "data/scan.py:351:_Borrowed.__init__",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:351:_Borrowed.__init__",
+      "callee": "data/scan.py:205:_open",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:596:candidate_instants",
+      "callee": "data/scan.py:157:_relation",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:596:candidate_instants",
+      "callee": "data/scan.py:359:_Borrowed.close",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:596:candidate_instants",
+      "callee": "data/scan.py:635:candidate_instants.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "exchange/conventions.py:191:FillConvention.build_horizon",
+      "callee": "exchange/conventions.py:221:FillConvention.build_horizon.<locals>.<genexpr>",
+      "count": 22
+    },
+    {
+      "caller": "exchange/conventions.py:191:FillConvention.build_horizon",
+      "callee": "exchange/conventions.py:52:ExecutionHorizon.__init__",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:474:_validate_execution_targets",
+      "callee": "flow/preflight.py:496:_validate_execution_targets.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:496:_validate_execution_targets.<locals>.<genexpr>",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "callee": "domain/values.py:148:LocalInstantDeclaration.instant",
+      "count": 150
+    },
+    {
+      "caller": "flow/preflight.py:496:_validate_execution_targets.<locals>.<genexpr>",
+      "callee": "exchange/execution_table.py:101:ExecutionInputRegistration.select_target",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:101:ExecutionInputRegistration.select_target",
+      "callee": "exchange/conventions.py:224:FillConvention.select_target",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:61:ExecutionHorizon.after",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:261:FillConvention.select_target.<locals>.<genexpr>",
+      "count": 130
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:89:ExecutionHorizon.validate_calendar",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:89:ExecutionHorizon.validate_calendar",
+      "callee": "exchange/conventions.py:83:ExecutionHorizon.local_target",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:83:ExecutionHorizon.local_target",
+      "callee": "exchange/conventions.py:160:FillConvention.resolve_local_target",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:265:FillConvention.select_target.<locals>.resolve",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:265:FillConvention.select_target.<locals>.resolve",
+      "callee": "exchange/conventions.py:83:ExecutionHorizon.local_target",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:148:FillConvention.declaration_identity",
+      "count": 20
+    },
+    {
+      "caller": "exchange/conventions.py:224:FillConvention.select_target",
+      "callee": "exchange/conventions.py:293:FillConvention.select_target.<locals>.<genexpr>",
+      "count": 140
+    },
+    {
+      "caller": "flow/frozen.py:128:FrozenStrategy.__post_init__",
+      "callee": "flow/run.py:122:_require_requirements",
+      "count": 2
+    },
+    {
+      "caller": "flow/run.py:122:_require_requirements",
+      "callee": "flow/run.py:123:_require_requirements.<locals>.<genexpr>",
+      "count": 5
+    },
+    {
+      "caller": "flow/frozen.py:128:FrozenStrategy.__post_init__",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:128:FrozenStrategy.__post_init__",
+      "callee": "flow/run.py:66:_model_state_ref",
+      "count": 1
+    },
+    {
+      "caller": "flow/run.py:66:_model_state_ref",
+      "callee": "flow/run_state.py:45:prepare_model_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:45:prepare_model_state",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 23
+    },
+    {
+      "caller": "domain/identifiers.py:97:ModelStateRef.__post_init__",
+      "callee": "domain/identifiers.py:98:ModelStateRef.__post_init__.<locals>.<genexpr>",
+      "count": 1495
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:143:_freeze_sources",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:143:_freeze_sources",
+      "callee": "flow/preflight.py:122:_validate_requirement",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:122:_validate_requirement",
+      "callee": "workspace.py:291:Workspace.dataset",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:291:Workspace.dataset",
+      "callee": "domain/identifiers.py:27:dataset_id",
+      "count": 2
+    },
+    {
+      "caller": "workspace.py:291:Workspace.dataset",
+      "callee": "workspace.py:1345:_require_span",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:122:_validate_requirement",
+      "callee": "data/datasets.py:331:require_grain",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:122:_validate_requirement",
+      "callee": "data/datasets.py:309:lookback_fits_grain",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:122:_validate_requirement",
+      "callee": "workspace.py:389:Workspace.source",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:389:Workspace.source",
+      "callee": "domain/identifiers.py:35:source_id",
+      "count": 2
+    },
+    {
+      "caller": "flow/preflight.py:143:_freeze_sources",
+      "callee": "workspace.py:389:Workspace.source",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:143:_freeze_sources",
+      "callee": "flow/preflight.py:153:_freeze_sources.<locals>.<genexpr>",
+      "count": 3
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "workspace.py:291:Workspace.dataset",
+      "count": 1
+    },
+    {
+      "caller": "flow/preflight.py:664:preflight_run",
+      "callee": "flow/preflight.py:727:preflight_run.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/run.py:70:_require_id",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:290:FrozenRun.__post_init__.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:294:FrozenRun.__post_init__.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/run.py:85:_require_period",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/run.py:95:_require_account",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/run.py:111:_require_instruments",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/run.py:122:_require_requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:330:FrozenRun.__post_init__.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:340:FrozenRun.__post_init__.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/frozen.py:288:FrozenRun.__post_init__",
+      "callee": "flow/frozen.py:365:FrozenRun.__post_init__.<locals>.<genexpr>",
+      "count": 3
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "flow/orchestration.py:191:run",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "exchange/execution_table.py:276:validate_execution_input",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "domain/errors.py:183:Diagnosis.raise_if_failed",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/roster.py:61:registered_roster",
+      "count": 1
+    },
+    {
+      "caller": "flow/roster.py:61:registered_roster",
+      "callee": "workspace.py:842:Workspace.registered_instruments",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:842:Workspace.registered_instruments",
+      "callee": "workspace.py:822:Workspace.roster_path",
+      "count": 1
+    },
+    {
+      "caller": "workspace.py:822:Workspace.roster_path",
+      "callee": "workspace.py:206:Workspace.path",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/orchestration.py:248:run.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/orchestration.py:519:_source_digests",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:519:_source_digests",
+      "callee": "data/store.py:35:physical_digest",
+      "count": 2
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/record.py:1647:freeze_run_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1647:freeze_run_record",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:414:FrozenRun.identity",
+      "callee": "flow/frozen.py:421:FrozenRun._derive_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:421:FrozenRun._derive_identity",
+      "callee": "exchange/conventions.py:148:FillConvention.declaration_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:421:FrozenRun._derive_identity",
+      "callee": "flow/frozen.py:456:FrozenRun._derive_identity.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:421:FrozenRun._derive_identity",
+      "callee": "flow/run.py:129:_encoded_requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:421:FrozenRun._derive_identity",
+      "callee": "flow/run.py:53:_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1647:freeze_run_record",
+      "callee": "exchange/conventions.py:148:FillConvention.declaration_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1647:freeze_run_record",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1647:freeze_run_record",
+      "callee": "flow/frozen.py:154:FrozenStrategy.record_ref",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:154:FrozenStrategy.record_ref",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 3
+    },
+    {
+      "caller": "flow/record.py:1647:freeze_run_record",
+      "callee": "flow/record.py:1074:write_run_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1074:write_run_record",
+      "callee": "flow/record.py:1050:run_record_path",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1074:write_run_record",
+      "callee": "flow/record.py:184:_Record.as_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1074:write_run_record",
+      "callee": "flow/record.py:403:_encode",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:403:_encode",
+      "callee": "flow/record.py:403:_encode",
+      "count": 107
+    },
+    {
+      "caller": "flow/record.py:1074:write_run_record",
+      "callee": "_internal/atomic.py:75:write_atomically",
+      "count": 1
+    },
+    {
+      "caller": "_internal/atomic.py:75:write_atomically",
+      "callee": "_internal/atomic.py:62:_swap",
+      "count": 3
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/orchestration.py:524:_run_strategy",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "extension/loading.py:289:load_strategy_model",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "extension/loading.py:381:load_exchange",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/orchestration.py:541:_run_strategy.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/orchestration.py:682:_as_loaded_fingerprints",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:682:_as_loaded_fingerprints",
+      "callee": "extension/loading.py:129:as_loaded_fingerprint",
+      "count": 2
+    },
+    {
+      "caller": "extension/loading.py:129:as_loaded_fingerprint",
+      "callee": "extension/fingerprint.py:27:fingerprint_component",
+      "count": 2
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/orchestration.py:85:_FrozenCatalog.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "data/scan.py:252:ScanSession.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "data/store.py:141:DuckDbObservationStore.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "authoring.py:313:Model.requirements",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "constraints/evaluation.py:225:constraint_requirements",
+      "count": 1
+    },
+    {
+      "caller": "constraints/evaluation.py:225:constraint_requirements",
+      "callee": "constraints/evaluation.py:201:_loaded",
+      "count": 1
+    },
+    {
+      "caller": "constraints/evaluation.py:201:_loaded",
+      "callee": "constraints/evaluation.py:205:_loaded.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "constraints/evaluation.py:201:_loaded",
+      "callee": "constraints/evaluation.py:207:_loaded.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "account/snapshot.py:101:AccountState.__post_init__",
+      "callee": "account/snapshot.py:104:AccountState.__post_init__.<locals>.<genexpr>",
+      "count": 59
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "authoring.py:985:StrategyModel.load_payload",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/frozen.py:154:FrozenStrategy.record_ref",
+      "count": 2
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/record.py:686:RunRecordWriter.open",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:686:RunRecordWriter.open",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:666:RunRecordWriter.directory",
+      "callee": "flow/record.py:1036:record_directory",
+      "count": 110
+    },
+    {
+      "caller": "flow/record.py:686:RunRecordWriter.open",
+      "callee": "flow/record.py:767:RunRecordWriter._open",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:767:RunRecordWriter._open",
+      "callee": "flow/record.py:905:RunRecordWriter._claim",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:905:RunRecordWriter._claim",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/run_state.py:285:RunStateRepository.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:285:RunStateRepository.__init__",
+      "callee": "flow/run_state.py:45:prepare_model_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:114:AcceptedRunState.__post_init__",
+      "callee": "flow/run_state.py:45:prepare_model_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:114:AcceptedRunState.__post_init__",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/run_state.py:322:RunStateRepository.root",
+      "count": 2
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/run_state.py:329:RunStateRepository.load_payload",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:329:RunStateRepository.load_payload",
+      "callee": "flow/run_state.py:183:AcceptedRunState.load_payload",
+      "count": 12
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "authoring.py:969:StrategyModel.account_history",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "account/history.py:44:retained_marks",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "account/account.py:164:Account.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/simulation.py:96:SimulationFlow.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/context.py:457:FlowContext.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/simulation.py:140:SimulationFlow.__init__.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/context.py:339:_require_constraint_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/context.py:339:_require_constraint_identity",
+      "callee": "flow/context.py:358:_require_constraint_identity.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/context.py:339:_require_constraint_identity",
+      "callee": "flow/context.py:359:_require_constraint_identity.<locals>.<genexpr>",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/frozen.py:404:FrozenRun.dispatch_order",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:404:FrozenRun.dispatch_order",
+      "callee": "flow/frozen.py:95:merged_occurrences",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:95:merged_occurrences",
+      "callee": "flow/frozen.py:99:merged_occurrences.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "flow/frozen.py:95:merged_occurrences",
+      "callee": "domain/agendas.py:123:OperationOccurrence.sort_key",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/valuation.py:106:ValuationPhase.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/callback.py:67:CallbackPhase.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/execution.py:36:ExecutionPhase.__init__",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/execution.py:343:ExecutionPhase.bind_registry_to_venue",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "authoring.py:969:StrategyModel.account_history",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "account/account.py:177:Account.mode",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:96:SimulationFlow.__init__",
+      "callee": "account/account.py:188:Account.bind",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/simulation.py:224:SimulationFlow.run",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:224:SimulationFlow.run",
+      "callee": "flow/loop.py:70:OccurrenceFlow.run",
+      "count": 1
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/simulation.py:235:SimulationFlow._start",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:235:SimulationFlow._start",
+      "callee": "flow/context.py:500:FlowContext.guard",
+      "count": 1
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:264:CallbackPhase.load_visible_strategy_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/callback.py:264:CallbackPhase.load_visible_strategy_state",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 1
+    },
+    {
+      "caller": "flow/callback.py:264:CallbackPhase.load_visible_strategy_state",
+      "callee": "flow/run_state.py:326:RunStateRepository.load_model_state",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:326:RunStateRepository.load_model_state",
+      "callee": "flow/run_state.py:175:AcceptedRunState.load_model_state",
+      "count": 11
+    },
+    {
+      "caller": "flow/run_state.py:175:AcceptedRunState.load_model_state",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 11
+    },
+    {
+      "caller": "flow/callback.py:264:CallbackPhase.load_visible_strategy_state",
+      "callee": "flow/run_state.py:329:RunStateRepository.load_payload",
+      "count": 1
+    },
+    {
+      "caller": "flow/callback.py:264:CallbackPhase.load_visible_strategy_state",
+      "callee": "authoring.py:985:StrategyModel.load_payload",
+      "count": 1
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/loop.py:74:OccurrenceFlow.run.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/record.py:836:RunRecordWriter.heartbeat",
+      "count": 20
+    },
+    {
+      "caller": "flow/record.py:836:RunRecordWriter.heartbeat",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 101
+    },
+    {
+      "caller": "flow/record.py:836:RunRecordWriter.heartbeat",
+      "callee": "flow/record.py:849:RunRecordWriter.checkpoint",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:849:RunRecordWriter.checkpoint",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:849:RunRecordWriter.checkpoint",
+      "callee": "_internal/atomic.py:75:write_atomically",
+      "count": 1
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/simulation.py:291:SimulationFlow._pending_due",
+      "count": 22
+    },
+    {
+      "caller": "flow/simulation.py:291:SimulationFlow._pending_due",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 22
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/simulation.py:244:SimulationFlow._dispatch_static",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:244:SimulationFlow._dispatch_static",
+      "callee": "flow/context.py:482:FlowContext.timed",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/simulation.py:250:SimulationFlow._dispatch_static.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:250:SimulationFlow._dispatch_static.<locals>.<lambda>",
+      "callee": "flow/callback.py:71:CallbackPhase.dispatch",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:71:CallbackPhase.dispatch",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 70
+    },
+    {
+      "caller": "flow/callback.py:71:CallbackPhase.dispatch",
+      "callee": "flow/context.py:500:FlowContext.guard",
+      "count": 70
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:473:CallbackPhase._visible_callback_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:473:CallbackPhase._visible_callback_state",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:473:CallbackPhase._visible_callback_state",
+      "callee": "flow/run_state.py:326:RunStateRepository.load_model_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:473:CallbackPhase._visible_callback_state",
+      "callee": "flow/run_state.py:329:RunStateRepository.load_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:84:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:84:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:358:CallbackPhase._restore_callback_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:358:CallbackPhase._restore_callback_state",
+      "callee": "authoring.py:985:StrategyModel.load_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:91:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:91:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:487:CallbackPhase._strategy_window",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:487:CallbackPhase._strategy_window",
+      "callee": "flow/orchestration.py:593:_run_strategy.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/orchestration.py:593:_run_strategy.<locals>.<lambda>",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/orchestration.py:593:_run_strategy.<locals>.<lambda>",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 10
+    },
+    {
+      "caller": "flow/orchestration.py:593:_run_strategy.<locals>.<lambda>",
+      "callee": "data/windows.py:30:ModelWindow.__init__",
+      "count": 10
+    },
+    {
+      "caller": "data/windows.py:30:ModelWindow.__init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 10
+    },
+    {
+      "caller": "data/windows.py:30:ModelWindow.__init__",
+      "callee": "data/windows.py:40:ModelWindow.__init__.<locals>.<genexpr>",
+      "count": 110
+    },
+    {
+      "caller": "data/windows.py:40:ModelWindow.__init__.<locals>.<genexpr>",
+      "callee": "domain/identifiers.py:72:instrument_id",
+      "count": 100
+    },
+    {
+      "caller": "domain/identifiers.py:72:instrument_id",
+      "callee": "domain/identifiers.py:17:_clean",
+      "count": 100
+    },
+    {
+      "caller": "domain/identifiers.py:72:instrument_id",
+      "callee": "domain/identifiers.py:82:instrument_id.<locals>.<genexpr>",
+      "count": 800
+    },
+    {
+      "caller": "data/windows.py:30:ModelWindow.__init__",
+      "callee": "data/windows.py:48:ModelWindow.__init__.<locals>.<genexpr>",
+      "count": 20
+    },
+    {
+      "caller": "flow/callback.py:71:CallbackPhase.dispatch",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:71:CallbackPhase.dispatch",
+      "callee": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "count": 80
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:108:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:108:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "authoring.py:965:StrategyModel.tables",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "flow/callback.py:501:CallbackPhase._callback_recorder.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "flow/callback.py:506:CallbackPhase._callback_recorder.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:499:CallbackPhase._callback_recorder",
+      "callee": "evidence/recorder.py:26:InvocationRecorder.__init__",
+      "count": 10
+    },
+    {
+      "caller": "evidence/recorder.py:26:InvocationRecorder.__init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 20
+    },
+    {
+      "caller": "evidence/recorder.py:26:InvocationRecorder.__init__",
+      "callee": "evidence/recorder.py:43:InvocationRecorder.__init__.<locals>.<genexpr>",
+      "count": 100
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:113:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:113:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:470:CallbackPhase._set_callback_recorder",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:139:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:139:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "constraints/evaluation.py:266:merged_constraint_bounds",
+      "count": 10
+    },
+    {
+      "caller": "constraints/evaluation.py:266:merged_constraint_bounds",
+      "callee": "constraints/evaluation.py:270:merged_constraint_bounds.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "authoring.py:462:ConstraintBounds.__post_init__",
+      "callee": "authoring.py:168:_copy_weights",
+      "count": 40
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:449:CallbackPhase._callback_account_view",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:449:CallbackPhase._callback_account_view",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "authoring.py:398:EconomicAccountView.__post_init__",
+      "callee": "authoring.py:99:_finite_decimal",
+      "count": 19
+    },
+    {
+      "caller": "authoring.py:398:EconomicAccountView.__post_init__",
+      "callee": "authoring.py:168:_copy_weights",
+      "count": 19
+    },
+    {
+      "caller": "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "agent/sample/reversal_5d.py:43:SampleReversal5d.inputs",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:780:CallbackPhase._account_history",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:780:CallbackPhase._account_history",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:780:CallbackPhase._account_history",
+      "callee": "account/history.py:63:AccountHistory.__init__",
+      "count": 10
+    },
+    {
+      "caller": "calls.py:244:StrategyModelContext.__post_init__",
+      "callee": "authoring.py:481:ConstraintBounds.detached",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "count": 10
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "callee": "calls.py:132:_DeclaredReads.read",
+      "count": 10
+    },
+    {
+      "caller": "calls.py:132:_DeclaredReads.read",
+      "callee": "calls.py:121:_DeclaredReads._declaration",
+      "count": 10
+    },
+    {
+      "caller": "calls.py:132:_DeclaredReads.read",
+      "callee": "authoring.py:264:requirements_for",
+      "count": 10
+    },
+    {
+      "caller": "calls.py:132:_DeclaredReads.read",
+      "callee": "data/windows.py:127:ModelWindow.grain",
+      "count": 10
+    },
+    {
+      "caller": "data/windows.py:127:ModelWindow.grain",
+      "callee": "data/store.py:280:DuckDbObservationStore.grain",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:280:DuckDbObservationStore.grain",
+      "callee": "flow/orchestration.py:89:_FrozenCatalog.dataset",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:280:DuckDbObservationStore.grain",
+      "callee": "data/datasets.py:331:require_grain",
+      "count": 10
+    },
+    {
+      "caller": "calls.py:132:_DeclaredReads.read",
+      "callee": "data/windows.py:102:ModelWindow.panel",
+      "count": 10
+    },
+    {
+      "caller": "data/windows.py:102:ModelWindow.panel",
+      "callee": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/store.py:198:DuckDbObservationStore.panel_window.<locals>.<genexpr>",
+      "count": 20
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/store.py:200:DuckDbObservationStore.panel_window.<locals>.<genexpr>",
+      "count": 20
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/store.py:202:DuckDbObservationStore.panel_window.<locals>.<genexpr>",
+      "count": 20
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "flow/orchestration.py:89:_FrozenCatalog.dataset",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/datasets.py:331:require_grain",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/datasets.py:309:lookback_fits_grain",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "flow/orchestration.py:92:_FrozenCatalog.source",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/store.py:285:DuckDbObservationStore._digest",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:285:DuckDbObservationStore._digest",
+      "callee": "data/store.py:35:physical_digest",
+      "count": 1
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:41:panel_identity",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/resolution.py:12:resolve_field",
+      "count": 1
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/scan.py:1145:observation_rows",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:151:_quote",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:433:identity_projections",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:433:identity_projections",
+      "callee": "data/scan.py:151:_quote",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:446:value_projections",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:446:value_projections",
+      "callee": "data/scan.py:452:value_projections.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:452:value_projections.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:1195:observation_rows.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:157:_relation",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:1279:observation_rows.<locals>.<genexpr>",
+      "count": 3
+    },
+    {
+      "caller": "data/scan.py:1279:observation_rows.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:1288:observation_rows.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:1288:observation_rows.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:351:_Borrowed.__init__",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:351:_Borrowed.__init__",
+      "callee": "data/scan.py:259:ScanSession.connection",
+      "count": 12
+    },
+    {
+      "caller": "data/scan.py:259:ScanSession.connection",
+      "callee": "data/scan.py:210:_require_path",
+      "count": 12
+    },
+    {
+      "caller": "data/scan.py:259:ScanSession.connection",
+      "callee": "data/scan.py:177:_configure",
+      "count": 2
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:1341:observation_rows.<locals>.<genexpr>",
+      "count": 4
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:359:_Borrowed.close",
+      "count": 1
+    },
+    {
+      "caller": "data/scan.py:1145:observation_rows",
+      "callee": "data/scan.py:1369:observation_rows.<locals>.<genexpr>",
+      "count": 6901
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:80:Panel.from_rows",
+      "count": 1
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:127:Panel.window",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:269:PanelWindow.lower_bound",
+      "count": 10
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:256:PanelWindow.counts",
+      "count": 10
+    },
+    {
+      "caller": "data/panel.py:256:PanelWindow.counts",
+      "callee": "data/panel.py:201:PanelWindow._column",
+      "count": 100
+    },
+    {
+      "caller": "data/store.py:177:DuckDbObservationStore.panel_window",
+      "callee": "data/panel.py:265:PanelWindow.max_available_at",
+      "count": 10
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "callee": "data/panel.py:184:PanelWindow.instruments",
+      "count": 10
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "callee": "data/panel.py:211:PanelWindow.values",
+      "count": 100
+    },
+    {
+      "caller": "data/panel.py:211:PanelWindow.values",
+      "callee": "data/panel.py:284:_LazyColumns.__init__",
+      "count": 100
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "callee": "data/panel.py:290:_LazyColumns.__getitem__",
+      "count": 100
+    },
+    {
+      "caller": "data/panel.py:290:_LazyColumns.__getitem__",
+      "callee": "data/panel.py:191:PanelWindow.series",
+      "count": 100
+    },
+    {
+      "caller": "data/panel.py:191:PanelWindow.series",
+      "callee": "data/panel.py:201:PanelWindow._column",
+      "count": 100
+    },
+    {
+      "caller": "agent/sample/reversal_5d.py:52:SampleReversal5d.decide",
+      "callee": "agent/sample/reversal_5d.py:72:SampleReversal5d.decide.<locals>.<lambda>",
+      "count": 90
+    },
+    {
+      "caller": "authoring.py:846:Rebalance.__post_init__",
+      "callee": "authoring.py:168:_copy_weights",
+      "count": 10
+    },
+    {
+      "caller": "authoring.py:168:_copy_weights",
+      "callee": "authoring.py:113:_identifier",
+      "count": 84
+    },
+    {
+      "caller": "authoring.py:168:_copy_weights",
+      "callee": "authoring.py:99:_finite_decimal",
+      "count": 84
+    },
+    {
+      "caller": "authoring.py:846:Rebalance.__post_init__",
+      "callee": "authoring.py:99:_finite_decimal",
+      "count": 10
+    },
+    {
+      "caller": "authoring.py:846:Rebalance.__post_init__",
+      "callee": "portfolio/budgets.py:72:Budget.validates_cash",
+      "count": 10
+    },
+    {
+      "caller": "authoring.py:846:Rebalance.__post_init__",
+      "callee": "portfolio/budgets.py:76:Budget.validates_target",
+      "count": 30
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:173:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:173:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:603:CallbackPhase._stamp_intent",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:603:CallbackPhase._stamp_intent",
+      "callee": "flow/callback.py:623:CallbackPhase._stamp_intent.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "flow/callback.py:603:CallbackPhase._stamp_intent",
+      "callee": "flow/callback.py:663:CallbackPhase._actual_source_refs",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:663:CallbackPhase._actual_source_refs",
+      "callee": "data/windows.py:86:ModelWindow.accesses",
+      "count": 20
+    },
+    {
+      "caller": "flow/callback.py:663:CallbackPhase._actual_source_refs",
+      "callee": "flow/callback.py:681:CallbackPhase._actual_source_refs.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "portfolio/intents.py:39:IntentSourceRef.__post_init__",
+      "callee": "portfolio/intents.py:43:IntentSourceRef.__post_init__.<locals>.<genexpr>",
+      "count": 420
+    },
+    {
+      "caller": "portfolio/intents.py:39:IntentSourceRef.__post_init__",
+      "callee": "portfolio/intents.py:49:IntentSourceRef.__post_init__.<locals>.<genexpr>",
+      "count": 1300
+    },
+    {
+      "caller": "flow/callback.py:603:CallbackPhase._stamp_intent",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:188:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:188:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "portfolio/intents.py:68:validate_economic_intent",
+      "count": 10
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/intents.py:80:validate_economic_intent.<locals>.<genexpr>",
+      "count": 190
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/intents.py:85:validate_economic_intent.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/budgets.py:72:Budget.validates_cash",
+      "count": 10
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/intents.py:96:validate_economic_intent.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/intents.py:97:validate_economic_intent.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "portfolio/intents.py:97:validate_economic_intent.<locals>.<genexpr>",
+      "callee": "portfolio/budgets.py:76:Budget.validates_target",
+      "count": 30
+    },
+    {
+      "caller": "portfolio/intents.py:68:validate_economic_intent",
+      "callee": "portfolio/intents.py:103:validate_economic_intent.<locals>.<genexpr>",
+      "count": 20
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:193:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:193:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:638:CallbackPhase._validate_intent_authority",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:638:CallbackPhase._validate_intent_authority",
+      "callee": "flow/callback.py:653:CallbackPhase._validate_intent_authority.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:204:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:204:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:756:CallbackPhase._accept_intent",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:756:CallbackPhase._accept_intent",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 20
+    },
+    {
+      "caller": "flow/callback.py:756:CallbackPhase._accept_intent",
+      "callee": "flow/callback.py:683:CallbackPhase.execution_horizon",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:683:CallbackPhase.execution_horizon",
+      "callee": "exchange/execution_table.py:85:ExecutionInputRegistration.build_horizon",
+      "count": 1
+    },
+    {
+      "caller": "flow/callback.py:756:CallbackPhase._accept_intent",
+      "callee": "exchange/execution_table.py:101:ExecutionInputRegistration.select_target",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:73:AcceptedIntent.__post_init__",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:71:CallbackPhase.dispatch",
+      "callee": "flow/callback.py:362:CallbackPhase._record_defaults",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:362:CallbackPhase._record_defaults",
+      "callee": "evidence/recorder.py:54:InvocationRecorder.append",
+      "count": 30
+    },
+    {
+      "caller": "evidence/recorder.py:54:InvocationRecorder.append",
+      "callee": "evidence/recorder.py:57:InvocationRecorder.append_batch",
+      "count": 70
+    },
+    {
+      "caller": "evidence/recorder.py:57:InvocationRecorder.append_batch",
+      "callee": "domain/values.py:279:normalize_rows",
+      "count": 70
+    },
+    {
+      "caller": "domain/values.py:279:normalize_rows",
+      "callee": "domain/values.py:289:normalize_rows.<locals>.<genexpr>",
+      "count": 3060
+    },
+    {
+      "caller": "domain/values.py:279:normalize_rows",
+      "callee": "domain/values.py:258:normalize_scalar",
+      "count": 340
+    },
+    {
+      "caller": "flow/callback.py:362:CallbackPhase._record_defaults",
+      "callee": "flow/valuation.py:404:ValuationPhase.committed_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:404:ValuationPhase.committed_mark",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:404:ValuationPhase.committed_mark",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:213:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:213:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:521:CallbackPhase._candidate_callback_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:521:CallbackPhase._candidate_callback_state",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:521:CallbackPhase._candidate_callback_state",
+      "callee": "authoring.py:977:StrategyModel.save_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:521:CallbackPhase._candidate_callback_state",
+      "callee": "flow/run_state.py:45:prepare_model_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:521:CallbackPhase._candidate_callback_state",
+      "callee": "flow/callback.py:580:CallbackPhase._validate_candidate_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:580:CallbackPhase._validate_candidate_payload",
+      "callee": "domain/values.py:305:normalize_memory",
+      "count": 20
+    },
+    {
+      "caller": "flow/callback.py:580:CallbackPhase._validate_candidate_payload",
+      "callee": "authoring.py:985:StrategyModel.load_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:580:CallbackPhase._validate_candidate_payload",
+      "callee": "authoring.py:977:StrategyModel.save_payload",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "callee": "flow/callback.py:220:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:220:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "callee": "data/windows.py:86:ModelWindow.accesses",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:532:CallbackPhase._callback_evidence",
+      "callee": "flow/callback.py:569:CallbackPhase._callback_actual_source_refs",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:569:CallbackPhase._callback_actual_source_refs",
+      "callee": "domain/agendas.py:99:OperationOccurrence.evaluation_time",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:569:CallbackPhase._callback_actual_source_refs",
+      "callee": "flow/context.py:500:FlowContext.guard",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:575:CallbackPhase._callback_actual_source_refs.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:575:CallbackPhase._callback_actual_source_refs.<locals>.<lambda>",
+      "callee": "flow/callback.py:663:CallbackPhase._actual_source_refs",
+      "count": 10
+    },
+    {
+      "caller": "evidence/artifacts.py:288:CallbackEvidence.__post_init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:233:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:233:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/callback.py:323:CallbackPhase._prepare_callback_publication",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:323:CallbackPhase._prepare_callback_publication",
+      "callee": "flow/run_state.py:366:RunStateRepository.prepare_callback",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:366:RunStateRepository.prepare_callback",
+      "callee": "flow/run_state.py:45:prepare_model_state",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:366:RunStateRepository.prepare_callback",
+      "callee": "evidence/recorder.py:90:InvocationRecorder.staged_rows",
+      "count": 10
+    },
+    {
+      "caller": "evidence/recorder.py:90:InvocationRecorder.staged_rows",
+      "callee": "evidence/recorder.py:98:InvocationRecorder.staged_rows.<locals>.<genexpr>",
+      "count": 150
+    },
+    {
+      "caller": "flow/run_state.py:366:RunStateRepository.prepare_callback",
+      "callee": "flow/run_state.py:332:RunStateRepository._stage_rows",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:332:RunStateRepository._stage_rows",
+      "callee": "flow/run_state.py:347:RunStateRepository._stage_rows.<locals>.<genexpr>",
+      "count": 150
+    },
+    {
+      "caller": "flow/run_state.py:366:RunStateRepository.prepare_callback",
+      "callee": "evidence/recorder.py:101:InvocationRecorder.manifests",
+      "count": 10
+    },
+    {
+      "caller": "evidence/recorder.py:101:InvocationRecorder.manifests",
+      "callee": "evidence/recorder.py:102:InvocationRecorder.manifests.<locals>.<genexpr>",
+      "count": 100
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/callback.py:247:CallbackPhase.dispatch.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:247:CallbackPhase.dispatch.<locals>.<lambda>",
+      "callee": "flow/run_state.py:423:RunStateRepository.publish",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:423:RunStateRepository.publish",
+      "callee": "flow/run_state.py:354:RunStateRepository._deliver",
+      "count": 11
+    },
+    {
+      "caller": "flow/run_state.py:354:RunStateRepository._deliver",
+      "callee": "flow/record.py:939:RunRecordWriter.append",
+      "count": 80
+    },
+    {
+      "caller": "flow/record.py:939:RunRecordWriter.append",
+      "callee": "flow/record.py:351:_arrow_table",
+      "count": 21
+    },
+    {
+      "caller": "flow/record.py:351:_arrow_table",
+      "callee": "flow/record.py:302:_arrow_type",
+      "count": 205
+    },
+    {
+      "caller": "flow/record.py:302:_arrow_type",
+      "callee": "flow/record.py:290:_zone_name",
+      "count": 31
+    },
+    {
+      "caller": "flow/record.py:939:RunRecordWriter.append",
+      "callee": "flow/record.py:836:RunRecordWriter.heartbeat",
+      "count": 81
+    },
+    {
+      "caller": "flow/simulation.py:291:SimulationFlow._pending_due",
+      "callee": "flow/context.py:86:AcceptedIntent.pending_id",
+      "count": 11
+    },
+    {
+      "caller": "flow/loop.py:49:DueExecutionEnvelope.__post_init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 11
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/loop.py:54:DueExecutionEnvelope.sort_key",
+      "count": 9
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/loop.py:34:OperationEnvelope.sort_key",
+      "count": 9
+    },
+    {
+      "caller": "flow/loop.py:34:OperationEnvelope.sort_key",
+      "callee": "domain/agendas.py:123:OperationOccurrence.sort_key",
+      "count": 9
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/simulation.py:257:SimulationFlow._dispatch_due",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:257:SimulationFlow._dispatch_due",
+      "callee": "flow/context.py:482:FlowContext.timed",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>",
+      "callee": "flow/context.py:500:FlowContext.guard",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>",
+      "callee": "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 30
+    },
+    {
+      "caller": "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "callee": "flow/context.py:86:AcceptedIntent.pending_id",
+      "count": 10
+    },
+    {
+      "caller": "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "callee": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 20
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/execution.py:57:ExecutionPhase.execute_due.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/context.py:570:FlowContext.due_boundary",
+      "count": 150
+    },
+    {
+      "caller": "flow/context.py:570:FlowContext.due_boundary",
+      "callee": "flow/context.py:482:FlowContext.timed",
+      "count": 150
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:60:ExecutionPhase.execute_due.<locals>.select_snapshot",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:60:ExecutionPhase.execute_due.<locals>.select_snapshot",
+      "callee": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "exchange/execution_table.py:343:exact_execution_snapshot.<locals>.<genexpr>",
+      "count": 67
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "data/scan.py:638:exact_snapshot_rows",
+      "count": 10
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:151:_quote",
+      "count": 40
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:656:exact_snapshot_rows.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:660:exact_snapshot_rows.<locals>.<genexpr>",
+      "count": 30
+    },
+    {
+      "caller": "data/scan.py:660:exact_snapshot_rows.<locals>.<genexpr>",
+      "callee": "data/scan.py:151:_quote",
+      "count": 40
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:351:_Borrowed.__init__",
+      "count": 10
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:157:_relation",
+      "count": 10
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:679:exact_snapshot_rows.<locals>.<genexpr>",
+      "count": 50
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:677:exact_snapshot_rows.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "data/scan.py:638:exact_snapshot_rows",
+      "callee": "data/scan.py:359:_Borrowed.close",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "exchange/execution_table.py:368:exact_execution_snapshot.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "exchange/execution_table.py:385:exact_execution_snapshot.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "exchange/execution_table.py:388:exact_execution_snapshot.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:316:exact_execution_snapshot",
+      "callee": "exchange/execution_table.py:391:exact_execution_snapshot.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/execution.py:96:ExecutionPhase.execute_due.<locals>.<genexpr>",
+      "count": 37
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:110:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:110:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/execution.py:376:ExecutionPhase._bound_rules",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:376:ExecutionPhase._bound_rules",
+      "callee": "exchange/venue.py:81:AcademicExchange.rules",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:110:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "orders/planning.py:375:plan_orders",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:16:_decimal",
+      "count": 20
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "portfolio/budgets.py:72:Budget.validates_cash",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:37:_prices",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:37:_prices",
+      "callee": "orders/planning.py:16:_decimal",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:26:_targets",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:26:_targets",
+      "callee": "orders/planning.py:16:_decimal",
+      "count": 30
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "exchange/listings.py:487:ExchangeRulesView.quantity_for",
+      "count": 30
+    },
+    {
+      "caller": "exchange/listings.py:487:ExchangeRulesView.quantity_for",
+      "callee": "exchange/listings.py:541:_sizing_is_uniform",
+      "count": 30
+    },
+    {
+      "caller": "exchange/listings.py:541:_sizing_is_uniform",
+      "callee": "exchange/listings.py:557:_sizing_is_uniform.<locals>.<genexpr>",
+      "count": 795
+    },
+    {
+      "caller": "exchange/listings.py:487:ExchangeRulesView.quantity_for",
+      "callee": "domain/instruments.py:90:base_quantity_for",
+      "count": 30
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "portfolio/budgets.py:76:Budget.validates_target",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:180:_apply_venue_rules",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "exchange/listings.py:452:ExchangeRulesView.tradable",
+      "count": 42
+    },
+    {
+      "caller": "exchange/listings.py:452:ExchangeRulesView.tradable",
+      "callee": "exchange/listings.py:149:TradeRule.tradable",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "exchange/listings.py:457:ExchangeRulesView.quantize",
+      "count": 42
+    },
+    {
+      "caller": "exchange/listings.py:457:ExchangeRulesView.quantize",
+      "callee": "exchange/listings.py:413:ExchangeRulesView.listing",
+      "count": 42
+    },
+    {
+      "caller": "exchange/listings.py:457:ExchangeRulesView.quantize",
+      "callee": "exchange/listings.py:116:TradeRule.quantize",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "orders/planning.py:230:_apply_venue_rules.<locals>._delta",
+      "count": 63
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "orders/planning.py:138:_buy_order",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:138:_buy_order",
+      "callee": "orders/planning.py:210:_apply_venue_rules.<locals>._fillable",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:138:_buy_order",
+      "callee": "orders/planning.py:230:_apply_venue_rules.<locals>._delta",
+      "count": 42
+    },
+    {
+      "caller": "orders/planning.py:138:_buy_order",
+      "callee": "orders/planning.py:170:_buy_order.<locals>.<lambda>",
+      "count": 21
+    },
+    {
+      "caller": "orders/planning.py:170:_buy_order.<locals>.<lambda>",
+      "callee": "orders/planning.py:230:_apply_venue_rules.<locals>._delta",
+      "count": 21
+    },
+    {
+      "caller": "orders/planning.py:170:_buy_order.<locals>.<lambda>",
+      "callee": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "count": 21
+    },
+    {
+      "caller": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "callee": "exchange/listings.py:541:_sizing_is_uniform",
+      "count": 129
+    },
+    {
+      "caller": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "callee": "domain/instruments.py:81:base_notional",
+      "count": 129
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "count": 36
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "exchange/listings.py:493:ExchangeRulesView.charge",
+      "count": 36
+    },
+    {
+      "caller": "exchange/listings.py:493:ExchangeRulesView.charge",
+      "callee": "exchange/listings.py:413:ExchangeRulesView.listing",
+      "count": 108
+    },
+    {
+      "caller": "exchange/listings.py:493:ExchangeRulesView.charge",
+      "callee": "exchange/listings.py:209:TradeRule.charge",
+      "count": 108
+    },
+    {
+      "caller": "exchange/listings.py:209:TradeRule.charge",
+      "callee": "exchange/listings.py:206:TradeRule.cost",
+      "count": 108
+    },
+    {
+      "caller": "exchange/listings.py:209:TradeRule.charge",
+      "callee": "exchange/costs.py:79:SideCost.charge",
+      "count": 108
+    },
+    {
+      "caller": "exchange/costs.py:47:FillCost.__post_init__",
+      "callee": "exchange/costs.py:32:_rate",
+      "count": 228
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "exchange/costs.py:51:FillCost.total",
+      "count": 36
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "orders/planning.py:299:_settle_payable",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:299:_settle_payable",
+      "callee": "orders/planning.py:272:_projected_cash",
+      "count": 10
+    },
+    {
+      "caller": "orders/planning.py:272:_projected_cash",
+      "callee": "orders/planning.py:210:_apply_venue_rules.<locals>._fillable",
+      "count": 36
+    },
+    {
+      "caller": "orders/planning.py:272:_projected_cash",
+      "callee": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "count": 36
+    },
+    {
+      "caller": "orders/planning.py:272:_projected_cash",
+      "callee": "exchange/listings.py:493:ExchangeRulesView.charge",
+      "count": 36
+    },
+    {
+      "caller": "orders/planning.py:272:_projected_cash",
+      "callee": "exchange/costs.py:51:FillCost.total",
+      "count": 36
+    },
+    {
+      "caller": "orders/batches.py:41:OrderRequest.__post_init__",
+      "callee": "orders/batches.py:18:_instrument",
+      "count": 42
+    },
+    {
+      "caller": "orders/batches.py:41:OrderRequest.__post_init__",
+      "callee": "orders/batches.py:9:_decimal",
+      "count": 168
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:483:plan_orders.<locals>.<lambda>",
+      "count": 42
+    },
+    {
+      "caller": "orders/batches.py:97:OrderBatch.__post_init__",
+      "callee": "orders/batches.py:102:OrderBatch.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "orders/batches.py:97:OrderBatch.__post_init__",
+      "callee": "orders/batches.py:106:OrderBatch.__post_init__.<locals>.<genexpr>",
+      "count": 16
+    },
+    {
+      "caller": "orders/batches.py:97:OrderBatch.__post_init__",
+      "callee": "orders/batches.py:111:OrderBatch.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "orders/batches.py:97:OrderBatch.__post_init__",
+      "callee": "orders/batches.py:114:OrderBatch.__post_init__.<locals>.<genexpr>",
+      "count": 16
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:127:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:127:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "exchange/venue.py:104:AcademicExchange.execute",
+      "count": 10
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/execution_table.py:434:accepted_requests",
+      "count": 10
+    },
+    {
+      "caller": "exchange/execution_table.py:434:accepted_requests",
+      "callee": "exchange/execution_table.py:457:accepted_requests.<locals>.<lambda>",
+      "count": 42
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/execution_table.py:397:requested_rows",
+      "count": 10
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/venue.py:81:AcademicExchange.rules",
+      "count": 10
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/venue.py:169:AcademicExchange._validate_rules",
+      "count": 10
+    },
+    {
+      "caller": "exchange/venue.py:169:AcademicExchange._validate_rules",
+      "callee": "exchange/venue.py:44:_side",
+      "count": 42
+    },
+    {
+      "caller": "exchange/venue.py:44:_side",
+      "callee": "domain/values.py:357:side_of",
+      "count": 42
+    },
+    {
+      "caller": "exchange/venue.py:169:AcademicExchange._validate_rules",
+      "callee": "exchange/listings.py:167:TradeRule.permits_position",
+      "count": 36
+    },
+    {
+      "caller": "exchange/listings.py:167:TradeRule.permits_position",
+      "callee": "exchange/listings.py:149:TradeRule.tradable",
+      "count": 36
+    },
+    {
+      "caller": "exchange/listings.py:167:TradeRule.permits_position",
+      "callee": "exchange/listings.py:163:TradeRule.short_allowed",
+      "count": 36
+    },
+    {
+      "caller": "exchange/venue.py:169:AcademicExchange._validate_rules",
+      "callee": "exchange/listings.py:178:TradeRule.permits_quantity",
+      "count": 36
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "domain/values.py:357:side_of",
+      "count": 36
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/listings.py:460:ExchangeRulesView.notional",
+      "count": 36
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/listings.py:493:ExchangeRulesView.charge",
+      "count": 36
+    },
+    {
+      "caller": "exchange/venue.py:104:AcademicExchange.execute",
+      "callee": "exchange/listings.py:434:ExchangeRulesView.stamped_kind",
+      "count": 36
+    },
+    {
+      "caller": "exchange/fills.py:60:Fill.__post_init__",
+      "callee": "exchange/fills.py:34:_decimal",
+      "count": 120
+    },
+    {
+      "caller": "exchange/fills.py:114:FillBatch.__post_init__",
+      "callee": "exchange/fills.py:115:FillBatch.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "exchange/fills.py:114:FillBatch.__post_init__",
+      "callee": "exchange/fills.py:125:FillBatch.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:135:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:135:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/account.py:196:Account.prepare_fill",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:196:Account.prepare_fill",
+      "callee": "exchange/fills.py:99:Fill.cash_delta",
+      "count": 36
+    },
+    {
+      "caller": "exchange/fills.py:99:Fill.cash_delta",
+      "callee": "exchange/costs.py:51:FillCost.total",
+      "count": 72
+    },
+    {
+      "caller": "account/account.py:196:Account.prepare_fill",
+      "callee": "account/account.py:228:Account.prepare_fill.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "account/account.py:196:Account.prepare_fill",
+      "callee": "account/account.py:243:Account.prepare_fill.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "account/account.py:39:PreparedAccountFill.__post_init__",
+      "callee": "account/account.py:56:PreparedAccountFill.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "account/account.py:39:PreparedAccountFill.__post_init__",
+      "callee": "account/account.py:60:PreparedAccountFill.__post_init__.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 20
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/context.py:86:AcceptedIntent.pending_id",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/context.py:490:FlowContext.in_agenda_zone",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:166:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/run_state.py:445:RunStateRepository.prepare_account_commit",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:445:RunStateRepository.prepare_account_commit",
+      "callee": "flow/context.py:86:AcceptedIntent.pending_id",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:445:RunStateRepository.prepare_account_commit",
+      "callee": "flow/run_state.py:221:_fill_rows",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:221:_fill_rows",
+      "callee": "exchange/fills.py:99:Fill.cash_delta",
+      "count": 42
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:195:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:195:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/account.py:330:Account.commit_fill",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:330:Account.commit_fill",
+      "callee": "account/account.py:181:Account.state",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:203:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:203:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/execution.py:337:ExecutionPhase._publish_account_commit",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:337:ExecutionPhase._publish_account_commit",
+      "callee": "flow/run_state.py:494:RunStateRepository.publish_account_commit",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:494:RunStateRepository.publish_account_commit",
+      "callee": "flow/run_state.py:435:RunStateRepository._publish_infallible",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:435:RunStateRepository._publish_infallible",
+      "callee": "flow/run_state.py:354:RunStateRepository._deliver",
+      "count": 30
+    },
+    {
+      "caller": "flow/execution.py:337:ExecutionPhase._publish_account_commit",
+      "callee": "account/account.py:181:Account.state",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:213:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:213:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:213:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/valuation.py:50:_marks_from_execution_snapshot",
+      "count": 10
+    },
+    {
+      "caller": "flow/marking.py:45:SelectedMark.__post_init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 42
+    },
+    {
+      "caller": "flow/valuation.py:50:_marks_from_execution_snapshot",
+      "callee": "flow/valuation.py:86:_marks_from_execution_snapshot.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:226:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:226:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/marking.py:66:ValuationService.mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/marking.py:66:ValuationService.mark",
+      "callee": "flow/marking.py:116:ValuationService._prices",
+      "count": 10
+    },
+    {
+      "caller": "flow/marking.py:116:ValuationService._prices",
+      "callee": "flow/marking.py:122:ValuationService._prices.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "flow/marking.py:116:ValuationService._prices",
+      "callee": "flow/marking.py:127:ValuationService._prices.<locals>.<genexpr>",
+      "count": 52
+    },
+    {
+      "caller": "flow/marking.py:66:ValuationService.mark",
+      "callee": "flow/marking.py:78:ValuationService.mark.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "domain/values.py:388:Mark.__post_init__",
+      "callee": "domain/values.py:372:_decimal",
+      "count": 90
+    },
+    {
+      "caller": "flow/marking.py:66:ValuationService.mark",
+      "callee": "flow/marking.py:114:ValuationService.mark.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "domain/values.py:409:MarkBatch.__post_init__",
+      "callee": "domain/values.py:410:MarkBatch.__post_init__.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "domain/values.py:409:MarkBatch.__post_init__",
+      "callee": "domain/values.py:372:_decimal",
+      "count": 10
+    },
+    {
+      "caller": "domain/values.py:409:MarkBatch.__post_init__",
+      "callee": "domain/values.py:415:MarkBatch.__post_init__.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "domain/values.py:409:MarkBatch.__post_init__",
+      "callee": "domain/values.py:418:MarkBatch.__post_init__.<locals>.<genexpr>",
+      "count": 40
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:236:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:236:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:236:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/account.py:248:Account.prepare_mark",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:248:Account.prepare_mark",
+      "callee": "account/account.py:104:_require_marks_within",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:104:_require_marks_within",
+      "callee": "domain/values.py:421:MarkBatch.quantities",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:104:_require_marks_within",
+      "callee": "account/account.py:119:_require_marks_within.<locals>.<genexpr>",
+      "count": 10
+    },
+    {
+      "caller": "account/snapshot.py:72:AccountMark.__post_init__",
+      "callee": "account/snapshot.py:15:_decimal",
+      "count": 10
+    },
+    {
+      "caller": "account/snapshot.py:72:AccountMark.__post_init__",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 52
+    },
+    {
+      "caller": "account/snapshot.py:101:AccountState.__post_init__",
+      "callee": "account/snapshot.py:111:AccountState.__post_init__.<locals>.<genexpr>",
+      "count": 56
+    },
+    {
+      "caller": "account/snapshot.py:101:AccountState.__post_init__",
+      "callee": "account/snapshot.py:115:AccountState.__post_init__.<locals>.<genexpr>",
+      "count": 28
+    },
+    {
+      "caller": "account/snapshot.py:101:AccountState.__post_init__",
+      "callee": "account/snapshot.py:117:AccountState.__post_init__.<locals>.<genexpr>",
+      "count": 56
+    },
+    {
+      "caller": "account/snapshot.py:101:AccountState.__post_init__",
+      "callee": "account/snapshot.py:120:AccountState.__post_init__.<locals>.<genexpr>",
+      "count": 28
+    },
+    {
+      "caller": "account/account.py:71:PreparedAccountTransition.__post_init__",
+      "callee": "account/account.py:90:_appends_one_mark",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:71:PreparedAccountTransition.__post_init__",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:273:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:273:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:273:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/valuation.py:225:ValuationPhase.measurement_recorder",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:225:ValuationPhase.measurement_recorder",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:225:ValuationPhase.measurement_recorder",
+      "callee": "flow/context.py:490:FlowContext.in_agenda_zone",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:225:ValuationPhase.measurement_recorder",
+      "callee": "evidence/recorder.py:26:InvocationRecorder.__init__",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:225:ValuationPhase.measurement_recorder",
+      "callee": "evidence/recorder.py:54:InvocationRecorder.append",
+      "count": 40
+    },
+    {
+      "caller": "domain/values.py:258:normalize_scalar",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 40
+    },
+    {
+      "caller": "flow/execution.py:273:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/run_state.py:512:RunStateRepository.prepare_marked",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:512:RunStateRepository.prepare_marked",
+      "callee": "account/snapshot.py:131:AccountState.latest_mark",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:512:RunStateRepository.prepare_marked",
+      "callee": "flow/run_state.py:497:RunStateRepository._staged",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:497:RunStateRepository._staged",
+      "callee": "evidence/recorder.py:90:InvocationRecorder.staged_rows",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:497:RunStateRepository._staged",
+      "callee": "flow/run_state.py:332:RunStateRepository._stage_rows",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:497:RunStateRepository._staged",
+      "callee": "evidence/recorder.py:101:InvocationRecorder.manifests",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:291:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:291:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "account/account.py:343:Account.commit_mark",
+      "count": 10
+    },
+    {
+      "caller": "account/account.py:343:Account.commit_mark",
+      "callee": "account/account.py:181:Account.state",
+      "count": 20
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:299:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:299:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/valuation.py:283:ValuationPhase.publish_marked",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:283:ValuationPhase.publish_marked",
+      "callee": "flow/run_state.py:555:RunStateRepository.publish_marked",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:555:RunStateRepository.publish_marked",
+      "callee": "flow/run_state.py:435:RunStateRepository._publish_infallible",
+      "count": 10
+    },
+    {
+      "caller": "flow/valuation.py:283:ValuationPhase.publish_marked",
+      "callee": "account/account.py:181:Account.state",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:307:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:307:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/valuation.py:300:ValuationPhase.monitor_after_commit",
+      "count": 10
+    },
+    {
+      "caller": "flow/context.py:482:FlowContext.timed",
+      "callee": "flow/execution.py:328:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:328:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/run_state.py:652:RunStateRepository.prepare_feedback",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:328:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "callee": "flow/run_state.py:680:RunStateRepository.publish_feedback",
+      "count": 10
+    },
+    {
+      "caller": "flow/run_state.py:680:RunStateRepository.publish_feedback",
+      "callee": "flow/run_state.py:435:RunStateRepository._publish_infallible",
+      "count": 10
+    },
+    {
+      "caller": "flow/execution.py:40:ExecutionPhase.execute_due",
+      "callee": "flow/context.py:86:AcceptedIntent.pending_id",
+      "count": 10
+    },
+    {
+      "caller": "flow/callback.py:449:CallbackPhase._callback_account_view",
+      "callee": "constraints/evaluation.py:361:build_account_view",
+      "count": 9
+    },
+    {
+      "caller": "authoring.py:398:EconomicAccountView.__post_init__",
+      "callee": "authoring.py:107:_tz_aware",
+      "count": 9
+    },
+    {
+      "caller": "authoring.py:107:_tz_aware",
+      "callee": "domain/values.py:32:require_tz_aware",
+      "count": 9
+    },
+    {
+      "caller": "orders/planning.py:180:_apply_venue_rules",
+      "callee": "orders/planning.py:210:_apply_venue_rules.<locals>._fillable",
+      "count": 15
+    },
+    {
+      "caller": "orders/batches.py:78:ZeroDeltaDiagnostic.__post_init__",
+      "callee": "orders/batches.py:18:_instrument",
+      "count": 6
+    },
+    {
+      "caller": "orders/batches.py:78:ZeroDeltaDiagnostic.__post_init__",
+      "callee": "orders/batches.py:9:_decimal",
+      "count": 18
+    },
+    {
+      "caller": "orders/planning.py:375:plan_orders",
+      "callee": "orders/planning.py:488:plan_orders.<locals>.<lambda>",
+      "count": 6
+    },
+    {
+      "caller": "exchange/fills.py:60:Fill.__post_init__",
+      "callee": "exchange/costs.py:51:FillCost.total",
+      "count": 6
+    },
+    {
+      "caller": "flow/loop.py:70:OccurrenceFlow.run",
+      "callee": "flow/simulation.py:269:SimulationFlow._finish",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:269:SimulationFlow._finish",
+      "callee": "flow/run_state.py:318:RunStateRepository.current",
+      "count": 3
+    },
+    {
+      "caller": "flow/simulation.py:269:SimulationFlow._finish",
+      "callee": "flow/frozen.py:414:FrozenRun.identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:269:SimulationFlow._finish",
+      "callee": "flow/context.py:500:FlowContext.guard",
+      "count": 1
+    },
+    {
+      "caller": "flow/context.py:500:FlowContext.guard",
+      "callee": "flow/simulation.py:285:SimulationFlow._finish.<locals>.<lambda>",
+      "count": 1
+    },
+    {
+      "caller": "flow/simulation.py:285:SimulationFlow._finish.<locals>.<lambda>",
+      "callee": "flow/run_state.py:748:RunStateRepository.finalize",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:748:RunStateRepository.finalize",
+      "callee": "flow/run_state.py:720:RunStateRepository.prepare_finalization",
+      "count": 1
+    },
+    {
+      "caller": "flow/run_state.py:748:RunStateRepository.finalize",
+      "callee": "flow/run_state.py:423:RunStateRepository.publish",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/orchestration.py:659:_roster_report_or_stale",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:659:_roster_report_or_stale",
+      "callee": "flow/roster.py:152:roster_report",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/record.py:1727:freeze_strategy_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/run_state.py:160:AcceptedRunState.recorder_rows",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/record.py:939:RunRecordWriter.append",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 2
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/record.py:679:RunRecordWriter.counts",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/record.py:1876:contract_report",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1876:contract_report",
+      "callee": "flow/context.py:180:DueExecutionResult.report",
+      "count": 10
+    },
+    {
+      "caller": "flow/record.py:1876:contract_report",
+      "callee": "flow/record.py:1937:contract_report.<locals>.<genexpr>",
+      "count": 11
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/frozen.py:165:FrozenStrategy.identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:165:FrozenStrategy.identity",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:165:FrozenStrategy.identity",
+      "callee": "flow/frozen.py:79:FrozenAgenda.encoded",
+      "count": 1
+    },
+    {
+      "caller": "flow/frozen.py:79:FrozenAgenda.encoded",
+      "callee": "domain/values.py:159:LocalInstantDeclaration.identity",
+      "count": 10
+    },
+    {
+      "caller": "flow/frozen.py:165:FrozenStrategy.identity",
+      "callee": "flow/run.py:129:_encoded_requirements",
+      "count": 2
+    },
+    {
+      "caller": "flow/frozen.py:165:FrozenStrategy.identity",
+      "callee": "flow/run.py:53:_identity",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1727:freeze_strategy_record",
+      "callee": "flow/record.py:973:RunRecordWriter.finish",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:184:_Record.as_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:403:_encode",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:883:RunRecordWriter._seal",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:883:RunRecordWriter._seal",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 4
+    },
+    {
+      "caller": "flow/record.py:883:RunRecordWriter._seal",
+      "callee": "flow/record.py:622:_write_parquet",
+      "count": 3
+    },
+    {
+      "caller": "flow/record.py:622:_write_parquet",
+      "callee": "flow/record.py:596:_unified_schema",
+      "count": 3
+    },
+    {
+      "caller": "flow/record.py:622:_write_parquet",
+      "callee": "flow/record.py:610:_conform",
+      "count": 21
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:675:RunRecordWriter.record_filename",
+      "count": 2
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "_internal/atomic.py:75:write_atomically",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:973:RunRecordWriter.finish",
+      "callee": "flow/record.py:932:RunRecordWriter._unlock",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:932:RunRecordWriter._unlock",
+      "callee": "flow/record.py:666:RunRecordWriter.directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "data/scan.py:324:ScanSession.close",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:524:_run_strategy",
+      "callee": "flow/record.py:1312:read_strategy_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1312:read_strategy_record",
+      "callee": "flow/record.py:1322:read_member_record",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1322:read_member_record",
+      "callee": "flow/record.py:1036:record_directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1322:read_member_record",
+      "callee": "flow/record.py:1342:_mapping_at",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:191:run",
+      "callee": "flow/frozen.py:150:FrozenStrategy.component_id",
+      "count": 4
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "cli/run.py:374:_strategy_envelope",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:374:_strategy_envelope",
+      "callee": "flow/record.py:1565:read_table",
+      "count": 43
+    },
+    {
+      "caller": "flow/record.py:1565:read_table",
+      "callee": "flow/record.py:1547:_parts",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1547:_parts",
+      "callee": "flow/record.py:1487:resolve_strategy_ref",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1487:resolve_strategy_ref",
+      "callee": "flow/record.py:1515:resolve_strategy_ref.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "flow/record.py:1487:resolve_strategy_ref",
+      "callee": "flow/record.py:1036:record_directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1547:_parts",
+      "callee": "flow/record.py:1036:record_directory",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1547:_parts",
+      "callee": "flow/record.py:1553:_table_files",
+      "count": 1
+    },
+    {
+      "caller": "flow/record.py:1565:read_table",
+      "callee": "flow/record.py:391:_python_rows",
+      "count": 43
+    },
+    {
+      "caller": "cli/run.py:374:_strategy_envelope",
+      "callee": "analysis/execution.py:19:fill_summary",
+      "count": 1
+    },
+    {
+      "caller": "analysis/execution.py:19:fill_summary",
+      "callee": "analysis/execution.py:97:_PerInstrument.__init__",
+      "count": 42
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "cli/run.py:428:_roster_envelope",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:428:_roster_envelope",
+      "callee": "flow/roster.py:152:roster_report",
+      "count": 1
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "flow/orchestration.py:147:RunResult.ok",
+      "count": 1
+    },
+    {
+      "caller": "flow/orchestration.py:147:RunResult.ok",
+      "callee": "flow/orchestration.py:150:RunResult.ok.<locals>.<genexpr>",
+      "count": 2
+    },
+    {
+      "caller": "cli/run.py:220:run",
+      "callee": "cli/envelope.py:102:success",
+      "count": 1
+    },
+    {
+      "caller": "cli/main.py:256:main",
+      "callee": "cli/envelope.py:146:emit",
+      "count": 1
+    }
+  ],
+  "first_stacks": {
+    "extension/loading.py:55:_load": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/judgments.py:57:judgments",
+      "flow/judgments.py:103:judgments.<locals>.<genexpr>.<lambda>",
+      "flow/judgments.py:301:_judge_member_datasets",
+      "extension/loading.py:289:load_strategy_model",
+      "extension/loading.py:55:_load"
+    ],
+    "flow/callback.py:71:CallbackPhase.dispatch": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/orchestration.py:191:run",
+      "flow/orchestration.py:524:_run_strategy",
+      "flow/simulation.py:224:SimulationFlow.run",
+      "flow/loop.py:70:OccurrenceFlow.run",
+      "flow/simulation.py:244:SimulationFlow._dispatch_static",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/simulation.py:250:SimulationFlow._dispatch_static.<locals>.<lambda>",
+      "flow/callback.py:71:CallbackPhase.dispatch"
+    ],
+    "agent/sample/reversal_5d.py:52:SampleReversal5d.decide": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/orchestration.py:191:run",
+      "flow/orchestration.py:524:_run_strategy",
+      "flow/simulation.py:224:SimulationFlow.run",
+      "flow/loop.py:70:OccurrenceFlow.run",
+      "flow/simulation.py:244:SimulationFlow._dispatch_static",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/simulation.py:250:SimulationFlow._dispatch_static.<locals>.<lambda>",
+      "flow/callback.py:71:CallbackPhase.dispatch",
+      "flow/callback.py:272:CallbackPhase._callback_intent_boundary",
+      "flow/callback.py:144:CallbackPhase.dispatch.<locals>.<lambda>",
+      "agent/sample/reversal_5d.py:52:SampleReversal5d.decide"
+    ],
+    "flow/execution.py:40:ExecutionPhase.execute_due": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/orchestration.py:191:run",
+      "flow/orchestration.py:524:_run_strategy",
+      "flow/simulation.py:224:SimulationFlow.run",
+      "flow/loop.py:70:OccurrenceFlow.run",
+      "flow/simulation.py:257:SimulationFlow._dispatch_due",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>",
+      "flow/context.py:500:FlowContext.guard",
+      "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>",
+      "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "flow/execution.py:40:ExecutionPhase.execute_due"
+    ],
+    "orders/planning.py:375:plan_orders": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/orchestration.py:191:run",
+      "flow/orchestration.py:524:_run_strategy",
+      "flow/simulation.py:224:SimulationFlow.run",
+      "flow/loop.py:70:OccurrenceFlow.run",
+      "flow/simulation.py:257:SimulationFlow._dispatch_due",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>",
+      "flow/context.py:500:FlowContext.guard",
+      "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>",
+      "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "flow/execution.py:40:ExecutionPhase.execute_due",
+      "flow/context.py:570:FlowContext.due_boundary",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/execution.py:110:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "orders/planning.py:375:plan_orders"
+    ],
+    "account/account.py:196:Account.prepare_fill": [
+      "cli/main.py:256:main",
+      "cli/run.py:220:run",
+      "flow/orchestration.py:191:run",
+      "flow/orchestration.py:524:_run_strategy",
+      "flow/simulation.py:224:SimulationFlow.run",
+      "flow/loop.py:70:OccurrenceFlow.run",
+      "flow/simulation.py:257:SimulationFlow._dispatch_due",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/simulation.py:260:SimulationFlow._dispatch_due.<locals>.<lambda>",
+      "flow/context.py:500:FlowContext.guard",
+      "flow/simulation.py:263:SimulationFlow._dispatch_due.<locals>.<lambda>.<locals>.<lambda>",
+      "flow/simulation.py:299:SimulationFlow._dispatch_pending",
+      "flow/execution.py:40:ExecutionPhase.execute_due",
+      "flow/context.py:570:FlowContext.due_boundary",
+      "flow/context.py:482:FlowContext.timed",
+      "flow/execution.py:135:ExecutionPhase.execute_due.<locals>.<lambda>",
+      "account/account.py:196:Account.prepare_fill"
+    ]
+  }
+}

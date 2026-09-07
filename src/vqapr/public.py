@@ -134,6 +134,8 @@ from vqapr.portfolio.weighting import (
     rescale,
     signal_weight,
 )
+from vqapr.report.document import RunReport, StrategyReport
+from vqapr.report.record import run_report, strategy_report
 from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
@@ -213,6 +215,7 @@ __all__ = (
     "RowsLookback",
     "RunDefinition",
     "RunRecordMissing",
+    "RunReport",
     "RunResult",
     "Side",
     "SideCost",
@@ -224,6 +227,7 @@ __all__ = (
     "StrategyModel",
     "StrategyModelContext",
     "StrategyOutcome",
+    "StrategyReport",
     "TableSpec",
     "TickerNetting",
     "TradeRule",
@@ -271,9 +275,11 @@ __all__ = (
     "returns",
     "run",
     "run_ids",
+    "run_report",
     "shipped_constraint_path",
     "signal_weight",
     "strategy_refs",
+    "strategy_report",
     "trade_rules_by_kind",
     "validate_allocation",
 )

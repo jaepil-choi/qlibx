@@ -607,6 +607,87 @@ This rung depends on what the specific task requires. Common steps:
 - Verify that account state matches expectations
 - Check that the simulation result is deterministic across runs with identical inputs
 
+**Start from the report, not from the tables.** `strategy_report` and `run_report` in
+`vqapr.public` read a finished record back and compute, once, what a paper's tables need:
+
+```python
+from decimal import Decimal
+from pathlib import Path
+from vqapr.public import run_report, strategy_report
+
+store = Path(".vqapr")                       # the `store_root` `vqapr run` printed
+one = strategy_report(store, "reversal")     # the run's only strategy, or name "<id>" / "<id>@<fp8>"
+every = run_report(store, "ff-arm", benchmark="bm-book", risk_free_annual=Decimal("0.03"))
+one.as_record()                              # JSON-ready: Decimal as text, instants with offset
+```
+
+A `StrategyReport` has six sections, each a pydantic document, each `None` with a reason in
+`omitted` when the record cannot give it:
+
+- **`performance`** — NAV, period returns and drawdown as series (`instants` beside `values`);
+  total and annualised return, volatility, Sharpe, Sortino, Calmar, max drawdown and when,
+  positive-period share; `by_year` and `by_month`. `periods_per_year` is inferred from the
+  valuation grid and says so (`inferred`); pass it to override. Sharpe is against
+  `risk_free_annual`, zero unless you give one -- the record holds no rate.
+- **`book`** — held / long / short counts and gross, net, long, short exposure, cash share, max
+  weight, top-five share and HHI, per valuation, from the marked positions.
+- **`attribution`** — P&L per period by name and by side (long / short), and `residual`: the part
+  of the NAV change no marked name explains. Zero when every held name was marked; a non-zero
+  residual is a finding, not noise. `position_hit_rate` is the share of name-periods with a
+  positive P&L.
+- **`trading`** — one-way realised turnover (from fills) beside one-way intended turnover (from
+  weights); costs summed from `vqapr.fill` (commission, tax, basis points of notional, share of
+  mean NAV per year, by roster kind); `fills` (the same summary `vqapr run` prints, including
+  `never_filled`); holding periods.
+- **`intent`** — each decision's weights against the book at the first valuation after it:
+  `gap` (Σ |realised − intended|) and `weight_sign_hit_rate`.
+- **`compliance`** — per constraint: `checked` split into `held` / `within_tolerance` /
+  `breached` / `unmeasured`, the worst excess and when, the offending names by count.
+
+A `RunReport` holds every strategy's report plus `headline` (one row per strategy), the
+`correlation` of period returns on the instants all strategies share, and `relative` (active
+return, tracking error, information ratio) against the `benchmark` strategy you name -- a
+benchmark must be a book of the same run, because an index level is not in the record.
+
+**Three hit rates, three names.** `positive_period_share`, `position_hit_rate` and
+`weight_sign_hit_rate` measure different things; do not report any of them as "hit ratio"
+without saying which.
+
+#### Reporting: tables and figures for a paper
+
+The package computes the values and stops there; **it ships no plotting library and no
+renderer**, on purpose (PRD UC-REPORT-001). Render in the project with whatever the project
+already uses -- `pandas` + `matplotlib` is the usual pair; add them to the project, never to
+vqapr. Every series in the document is `instants` beside `values`, so
+`pd.Series(s.values, index=pd.DatetimeIndex(s.instants)).astype(float)` is the whole bridge.
+
+What a paper expects, and where it comes from:
+
+- **Table 1, the headline.** One row per strategy: annualised return, volatility, Sharpe, max
+  drawdown, turnover, cost, breaches. `run_report(...).headline`. Round for the table only;
+  keep the document's exact text for the appendix or the replication package.
+- **Table 2, by year.** `performance.by_year` per strategy: total return, volatility, Sharpe, max
+  drawdown. Add `relative` columns when a benchmark book is in the run.
+- **Figure 1, cumulative return with drawdown beneath.** `performance.nav` normalised to 1 (or
+  cumulative `returns`), one line per strategy, `performance.drawdown` as a filled area below on a
+  shared x axis.
+- **Figure 2, the book over time.** `book.gross_exposure`, `net_exposure`, `held` -- three small
+  panels, one x axis.
+- **Figure 3, correlation.** `run_report(...).correlation.values` as a heat map with the value
+  printed in each cell.
+- **Table 3, execution.** `trading.costs`, `trading.fills`, `intent.mean_gap`,
+  `annualized_realized_turnover` beside `annualized_intended_turnover` -- the second pair is the
+  size of what did not execute.
+- **Table 4, compliance.** `compliance.constraints`: checked / held / within tolerance / breached,
+  worst excess, top offenders.
+
+House style for a paper figure: serif or the journal's font; one column ≈ 3.3 in wide, two
+columns ≈ 7 in; 300 dpi PNG for review, PDF for submission; no top and right spines; a light
+horizontal grid only; a legend inside the axes or a caption; colour that survives greyscale
+(vary line style, not only hue); the zero line drawn. Label axes with units (`%`, `× NAV/yr`).
+State in the caption what `periods_per_year` and `risk_free_annual` were, because the
+document carries them and a reader will ask.
+
 ## Reading vqapr's output
 
 Every vqapr command returns exactly one line of JSON to stdout. The shape is always:

@@ -52,18 +52,19 @@ def _seed(tmp_path: Path) -> Workspace:
     workspace = Workspace.create(tmp_path)
     source = tmp_path / "alpha.py"
     source.write_text("class S:\n    pass\n", encoding="utf-8")
-    workspace.register_component(
-        ComponentRef(
-            component_id="alpha",
-            kind=ComponentKind.STRATEGY_MODEL,
-            path=source,
-            object_name="S",
-            config={},
-            fingerprint=fingerprint_component(
-                source, kind=ComponentKind.STRATEGY_MODEL, object_name="S", config={}
-            ),
+    with Workspace.transaction(workspace) as t:
+        t.register_component(
+            ComponentRef(
+                component_id="alpha",
+                kind=ComponentKind.STRATEGY_MODEL,
+                path=source,
+                object_name="S",
+                config={},
+                fingerprint=fingerprint_component(
+                    source, kind=ComponentKind.STRATEGY_MODEL, object_name="S", config={}
+                ),
+            )
         )
-    )
     return workspace
 
 
@@ -97,7 +98,8 @@ def test_a_removal_and_a_registration_cannot_produce_an_unopenable_workspace(
     def register_the_reference() -> None:
         """A second, entirely well-behaved caller. It takes the lock like anyone else."""
         try:
-            competitor.register_run(_run_naming_alpha())
+            with Workspace.transaction(competitor) as t:
+                t.register_run(_run_naming_alpha())
         except BaseException as error:
             failed.append(error)
         finally:

@@ -41,7 +41,7 @@ def test_the_gate_covers_every_showcase_but_the_hand_run_one() -> None:
     """A new showcase is collected without editing this file; a missing one is a failure."""
     found = _self_contained()
     assert len(found) == 8, found
-    assert HAND_RUN <= {path.name for path in SHOWCASES.iterdir()}, "show_003 has moved"
+    assert {path.name for path in SHOWCASES.iterdir()} >= HAND_RUN, "show_003 has moved"
 
 
 @pytest.mark.slow

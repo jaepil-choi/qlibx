@@ -246,6 +246,7 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
         "instrument_field": item.instrument_field,
         "available_at": item.available_at,
         "span": [str(value) for value in (item.span or ())] or None,
+        "produced_by": item.produced_by,
         "rows_total": scan.row_count(source),
         "returned": len(rows),
         "items": rows,

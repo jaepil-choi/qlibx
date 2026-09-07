@@ -271,9 +271,12 @@ class DataModelOutput:
     a reader listing the directory never opens a file whose footer is not there yet.
     """
 
-    def __init__(self, project_root: str | Path, layer: FrozenDataModel) -> None:
+    def __init__(
+        self, project_root: str | Path, layer: FrozenDataModel, *, run_id: str | None = None
+    ) -> None:
         self._root = Path(project_root)
         self._layer = layer
+        self._run_id = run_id
         self._directory = output_directory(project_root, layer.dataset_id)
         self._schema: pa.Schema | None = None
         self._parts = 0
@@ -400,11 +403,16 @@ class DataModelOutput:
             # `validated_output` admits, so what lands IS that grain.
             grain=Grain.INSTRUMENT_INSTANT,
         )
+        if self._run_id is not None:
+            # The dataset names the run that wrote it (`docs/issues/082`): known here and
+            # nowhere later, since the registration is the only thing that outlives this run.
+            registration = registration.with_producer(self._run_id)
         source = SourceSpec.of(source_id, self._directory)
         try:
             diagnosis, _, registration = validate(registration, source)
             diagnosis.raise_if_failed()
-            workspace.register_dataset(registration, source)
+            with Workspace.transaction(workspace.project_root) as transaction:
+                transaction.register_dataset(registration, source)
         except Exception:
             self._discard()
             raise

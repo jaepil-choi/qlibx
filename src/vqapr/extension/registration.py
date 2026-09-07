@@ -112,7 +112,8 @@ def register_component(
     ref = prepare_component(
         project_root, raw_component_id, path, object_name, kind=kind, config=config
     )
-    Workspace.create(project_root).register_component(ref)
+    with Workspace.transaction(project_root) as transaction:
+        transaction.register_component(ref)
     return ref
 
 

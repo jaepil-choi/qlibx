@@ -57,21 +57,23 @@ def workspace(tmp_path: Path) -> Path:
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
     ).with_span(*_SPAN)
-    space.register_dataset(registration, SourceSpec.of("prices-source", "prepared/prices"))
+    with Workspace.transaction(space) as t:
+        t.register_dataset(registration, SourceSpec.of("prices-source", "prepared/prices"))
     return tmp_path
 
 
 def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            object_name,
-            fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
 
 
 def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
@@ -84,24 +86,25 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime(2024, 1, 1, 15, 30).time(),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
+    with Workspace.transaction(root) as t:
+        t.register_execution_input(
+            ExecutionInputRegistration.of(
+                "my-exec",
+                ExecutionTableSpec(
+                    source=SourceSpec.of("exec-src", exec_dir),
+                    trade_at_field="trade_at",
+                    instrument_field="instrument",
+                    is_tradable_field="is_tradable",
+                    price_fields={"close": "close"},
+                ),
+                FillConvention(
+                    selector=FillSelector.NEXT_ELIGIBLE,
+                    local_time=datetime(2024, 1, 1, 15, 30).time(),
+                    timezone="Asia/Seoul",
+                    trade_price="close",
+                ),
+            )
         )
-    )
     source = root / "strategy.py"
     source.write_text(
         "from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold\n\n"
@@ -125,24 +128,25 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         encoding="utf-8",
     )
     _register_component(root, "venue", ComponentKind.EXCHANGE, venue)
-    Workspace.open(root).register_run(
-        RunDefinition(
-            run_id="probe",
-            strategies=(StrategyEntry("my-strat"),),
-            timezone="Asia/Seoul",
-            at=time(15, 30),
-            sessions=(date(2024, 1, 2),),
-            instruments=("A",),
-            exchange="venue",
-            execution_input_id="my-exec",
-            start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
-            end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),
-            initial_account_snapshot=AccountSnapshot(
-                0, Decimal("1000"), {"A": Decimal("-5")} if short else {}
-            ),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(root) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="probe",
+                strategies=(StrategyEntry("my-strat"),),
+                timezone="Asia/Seoul",
+                at=time(15, 30),
+                sessions=(date(2024, 1, 2),),
+                instruments=("A",),
+                exchange="venue",
+                execution_input_id="my-exec",
+                start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
+                end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),
+                initial_account_snapshot=AccountSnapshot(
+                    0, Decimal("1000"), {"A": Decimal("-5")} if short else {}
+                ),
+                initial_account_mode=AccountMode.LONG_ONLY,
+            )
         )
-    )
     return "probe"
 
 

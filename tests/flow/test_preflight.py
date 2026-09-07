@@ -95,7 +95,8 @@ def _setup(
     strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
     constraint_component = _component(root, "limit", ComponentKind.CONSTRAINT)
     for component in (strategy_component, constraint_component):
-        workspace.register_component(component)
+        with Workspace.transaction(workspace) as t:
+            t.register_component(component)
     # Registered through the public entry point, which measures the span persistence requires.
     register_dataset(
         root,
@@ -175,7 +176,8 @@ def _execution_exchange(
             path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
         ),
     )
-    workspace.register_component(component)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(component)
     execution_path = root / "execution.parquet"
     if register_input:
         connection = duckdb.connect()
@@ -202,7 +204,8 @@ def _execution_exchange(
         FillConvention(selector, time(15, 30), "Asia/Seoul", "close"),
     )
     if register_input:
-        workspace.register_execution_input(execution)
+        with Workspace.transaction(workspace) as t:
+            t.register_execution_input(execution)
     return component
 
 
@@ -321,12 +324,13 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
 ) -> None:
     workspace, definition = _setup(tmp_path, model_price_parquet)
     exchange = _execution_exchange(workspace, tmp_path)
-    compatible = replace(
-        definition,
-        exchange="exchange",
-        execution_input_id="execution",
-        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("2")}),
-    )
+    compatible = definition.replace(
+                     exchange='exchange',
+                     execution_input_id='execution',
+                     initial_account_snapshot=AccountSnapshot(
+                         0, Decimal('100'), {'ABC': Decimal('2')}
+                     ),
+                 )
 
     assert isinstance(
         load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
@@ -334,7 +338,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     assert preflight_run(workspace, compatible).exchange == exchange
     assert isinstance(exchange, ComponentRef)
     with pytest.raises(VqaprError, match="unlisted_instrument"):
-        preflight_run(workspace, replace(compatible, instruments=("ABC", "MISSING")))
+        preflight_run(workspace, compatible.replace(instruments=('ABC', 'MISSING')))
 
     duck_path = tmp_path / "duck.py"
     duck_path.write_text(
@@ -355,9 +359,10 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             duck_path, kind=ComponentKind.EXCHANGE, object_name="Duck"
         ),
     )
-    workspace.register_component(duck)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(duck)
     with pytest.raises(VqaprError, match="wrong_type"):
-        preflight_run(workspace, replace(compatible, exchange="duck"))
+        preflight_run(workspace, compatible.replace(exchange='duck'))
 
     cases = (
         (
@@ -378,7 +383,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     for _name, snapshot, code in cases:
         with pytest.raises(VqaprError, match=code):
-            preflight_run(workspace, replace(compatible, initial_account_snapshot=snapshot))
+            preflight_run(workspace, compatible.replace(initial_account_snapshot=snapshot))
 
     # A holding the venue will never fill, in an instrument the run does not trade -- the
     # money is stuck in something unsellable and preflight says so before the run starts.
@@ -409,15 +414,15 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
             no_sell_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
         ),
     )
-    workspace.register_component(no_sell)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(no_sell)
     with pytest.raises(VqaprError, match="holding_not_closable"):
         preflight_run(
             workspace,
-            replace(
-                compatible,
-                exchange="no-sell",
+            compatible.replace(
+                exchange='no-sell',
                 initial_account_snapshot=AccountSnapshot(
-                    0, Decimal("100"), {"STUCK": Decimal("1")}
+                    0, Decimal('100'), {'STUCK': Decimal('1')}
                 ),
             ),
         )
@@ -433,24 +438,24 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     with pytest.raises(VqaprError, match="fractional_quantity"):
         preflight_run(
             workspace,
-            replace(
-                compatible,
-                exchange="fractional",
+            compatible.replace(
+                exchange='fractional',
                 initial_account_snapshot=AccountSnapshot(
-                    0, Decimal("100"), {"ABC": Decimal("1.5")}
+                    0, Decimal('100'), {'ABC': Decimal('1.5')}
                 ),
             ),
         )
 
-    signed = replace(
-        compatible,
-        initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {"ABC": Decimal("-2")}),
-    )
+    signed = compatible.replace(
+                 initial_account_snapshot=AccountSnapshot(
+                     0, Decimal('100'), {'ABC': Decimal('-2')}
+                 ),
+             )
     with pytest.raises(VqaprError, match="mode"):
         preflight_run(workspace, signed)
     assert (
         preflight_run(
-            workspace, replace(signed, initial_account_mode=AccountMode.SIGNED)
+            workspace, signed.replace(initial_account_mode=AccountMode.SIGNED)
         ).initial_account_mode
         is AccountMode.SIGNED
     )
@@ -474,7 +479,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
-    definition = replace(definition, strategies=(StrategyEntry("strategy", ("limit",), memory),))
+    definition = definition.replace(strategies=(StrategyEntry('strategy', ('limit',), memory),))
     frozen = preflight_run(workspace, definition)
     memory["nested"].append(2)
     assert definition.strategies[0].initial_model_memory == {"nested": [1]}
@@ -551,7 +556,7 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
     workspace, definition = _setup(
         tmp_path / "unlisted", model_price_parquet, with_execution=False
     )
-    unlisted = replace(definition, instruments=("NOT-LISTED",))
+    unlisted = definition.replace(instruments=('NOT-LISTED',))
 
     # The execution refusal comes first, and it is the reason the universe check is reachable
     # at all once an execution input is supplied.
@@ -561,7 +566,7 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
     workspace, definition = _setup(tmp_path / "listed", model_price_parquet)
 
     with pytest.raises(VqaprError, match=r"preflight\.universe\.unlisted_instrument"):
-        preflight_run(workspace, replace(definition, instruments=("NOT-LISTED",)))
+        preflight_run(workspace, definition.replace(instruments=('NOT-LISTED',)))
 
 
 def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
@@ -593,10 +598,11 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
             path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
         ),
     )
-    workspace.register_component(component)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(component)
 
     with pytest.raises(VqaprError, match=r"preflight\.execution\.requirement_missing") as error:
-        preflight_run(workspace, replace(definition, exchange="limited"))
+        preflight_run(workspace, definition.replace(exchange='limited'))
     failure = error.value.as_dict()["failures"][0]
     assert "price_limit" in failure["observed"], "the message names the feature to switch off"
     assert "switched off" in failure["requirement"]
@@ -620,8 +626,9 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
             off_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
         ),
     )
-    workspace.register_component(off)
-    assert preflight_run(workspace, replace(definition, exchange="unlimited")).exchange == off
+    with Workspace.transaction(workspace) as t:
+        t.register_component(off)
+    assert preflight_run(workspace, definition.replace(exchange='unlimited')).exchange == off
 
 
 def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
@@ -659,14 +666,15 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
             path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
         ),
     )
-    workspace.register_component(component)
-    tracked = replace(definition, exchange="tracked")
+    with Workspace.transaction(workspace) as t:
+        t.register_component(component)
+    tracked = definition.replace(exchange='tracked')
 
     # Publishing it is fine; the run simply does not trade it.
     assert preflight_run(workspace, tracked).exchange == component
 
     with pytest.raises(VqaprError, match=r"preflight\.universe\.untradable_listing") as e:
-        preflight_run(workspace, replace(tracked, instruments=("ABC", "KOSPI200")))
+        preflight_run(workspace, tracked.replace(instruments=("ABC", "KOSPI200")))
     codes = [failure["code"] for failure in e.value.as_dict()["failures"]]
     assert codes == ["preflight.universe.untradable_listing"], (
         "a listed instrument must not also be reported as unlisted"
@@ -711,11 +719,11 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         preflight_run(workspace, definition)
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        replace(definition, start=datetime(2024, 3, 5, 9))
+        definition.replace(start=datetime(2024, 3, 5, 9))
     with pytest.raises(ValueError, match="start must not be after end"):
-        replace(definition, start=definition.end, end=definition.start)
+        definition.replace(start=definition.end, end=definition.start)
     with pytest.raises(ValueError, match="declared together"):
-        replace(definition, initial_account_mode=None)
+        definition.replace(initial_account_mode=None)
     with pytest.raises(TypeError, match="Model memory"):
         StrategyEntry("strategy", (), ("not-json",))  # type: ignore[arg-type]
 
@@ -730,14 +738,11 @@ def test_the_derived_agenda_fires_once_per_session_at_the_declared_wall_time(
     the same sessions name the same occurrences.
     """
     workspace, definition = _setup(tmp_path, model_price_parquet)
-    listed = replace(
-        definition,
-        sessions=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
-        at=time(8, 30),
-        # The agenda is the run's sessions INSIDE its period (`docs/issues/069`), so the
-        # period has to reach the last listed day for all three to appear.
-        end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
-    )
+    listed = definition.replace(
+                 sessions=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
+                 at=time(8, 30),
+                 end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
+             )
 
     agenda = derived_agenda(workspace, listed)
 
@@ -769,12 +774,11 @@ def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
     a run declared there fires on those days.
     """
     workspace, definition = _setup(tmp_path, model_price_parquet)
-    from_dataset = replace(
-        definition,
-        sessions=(),
-        sessions_from="prices",
-        end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE),
-    )
+    from_dataset = definition.replace(
+                       sessions=(),
+                       sessions_from='prices',
+                       end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE),
+                   )
 
     agenda = derived_agenda(workspace, from_dataset)
 
@@ -782,14 +786,14 @@ def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
         datetime(2024, 3, day, 9, tzinfo=_ZONE) for day in (5, 6, 7, 8)
     ], "the dataset's 15:30 instants became 09:00 decisions on the same venue days"
 
-    honolulu = replace(from_dataset, timezone="Pacific/Honolulu", at=time(7))
+    honolulu = from_dataset.replace(timezone='Pacific/Honolulu', at=time(7))
     assert [
         occurrence.local_instant.local_date
         for occurrence in derived_agenda(workspace, honolulu).occurrences
     ] == [date(2024, 3, day) for day in (4, 5, 6, 7)]
 
     with pytest.raises(VqaprError):
-        derived_agenda(workspace, replace(from_dataset, sessions_from="absent"))
+        derived_agenda(workspace, from_dataset.replace(sessions_from='absent'))
 
 
 def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
@@ -806,7 +810,7 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     workspace, definition = _setup(tmp_path, model_price_parquet)
     # The dataset has four sessions (3/5 .. 3/8); the run's period (`_setup`: 3/5 09:00 to
     # 15:30, the one day the execution fixture can fill) admits one.
-    two_days = replace(definition, sessions=(), sessions_from="prices")
+    two_days = definition.replace(sessions=(), sessions_from='prices')
 
     agenda = derived_agenda(workspace, two_days)
     assert [occurrence.local_instant.local_date for occurrence in agenda.occurrences] == [
@@ -836,15 +840,13 @@ def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
 ) -> None:
     """02:30 on 2024-03-10 does not exist in New York; the run is refused, not moved an hour."""
     workspace, definition = _setup(tmp_path, model_price_parquet)
-    skipped = replace(
-        definition,
-        timezone="America/New_York",
-        at=time(2, 30),
-        sessions=(date(2024, 3, 10),),
-        # The period has to admit the day for the agenda to be asked about it (`069`).
-        start=datetime(2024, 3, 9, tzinfo=_ZONE),
-        end=datetime(2024, 3, 11, tzinfo=_ZONE),
-    )
+    skipped = definition.replace(
+                  timezone='America/New_York',
+                  at=time(2, 30),
+                  sessions=(date(2024, 3, 10),),
+                  start=datetime(2024, 3, 9, tzinfo=_ZONE),
+                  end=datetime(2024, 3, 11, tzinfo=_ZONE),
+              )
 
     with pytest.raises(ValueError, match="does not exist"):
         derived_agenda(workspace, skipped)
@@ -890,7 +892,8 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
             path, kind=ComponentKind.CONSTRAINT, object_name="Drifted"
         ),
     )
-    workspace.register_component(drifted)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(drifted)
 
     with pytest.raises(VqaprError) as caught:
         preflight_run(workspace, definition)

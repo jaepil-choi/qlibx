@@ -12,7 +12,6 @@ strategy that raises from its own file between them.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -69,10 +68,9 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     register_strategy_model(project, "ou-first", journey.STRATEGY_SOURCE, "SampleReversal5d")
     register_strategy_model(project, "never-ready", raising, "NeverReady")
     register_strategy_model(project, "ou-last", journey.STRATEGY_SOURCE, "SampleReversal5d")
-    definition = replace(
-        journey.definition(panel, run_id="mixed"),
-        strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
-    )
+    definition = journey.definition(panel, run_id='mixed').replace(
+                     strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
+                 )
     register_run(project, definition)
     return project, tmp_path / "store"
 

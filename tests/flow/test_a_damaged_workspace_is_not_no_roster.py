@@ -49,9 +49,10 @@ def _register(project: Path, declared: dict[str, str], *, into: str) -> str:
     digest = hashlib.sha256()
     for _, path in sorted(written.items()):
         digest.update(Path(path).read_bytes())
-    Workspace.create(project).register_instruments(
-        {kind: path for kind, path in written.items()}, digest=digest.hexdigest()
-    )
+    with Workspace.transaction(project) as t:
+        t.register_instruments(
+            {kind: path for kind, path in written.items()}, digest=digest.hexdigest()
+        )
     return digest.hexdigest()
 
 

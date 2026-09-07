@@ -79,9 +79,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         ))
     declaration = Path(args.declaration)
     document = read_yaml_mapping(declaration, what="a declaration")
-    return success(
-        "workspace.register",
-        registered=apply(
-            document, project_root, base=declaration.parent, declaration=declaration
-        ),
-    )
+    registered = apply(document, project_root, base=declaration.parent, declaration=declaration)
+    # What was just declared, said once in words (`docs/issues/027`): one sentence per
+    # point-in-time concept, or nothing for a declaration that carries none.
+    return success("workspace.register", registered=dict(registered), spoken=registered.spoken)

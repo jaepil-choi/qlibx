@@ -68,15 +68,16 @@ def _fingerprint(root: Path) -> dict[str, str]:
 
 def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            object_name,
-            fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
 
 
 def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str) -> None:
@@ -118,24 +119,25 @@ def _execution_input(root: Path, fill_at: str = "15:30") -> None:
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-                timezone="UTC",
-                trade_price="close",
-            ),
+    with Workspace.transaction(root) as t:
+        t.register_execution_input(
+            ExecutionInputRegistration.of(
+                "my-exec",
+                ExecutionTableSpec(
+                    source=SourceSpec.of("exec-src", exec_dir),
+                    trade_at_field="trade_at",
+                    instrument_field="instrument",
+                    is_tradable_field="is_tradable",
+                    price_fields={"close": "close"},
+                ),
+                FillConvention(
+                    selector=FillSelector.NEXT_ELIGIBLE,
+                    local_time=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
+                    timezone="UTC",
+                    trade_price="close",
+                ),
+            )
         )
-    )
 
 
 def _definition(**overrides: object) -> RunDefinition:
@@ -170,22 +172,24 @@ def workspace(tmp_path: Path) -> Path:
     `_definition` carries them as defaults.
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("available_at", "instrument"),
-            fields={"volume": "volume"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("available_at", "instrument"),
+                fields={"volume": "volume"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
     _execution_input(tmp_path)
-    Workspace.open(tmp_path).register_run(_definition())
+    with Workspace.transaction(tmp_path) as t:
+        t.register_run(_definition())
     return tmp_path
 
 
@@ -271,12 +275,13 @@ def test_repairing_one_defect_leaves_the_others_reported(workspace: Path) -> Non
     closes the short position and asserts the other three refusals survive untouched.
     """
     before = {entry["code"] for entry in check(RUN, workspace)["failures"]}
-    Workspace.open(workspace).register_run(
-        _definition(
-            run_id="repaired",
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            _definition(
+                run_id="repaired",
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            )
         )
-    )
     after = {entry["code"] for entry in check("repaired", workspace)["failures"]}
 
     assert "check.weights.mode_conflict" in before
@@ -398,7 +403,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    definition = replace(_definition(), strategies=(StrategyEntry("wide"),))
+    definition = _definition().replace(strategies=(StrategyEntry('wide'),))
     (member,) = _members(definition)
     failures = _judge_member_datasets(
         definition,
@@ -418,18 +423,19 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
 def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> None:
     """`check.field.absent`, reachable only once the model is loaded."""
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"volume": "volume"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"volume": "volume"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
     # On a session the data covers, so the absent field is the only thing wrong.
@@ -446,18 +452,19 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     (issue 012).
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"close": "close"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"close": "close"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
     begins = _SPAN[0]
 
@@ -491,18 +498,19 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
     refusing what `run` accepts.
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"close": "close"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"close": "close"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
     # The sessions come from a dataset that is not registered: the agenda cannot be built here.
@@ -629,12 +637,13 @@ def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(
 ) -> None:
     """The other direction: a run that carries nothing wrong is certified, not merely tolerated."""
     space = Workspace.open(workspace)
-    Workspace.open(workspace).register_dataset(
-        replace(
-            space.dataset("prices"),
-            dataset_id="full",
-            fields={"close": "close", "volume": "volume"},
-        ),
-        space.source("prices-source"),
-    )
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(
+            replace(
+                space.dataset("prices"),
+                dataset_id="full",
+                fields={"close": "close", "volume": "volume"},
+            ),
+            space.source("prices-source"),
+        )
     assert "check.field.absent" in {entry["code"] for entry in check(RUN, workspace)["failures"]}

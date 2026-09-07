@@ -149,8 +149,10 @@ def test_workspace_fill_round_trip_is_idempotent_and_rejects_offset_sessions(
     registration = _registration(tmp_path / "execution.parquet")
     workspace = Workspace.create(tmp_path)
 
-    assert workspace.register_execution_input(registration)
-    assert not workspace.register_execution_input(registration)
+    with Workspace.transaction(workspace) as t:
+        assert t.register_execution_input(registration)
+    with Workspace.transaction(workspace) as t:
+        assert not t.register_execution_input(registration)
     assert Workspace.open(tmp_path).execution_input("krx-daily") == registration
 
     document = workspace.path.read_text(encoding="utf-8")

@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — **Step 4 완료(record `159`)**, 다음은 `step-05-document-is-the-domain`. `082`의 나머지(dataset이 producer run을 댄다)를 Step 5에 접는다 → 6 → 7 |
+| 브랜치 | 없음 — **Step 5 완료(record `160`; `027`·`082` 닫힘)**, 다음은 `step-06-record-family` (6a: `Frozen*` pydantic, 6b: 기록 family 7→3). 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -32,6 +32,7 @@
 | `155` | `fix/078-size-down-and-leave-cash` | `078` | 지불 가능 수량이 **청구하는 채널**(`ExchangeRulesView.charge`)에서 rate를 읽고, 보정은 청구된 값으로 다시 풀고, 못 맞추면 거부 대신 현금을 남긴다. 척추 인접(`orders/planning.py`)이라 캠페인 밖 |
 | `156` | `fix/refusals-and-summaries-tell-the-truth` | `079`·`083`·`084`·`085` (+`082`의 `--kind` 절반) | datamodel 거부가 pyarrow 문장+확정 스키마를 인용하고 원인을 단정 안 함(`type_drift`→`schema_mismatch`); `show model`의 구조화 거부와 `list components --kind`; run conflict `fix`가 `rm run-definition`을 대고 같은 문서의 producer run을 거부가 이름으로 댐(`declaration.read.run_fed_by_sibling`); `fill_summary.never_filled` |
 | `157` | `fix/080-081-enumerate-then-cascade` | `080`·`081` | datamodel 쪽 `unfinished`/`running` 열거와 `rm datamodel`이 record 없는 디렉터리를 댐; `list runs`의 `orphaned` 행; `rm run-definition`의 `records_remaining`; **`rm run <id> --cascade`** (record → 정의 → materialized 출력 → component, 다른 run이 이름 대는 것은 `kept`+`held_by`) |
+| `159`·`160` | `step-04-delete-materialize` · `step-05-document-is-the-domain` | — · `027`·`082` | 캠페인 Step 4·5. Step 5가 찾은 것: §1.3의 `declarations.py` 행이 틀림(6/7이 adapter 구현); `model_copy`는 재검증 안 함(`RunDefinition.replace()`가 검증을 거침); `instruments:` 오타가 퇴역 shape 조언을 받던 결함; 문 하나가 지켜야 했던 보장 셋(호출자 객체 갱신·fresh 프로젝트의 첫 등록이 문서를 씀·사라진 문서는 `open.missing`으로 거부) |
 | `158` | `fix/086-tolerance-and-three-buckets` | `086` | `StampedConstraintFinding`이 `excess`를 `max(bound×1%, 10bp)`(또는 `Constraint.tolerance`)로 판정해 `held`/`within_tolerance`/`breached`; contract 블록이 셋을 나눠 세고 `ok`는 `breached`만 봄; monitoring 행에 `verdict`·`tolerance`. **constraint·scaffold 코드 변경 0** |
 
 **함정 하나, 기록해 둔다.** `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
@@ -46,6 +47,7 @@
 하나이고, 그 세션에 값이 없던 컬럼은 `null` 타입으로 써진다 — 여러 part를 읽는 쪽이 스키마를 **union**해야
 하고, 패키지의 `scan._relation`이 이제 그렇게 한다(`union_by_name=true`). 직접 duckdb로 읽을 때도 같은
 옵션이 필요하다. ③ 모듈을 지운 뒤에는 전체 스위트 전에 `pytest --collect-only`부터 — 1초면 import 누락이 잡힌다.
+④ **문(door)을 지울 때는 호출자 수가 리라이트 범위가 아니다.** Step 5 M5a에서 `public.py`의 헬퍼 둘이 지운 문을 계속 부르고 있었고, 타깃 테스트는 전부 통과했으며(그 헬퍼를 안 씀), 첫 전체 스위트에서 showcase·slow 여정 34개가 한꺼번에 죽었다. 문을 지운 뒤에는 `grep`으로 남은 호출자 0을 확인하고 showcase 게이트를 전체 스위트 **앞에** 돌린다.
 
 **남은 실환경 이슈는 `082` 하나** — `--reads` 인덱스와 dataset의 producer `run_id`. 캠페인 Step 5에서 dataset
 문서를 다시 쓸 때 접는다. 원래부터 열려 있던 `023`·`027`은 그대로.
@@ -227,7 +229,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 6. `tests/characterization/refusal_codes.py` inventory에서 `materialize.*` 코드 제거(재생성).
    `scripts/vulture_whitelist.py` 확인.
 
-### Step 5 — 문서가 도메인이다 (ExecPlan 필요, record `160`) ← **다음 손**
+### ~~Step 5 — 문서가 도메인이다~~ — **완료 2026-09-05, record `160`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 6**(record `161`), 그 첫 마일스톤 6a = `Frozen*` → frozen pydantic(Step 5의 M5d를 여기로 연기).
 
 캠페인 §1.3 표가 계약이다. 손 위치:
 - `src/vqapr/workspace_document.py`: `RunDocument.to_domain(:412)`, `DatasetDocument`·`ExecutionInputDocument`·

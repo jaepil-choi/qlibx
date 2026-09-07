@@ -27,7 +27,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from test_commands import _cli, _workspace_for_run
+from test_commands import _workspace_for_run
 
 from vqapr.cli.check import check
 

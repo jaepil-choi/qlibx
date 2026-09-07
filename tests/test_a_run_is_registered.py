@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
@@ -82,30 +83,34 @@ def workspace(tmp_path: Path) -> Workspace:
         ("no-short", ComponentKind.CONSTRAINT),
         ("venue", ComponentKind.EXCHANGE),
     ):
-        space.register_component(_component(name, kind, tmp_path))
+        with Workspace.transaction(space) as t:
+            t.register_component(_component(name, kind, tmp_path))
     execution = tmp_path / "execution.parquet"
     execution.write_bytes(b"")
-    space.register_execution_input(
-        ExecutionInputRegistration.of(
-            "venue-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("venue-source", execution),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+    with Workspace.transaction(space) as t:
+        t.register_execution_input(
+            ExecutionInputRegistration.of(
+                "venue-daily",
+                ExecutionTableSpec(
+                    source=SourceSpec.of("venue-source", execution),
+                    trade_at_field="trade_at",
+                    instrument_field="instrument",
+                    is_tradable_field="is_tradable",
+                    price_fields={"close": "close"},
+                ),
+                FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+            )
         )
-    )
     return Workspace.open(tmp_path)
 
 
 def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> None:
     definition = _definition()
 
-    assert workspace.register_run(definition) is True
-    assert workspace.register_run(definition) is False, "the same run again changes nothing"
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is False, "the same run again changes nothing"
 
     reopened = Workspace.open(workspace.project_root)
     assert reopened.run_definition("krx-2024") == definition
@@ -137,10 +142,12 @@ def test_a_run_may_take_its_sessions_from_a_registered_dataset_instead(
         fields={"close": "close"},
         grain="instrument_instant",
     ).with_span(datetime(2024, 3, 5, tzinfo=KST), datetime(2024, 3, 7, tzinfo=KST))
-    workspace.register_dataset(prices, SourceSpec.of("price-source", tmp_path / "prices.parquet"))
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(prices, SourceSpec.of("price-source", tmp_path / "prices.parquet"))
     definition = _definition(sessions=(), sessions_from="prices")
 
-    assert workspace.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
 
     reopened = Workspace.open(workspace.project_root)
     assert reopened.run_definition("krx-2024") == definition
@@ -152,10 +159,12 @@ def test_a_run_may_take_its_sessions_from_a_registered_dataset_instead(
 def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     workspace: Workspace,
 ) -> None:
-    workspace.register_run(_definition())
+    with Workspace.transaction(workspace) as t:
+        t.register_run(_definition())
 
     with pytest.raises(VqaprError) as refused:
-        workspace.register_run(_definition(instruments=("A",)))
+        with Workspace.transaction(workspace) as t:
+            t.register_run(_definition(instruments=("A",)))
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.conflict"
     assert "run_id 'krx-2024'" in failure["requirement"]
@@ -180,14 +189,16 @@ def test_a_run_naming_anything_unregistered_is_refused_by_name(
 ) -> None:
     """Refused at registration, so `vqapr run <id>` never meets an id it cannot resolve."""
     with pytest.raises(VqaprError) as refused:
-        workspace.register_run(_definition(**override))
+        with Workspace.transaction(workspace) as t:
+            t.register_run(_definition(**override))
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.reference"
     assert names in failure["requirement"], failure["requirement"]
 
 
 def test_a_run_holds_what_it_names_so_removal_is_refused_by_name(workspace: Workspace) -> None:
-    workspace.register_run(_definition())
+    with Workspace.transaction(workspace) as t:
+        t.register_run(_definition())
 
     assert workspace.references_to("component", "ou-ff5") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "no-short") == ("run 'krx-2024'",)
@@ -264,11 +275,11 @@ def test_a_malformed_run_declaration_is_refused_with_its_own_code(
         ({"timezone": ""}, ValueError, "timezone must be a non-empty IANA timezone name"),
         ({"timezone": "Mars/Olympus"}, ValueError, "unknown IANA timezone"),
         ({"at": None}, ValueError, "at must be declared"),
-        ({"at": "15:29"}, TypeError, "at must be a datetime.time"),
+        ({"at": object()}, ValidationError, "at"),
         ({"at": time(15, 29, tzinfo=KST)}, ValueError, "timezone-naive wall time"),
         ({"sessions": ()}, ValueError, "exactly one of sessions_from or sessions"),
         ({"sessions_from": "prices"}, ValueError, "exactly one of sessions_from or sessions"),
-        ({"sessions": (datetime(2024, 3, 5, tzinfo=KST),)}, TypeError, "tuple of dates"),
+        ({"sessions": (datetime(2024, 3, 5, 9, 30, tzinfo=KST),)}, ValidationError, "sessions"),
     ],
 )
 def test_the_run_definition_refuses_a_half_declared_clock(
@@ -290,6 +301,7 @@ def test_a_run_without_an_initial_account_reopens(workspace: Workspace) -> None:
     to make `Workspace.open()` refuse the whole workspace on the next command.
     """
     definition = _definition(initial_account_snapshot=None, initial_account_mode=None)
-    assert workspace.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
 
     assert Workspace.open(workspace.project_root).run_definition("krx-2024") == definition

@@ -309,9 +309,11 @@ def component_ref(
 
 def register_component(project_root: str | Path, component: ComponentRef) -> bool:
     """Register one validated extension component reference."""
-    return Workspace.create(project_root).register_component(component)
+    with Workspace.transaction(project_root) as transaction:
+        return transaction.register_component(component)
 
 
 def register_run(project_root: str | Path, definition: RunDefinition) -> bool:
     """Register a run: the reusable configuration `vqapr run <run-id>` executes (record `139`)."""
-    return Workspace.create(project_root).register_run(definition)
+    with Workspace.transaction(project_root) as transaction:
+        return transaction.register_run(definition)

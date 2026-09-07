@@ -76,15 +76,16 @@ def _register_a_strategy(root: Path, name: str = "alpha") -> None:
     Registered directly rather than through the document: a `components:` entry loads the file
     to fingerprint it, and what these tests measure is the write, not component loading.
     """
-    Workspace.create(root).register_component(
-        ComponentRef.of(
-            name,
-            ComponentKind.STRATEGY_MODEL,
-            root / f"{name}.py",
-            "Strategy",
-            fingerprint="a" * 64,
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                name,
+                ComponentKind.STRATEGY_MODEL,
+                root / f"{name}.py",
+                "Strategy",
+                fingerprint="a" * 64,
+            )
         )
-    )
 
 
 def test_a_document_refused_at_its_kth_item_leaves_the_workspace_byte_identical(

@@ -41,12 +41,14 @@ def test_one_edit_one_reregistration_and_the_id_survives(tmp_path: Path) -> None
     workspace = Workspace.create(tmp_path)
     source = tmp_path / "model.py"
     source.write_text(SOURCE.format(value=1), encoding="utf-8")
-    workspace.register_component(_ref(source))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_ref(source))
     before = workspace.component("mom").fingerprint
 
     # The edit. One line.
     source.write_text(SOURCE.format(value=2), encoding="utf-8")
-    workspace.register_component(_ref(source))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_ref(source))
 
     after = workspace.component("mom")
     assert after.fingerprint != before, "the edit must move the registered fingerprint"
@@ -69,7 +71,8 @@ def test_the_as_loaded_digest_follows_the_source_not_the_registration(tmp_path: 
     source = tmp_path / "model.py"
     source.write_text(SOURCE.format(value=1), encoding="utf-8")
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
 
     assert as_loaded_fingerprint(ref) == ref.fingerprint, "unedited: the two agree"
 
@@ -95,7 +98,8 @@ def test_the_overfitting_signal_is_countable(tmp_path: Path) -> None:
     for value in range(1, 6):
         source.write_text(SOURCE.format(value=value), encoding="utf-8")
         ref = _ref(source)
-        workspace.register_component(ref)
+        with Workspace.transaction(workspace) as t:
+            t.register_component(ref)
         seen.add(ref.fingerprint)
 
     assert len(seen) == 5, "five edits must produce five distinct fingerprints"

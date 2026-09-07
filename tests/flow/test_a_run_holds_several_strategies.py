@@ -13,7 +13,6 @@ because a record is only worth freezing if a real run produced it.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -51,10 +50,9 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     # on the run's sessions at its `at`, so registering the model is all a strategy needs.
     for name in STRATEGIES:
         register_strategy_model(project, name, journey.STRATEGY_SOURCE, "SampleReversal5d")
-    definition = replace(
-        journey.definition(panel, run_id="comparison"),
-        strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
-    )
+    definition = journey.definition(panel, run_id='comparison').replace(
+                     strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
+                 )
     register_run(project, definition)
     return project, tmp_path / "store"
 
@@ -76,7 +74,7 @@ def test_preflight_freezes_one_run_layer_and_one_layer_per_strategy(tmp_path: Pa
     # Same run, fewer strategies. The run id stays: since record `148` the strategy's agenda is
     # derived from the run (`<run_id>.sessions`), so a strategy's identity folds the run it is
     # asked in, and only the OTHER strategies of that run are what must not change it.
-    only = replace(workspace.run_definition("comparison"), strategies=(StrategyEntry("ou-k0"),))
+    only = workspace.run_definition('comparison').replace(strategies=(StrategyEntry('ou-k0'),))
     alone = preflight_run(project, only).strategy("ou-k0")
     assert alone.identity == frozen.strategy("ou-k0").identity, (
         "a strategy's identity is its own: adding strategies to the run does not change it"
@@ -96,17 +94,16 @@ def test_a_strategy_the_run_names_without_a_registration_is_refused_by_name(
     project, _ = _project(tmp_path)
     register_strategy_model(project, "registered-only", journey.STRATEGY_SOURCE, "SampleReversal5d")
     workspace = Workspace.open(project)
-    named = replace(
-        workspace.run_definition("comparison"),
-        run_id="x",
-        strategies=(StrategyEntry("registered-only"),),
-    )
+    named = workspace.run_definition('comparison').replace(
+                run_id='x',
+                strategies=(StrategyEntry('registered-only'),),
+            )
     register_run(project, named)
     assert Workspace.open(project).run_definition("x").strategies == named.strategies
 
     from vqapr.domain.errors import VqaprError
 
-    unregistered = replace(named, run_id="y", strategies=(StrategyEntry("unregistered"),))
+    unregistered = named.replace(run_id='y', strategies=(StrategyEntry('unregistered'),))
     with pytest.raises(VqaprError) as refused:
         register_run(project, unregistered)
     assert "'unregistered'" in refused.value.as_dict()["failures"][0]["requirement"]
@@ -206,7 +203,7 @@ def test_a_changed_run_under_an_old_id_is_refused_naming_both_digests(tmp_path: 
     frozen = preflight_run(project, workspace.run_definition("comparison"))
     execute_run(project, frozen, store_root=store, strategies=["ou-k0"])
 
-    changed = replace(workspace.run_definition("comparison"), instruments=frozen.instruments[:1])
+    changed = workspace.run_definition('comparison').replace(instruments=frozen.instruments[:1])
     with pytest.raises(RunRecordConflict) as refused:
         execute_run(
             project, preflight_run(project, changed), store_root=store, strategies=["ou-k0"]

@@ -10,8 +10,7 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import StrategyModel
-from vqapr.constraints.constraint import Constraint
+from vqapr.authoring import Constraint, StrategyModel
 from vqapr.data.datasets import lookback_fits_grain, require_grain
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec

@@ -17,12 +17,12 @@ from types import SimpleNamespace
 import pytest
 
 from vqapr.authoring import Constraint, ConstraintFinding
-from vqapr.constraints.evaluation import _tolerance_override
-from vqapr.constraints.findings import (
+from vqapr.constraints.evaluation import (
     VERDICT_BREACHED,
     VERDICT_HELD,
     VERDICT_WITHIN_TOLERANCE,
     StampedConstraintFinding,
+    _tolerance_override,
     default_tolerance,
 )
 from vqapr.flow.record import contract_report

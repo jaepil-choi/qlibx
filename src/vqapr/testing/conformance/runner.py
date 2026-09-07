@@ -40,8 +40,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vqapr.authoring import DataModel, StrategyModel
-from vqapr.constraints.constraint import Constraint
+from vqapr.authoring import Constraint, DataModel, StrategyModel
 from vqapr.domain.errors import (
     Diagnosis,
     ExplainTopic,

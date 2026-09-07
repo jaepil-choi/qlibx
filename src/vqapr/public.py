@@ -17,11 +17,19 @@ from vqapr.analysis.signal import (
     information_coefficient,
     rank_information_coefficient,
 )
-from vqapr.authoring import DataModel, DatasetInput, Hold, Rebalance, StrategyModel
+from vqapr.authoring import (
+    Constraint,
+    ConstraintBounds,
+    ConstraintFinding,
+    DataModel,
+    DatasetInput,
+    Hold,
+    Rebalance,
+    StrategyModel,
+)
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
-from vqapr.constraints.constraint import Constraint, ConstraintBounds
-from vqapr.constraints.findings import ConstraintFinding, ConstraintReport
+from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow

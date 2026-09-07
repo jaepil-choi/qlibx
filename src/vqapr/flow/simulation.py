@@ -16,8 +16,7 @@ from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
-from vqapr.authoring import AccountHistoryInput, StrategyModel
-from vqapr.constraints.constraint import Constraint
+from vqapr.authoring import AccountHistoryInput, Constraint, StrategyModel
 from vqapr.data.windows import ModelWindow
 from vqapr.evidence.artifacts import (
     FinalizationEvidence,

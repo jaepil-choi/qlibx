@@ -22,9 +22,8 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import AccountHistoryInput, StrategyModel
-from vqapr.constraints.constraint import Constraint
-from vqapr.constraints.findings import ConstraintReport
+from vqapr.authoring import AccountHistoryInput, Constraint, StrategyModel
+from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import (
     ExplainTopic,

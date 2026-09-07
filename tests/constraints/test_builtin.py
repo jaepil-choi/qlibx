@@ -403,7 +403,7 @@ from vqapr.authoring import (
     EconomicAccountView,
     Rebalance,
 )
-from vqapr.constraints.findings import ConstraintFinding
+from vqapr.authoring import ConstraintFinding
 
 
 class LocalCap(Constraint):

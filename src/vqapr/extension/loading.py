@@ -18,8 +18,7 @@ import inspect
 import sys
 from pathlib import Path
 
-from vqapr.authoring import DataModel, StrategyModel
-from vqapr.constraints.constraint import Constraint
+from vqapr.authoring import Constraint, DataModel, StrategyModel
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 from vqapr.exchange.listings import ExchangeRulesView
@@ -314,7 +313,7 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
             f"{_STAGE}.wrong_type",
             "registered Constraint object must implement the public Constraint contract",
             type(constraint).__name__,
-            fix="make the registered object a subclass of vqapr.constraints.constraint.Constraint",
+            fix="make the registered object a subclass of vqapr.authoring.Constraint",
             explain=ExplainTopic.COMPONENT_CONTRACT,
         )
     # Not `_requirements(...)`: a Constraint declares its reads with `inputs()` like every other

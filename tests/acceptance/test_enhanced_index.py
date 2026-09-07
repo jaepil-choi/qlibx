@@ -17,8 +17,8 @@ from uuid import UUID
 import duckdb
 import pytest
 
+from vqapr.authoring import ConstraintBounds
 from vqapr.constraints.builtin import NoShort, SingleNameCap
-from vqapr.constraints.constraint import ConstraintBounds
 from vqapr.constraints.evaluation import merged_constraint_bounds, project_constraints
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement

@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.evaluation import (
+    ConstraintReport,
     evaluate_constraints,
     project_constraints,
 )
-from vqapr.constraints.findings import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.evidence.artifacts import (
     MonitoringEvidence,

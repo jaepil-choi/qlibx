@@ -43,7 +43,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
         if kind is ComponentKind.STRATEGY_MODEL
-        else "from vqapr.constraints.constraint import Constraint\n"
+        else "from vqapr.authoring import Constraint\n"
         f"class {identifier.title().replace('-', '')}(Constraint):\n"
         "    @property\n"
         "    def constraint_id(self):\n"
@@ -689,7 +689,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     workspace, definition = _setup(tmp_path / "constraint-requirement", model_price_parquet)
     constraint_path = tmp_path / "constraint-requirement" / "limit.py"
     constraint_path.write_text(
-        "from vqapr.constraints.constraint import Constraint\n"
+        "from vqapr.authoring import Constraint\n"
         "from vqapr.data.lookback import RowsLookback\n"
         "from vqapr.data.requirements import DataRequirement\n"
         "class Limit(Constraint):\n"
@@ -870,7 +870,7 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
     workspace, definition = _setup(root, model_price_parquet)
     path = root / "drifted.py"
     path.write_text(
-        "from vqapr.constraints.constraint import Constraint\n"
+        "from vqapr.authoring import Constraint\n"
         "class Drifted(Constraint):\n"
         "    @property\n"
         "    def constraint_id(self):\n"

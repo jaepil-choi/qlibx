@@ -28,13 +28,13 @@ from vqapr.domain.errors import (
 )
 from vqapr.flow.judgments import judgments
 from vqapr.flow.orchestration import COMPLETED, FAILED
-from vqapr.flow.reporting import FILL_TABLE
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     RunRecordConflict,
     RunRecordExists,
     RunRecordLive,
     read_typed_table,
 )
+from vqapr.flow.run_state import FILL_TABLE
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.public import RunDefinition, Workspace, preflight_run
 from vqapr.public import run as execute_run

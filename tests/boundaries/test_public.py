@@ -400,7 +400,7 @@ def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
-    from vqapr.flow.run import FrozenStrategy
+    from vqapr.flow.frozen import FrozenStrategy
 
     memory = {"carry": [1]}
     layer = object.__new__(FrozenStrategy)

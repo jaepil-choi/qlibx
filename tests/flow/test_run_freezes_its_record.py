@@ -17,7 +17,7 @@ import pytest
 
 import vqapr.agent.sample.journey as journey
 from vqapr.cli.show import RECORD_FIELDS, STRATEGY_FIELDS, record_view
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     RUN_JSON_FIELDS,
     RunRecordExists,
     read_run_record,
@@ -86,7 +86,7 @@ def test_a_store_may_keep_the_account_row_alone(tmp_path: Path) -> None:
 
     execute_run(project, frozen, store_root=store, record_account_positions=False)
 
-    from vqapr.flow.run_records import read_table
+    from vqapr.flow.record import read_table
 
     (ref,) = strategy_refs(store, journey.RUN_ID)
     instruments = {

@@ -112,9 +112,8 @@ def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> No
         t.register_dataset(original, _source())
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        with Workspace.transaction(workspace) as t:
-            t.register_dataset(_registration(fields={"open": "open"}), _source())
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(fields={"open": "open"}), _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -202,9 +201,8 @@ def test_idempotent_registration_rechecks_that_workspace_still_exists(tmp_path: 
         t.register_dataset(registration, _source())
     workspace.path.unlink()
 
-    with pytest.raises(VqaprError) as caught:
-        with Workspace.transaction(workspace) as t:
-            t.register_dataset(registration, _source())
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(registration, _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -250,9 +248,8 @@ def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Pat
     workspace = Workspace.create(tmp_path)
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        with Workspace.transaction(workspace) as t:
-            t.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
 
     payload = caught.value.as_dict()
     assert payload["stage"] == "workspace.dataset.register"
@@ -267,12 +264,11 @@ def test_conflicting_source_spec_fails_without_mutation(tmp_path: Path) -> None:
         t.register_dataset(_registration(), _source())
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        with Workspace.transaction(workspace) as t:
-            t.register_dataset(
-                _registration("price_adjusted"),
-                _source(hive_partitioned=False),
-            )
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(
+            _registration("price_adjusted"),
+            _source(hive_partitioned=False),
+        )
 
     payload = caught.value.as_dict()
     assert payload["stage"] == "workspace.dataset.register"
@@ -380,9 +376,8 @@ def test_conflicting_execution_input_fails_without_mutation(
         t.register_execution_input(_execution(execution_parquet))
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        with Workspace.transaction(workspace) as t:
-            t.register_execution_input(_execution(execution_parquet, trade_price="open"))
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_execution_input(_execution(execution_parquet, trade_price="open"))
 
     assert caught.value.stage == "workspace.execution_input.register"
     assert caught.value.mutation is False
@@ -594,9 +589,8 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
         fields={"close": "close"},
     )
 
-    with pytest.raises(VqaprError) as refused:
-        with Workspace.transaction(workspace) as t:
-            t.register_dataset(unmeasured, _source())
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_dataset(unmeasured, _source())
 
     assert refused.value.failures[0].code == "dataset.register.span.absent"
     assert "register_dataset" in (refused.value.retry_precondition or "")

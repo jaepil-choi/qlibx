@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-import vqapr.flow.model_state as model_state
+import vqapr.flow.run_state as model_state
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.flow.run_state import (

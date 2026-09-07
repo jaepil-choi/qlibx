@@ -25,7 +25,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.flow.run_records import RunRecordWriter
+from vqapr.flow.record import RunRecordWriter
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,

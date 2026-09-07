@@ -26,7 +26,7 @@ INTERNAL_ROOT = "src/vqapr/_internal/"
 PERMITTED: frozenset[str] = frozenset(
     {
         # Reaches `_internal.atomic` for the one durable write (record `107`).
-        "src/vqapr/flow/run_records.py",
+        "src/vqapr/flow/record.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
         "src/vqapr/workspace.py",
     }

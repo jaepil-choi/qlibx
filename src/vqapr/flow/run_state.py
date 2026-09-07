@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -18,7 +20,6 @@ from vqapr.account.snapshot import AccountState
 from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.references import ModelStateRef
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
-from vqapr.flow.model_state import prepare_model_state
 from vqapr.valuation.marks import MarkBatch
 
 
@@ -29,6 +30,42 @@ class LifecycleKind(StrEnum):
     MARKED = "MARKED"
     MONITORED = "MONITORED"
     FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
+
+
+# ---- detached model state (folded in from flow/model_state.py, one-shape Step 6) ----
+
+@dataclass(frozen=True, slots=True)
+class PreparedModelState:
+    """A detached state candidate with no visibility until its root is published."""
+
+    ref: ModelStateRef
+    memory: ModelMemory
+    payload: bytes
+
+
+def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
+    """Detach one exact memory/payload envelope without making it visible."""
+    if not isinstance(payload, bytes):
+        raise TypeError("payload must be bytes")
+    normalized = normalize_memory(memory)
+    memory_bytes = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    envelope = (
+        len(memory_bytes).to_bytes(8, "big")
+        + memory_bytes
+        + len(payload).to_bytes(8, "big")
+        + payload
+    )
+    return PreparedModelState(
+        ref=ModelStateRef(hashlib.sha256(envelope).hexdigest()),
+        memory=normalized,
+        payload=bytes(payload),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +207,9 @@ class PreparedRunState:
 
 _UNSET = object()
 
-_FILL_TABLE = "vqapr.fill"
+FILL_TABLE = "vqapr.fill"
+"""The fill journal's table id, named once: `context.DEFAULT_TABLES` builds its spec from
+this and every reader imports it from here (one-shape Step 6; it was spelled in three places)."""
 """Package-owned, fixed-schema record of every committed fill.
 
 Canon 9.1 forbids a *free-form* recorder at the execution stage, because two ways to state the
@@ -430,7 +469,7 @@ class RunStateRepository:
         chunks = dict(root._recorder_chunks)
         rows = _fill_rows(account.journal_entries, envelope=envelope)
         if rows:
-            chunks[_FILL_TABLE] = (*chunks.get(_FILL_TABLE, ()), rows)
+            chunks[FILL_TABLE] = (*chunks.get(FILL_TABLE, ()), rows)
         return PreparedRunState(
             root.version,
             AcceptedRunState(

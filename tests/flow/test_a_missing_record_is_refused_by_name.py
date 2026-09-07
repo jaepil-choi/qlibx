@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     RunRecordMissing,
     RunRecordWriter,
     read_table,

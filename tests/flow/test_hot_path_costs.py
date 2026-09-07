@@ -25,7 +25,6 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
-from vqapr.flow import model_state as model_state_module
 from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.public import (
     DatasetRegistration,
@@ -230,14 +229,14 @@ def test_model_state_verification_is_linear_in_callback_count(
     import vqapr.flow.run_state as run_state_module
 
     calls = 0
-    original = model_state_module.prepare_model_state
+    original = run_state_module.prepare_model_state
 
     def counting_prepare(memory: object, payload: bytes):
         nonlocal calls
         calls += 1
         return original(memory, payload)
 
-    monkeypatch.setattr(model_state_module, "prepare_model_state", counting_prepare)
+    # One module now (one-shape Step 6 folded `model_state` into `run_state`), so one patch.
     monkeypatch.setattr(run_state_module, "prepare_model_state", counting_prepare)
 
     callbacks = 40
@@ -286,8 +285,7 @@ def test_an_externally_built_root_is_still_verified_in_full() -> None:
     `_verified` defaults to empty, so a root built from outside `run_state.py` pays full
     verification. Anything else would let a caller skip the proof by omission.
     """
-    from vqapr.flow.model_state import prepare_model_state
-    from vqapr.flow.run_state import AcceptedRunState
+    from vqapr.flow.run_state import AcceptedRunState, prepare_model_state
 
     prepared = prepare_model_state({"count": 1}, b"before")
 

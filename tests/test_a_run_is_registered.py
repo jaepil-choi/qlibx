@@ -162,9 +162,8 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     with Workspace.transaction(workspace) as t:
         t.register_run(_definition())
 
-    with pytest.raises(VqaprError) as refused:
-        with Workspace.transaction(workspace) as t:
-            t.register_run(_definition(instruments=("A",)))
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(_definition(instruments=("A",)))
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.conflict"
     assert "run_id 'krx-2024'" in failure["requirement"]
@@ -188,9 +187,8 @@ def test_a_run_naming_anything_unregistered_is_refused_by_name(
     workspace: Workspace, override: dict[str, object], names: str
 ) -> None:
     """Refused at registration, so `vqapr run <id>` never meets an id it cannot resolve."""
-    with pytest.raises(VqaprError) as refused:
-        with Workspace.transaction(workspace) as t:
-            t.register_run(_definition(**override))
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(_definition(**override))
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.reference"
     assert names in failure["requirement"], failure["requirement"]

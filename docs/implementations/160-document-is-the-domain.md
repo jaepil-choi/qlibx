@@ -3,7 +3,7 @@
 **Closes:** `docs/issues/027`, `082`. **Branch:** `step-05-document-is-the-domain`, off
 `develop @ 9cbc859e`. **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`,
 Step 5 (owner decisions D1·D2·D3); ExecPlan section M5 in `.agent/plans/active/one-shape-campaign.md`.
-**Authority:** the owner, 2026-09-04 (D1–D3) and 2026-09-05 (milestone order: the merge before the
+**Authority:** the owner, 2026-09-04 (D1–D3) and 2026-09-07 (milestone order: the merge before the
 door; recorded in the ExecPlan).
 
 ## Why this exists
@@ -15,7 +15,7 @@ re-checked what `RunDocument`'s validators had checked; five `Workspace.register
 beside five `Transaction.register_*` doors; and `declarations.py` still carried prose generators
 from before pydantic. Step 5 keeps one of each.
 
-It was measured before it was started (ExecPlan M5, 2026-09-05): 764 + 336 + 445 lines across the
+It was measured before it was started (ExecPlan M5, 2026-09-07): 764 + 336 + 445 lines across the
 two files, ~130 direct-door call sites, 41 positional `StrategyEntry(...)` sites. **The cost of this
 step is test churn, not source** — pydantic models are keyword-only, and a deleted door turns a
 one-line registration into a block — which is what made the work safe to do in bulk and worth
@@ -53,7 +53,9 @@ Narrowed to the shape it names; a typo now gets the permitted key set and the ne
 - **`SourceSpec`, `ComponentRef`** are frozen `BaseModel`s whose field order *is* the stored key
   order; `path` serializes as written, `config` as a dict, the id is excluded on dump.
 - **Deleted:** `RunDocument`, `StrategyEntryDocument`, `DataModelEntryDocument`, `SourceDocument`,
-  `ComponentDocument`, their `to_domain`/`from_domain`, `_require_id`, `_require_wall_time`.
+  `ComponentDocument`, their `to_domain`/`from_domain`, and `_require_wall_time`. (`_require_id`
+  was named here as deleted when this record was first written; it stayed, because the `Frozen*`
+  still use it -- corrected in Step 6.)
   `_linked` and `write_workspace` read and dump the models directly.
 
 **Not merged, by judgment:** `DatasetDocument` and `ExecutionInputDocument`. Their `to_domain` is one

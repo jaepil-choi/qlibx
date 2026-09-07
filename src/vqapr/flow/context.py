@@ -47,8 +47,9 @@ from vqapr.evidence.artifacts import (
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.venue import Exchange
-from vqapr.flow.run import FrozenRun, FrozenStrategy
+from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import (
+    FILL_TABLE,
     AcceptedRunState,
     RunStateRepository,
 )
@@ -297,7 +298,7 @@ DEFAULT_TABLES = (
     ),
 
     TableSpec(
-        f"{DEFAULT_TABLE_PREFIX}fill",
+        FILL_TABLE,
         (
             "instrument",
             # The category this fill was charged under. Declared here because the charge is a
@@ -315,6 +316,12 @@ DEFAULT_TABLES = (
         ),
     ),
 )
+
+FRAMEWORK_TABLES = tuple(spec.table_id for spec in DEFAULT_TABLES)
+"""The tables the package records on a strategy's behalf, which nobody declares -- derived from
+`DEFAULT_TABLES` rather than listed again (`flow/reporting.py` listed them a second time; one-shape
+Step 6 folded it here). `vqapr.monitoring` is written only by a strategy that declared a
+constraint, but it is the package's table either way."""
 """What every run records without the Strategy asking.
 
 Canon 9.2 makes these defaults rather than opt-in because both are package-computed -- the weights

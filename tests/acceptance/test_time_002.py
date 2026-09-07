@@ -51,13 +51,8 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import (
-    ConstraintSet,
-    FrozenAgenda,
-    FrozenRun,
-    FrozenStrategy,
-    StrategyConfig,
-)
+from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
 from vqapr.portfolio.budgets import Budget, PortfolioDirection

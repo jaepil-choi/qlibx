@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.flow.run_records import RECORD_FILENAME, RunRecordWriter, read_record, run_ids
+from vqapr.flow.record import RECORD_FILENAME, RunRecordWriter, read_record, run_ids
 
 pytestmark = pytest.mark.concurrency
 
@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, {src!r})
-from vqapr.flow.run_records import RunRecordWriter
+from vqapr.flow.record import RunRecordWriter
 
 
 def main() -> None:
@@ -59,7 +59,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, {src!r})
-from vqapr.flow.run_records import RunRecordWriter
+from vqapr.flow.record import RunRecordWriter
 
 
 def main() -> None:
@@ -163,7 +163,7 @@ def test_five_processes_racing_the_same_run_id_refuse_rather_than_interleave(
     # It is asserted rather than tolerated because the property is real and the failure is the
     # signal. Two attempts to close the window -- replacing the stale lock atomically, then
     # reordering so the lock precedes the directory -- each made it MORE frequent (9/12 and 12/12
-    # failures) and were reverted. `src/vqapr/flow/run_records.py` documents the window at the
+    # failures) and were reverted. `src/vqapr/flow/record.py` documents the window at the
     # recovery branch. Closing it properly needs a single atomic create-and-claim, which this
     # filesystem does not offer directly.
     succeeded = [line for line in outputs if line == "SUCCEEDED"]
@@ -241,14 +241,14 @@ def test_concurrent_force_runs_never_blend_two_runs_into_one_record(tmp_path: Pa
     import sys
     import textwrap
 
-    from vqapr.flow.run_records import read_table
+    from vqapr.flow.record import read_table
 
     runner = tmp_path / "forcer.py"
     runner.write_text(
         textwrap.dedent(
             """
             import sys, pathlib, time
-            from vqapr.flow.run_records import (
+            from vqapr.flow.record import (
                 RunRecordExists,
                 RunRecordLive,
                 RunRecordTaken,

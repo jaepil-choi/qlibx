@@ -188,11 +188,10 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
 ) -> None:
     """Unregistered, or registered as a strategy: either way `vqapr run` would meet an id it
     cannot freeze, so registration refuses it first."""
-    with pytest.raises(VqaprError) as refused:
-        with Workspace.transaction(workspace) as t:
-            t.register_run(
-                _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
-            )
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(
+            _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
+        )
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "workspace.run.register.reference"
     assert names in failure["requirement"], failure["requirement"]

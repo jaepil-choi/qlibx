@@ -38,7 +38,8 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.timestamps import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import ConstraintSet, FrozenAgenda, FrozenRun, FrozenStrategy, StrategyConfig
+from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow
 from vqapr.runtime.agendas import OperationOccurrence, OperationRole

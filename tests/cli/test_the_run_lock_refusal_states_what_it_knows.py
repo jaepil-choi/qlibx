@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.run import _held_record
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
     LockClaim,

@@ -20,9 +20,9 @@ from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
-from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.preflight import derived_agenda, preflight_run
 from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run_state import prepare_model_state
 from vqapr.public import register_dataset
 from vqapr.runtime.agendas import OperationRole
 from vqapr.workspace import Workspace

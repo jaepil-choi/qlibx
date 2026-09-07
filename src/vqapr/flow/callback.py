@@ -23,7 +23,7 @@ from vqapr.constraints.evaluation import (
 )
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.memory import normalize_memory
+from vqapr.domain.values import normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     SimulationFailure,

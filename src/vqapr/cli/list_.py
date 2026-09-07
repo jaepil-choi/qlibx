@@ -383,8 +383,7 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
         "digest": str(pointer["digest"]),
         "tables": {str(kind): str(path) for kind, path in sorted(dict(pointer["tables"]).items())},
     }
-    from vqapr.domain.roster import build_roster
-    from vqapr.domain.roster_export import read_roster_table
+    from vqapr.domain.instruments import build_roster, read_roster_table
 
     try:
         roster = build_roster(

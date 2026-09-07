@@ -17,8 +17,8 @@ from vqapr.account.account import (
     PreparedAccountValuation,
 )
 from vqapr.account.snapshot import AccountState
-from vqapr.domain.memory import ModelMemory, normalize_memory
-from vqapr.domain.references import ModelStateRef
+from vqapr.domain.identifiers import ModelStateRef
+from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
 from vqapr.valuation.marks import MarkBatch
 

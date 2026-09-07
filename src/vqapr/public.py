@@ -38,13 +38,14 @@ from vqapr.domain.instruments import (
     IndexInstrument,
     Instrument,
     InstrumentKind,
+    InstrumentRoster,
     StockInstrument,
+    build_roster,
+    export_roster,
     instrument,
     instruments,
 )
-from vqapr.domain.roster import InstrumentRoster, build_roster
-from vqapr.domain.roster_export import export_roster
-from vqapr.domain.timestamps import LocalInstantDeclaration, declare_local_instant
+from vqapr.domain.values import LocalInstantDeclaration, declare_local_instant
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector

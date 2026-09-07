@@ -29,7 +29,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,

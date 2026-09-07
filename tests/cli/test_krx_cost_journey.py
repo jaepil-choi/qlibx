@@ -167,7 +167,7 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, payload
 
     # The roster: what each id IS. The project's statement, not the venue's.
-    from vqapr.domain.roster_export import export_roster
+    from vqapr.domain.instruments import export_roster
 
     written = export_roster({STOCK: "stock", ETF: "etf"}, tmp_path / "roster")
     roster = tmp_path / "roster.yaml"

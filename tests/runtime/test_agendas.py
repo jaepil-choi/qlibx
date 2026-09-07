@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, time
 import pytest
 
 from vqapr.domain.identifiers import agenda_id, occurrence_id
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.runtime.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.runtime.events import DueExecutionEnvelope, OperationEnvelope
 

@@ -14,9 +14,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.register import run as register_run
-from vqapr.domain.instruments import InstrumentKind
-from vqapr.domain.roster import build_roster
-from vqapr.domain.roster_export import export_roster, read_roster_table
+from vqapr.domain.instruments import InstrumentKind, build_roster, export_roster, read_roster_table
 from vqapr.inputs import InputError
 from vqapr.workspace import Workspace
 

@@ -646,7 +646,7 @@ def test_list_instruments_answers_without_opening_the_sidecar_by_hand(
     Empty is an answer, not a failure: `list` is the command an agent runs first to orient itself,
     and a project with no roster is an ordinary state.
     """
-    from vqapr.domain.roster_export import export_roster
+    from vqapr.domain.instruments import export_roster
 
     # Before a workspace exists at all, and after one exists with no roster. Both are zero.
     code, empty = _cli(capsys, "--project-root", str(tmp_path), "list", "instruments")
@@ -712,7 +712,7 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     """
     import json as _json
 
-    from vqapr.domain.roster_export import export_roster
+    from vqapr.domain.instruments import export_roster
     from vqapr.flow.record import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)

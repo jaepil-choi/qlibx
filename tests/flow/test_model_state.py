@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from vqapr.domain.memory import normalize_memory
+from vqapr.domain.values import normalize_memory
 from vqapr.flow.run_state import prepare_model_state
 
 

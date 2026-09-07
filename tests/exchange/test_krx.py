@@ -16,10 +16,8 @@ import pytest
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
-from vqapr.domain.enums import Side
-from vqapr.domain.instruments import instrument
-from vqapr.domain.roster import InstrumentRoster
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.instruments import InstrumentRoster, instrument
+from vqapr.domain.values import LocalInstantDeclaration, Side
 from vqapr.exchange.costs import FillCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason

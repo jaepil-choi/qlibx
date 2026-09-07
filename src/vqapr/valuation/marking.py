@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.valuation.marks import Mark, MarkBatch
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.runtime.agendas import OperationOccurrence
 
 

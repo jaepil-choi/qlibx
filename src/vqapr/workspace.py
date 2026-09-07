@@ -32,7 +32,7 @@ from vqapr.domain.identifiers import (
     execution_input_id,
     source_id,
 )
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition

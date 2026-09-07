@@ -23,8 +23,8 @@ import json
 import re
 from pathlib import Path
 
-from vqapr.cli.main import main
 from vqapr.cli.list_ import KINDS
+from vqapr.cli.main import main
 
 SKILL = Path("src/vqapr/agent/skill/SKILL.md")
 

@@ -19,9 +19,8 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.identifiers import AgendaId
-from vqapr.domain.memory import ModelMemory, normalize_memory
-from vqapr.domain.references import ModelStateRef
+from vqapr.domain.identifiers import AgendaId, ModelStateRef
+from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import (

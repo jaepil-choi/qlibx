@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
+from vqapr.domain.values import at_local, require_tz_aware, shift_calendar
 
 
 @dataclass(frozen=True, slots=True)

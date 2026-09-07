@@ -21,7 +21,7 @@ from vqapr.domain.errors import (
     FailureFamily,
     VqaprError,
 )
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
     validate_execution_input,

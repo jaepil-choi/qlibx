@@ -8,9 +8,8 @@ from typing import ClassVar
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side
-from vqapr.domain.instruments import InstrumentKind, instrument
-from vqapr.domain.roster import InstrumentRoster
+from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
+from vqapr.domain.values import Side
 from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason

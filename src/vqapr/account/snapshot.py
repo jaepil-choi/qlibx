@@ -9,7 +9,7 @@ from decimal import Decimal
 from itertools import pairwise
 from types import MappingProxyType
 
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import require_tz_aware
 from vqapr.valuation.marks import MarkBatch
 
 

@@ -23,7 +23,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,

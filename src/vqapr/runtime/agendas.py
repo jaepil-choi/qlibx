@@ -16,7 +16,7 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.identifiers import AgendaId, OccurrenceId
-from vqapr.domain.timestamps import (
+from vqapr.domain.values import (
     LocalInstantDeclaration,
     declare_local_instant,
     require_tz_aware,

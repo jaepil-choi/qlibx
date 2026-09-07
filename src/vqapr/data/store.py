@@ -23,8 +23,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
-from vqapr.domain.rows import Rows, normalize_rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.values import Rows, normalize_rows, require_tz_aware
 
 
 class DatasetCatalog(Protocol):

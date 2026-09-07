@@ -9,8 +9,8 @@ from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.errors import ExplainTopic, FailureSource, VqaprError
-from vqapr.domain.references import ModelStateRef
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.domain.identifiers import ModelStateRef
+from vqapr.domain.values import require_tz_aware
 
 MAX_OBSERVED_CHARS = 500
 """Upper bound for one serialized observation. The unbounded body belongs in a dump file."""

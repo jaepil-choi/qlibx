@@ -19,7 +19,6 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -28,6 +27,7 @@ from vqapr.domain.instruments import (
     StockInstrument,
     instrument,
 )
+from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
 from vqapr.exchange.venue import AcademicExchange
@@ -223,7 +223,7 @@ def _bound(venue, roster):
     hand its view the identity it borrows. There is deliberately no public way for a venue to
     acquire one itself.
     """
-    from vqapr.domain.roster import InstrumentRoster
+    from vqapr.domain.instruments import InstrumentRoster
 
     return _WithRoster(venue, venue.rules.with_registry(InstrumentRoster(roster)))
 

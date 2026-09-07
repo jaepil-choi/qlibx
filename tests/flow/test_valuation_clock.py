@@ -36,7 +36,7 @@ from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.authoring import Hold, StrategyModel
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.timestamps import LocalInstantDeclaration
+from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.run import ConstraintSet, StrategyConfig

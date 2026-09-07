@@ -22,9 +22,9 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.enums import Side, side_of
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
+from vqapr.domain.values import Side, side_of
 from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
     ExactExecutionRow,

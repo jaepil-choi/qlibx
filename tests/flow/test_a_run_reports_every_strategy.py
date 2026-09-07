@@ -59,10 +59,10 @@ call in `decide()` and not the Flow's guard."""
 STRATEGIES = ("ou-first", "never-ready", "ou-last")
 
 
-def _project(tmp_path: Path) -> tuple[Path, Path]:
+def _project(tmp_path: Path, sample_panel) -> tuple[Path, Path]:
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project)
+    panel = journey.install(project, panel=sample_panel)
     raising = tmp_path / "never_ready.py"
     raising.write_text(RAISING_SOURCE, encoding="utf-8")
     register_strategy_model(project, "ou-first", journey.STRATEGY_SOURCE, "SampleReversal5d")
@@ -88,8 +88,10 @@ def _assert_failure_names_its_strategy(failure: dict) -> None:
     )
 
 
-def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(tmp_path: Path) -> None:
-    project, store = _project(tmp_path)
+def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(
+    tmp_path: Path, sample_panel
+) -> None:
+    project, store = _project(tmp_path, sample_panel)
     frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
 
     outcome = execute_run(project, frozen, store_root=store)
@@ -120,9 +122,11 @@ def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(tmp_path:
 
 
 @pytest.mark.slow
-def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(tmp_path: Path) -> None:
+def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(
+    tmp_path: Path, sample_panel
+) -> None:
     """The finding itself: `--jobs`, one refusal, the parent used to see `cannot pickle`."""
-    project, store = _project(tmp_path)
+    project, store = _project(tmp_path, sample_panel)
     frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
 
     outcome = execute_run(project, frozen, store_root=store, jobs=3)

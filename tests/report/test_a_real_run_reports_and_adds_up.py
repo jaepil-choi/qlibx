@@ -19,10 +19,10 @@ from vqapr.public import run as execute_run
 
 
 @pytest.mark.slow
-def test_the_sample_journeys_report_adds_up(tmp_path: Path) -> None:
+def test_the_sample_journeys_report_adds_up(tmp_path: Path, sample_panel) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project)
+    panel = journey.install(project, panel=sample_panel)
     register_run(project, journey.definition(panel))
     frozen = preflight_run(project, Workspace.open(project).run_definition(journey.RUN_ID))
     store = tmp_path / "store"

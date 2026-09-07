@@ -16,29 +16,21 @@ import pytest
 from vqapr.agent.sample.build import (
     DEAD_SESSIONS,
     LATE_SESSIONS,
-    WAREHOUSE,
     WIND_DOWN_SESSIONS,
-    build,
 )
 from vqapr.agent.sample.reversal_5d import LOOKBACK, SampleReversal5d
 
 pytestmark = pytest.mark.real_data
 
-_MISSING = not WAREHOUSE.exists()
-_REASON = f"warehouse {WAREHOUSE} is not provisioned"
 
 
-@pytest.fixture(scope="module")
-def panel(tmp_path_factory: pytest.TempPathFactory):
-    """Built once per module. The build is ~36s; the tests reading it are milliseconds each.
-
-    Marked `slow` at the tests rather than here, because a fixture cannot deselect itself: pytest
-    resolves markers on the test, so a fixture this expensive only costs anything when a selected
-    test asks for it.
-    """
-    if _MISSING:
-        pytest.skip(_REASON)
-    return build(tmp_path_factory.mktemp("sample"))
+@pytest.fixture
+def panel(sample_panel):
+    """The session's one panel (`tests/conftest.py`). The build is ~36s; the tests reading it are
+    milliseconds each. Marked `slow` at the tests rather than here, because a fixture cannot
+    deselect itself: pytest resolves markers on the test, so a fixture this expensive only costs
+    anything when a selected test asks for it."""
+    return sample_panel
 
 
 def _rows(path: Path, instrument: str, field: str) -> list:
@@ -102,7 +94,7 @@ def test_the_strategy_never_inspects_listing_status() -> None:
 
 
 @pytest.mark.slow
-def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
+def test_the_sample_journey_runs_end_to_end(tmp_path: Path, sample_panel) -> None:
     """The reference journey an agent copies must actually run.
 
     `reversal_5d` is written against the authoring contract while `journey` registers it
@@ -115,7 +107,7 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
 
     root = tmp_path / "proj"
     root.mkdir()
-    panel = journey.install(root)
+    panel = journey.install(root, panel=sample_panel)
     result = journey.execute(root, panel)
 
     # One callback and one due item per session (record `148`): the standalone valuation
@@ -136,21 +128,23 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_the_installed_sample_is_accepted_by_the_products_own_check(tmp_path: Path) -> None:
-    """`vqapr check` and `vqapr run` ask the judgments before the freeze; `execute` does not.
+def test_the_installed_sample_is_accepted_by_the_products_own_check(
+    tmp_path: Path, sample_panel
+) -> None:
+    """What `install` registers passes the judgments every door asks before the freeze.
 
     The 0.6.0 call-flow review (record `167`) ran the installed sample through the CLI and was
     refused with `check.lookback.uncovered`: the horizon opened on the first session, whose close
-    is published at 15:30, after the 08:00 decision. The registered run is one declaration, and
-    the door a reader is told to use must accept what `install` registered.
+    is published at 15:30, after the 08:00 decision, while `execute` reached the freeze without
+    asking. The horizon moved (record `167`) and the judgments moved into `preflight_run`
+    (record `168`), so this asks the public door the journey itself uses.
     """
     from vqapr.agent.sample import journey
-    from vqapr.flow.judgments import judgments
-    from vqapr.workspace import Workspace
+    from vqapr.public import Workspace, preflight_run
 
     root = tmp_path / "proj"
     root.mkdir()
-    journey.install(root)
+    journey.install(root, panel=sample_panel)
     workspace = Workspace.open(root)
-    found, blocked = judgments(workspace.run_definition(journey.RUN_ID), workspace)
-    assert (found, blocked) == ([], [])
+    frozen = preflight_run(workspace, workspace.run_definition(journey.RUN_ID))
+    assert frozen.run_id == journey.RUN_ID

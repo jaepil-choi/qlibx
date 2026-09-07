@@ -41,11 +41,11 @@ from vqapr.public import run as execute_run
 STRATEGIES = ("ou-k0", "ou-pca5", "ou-ff5")
 
 
-def _project(tmp_path: Path) -> tuple[Path, Path]:
+def _project(tmp_path: Path, sample_panel) -> tuple[Path, Path]:
     """The sample workspace, plus the sample strategy registered three more times under new ids."""
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project)
+    panel = journey.install(project, panel=sample_panel)
     # No per-strategy binding to register (record `148`): every strategy of the run is called
     # on the run's sessions at its `at`, so registering the model is all a strategy needs.
     for name in STRATEGIES:
@@ -57,8 +57,10 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     return project, tmp_path / "store"
 
 
-def test_preflight_freezes_one_run_layer_and_one_layer_per_strategy(tmp_path: Path) -> None:
-    project, _ = _project(tmp_path)
+def test_preflight_freezes_one_run_layer_and_one_layer_per_strategy(
+    tmp_path: Path, sample_panel
+) -> None:
+    project, _ = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
 
     frozen = preflight_run(project, workspace.run_definition("comparison"))
@@ -82,7 +84,7 @@ def test_preflight_freezes_one_run_layer_and_one_layer_per_strategy(tmp_path: Pa
 
 
 def test_a_strategy_the_run_names_without_a_registration_is_refused_by_name(
-    tmp_path: Path,
+    tmp_path: Path, sample_panel
 ) -> None:
     """A registered model is all a strategy needs (record `148`); an unregistered one is refused.
 
@@ -91,7 +93,7 @@ def test_a_strategy_the_run_names_without_a_registration_is_refused_by_name(
     that does not exist is the component itself -- and a run that merely names a registered
     model registers cleanly.
     """
-    project, _ = _project(tmp_path)
+    project, _ = _project(tmp_path, sample_panel)
     register_strategy_model(project, "registered-only", journey.STRATEGY_SOURCE, "SampleReversal5d")
     workspace = Workspace.open(project)
     named = workspace.run_definition('comparison').replace(
@@ -110,9 +112,9 @@ def test_a_strategy_the_run_names_without_a_registration_is_refused_by_name(
 
 
 @pytest.mark.slow
-def test_three_strategies_in_one_run_leave_three_nav_series(tmp_path: Path) -> None:
+def test_three_strategies_in_one_run_leave_three_nav_series(tmp_path: Path, sample_panel) -> None:
     """The acceptance criterion: one run, three strategies, three NAV series, two records."""
-    project, store = _project(tmp_path)
+    project, store = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
     frozen = preflight_run(project, workspace.run_definition("comparison"))
 
@@ -152,8 +154,10 @@ def test_three_strategies_in_one_run_leave_three_nav_series(tmp_path: Path) -> N
 
 
 @pytest.mark.slow
-def test_jobs_runs_the_strategies_in_processes_and_the_records_come_back(tmp_path: Path) -> None:
-    project, store = _project(tmp_path)
+def test_jobs_runs_the_strategies_in_processes_and_the_records_come_back(
+    tmp_path: Path, sample_panel
+) -> None:
+    project, store = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
     frozen = preflight_run(project, workspace.run_definition("comparison"))
 
@@ -165,9 +169,9 @@ def test_jobs_runs_the_strategies_in_processes_and_the_records_come_back(tmp_pat
     assert all(record["account"]["version"] > 0 for record in outcome.records.values())
 
 
-def test_a_strategy_record_is_content_addressed(tmp_path: Path) -> None:
+def test_a_strategy_record_is_content_addressed(tmp_path: Path, sample_panel) -> None:
     """Same run + same fingerprint = same directory; a tweak lands beside it; data unchanged."""
-    project, store = _project(tmp_path)
+    project, store = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
     frozen = preflight_run(project, workspace.run_definition("comparison"))
 
@@ -197,8 +201,10 @@ def test_a_strategy_record_is_content_addressed(tmp_path: Path) -> None:
     )
 
 
-def test_a_changed_run_under_an_old_id_is_refused_naming_both_digests(tmp_path: Path) -> None:
-    project, store = _project(tmp_path)
+def test_a_changed_run_under_an_old_id_is_refused_naming_both_digests(
+    tmp_path: Path, sample_panel
+) -> None:
+    project, store = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
     frozen = preflight_run(project, workspace.run_definition("comparison"))
     execute_run(project, frozen, store_root=store, strategies=["ou-k0"])
@@ -212,9 +218,11 @@ def test_a_changed_run_under_an_old_id_is_refused_naming_both_digests(tmp_path: 
     assert (store / "runs" / "comparison" / RUN_FILENAME).is_file(), "the old run.json stands"
 
 
-def test_a_killed_strategy_leaves_rows_and_no_record_and_run_json_stands(tmp_path: Path) -> None:
+def test_a_killed_strategy_leaves_rows_and_no_record_and_run_json_stands(
+    tmp_path: Path, sample_panel
+) -> None:
     """A run killed midway still says what it attempted; the strategy that died is not listed."""
-    project, store = _project(tmp_path)
+    project, store = _project(tmp_path, sample_panel)
     workspace = Workspace.open(project)
     frozen = preflight_run(project, workspace.run_definition("comparison"))
 

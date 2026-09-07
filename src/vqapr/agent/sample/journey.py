@@ -77,9 +77,16 @@ def _sessions(panel: SamplePanel) -> list[date]:
     return [date(int(v[:4]), int(v[4:6]), int(v[6:8])) for v in panel.sessions]
 
 
-def install(project_root: Path) -> SamplePanel:
-    """Create the panel and register every declaration a run needs."""
-    panel = build(project_root)
+def install(project_root: Path, panel: SamplePanel | None = None) -> SamplePanel:
+    """Create the panel and register every declaration a run needs.
+
+    `panel` is a panel already built elsewhere, registered here instead of one built under
+    `project_root`. Building reads the local warehouse and takes about 36 seconds; the package's
+    own tests install the sample into a dozen projects per run and build it once
+    (`tests/conftest.py::sample_panel`). A reader running the sample builds it, as before.
+    """
+    if panel is None:
+        panel = build(project_root)
     register_dataset(
         project_root,
         DatasetRegistration.of(

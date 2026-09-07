@@ -79,7 +79,7 @@ when the configured repeated-failure limit is reached.
   work is explicitly requested.
 - Prefer fast, explicit failure over guessed schemas, guessed fields, or silent fallback.
 - Run narrow validation while iterating and the declared completion validation before handoff.
-- The default test command deselects `slow`, which is thirteen end-to-end journeys. Use the
+- The default test command deselects `slow`, the end-to-end journeys and showcases. Use the
   manifest's `test` while iterating and `test_all` before handoff or release; a change to run
   assembly, the record shape, or the emitted scaffolds is not verified until `test_all` passes.
 

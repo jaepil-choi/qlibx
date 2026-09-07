@@ -169,8 +169,8 @@ runs:
 
 Then `vqapr register <file.yaml>`, `vqapr check <run-id>` and `vqapr run <run-id>` by id -- the
 same three commands a strategy run takes; a YAML path handed to `run` or `check` is refused by
-name. Each session's rows land as one parquet chunk under `.vqapr/materialized/<dataset_id>/` the
-moment the session completes, the dataset registers once after the last session, and the run's
+name. The sessions' rows land as one parquet file under `.vqapr/materialized/<dataset_id>/` when
+the last session completes, the dataset registers right after, and the run's
 record lands under `.vqapr/runs/<run-id>/datamodels/<id>@<fp8>/datamodel.json` -- one line per
 session (evaluation time, output `available_at`, row count), no per-instrument lineage.
 `vqapr list datasets` shows the dataset arrived, `vqapr list datamodels --run <run-id>` and
@@ -178,7 +178,7 @@ session (evaluation time, output `available_at`, row count), no per-instrument l
 back what it computed. The output is readable by any component that declares it -- which is the
 point: one model's output is the next model's input. Running the same run again is refused while
 its output dataset is registered (`check.datamodel.output_registered`); `vqapr rm dataset <id>`
-withdraws the registration and deletes the chunks under `.vqapr/materialized/<id>/`, and is the
+withdraws the registration and deletes the files under `.vqapr/materialized/<id>/`, and is the
 way to retry a datamodel run or to drop a throw-away output. It refuses while a registered run
 takes its sessions from that dataset (`sessions_from`), naming the run; a dataset you registered
 from your own path is withdrawn without touching your file.
@@ -209,17 +209,20 @@ table, strategy_ref)`.** `store_root` is the path the run's result printed under
 `<strategy-id>` when one record of it exists, or omitted when the run holds one strategy. A root,
 run id or ref that names no record is refused (`RunRecordMissing`) naming what was found
 instead, so an empty frame means an empty table and nothing else. The rows are parquet on
-disk, one directory per table and one file per chunk
-(`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/*.parquet`), so
+disk, one directory per table and one file per table
+(`.vqapr/runs/<run-id>/strategies/<strategy-id>@<fp8>/tables/<table>/all.parquet`), so
 `duckdb.read_parquet` on that directory reads them too: an instant is a `TIMESTAMPTZ` and comes
 back as the same instant, and a `Decimal` is exact text (the column's metadata marks it) that
 `read_strategy_table` restores and you cast yourself anywhere else.
 `read_strategy_table` decodes by the column types the writer recorded beside the table, so
-`nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows reach the disk as
-each occurrence is accepted, so a long run can be watched -- `vqapr list strategies --run
-<run-id>` lists a strategy that has no record yet with `status: running`, its `chunks` (one per
-accepted session) and its `last_event_time`; see "Watching a long run" below -- and a killed one
-keeps what it did.
+`nav` comes back a `Decimal` and `observed_at` an aware `datetime`. Rows stay in memory while
+the run executes and land once, when it ends -- normally, or through an exception or Ctrl+C,
+which keep every row recorded up to then beside no record. Only a hard kill (`taskkill /F`, an
+OOM kill) loses rows, and then only what came after the last spill (a part written when the
+buffer passes 256 MB). A long run can still be watched -- `vqapr list strategies --run
+<run-id>` lists a strategy that has no record yet with `status: running`, its `chunks` (accepted
+sessions so far) and its `last_event_time`, from a progress file the run rewrites every few
+seconds; see "Watching a long run" below.
 
 `vqapr run <run-id> --no-account-positions` records only the `_ACCOUNT` row (cash and NAV)
 at each valuation instead of one row per held instrument; fills are recorded either way.
@@ -461,9 +464,10 @@ completed records stand. Fix the failed strategy, register the file again, and
 the same under `--jobs N`.
 
 **Watching a long run.** A strategy's record (`strategy.json`) is written last, so until then
-`vqapr list strategies --run <run-id>` lists it with `status: running`, `chunks` (one per
-accepted session), `last_event_time` (the last session it accepted) and `lock.refreshed_ago`
-(seconds since the run last touched its lock). A directory whose lock has gone quiet for two
+`vqapr list strategies --run <run-id>` lists it with `status: running`, `chunks` (accepted
+sessions so far), `last_event_time` (the last session it accepted) and `lock.refreshed_ago`
+(seconds since the run last touched its lock); the first two come from a progress file the run
+rewrites every few seconds, so they can lag that much. A directory whose lock has gone quiet for two
 minutes and still has no record is `status: unfinished`: the strategy was killed, or its flow
 ended in a refusal -- the run's own envelope says which. `vqapr show strategy` reads finished
 records only.

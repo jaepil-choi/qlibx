@@ -28,8 +28,14 @@ REF = "never-ready@abcdef12"
 def _list(capsys: pytest.CaptureFixture[str], project: Path, store: Path, *extra: str) -> dict:
     code = main(
         [
-            "--project-root", str(project),
-            "list", "strategies", "--run", "mixed", "--store-root", str(store),
+            "--project-root",
+            str(project),
+            "list",
+            "strategies",
+            "--run",
+            "mixed",
+            "--store-root",
+            str(store),
             *extra,
         ]
     )
@@ -53,6 +59,8 @@ def test_a_strategy_being_written_is_listed_as_running_with_its_progress(
     writer.append("vqapr.account", [_row(first)])
     writer.append("vqapr.account", [_row(second)])
     writer.append("vqapr.weight", [{"instrument": "A", "weight": "0.5", "event_time": second}])
+    # The heartbeat rewrites `progress.json` every few seconds (`087`); this is that rewrite.
+    writer.checkpoint()
 
     listed = _list(capsys, tmp_path, store)
 
@@ -61,7 +69,7 @@ def test_a_strategy_being_written_is_listed_as_running_with_its_progress(
     assert row["strategy_ref"] == REF and row["strategy_id"] == "never-ready"
     assert row["status"] == "running"
     assert row["fingerprint"] is None, "only the <fp8> in the ref is known before the record"
-    assert row["chunks"] == 2, "one part per accepted session, the most any table has"
+    assert row["chunks"] == 2, "the accepted sessions so far, from progress.json"
     assert row["tables"] == ["vqapr.account", "vqapr.weight"]
     assert datetime.fromisoformat(row["last_event_time"]) == second
     assert row["lock"]["pid"] == os.getpid()

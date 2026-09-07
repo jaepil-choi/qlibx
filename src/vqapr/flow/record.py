@@ -47,7 +47,7 @@ import pyarrow.parquet as pq
 from pydantic import BaseModel, ConfigDict
 
 from vqapr._internal import atomic
-from vqapr.flow.datamodel import DataModelResult
+from vqapr.flow.datamodel import COMPACT_FILENAME, SPILL_BYTES, DataModelResult
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import LifecycleKind
 from vqapr.flow.simulation import SimulationResult
@@ -68,7 +68,8 @@ strategy's output, beside its `tables/`. `record.json` remains the materializati
 """
 TABLES_DIRECTORY = "tables"
 PART_SUFFIX = ".parquet"
-"""Each table is a directory of parquet files, one complete file per chunk `append` received.
+"""Each table is a directory of parquet: `all.parquet` once the run has ended, spill parts
+(`000000.parquet`, ...) only while it is still running and only when the buffer overflowed.
 
 Record `146` (deletion campaign Step 5). The rows were JSONL with a `.types.json` sidecar that
 said which Python type each column had been stringified from, because JSON cannot carry a type
@@ -79,11 +80,25 @@ value stored as text -- exact and unbounded, where a parquet decimal would need 
 and a weight of one third has twenty-eight places -- and the column's field metadata says so
 (`vqapr.type: decimal`), so `read_table` restores it and a duckdb reader casts it knowingly.
 
-One file per chunk rather than one open writer per table, because a killed run must leave
-readable rows (record `135`): a parquet file is complete only once its footer is written, so an
-open writer would leave nothing, while a file per chunk leaves every chunk that landed. A
-chunk is one accepted occurrence's rows, so the files are as many as the run's occurrences.
+**Written once, at the end (`docs/issues/087`).** Record `146` wrote one complete file per
+accepted occurrence, because a parquet file is readable only once its footer is written and a
+killed run was to leave every chunk that landed (record `135`). Measured, that was a physical
+write per occurrence per table -- about a fifth of a real strategy's wall clock -- and a
+finished table of six hundred 8 KB files whose framing outweighed their data a hundredfold.
+The owner's ruling (2026-09-07): rows stay in memory as Arrow batches and land as one file
+per table when the run ENDS -- normally, or through an exception or an interrupt, since the
+writer's `release` runs on both paths. What no code can save is a hard kill (`terminate`, an
+OOM kill, a power cut): then only what `SPILL_BYTES` had already forced to disk survives. A
+reader prefers `all.parquet` and ignores spill parts beside it, so a crash between the compact
+write and the parts' removal cannot double-count.
 """
+
+PROGRESS_FILENAME = "progress.json"
+PROGRESS_EVERY = 5.0
+"""What a running member says about itself while its rows are still in memory: accepted
+occurrences, rows per table and the last `event_time`, rewritten by the heartbeat at most every
+`PROGRESS_EVERY` seconds. `list strategies --run` reads it (`member_progress`); before `087`
+it counted part files, and there are none to count now."""
 
 SCHEMA = "vqapr-run-record/v2"
 """Bumped from `v1` by record `115`, when the record gained a `kind` discriminator.
@@ -146,6 +161,7 @@ JSON envelope carries no schema with it. The envelope also carries a note naming
 and the remedy, which belongs where someone is about to act and not in an archive of what a past
 run did.
 """
+
 
 class _Record(BaseModel):
     """A record's field set, named once (one-shape campaign Step 6, record 161).
@@ -265,9 +281,6 @@ def record_fields(kind: str) -> tuple[str, ...]:
             f"unknown run-record kind {kind!r}; known kinds are "
             f"{', '.join(sorted(RECORD_FIELDS_BY_KIND))}"
         ) from None
-
-
-
 
 
 _DECIMAL = {b"vqapr.type": b"decimal"}
@@ -569,6 +582,53 @@ class RunRecordExists(FileExistsError):
         super().__init__(f"run record {run_id!r} already exists at {directory}")
 
 
+@dataclass(slots=True)
+class _Buffer:
+    """What a writer holds in memory between `append` and the end of the run."""
+
+    tables: dict[str, list[pa.Table]] = field(default_factory=dict)
+    nbytes: int = 0
+    last_event_time: datetime | None = None
+    progress_written_at: float | None = None
+    occurrences: set[str] = field(default_factory=set)
+
+
+def _unified_schema(schemas: Sequence[pa.Schema]) -> pa.Schema:
+    """One schema for several chunks of one table: each column typed by the first chunk that
+    typed it, its metadata (the Decimal marker) with it; a column no chunk typed stays null."""
+    fields: dict[str, pa.Field] = {}
+    for schema in schemas:
+        for column in schema:
+            known = fields.get(column.name)
+            if known is None or (
+                pa.types.is_null(known.type) and not pa.types.is_null(column.type)
+            ):
+                fields[column.name] = column
+    return pa.schema(list(fields.values()))
+
+
+def _conform(table: pa.Table, schema: pa.Schema) -> pa.Table:
+    """One chunk in the unified schema: columns it lacks are null, columns it typed as null
+    are cast, and a timestamp recorded in another zone is the same instant in the unified one."""
+    arrays = []
+    for column in schema:
+        if column.name in table.column_names:
+            arrays.append(table.column(column.name).cast(column.type))
+        else:
+            arrays.append(pa.nulls(table.num_rows, type=column.type))
+    return pa.Table.from_arrays(arrays, schema=schema)
+
+
+def _write_parquet(tables: Sequence[pa.Table], target: Path) -> None:
+    """Several chunks as one complete file, written beside the target and moved into place, so a
+    reader listing the directory never opens a file whose footer is not there yet."""
+    schema = _unified_schema([table.schema for table in tables])
+    joined = pa.concat_tables([_conform(table, schema) for table in tables])
+    staging = target.with_name(f".{target.name}.tmp")
+    pq.write_table(joined, staging, compression="zstd")
+    os.replace(staging, target)
+
+
 @dataclass(frozen=True, slots=True)
 class RunRecordWriter:
     """Appends one run's rows and facts, inside that run's own directory.
@@ -584,6 +644,9 @@ class RunRecordWriter:
     directory itself -- a materialization record, or a run record written before `139`."""
     member_kind: str = STRATEGY_KIND
     """Which kind of member `strategy_ref` names (record `148`): a strategy or a datamodel."""
+    spill_bytes: int = SPILL_BYTES
+    """Buffered Arrow bytes above which a spill part is written; a test lowers it to force one."""
+    _buffer: _Buffer = field(default_factory=_Buffer, init=False, repr=False, compare=False)
     _rows: dict[str, int] = field(default_factory=dict, init=False, repr=False, compare=False)
     _instants: dict[str, set[str]] = field(
         default_factory=dict, init=False, repr=False, compare=False
@@ -771,14 +834,73 @@ class RunRecordWriter:
         (directory / TABLES_DIRECTORY).mkdir(exist_ok=True)
 
     def heartbeat(self) -> None:
-        """Mark this run as still alive.
+        """Mark this run as still alive, and every `PROGRESS_EVERY` seconds say how far it got.
 
         Never raises: a lock that cannot be touched right now -- a peer reading it, a filesystem
-        with coarse timestamps -- must not fail a run that is otherwise fine. The next chunk tries
-        again, and chunks arrive far more often than the stale window.
+        with coarse timestamps -- must not fail a run that is otherwise fine. The next occurrence
+        tries again, and occurrences arrive far more often than the stale window.
         """
         with suppress(OSError):
             os.utime(self.directory / LOCK_FILENAME, None)
+        written = self._buffer.progress_written_at
+        if written is None or _time.monotonic() - written >= PROGRESS_EVERY:
+            self.checkpoint()
+
+    def checkpoint(self) -> None:
+        """Write `progress.json` now: what `list strategies --run` shows for a running member.
+
+        Never raises, for the heartbeat's reason. Rows stay in memory (`087`); this is the one
+        thing about a running member that reaches the disk before the end.
+        """
+        self._buffer.progress_written_at = _time.monotonic()
+        last = self._buffer.last_event_time
+        payload = json.dumps(
+            {
+                "occurrences": len(self._buffer.occurrences),
+                "rows": dict(sorted(self._rows.items())),
+                "last_event_time": None if last is None else last.isoformat(),
+            },
+            sort_keys=True,
+        )
+        with suppress(OSError):
+            atomic.write_atomically(
+                self.directory / PROGRESS_FILENAME, payload + "\n", create_parent=False
+            )
+
+    def _spill(self) -> None:
+        """Write everything buffered as one spill part per table; the safety valve."""
+        for table_id, tables in self._buffer.tables.items():
+            if not tables:
+                continue
+            directory = self.directory / TABLES_DIRECTORY / table_id
+            directory.mkdir(parents=True, exist_ok=True)
+            part = self._parts.get(table_id, 0)
+            _write_parquet(tables, directory / f"{part:06d}{PART_SUFFIX}")
+            self._parts[table_id] = part + 1
+        self._buffer.tables.clear()
+        self._buffer.nbytes = 0
+
+    def _seal(self) -> None:
+        """Every table as `all.parquet`: what is buffered, after whatever was spilled.
+
+        Written before the record and before the lock goes, on the success path and the failure
+        path alike. Spill parts are removed only once the compact file is in place, and a reader
+        prefers the compact file, so a crash in between loses nothing and repeats nothing.
+        """
+        for table_id in sorted(set(self._buffer.tables) | set(self._parts)):
+            directory = self.directory / TABLES_DIRECTORY / table_id
+            parts = sorted(directory.glob(f"[0-9]*{PART_SUFFIX}")) if directory.is_dir() else []
+            tables = [pq.read_table(part) for part in parts] + self._buffer.tables.get(table_id, [])
+            if not tables:
+                continue
+            directory.mkdir(parents=True, exist_ok=True)
+            _write_parquet(tables, directory / COMPACT_FILENAME)
+            for part in parts:
+                part.unlink()
+        self._buffer.tables.clear()
+        self._buffer.nbytes = 0
+        with suppress(OSError):
+            (self.directory / PROGRESS_FILENAME).unlink(missing_ok=True)
 
     def _claim(self) -> None:
         """Mark this run as live, so a concurrent `--force` refuses instead of destroying it.
@@ -794,45 +916,59 @@ class RunRecordWriter:
             os.close(handle)
 
     def release(self) -> None:
-        """Drop this run's liveness claim.
+        """End this run's writing: its tables land, then its liveness claim goes.
 
-        Never raises. It is called from `finish` and from the failure path of a run that is already
-        ending, and a lock that cannot be removed right now -- because a peer has it open to read
-        the holder, which on Windows raises rather than waiting -- is not a reason to fail a run
-        that otherwise succeeded. The lock ages out on its own, so the worst case is that this id
-        stays claimed until it goes stale.
+        Called from `finish` and from the failure path of a run that is already ending. The
+        rows are written here on BOTH paths (`087`): a strategy that raised, or was interrupted,
+        keeps every row it recorded, beside no record -- `list strategies --run` shows it as
+        `unfinished`. A table that cannot be written raises, on the failure path too, chained on
+        the failure that ended the run: losing the rows silently would be the worse outcome.
         """
+        try:
+            self._seal()
+        finally:
+            self._unlock()
+
+    def _unlock(self) -> None:
+        """Drop the liveness claim. Never raises: a lock that cannot be removed right now --
+        because a peer has it open to read the holder, which on Windows raises rather than waiting
+        -- is not a reason to fail a run that otherwise succeeded. The lock ages out on its own."""
         with suppress(OSError):
             (self.directory / LOCK_FILENAME).unlink(missing_ok=True)
 
     def append(self, table_id: str, rows: Sequence[Mapping[str, object]]) -> None:
-        """Append one chunk to one table, as one complete parquet file.
+        """Take one chunk of one table into memory, typed; it reaches the disk when the run ends.
 
         Takes a chunk at a time so a caller CAN stream as it produces rows, and a run with a
-        store does: each accepted occurrence's rows land here at publish.
+        store does: each accepted occurrence's rows arrive here at publish. The chunk is turned
+        into an Arrow table at once -- a column of two kinds is refused at the occurrence that
+        wrote it, by name, and a columnar buffer is a fraction of the rows' size as Python
+        objects -- and written only by `release`, or by `_spill` above `spill_bytes`.
 
         Also the run's heartbeat. `LOCK_STALE_AFTER` asks whether the holder is still alive, and
         without a refresh the answer is really "has this run been going longer than two minutes" --
         true of every real run here, which would let any peer take a live id.
         """
-        self.heartbeat()
         if not rows:
+            self.heartbeat()
             return
-        directory = self.directory / TABLES_DIRECTORY / table_id
-        directory.mkdir(parents=True, exist_ok=True)
         table = _arrow_table(rows, table_id, self._fields.setdefault(table_id, {}))
-        part = self._parts.get(table_id, 0)
-        target = directory / f"{part:06d}{PART_SUFFIX}"
-        # Written beside the target and moved into place, so a reader listing the directory
-        # never opens a file whose footer is not there yet.
-        staging = directory / f".{part:06d}{PART_SUFFIX}.tmp"
-        pq.write_table(table, staging, compression="zstd")
-        os.replace(staging, target)
-        self._parts[table_id] = part + 1
+        buffered = self._buffer.tables.setdefault(table_id, [])
+        buffered.append(table)
+        self._buffer.nbytes += table.nbytes
         instants = self._instants.setdefault(table_id, set())
         for row in rows:
-            instants.add(str(row.get("event_time")))
+            at = row.get("event_time")
+            instants.add(str(at))
+            if isinstance(at, datetime):
+                self._buffer.occurrences.add(str(at))
+                last = self._buffer.last_event_time
+                if last is None or at > last:
+                    self._buffer.last_event_time = at
         self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
+        self.heartbeat()
+        if self._buffer.nbytes >= self.spill_bytes:
+            self._spill()
 
     def finish(self, record: _Record | Mapping[str, object], *, kind: str = RUN_KIND) -> Path:
         """Write the run's own facts, last, by atomic replace.
@@ -871,6 +1007,9 @@ class RunRecordWriter:
         for stamped in ("run_id", *(MEMBER_KINDS[kind][3:] if kind in MEMBER_KINDS else ())):
             body.pop(stamped, None)
         payload = json.dumps({**head, **_encode(body)}, indent=2, sort_keys=True)
+        # The tables land BEFORE the record: the record existing is what says the run is
+        # complete, and a reader that finds one must find every row beside it.
+        self._seal()
 
         def taken(_error: OSError) -> BaseException:
             # The directory is no longer there, or no longer ours. Another run took this id while
@@ -890,7 +1029,7 @@ class RunRecordWriter:
         )
         # The run is over, so it is no longer live. Released after the record lands, never before:
         # a reader that sees a complete record must never also see a live claim on it.
-        self.release()
+        self._unlock()
         return directory / self.record_filename
 
 
@@ -1079,19 +1218,40 @@ def member_progress(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str
     """What an unfinished member directory says about how far its run got.
 
     `status` is `running` or `unfinished` (see `STATUS_*`). `lock` is the holder's pid and how
-    many seconds ago the run last touched its lock, or `None`; `chunks` is the most parts any of
-    its tables has -- one per accepted session, since `append` writes one part per call; `tables`
-    names them; `last_event_time` is the newest `event_time` in the newest part of any table,
-    which is the last session the run accepted. One directory scan and one small parquet read per
-    table; nothing here opens the whole record.
+    many seconds ago the run last touched its lock, or `None`. The rest comes from
+    `progress.json`, which the heartbeat rewrites every `PROGRESS_EVERY` seconds while the rows
+    are still in memory (`087`): `chunks` is the accepted occurrences so far (the name it had when
+    it counted part files, kept for the CLI), `tables` names the tables with rows, and
+    `last_event_time` is the last instant the run accepted. A directory with no progress file --
+    a member that ended before its first heartbeat, or one hard-killed after a spill -- falls back
+    to what its files say: one part per spill, and the newest instant in the newest one.
     """
     directory = record_directory(root, run_id, ref, kind=kind)
     claim = _lock_claim(directory / LOCK_FILENAME)
+    progress = directory / PROGRESS_FILENAME
+    if progress.is_file():
+        try:
+            said = json.loads(progress.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            said = {}
+        if isinstance(said, dict):
+            rows = said.get("rows") or {}
+            return {
+                "status": STATUS_RUNNING if claim is not None else STATUS_UNFINISHED,
+                "lock": (
+                    None
+                    if claim is None
+                    else {"pid": claim.pid, "refreshed_ago": round(claim.age, 1)}
+                ),
+                "chunks": int(said.get("occurrences") or 0),
+                "tables": sorted(rows) if isinstance(rows, dict) else [],
+                "last_event_time": said.get("last_event_time"),
+            }
     tables = directory / TABLES_DIRECTORY
     parts: dict[str, tuple[Path, ...]] = {}
     if tables.is_dir():
         for table in sorted(child for child in tables.iterdir() if child.is_dir()):
-            parts[table.name] = tuple(sorted(table.glob(f"*{PART_SUFFIX}")))
+            parts[table.name] = _table_files(table)
     newest: datetime | None = None
     for files in parts.values():
         if not files:
@@ -1387,9 +1547,19 @@ def resolve_strategy_ref(root: Path, run_id: str, strategy_ref: str | None) -> s
 def _parts(root: Path, run_id: str, table_id: str, strategy_ref: str | None) -> tuple[Path, ...]:
     resolved = resolve_strategy_ref(root, run_id, strategy_ref)
     directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY / table_id
+    return _table_files(directory)
+
+
+def _table_files(directory: Path) -> tuple[Path, ...]:
+    """The files that ARE one table: `all.parquet` alone when the run ended, else the spill
+    parts a still-running or hard-killed run left. Never both -- a compact file beside parts is
+    a seal interrupted between its write and the parts' removal, and the parts are its input."""
     if not directory.is_dir():
         return ()
-    return tuple(sorted(path for path in directory.glob(f"*{PART_SUFFIX}")))
+    compact = directory / COMPACT_FILENAME
+    if compact.is_file():
+        return (compact,)
+    return tuple(sorted(path for path in directory.glob(f"[0-9]*{PART_SUFFIX}")))
 
 
 def read_table(

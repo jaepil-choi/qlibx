@@ -21,15 +21,15 @@ impossible rather than merely inconvenient:
   <run-id>/
     record.json            the run's own facts: account, contract report, source digest, period
     tables/
-      vqapr.account/       one directory per recorded table, one parquet file per chunk
-        000000.parquet     as the run proceeds (record `146`)
-        000001.parquet
+      vqapr.account/       one directory per recorded table, one parquet file per table,
+        all.parquet        written when the run ends (record `164`; one file per chunk, `146`)
       vqapr.weight/
       vqapr.monitoring/    when the run declared constraints: one row per rule per occurrence
       factor.membership/
 ```
 
-One directory per run id. One directory per table. One complete file per chunk as it arrives.
+One directory per run id. One directory per table. One complete file per table when the run
+ends; spill parts (`000000.parquet`, ...) only while a very large run is still executing.
 
 ## Why a directory scan, not an index file
 
@@ -49,20 +49,39 @@ construction.
 The cost is that listing is O(runs) rather than O(1). At the scale this serves — one directory per
 research run — that is not a cost worth buying a lost-update bug to avoid.
 
-## Why the writer appends in chunks
+## Why the writer takes chunks and writes once (record `164`; per chunk before it)
 
-`append` takes a chunk at a time and never rewrites what it already wrote, so a caller that streams
-rows as it produces them gets crash survival and bounded memory for free: a killed run keeps
-everything up to its last chunk, and peak memory is one chunk rather than a whole run.
+`append` takes a chunk at a time -- one accepted occurrence's rows -- types it into an Arrow
+table on the spot, and holds it. Nothing reaches the disk per chunk. When the run ends the
+writer writes each table as one file, `all.parquet`; a run that ends by raising or by an
+interrupt ends the same way, because `flow/orchestration.py` calls the writer's `release` on the
+failure path and `release` writes before it unlocks. Only a hard kill -- `terminate`, an OOM
+kill, a power cut -- runs no code, and then what survives is what the spill valve had already
+written: above `SPILL_BYTES` (256 MB of buffered Arrow) the buffer is written as one spill part
+per table, and the end folds every part and the remainder into the compact file.
 
-**The product streams (record `135`).** `RunStateRepository` hands each accepted occurrence's
-rows to the writer at the swap that accepts it, and no root retains them; `freeze_record` writes
-only `record.json` at the end, from counts the writer kept as chunks passed. A killed run keeps
-every accepted occurrence's rows and no record, and a streamed run's peak heap is a fraction of
-the same run kept in memory -- both measured in `tests/flow/test_the_run_record_streams.py`. A
-flow assembled without a store keeps rows in its roots as before.
+**Why not per chunk.** Record `135` streamed so that a killed run kept every chunk that landed,
+and record `146` made each chunk a complete parquet file because parquet is readable only once
+its footer is written. Measured (`docs/issues/087`): 1.5 ms of file cost per append before any
+row conversion, a physical write per occurrence per table, about a fifth of a real strategy's
+wall clock, and a finished table of six hundred 8 KB files whose framing outweighed their data a
+hundredfold. The owner ruled (2026-09-07) that a run should not write per loop, that what it
+recorded should be saved when it dies, and accepted that no code can answer a hard kill. The
+sample journey went from 7.8 s and 1,465 files to 5.4 s and 3.
 
-## Why parquet, one file per chunk (record `146`; JSONL before it)
+**The product streams into memory (record `135`, kept).** `RunStateRepository` hands each
+accepted occurrence's rows to the writer at the swap that accepts it, and no root retains them;
+the writer's columnar buffer is a fraction of the rows as Python objects (measured in
+`tests/flow/test_the_run_record_streams.py`). `freeze_strategy_record` writes the record at the
+end, after the tables, from counts the writer kept as chunks passed. A flow assembled without a
+store keeps rows in its roots as before.
+
+**Watching a run.** With no parts to count, a running member says how far it got in
+`progress.json` -- accepted occurrences, rows per table, the last `event_time` -- rewritten by
+the heartbeat at most every `PROGRESS_EVERY` seconds and removed when the tables land.
+`member_progress` reads it; `vqapr list strategies --run` shows it.
+
+## Why parquet (record `146`; JSONL before it)
 
 The rows were JSONL from record `135` to record `146`: append-only, one row per line, and a
 `.types.json` sidecar beside each table saying which Python type every column had been
@@ -72,13 +91,13 @@ top of a format that has none, and the deletion campaign (D3: do not reinvent th
 replaced it with the format that carries types: parquet, through pyarrow, which the tree already
 depended on.
 
-**One complete file per chunk, not one open writer per table.** A parquet file is readable
-only once its footer is written, so a writer held open for the run would leave nothing if the
-run were killed -- and a killed run leaving every chunk that landed is the property the whole
-layout exists for. So each `append` writes one file, `tables/<table>/<n>.parquet`, staged beside
-the target and moved into place; a chunk is one accepted occurrence's rows, so the files number
-the run's occurrences. A reader lists the directory in order; duckdb reads it as
-`read_parquet('tables/<table>/*.parquet')`.
+**One complete file per table, written when the run ends** (record `164`; one per chunk from
+`146` to `164`, see the section above). `tables/<table>/all.parquet`, staged beside the target
+and moved into place. Spill parts `tables/<table>/<n>.parquet` exist only while a large run is
+still executing, or after a hard kill; the end writes the compact file first and removes the
+parts after, and a reader (`record._table_files`) takes the compact file alone when it is there,
+so a crash between the two repeats nothing. duckdb reads the directory as
+`read_parquet('tables/<table>/*.parquet')`; inside that one window it would see both.
 
 **Types travel in the file.** An instant is a `timestamp[us, tz]` in the zone the first value
 carried, and comes back as that instant in that zone through pyarrow and through duckdb alike.
@@ -146,20 +165,19 @@ beside the old one, and counting them is architecture §17.4's answer.
         .running                   its liveness lock while it computes
 <project>/.vqapr/materialized/
   <dataset-id>/
-    000000.parquet                 one chunk per session, moved into place as the session completes
-    000001.parquet
+    all.parquet                    every session, written once when the run registers (record `164`)
 ```
 
 A datamodel run holds datamodels the way a strategy run holds strategies (design §4; a run holds
 one kind, never both). The member directory is the same unit of writing, lock and `--force`
 replacement; what differs is where the rows go. A datamodel's rows ARE a dataset -- the one its
 run declared under `datamodels.<id>.dataset_id` -- so they land under `.vqapr/materialized/`,
-one complete parquet chunk per session, and the directory registers as the dataset's source once
-the last session has completed, through the registration path every other dataset takes. There
-are no `tables/` under a datamodel's record directory, and `datamodel.json` carries one line per
-session (evaluation time, output `available_at`, row count) rather than the per-instrument
-lineage `docs/issues/059` measured at 478 MB. A run killed midway leaves the chunks that landed
-and no registration; a re-run starts the directory clean.
+as one parquet file once the last session has completed (`164`; a file per session before it),
+and the directory registers as the dataset's source right after, through the registration path
+every other dataset takes. There are no `tables/` under a datamodel's record directory, and
+`datamodel.json` carries one line per session (evaluation time, output `available_at`, row
+count) rather than the per-instrument lineage `docs/issues/059` measured at 478 MB. A run that
+fails first leaves no output and no registration; a re-run starts the directory clean.
 
 `materialize()`, the spec file it read and the `materialization` record kind are gone: a
 datamodel is a registered run, judged, frozen and executed by the same verbs.

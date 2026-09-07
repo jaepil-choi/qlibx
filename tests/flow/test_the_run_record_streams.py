@@ -8,10 +8,12 @@ accepted rows go to the sink at the swap and no root retains them.
 
 Two properties, asserted directly:
 
-- the table file on disk **grows between occurrences** while the run is still executing, and the
-  final state retains no rows;
+- each occurrence's rows leave the roots at publish and the final state retains none; since
+  `docs/issues/087` the writer holds them as Arrow tables and writes once when the run ends,
+  so the disk is untouched while the run executes;
 - the peak heap of a streamed run is a fraction of the same run kept in memory -- measured with
-  `tracemalloc`, not inferred from a row count.
+  `tracemalloc`, not inferred from a row count. A columnar buffer is that fraction; the rows as
+  Python dicts on the roots are the whole.
 
 Without a sink nothing changes: rows stay in the roots and every in-memory reader sees them.
 """
@@ -172,28 +174,31 @@ def _flow(
     )
 
 
-def test_rows_reach_the_disk_at_each_accepted_occurrence(tmp_path: Path) -> None:
+def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_end(
+    tmp_path: Path,
+) -> None:
+    """The sink takes each occurrence's rows at publish and the roots keep none; the writer
+    holds them typed in memory and writes one file per table when the run ends
+    (`docs/issues/087` -- record `146` wrote one file per occurrence, a physical write per loop)."""
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
     table = writer.directory / TABLES_DIRECTORY / "probe"
     sizes: list[int] = []
 
     def observe() -> None:
-        # One complete parquet file per accepted occurrence (record `146`).
         sizes.append(len(list(table.glob("*.parquet"))) if table.exists() else 0)
 
     state = _state(row_sink=writer.append)
     result = _flow(state, _occurrences(3), on_progress=observe).run()
 
-    # The run signals progress at the START of each occurrence, so the first observation sees an
-    # empty table and each later one sees exactly the occurrences accepted so far.
     assert len(sizes) == 3
-    assert sizes == [0, 1, 2], sizes
-    assert len(list(table.glob("*.parquet"))) == 3, (
-        "the last occurrence's rows landed after its signal"
-    )
+    assert sizes == [0, 0, 0], "nothing reaches the disk while the run is executing"
     assert result.final_state.recorder_rows == {}, "a streamed run retains no rows on its roots"
     assert writer.counts()["probe"] == {"rows": 3 * ROWS_PER_OCCURRENCE, "instants": 3}
+
+    writer.release()
+
+    assert [path.name for path in table.iterdir()] == ["all.parquet"]
     assert sum(1 for _ in read_table(tmp_path, "streamed", "probe")) == 3 * ROWS_PER_OCCURRENCE
 
 

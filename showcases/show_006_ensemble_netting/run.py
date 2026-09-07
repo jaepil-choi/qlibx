@@ -100,7 +100,7 @@ REVERSAL_LOOKBACK = 6
 MOMENTUM_LOOKBACK = 11
 """Eleven closes span a ten-session return."""
 
-VERIFIED_AGAINST = "vqapr-0.5.0"
+VERIFIED_AGAINST = "vqapr-0.6.0"
 LAST_VERIFIED_AT = "2026-09-07"
 
 

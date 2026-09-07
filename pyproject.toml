@@ -6,6 +6,8 @@ readme = "README.md"
 authors = [
     { name = "Jaepil.Choi", email = "chljeffreyz@gmail.com" }
 ]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.15"
 # `cvxpy` and `pydantic` were listed here and imported nowhere in the repository -- a convex
 # solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path

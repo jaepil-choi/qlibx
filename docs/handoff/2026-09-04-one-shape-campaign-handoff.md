@@ -35,7 +35,7 @@
 | `159`·`160` | `step-04-delete-materialize` · `step-05-document-is-the-domain` | — · `027`·`082` | 캠페인 Step 4·5. Step 5가 찾은 것: §1.3의 `declarations.py` 행이 틀림(6/7이 adapter 구현); `model_copy`는 재검증 안 함(`RunDefinition.replace()`가 검증을 거침); `instruments:` 오타가 퇴역 shape 조언을 받던 결함; 문 하나가 지켜야 했던 보장 셋(호출자 객체 갱신·fresh 프로젝트의 첫 등록이 문서를 씀·사라진 문서는 `open.missing`으로 거부) |
 | `158` | `fix/086-tolerance-and-three-buckets` | `086` | `StampedConstraintFinding`이 `excess`를 `max(bound×1%, 10bp)`(또는 `Constraint.tolerance`)로 판정해 `held`/`within_tolerance`/`breached`; contract 블록이 셋을 나눠 세고 `ok`는 `breached`만 봄; monitoring 행에 `verdict`·`tolerance`. **constraint·scaffold 코드 변경 0** |
 
-**함정 하나, 기록해 둔다.** (2026-09-07 추가: 같은 파일의 `test_a_process_killed_mid_write_leaves_rows_and_no_record`도 타이머로 worker를 죽여서, 프로세스 시작이 느리면 첫 parquet part 전에 죽는다 — 격리 6회 중 1회, develop에서도 남. record `162` Validation.) `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
+**함정 하나, 기록해 둔다.** (2026-09-07 추가: 같은 파일의 `test_a_process_killed_mid_write_leaves_rows_and_no_record`도 타이머로 worker를 죽여서, 프로세스 시작이 느리면 첫 parquet part 전에 죽는다 — 격리 6회 중 1회, develop에서도 남. record `162` Validation. **닫힘, record `165`**: 이제 시계 대신 증거를 기다린다 — kill 테스트는 첫 spill part가 디스크에 나타날 때까지, interrupt 테스트는 자식이 열 번째 append 뒤 남기는 마커까지 폴링. 20/20·20/20. 아래 five-process 테스트는 시계가 없어 같은 처리가 안 되며, record `165`에 이유를 적었다.) `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
 문서화된 ~1/12 flake이고, `157`의 전체 스위트에서 한 번 실패했다(1,452 passed / 1 failed). 격리 재실행
 5/6, `develop`에서 5/5. **소스를 막 고친 직후에 돌리면 더 자주 실패한다** — 다섯 자식 프로세스가 바뀐
 모듈을 동시에 바이트컴파일하느라 창이 넓어진다(3/5 관측). 실패하면 두어 번 다시 돌려 보고, 세 번 연속이면

@@ -28,12 +28,14 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from vqapr.flow.record import (
     COMPACT_FILENAME,
+    PART_SUFFIX,
     RECORD_FILENAME,
     RunRecordWriter,
     read_record,
@@ -59,6 +61,7 @@ def interrupted(*_):
 
 def main() -> None:
     root, run_id, spill = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    ten_rows = Path(sys.argv[4])
     # What the console does on Ctrl+C, wired to the one signal a test can send to a single
     # process: CTRL_BREAK on Windows (delivered as SIGBREAK), SIGTERM elsewhere.
     signal.signal(getattr(signal, "SIGBREAK", signal.SIGTERM), interrupted)
@@ -67,6 +70,9 @@ def main() -> None:
     try:
         for i in range(2000):
             writer.append("vqapr.account", [{{"instrument": "_ACCOUNT", "nav": str(1000 + i)}}])
+            if i == 9:
+                # The test's evidence that ten rows are in memory: `append` returned ten times.
+                ten_rows.touch()
             time.sleep(0.02)
         writer.finish({{"account": {{"version": 2000}}}})
     except BaseException:
@@ -118,25 +124,34 @@ def _write_script(tmp_path: Path, name: str, template: str, src_root: str) -> Pa
     return script
 
 
-def _start_writer(tmp_path: Path, src_root: str, store: Path, run_id: str, spill: int):
+def _start_writer(
+    tmp_path: Path, src_root: str, store: Path, run_id: str, spill: int, ten_rows: Path
+):
     script = _write_script(tmp_path, "write_probe.py", _WRITE_SCRIPT, src_root)
     # Its own process group, so CTRL_BREAK reaches it and nothing else (Windows).
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     return subprocess.Popen(
-        [sys.executable, str(script), str(store), run_id, str(spill)], creationflags=flags
+        [sys.executable, str(script), str(store), run_id, str(spill), str(ten_rows)],
+        creationflags=flags,
     )
 
 
-def _wait_until_writing(proc: subprocess.Popen, store: Path, run_id: str) -> None:
-    """Until the child holds its lock -- imports done, handler installed, rows arriving. A
-    signal sent before the handler exists is a hard kill, which is the other test."""
-    lock = store / "runs" / run_id / ".running"
+def _wait_for(proc: subprocess.Popen, evidence: Callable[[], bool], what: str) -> None:
+    """Until the child leaves `what` on disk: evidence, never a clock.
+
+    This replaced "wait for the lock, then sleep one second". A cold interpreter's first parquet
+    write -- pyarrow and the zstd codec loading on a fresh `.venv`, or a machine busy with the
+    rest of the suite -- was measured to take longer than that second, and a signal that lands
+    before the evidence exists tests a different scenario than the one the test names: a hard
+    kill before the handler is installed, or a kill before the first spill part. Ten rows at
+    20 ms each are a quarter of a second, so the budget below is never approached; it exists so
+    a child that hangs fails by name instead of by the harness.
+    """
     deadline = time.monotonic() + 120
-    while not lock.exists():
-        assert proc.poll() is None, "the child ended before it started writing"
-        assert time.monotonic() < deadline, "the child never claimed its run id"
+    while not evidence():
+        assert proc.poll() is None, f"the child ended before {what}"
+        assert time.monotonic() < deadline, f"the child never produced {what}"
         time.sleep(0.05)
-    time.sleep(1.0)
 
 
 def _interrupt(proc: subprocess.Popen) -> None:
@@ -158,8 +173,12 @@ def test_a_process_interrupted_mid_write_leaves_every_row_and_no_record(
     """
     store = tmp_path / "store"
     store.mkdir()
-    proc = _start_writer(tmp_path, _src_root, store, "interrupted-run", _NO_SPILL)
-    _wait_until_writing(proc, store, "interrupted-run")
+    ten_rows = tmp_path / "ten-rows"
+    proc = _start_writer(tmp_path, _src_root, store, "interrupted-run", _NO_SPILL, ten_rows)
+    # Nothing reaches the disk before the end (`087`), so the child says when the tenth row is in
+    # memory. Its handler was installed before `open()`, so a signal now is an interrupt and not
+    # the hard kill of the test below.
+    _wait_for(proc, ten_rows.exists, "its tenth row")
     _interrupt(proc)
     proc.wait(timeout=180)
 
@@ -180,14 +199,16 @@ def test_a_process_hard_killed_mid_write_keeps_only_what_had_spilled(
     survives; what was buffered after it is gone; no record, no compact file."""
     store = tmp_path / "store"
     store.mkdir()
-    proc = _start_writer(tmp_path, _src_root, store, "killed-run", 1)
-    _wait_until_writing(proc, store, "killed-run")
+    table = store / "runs" / "killed-run" / "tables" / "vqapr.account"
+    proc = _start_writer(tmp_path, _src_root, store, "killed-run", 1, tmp_path / "ten-rows")
+    # A part is staged under a dotted name and renamed into place, so the first `000000.parquet`
+    # is a complete file: the kill lands with at least one spill part on disk, by evidence.
+    _wait_for(proc, lambda: any(table.glob(f"[0-9]*{PART_SUFFIX}")), "its first spill part")
     proc.terminate()
     proc.wait(timeout=180)
 
     assert run_ids(store) == ()
     assert not (store / "runs" / "killed-run" / RECORD_FILENAME).exists()
-    table = store / "runs" / "killed-run" / "tables" / "vqapr.account"
     names = sorted(path.name for path in table.iterdir())
     assert names and COMPACT_FILENAME not in names, "spill parts only: the run never ended"
     rows = list(read_table(store, "killed-run", "vqapr.account"))

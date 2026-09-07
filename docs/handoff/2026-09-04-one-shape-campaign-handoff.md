@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — **Step 6 완료(record `161`)**, 다음은 `step-07-fold-packages`. 남은 이슈는 `023`(HELD) 하나 |
+| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료.** 다음은 **0.5.0 릴리스**(stamp → stepper 재생성 → show_003 수동 → testbed 갱신 안내). 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -35,7 +35,7 @@
 | `159`·`160` | `step-04-delete-materialize` · `step-05-document-is-the-domain` | — · `027`·`082` | 캠페인 Step 4·5. Step 5가 찾은 것: §1.3의 `declarations.py` 행이 틀림(6/7이 adapter 구현); `model_copy`는 재검증 안 함(`RunDefinition.replace()`가 검증을 거침); `instruments:` 오타가 퇴역 shape 조언을 받던 결함; 문 하나가 지켜야 했던 보장 셋(호출자 객체 갱신·fresh 프로젝트의 첫 등록이 문서를 씀·사라진 문서는 `open.missing`으로 거부) |
 | `158` | `fix/086-tolerance-and-three-buckets` | `086` | `StampedConstraintFinding`이 `excess`를 `max(bound×1%, 10bp)`(또는 `Constraint.tolerance`)로 판정해 `held`/`within_tolerance`/`breached`; contract 블록이 셋을 나눠 세고 `ok`는 `breached`만 봄; monitoring 행에 `verdict`·`tolerance`. **constraint·scaffold 코드 변경 0** |
 
-**함정 하나, 기록해 둔다.** `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
+**함정 하나, 기록해 둔다.** (2026-09-07 추가: 같은 파일의 `test_a_process_killed_mid_write_leaves_rows_and_no_record`도 타이머로 worker를 죽여서, 프로세스 시작이 느리면 첫 parquet part 전에 죽는다 — 격리 6회 중 1회, develop에서도 남. record `162` Validation.) `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
 문서화된 ~1/12 flake이고, `157`의 전체 스위트에서 한 번 실패했다(1,452 passed / 1 failed). 격리 재실행
 5/6, `develop`에서 5/5. **소스를 막 고친 직후에 돌리면 더 자주 실패한다** — 다섯 자식 프로세스가 바뀐
 모듈을 동시에 바이트컴파일하느라 창이 넓어진다(3/5 관측). 실패하면 두어 번 다시 돌려 보고, 세 번 연속이면
@@ -263,9 +263,11 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_state.prepare/publish_valuation_only`가
 148 뒤에도 `valuation.py:194,221`에서 불리는데 실제 도달하는지(record 104 tracer).
 
-### Step 7 — 패키지 접기
+### ~~Step 7 — 패키지 접기~~ — **완료 2026-09-07, record `162`. 캠페인의 마지막 단계.**
 
-캠페인 §2 표 그대로. 마지막에.
+순환 3→0(`cli↔cli.main`은 entry point를 `vqapr.cli.main:main`으로, `store↔windows`는 두 shape을 store로, `conventions↔execution_table`은 convention이 `source`·`trade_at_field`·`execution_input_id`를 받고 registration이 위임). `domain/` 10→**5**(`errors`·`identifiers`·`instruments`·`values`·`agendas`), `constraints/` 7→**5**, `valuation/`·`runtime/` 삭제(`flow/marking.py`, `domain/values.py`, `domain/agendas.py`, `flow/loop.py`로). ratchet 18→13. 표의 숫자와 다른 곳은 record `162` "Corrections"에 이유가 있다.
+
+**다음 손 = 0.5.0 릴리스.** 순서: (1) `pyproject`·`uv.lock`·showcase `VERIFIED_AGAINST` stamp(0.4.1 때 `080a275b` 참조), (2) spine stepper를 실제 트레이스로 재생성(메모리 규칙), (3) `show_003`을 손으로 실행(DW 창고, 릴리스 전 수동), (4) 태그·푸시 뒤 testbed(kwam-enhanced-index)와 Reporting 세션에 갱신 안내. 0.4.1 대비 변경 요약은 이 세션의 보고에 있고, record `151`~`162`가 전부다.
 
 ## 4. 열린 질문 (소유자에게, 막지는 않음)
 

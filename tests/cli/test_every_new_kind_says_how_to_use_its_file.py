@@ -47,6 +47,7 @@ def _new(root: Path, kind: str, extra: tuple[str, ...]) -> dict:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -122,6 +123,7 @@ def test_the_emitted_run_template_is_refused_for_its_placeholders_not_for_its_sh
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 

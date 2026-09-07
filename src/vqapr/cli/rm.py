@@ -31,7 +31,7 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
 from vqapr.flow.datamodel import MATERIALIZED_DIRECTORY
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     DATAMODEL_KIND,
     RunRecordLive,
     datamodel_refs,

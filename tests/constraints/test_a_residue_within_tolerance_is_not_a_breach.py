@@ -25,7 +25,7 @@ from vqapr.constraints.findings import (
     StampedConstraintFinding,
     default_tolerance,
 )
-from vqapr.flow.records import contract_report
+from vqapr.flow.record import contract_report
 
 
 def _finding(*, passed: bool, bound: str, excess: str) -> ConstraintFinding:

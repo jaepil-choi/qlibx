@@ -264,7 +264,7 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
 
     # `show datamodel`: the full form and the short form answer the same record, and the answer
     # is the record's own field set -- a field written and never surfaced would fail here.
-    from vqapr.flow.run_records import read_datamodel_record
+    from vqapr.flow.record import read_datamodel_record
 
     frozen = read_datamodel_record(store, "factors", reversal_ref)
     for identifier in (f"factors/{reversal_ref}", "factors/reversal"):

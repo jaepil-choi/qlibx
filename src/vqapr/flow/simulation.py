@@ -47,8 +47,8 @@ from vqapr.flow.context import (
 # Re-exported under the names tests imported from this module before the split (record `147`).
 from vqapr.flow.context import _shadows_package_table as _shadows_package_table
 from vqapr.flow.execution import ExecutionPhase
+from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import OccurrenceFlow
-from vqapr.flow.run import FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import (
     RunFinalization,
     RunStateRepository,

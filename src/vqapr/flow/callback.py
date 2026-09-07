@@ -46,10 +46,10 @@ from vqapr.flow.context import (
     _raise_callback_return_type,
     _shadows_package_table,
 )
-from vqapr.flow.model_state import prepare_model_state
 from vqapr.flow.run_state import (
     LifecycleKind,
     LifecycleTrace,
+    prepare_model_state,
 )
 from vqapr.flow.valuation import ValuationPhase
 from vqapr.portfolio.intents import (

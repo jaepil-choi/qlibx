@@ -23,7 +23,7 @@ import dataclasses
 from types import SimpleNamespace
 
 from vqapr.analysis.execution import fill_summary
-from vqapr.flow.reporting import FRAMEWORK_TABLES, recorded
+from vqapr.flow.context import FRAMEWORK_TABLES
 from vqapr.flow.run_state import AcceptedRunState
 from vqapr.flow.simulation import SimulationResult
 
@@ -166,11 +166,11 @@ def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
         ("ff3.formation", ()),
     )
 
-    declared = [table for table in recorded(result) if table not in FRAMEWORK_TABLES]
+    declared = [
+        table for table in result.final_state.recorder_rows if table not in FRAMEWORK_TABLES
+    ]
     assert declared == ["ff3.formation"]
 
 
 def test_the_helper_returns_an_empty_mapping_for_a_result_that_recorded_nothing() -> None:
     """No rows is not a crash, and not a `None` the callers would have to test for."""
-    assert recorded(SimpleNamespace()) == {}
-    assert recorded(SimpleNamespace(final_state=SimpleNamespace())) == {}

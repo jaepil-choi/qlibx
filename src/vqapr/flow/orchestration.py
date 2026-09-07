@@ -41,20 +41,19 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.datamodel import DataModelFlow, DataModelOutput, DataModelResult
+from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.preflight import preflight_run as _preflight_run
-from vqapr.flow.records import (
+from vqapr.flow.record import (
+    DATAMODEL_KIND,
+    RunRecordWriter,
     freeze_datamodel_record,
     freeze_run_record,
     freeze_strategy_record,
-)
-from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.run import FrozenDataModel, FrozenRun, FrozenStrategy, RunDefinition
-from vqapr.flow.run_records import (
-    DATAMODEL_KIND,
-    RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
 )
+from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
+from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.simulation import SimulationFlow, SimulationResult
 from vqapr.workspace import Workspace

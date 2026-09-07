@@ -26,8 +26,7 @@ from vqapr.cli.register import cli_kind
 from vqapr.declarations import AUTHORED_KINDS
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
-from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     STATUS_COMPLETED,
     datamodel_progress,
     datamodel_refs,
@@ -39,6 +38,7 @@ from vqapr.flow.run_records import (
     unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
+from vqapr.flow.run import RunDefinition
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 

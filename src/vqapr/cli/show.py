@@ -21,7 +21,7 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.run_records import (
+from vqapr.flow.record import (
     DATAMODEL_KIND,
     RECORD_FIELDS_BY_KIND,
     RUN_JSON_FIELDS,

@@ -35,8 +35,8 @@ from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSou
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.rows import Row, Rows, normalize_rows
 from vqapr.domain.timestamps import require_tz_aware
+from vqapr.flow.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.loop import OccurrenceFlow
-from vqapr.flow.run import FrozenDataModel, FrozenRun
 from vqapr.runtime.agendas import OperationOccurrence
 from vqapr.workspace import Workspace
 

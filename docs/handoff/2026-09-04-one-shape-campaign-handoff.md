@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — **Step 5 완료(record `160`; `027`·`082` 닫힘)**, 다음은 `step-06-record-family` (6a: `Frozen*` pydantic, 6b: 기록 family 7→3). 남은 이슈는 `023`(HELD) 하나 |
+| 브랜치 | 없음 — **Step 6 완료(record `161`)**, 다음은 `step-07-fold-packages`. 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
@@ -229,7 +229,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 6. `tests/characterization/refusal_codes.py` inventory에서 `materialize.*` 코드 제거(재생성).
    `scripts/vulture_whitelist.py` 확인.
 
-### ~~Step 5 — 문서가 도메인이다~~ — **완료 2026-09-05, record `160`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 6**(record `161`), 그 첫 마일스톤 6a = `Frozen*` → frozen pydantic(Step 5의 M5d를 여기로 연기).
+### ~~Step 5 — 문서가 도메인이다~~ — **완료 2026-09-07, record `160`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 6**(record `161`), 그 첫 마일스톤 6a = `Frozen*` → frozen pydantic(Step 5의 M5d를 여기로 연기).
 
 캠페인 §1.3 표가 계약이다. 손 위치:
 - `src/vqapr/workspace_document.py`: `RunDocument.to_domain(:412)`, `DatasetDocument`·`ExecutionInputDocument`·
@@ -254,7 +254,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
   `cli/register.py:73`이 `apply()`의 반환(`dict[str, list[str]]`, id 목록)을 envelope에 넣는다 → 문장 리스트를
   더한다. "One sentence per PIT-bearing field, or nothing" (`027` §What to settle).
 
-### Step 6 — 기록 family 7 → 3 (record `156`)
+### ~~Step 6 — 기록 family 7 → 3~~ — **완료 2026-09-07, record `161`.** 아래는 당시의 손 위치. 다음 손은 **Step 7**(record `162`): 남은 순환은 정확히 셋 — `data.store↔data.windows`, `exchange.conventions↔exchange.execution_table`, `cli↔cli.main`.
 
 캠페인 §1.3 표의 마지막 행. `flow/run_records.py`의 `_RUN_FIELDS`(:109)·`_STRATEGY_FIELDS`(:145)·
 `_DATAMODEL_FIELDS`(:168)·`RUN_JSON_FIELDS`(:188)와 `flow/records.py`의 lambda builder 셋이 record 모델

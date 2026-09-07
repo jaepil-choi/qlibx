@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.run_records import LOCK_FILENAME, RunRecordWriter
+from vqapr.flow.record import LOCK_FILENAME, RunRecordWriter
 
 REF = "never-ready@abcdef12"
 

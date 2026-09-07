@@ -50,8 +50,12 @@ class Document(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
 
 
-class DatasetDocument(Document):
+class DatasetCodec(Document):
     """`datasets.<dataset_id>` on disk: five declared keys, then whatever has been measured.
+
+    A *codec*, not a domain twin (one-shape Step 5 judgment, Step 6 rename): `DatasetRegistration`
+    is the one shape, and this is the on-disk spelling of its measured fields and the quarantine
+    of an entry written before `span` existed -- things a registration cannot carry as rules.
 
     Two measurements on two independent axes, four admissible shapes. `span` is added by the
     release that made it mandatory; `field_types` + `aggregated` were added when a field became
@@ -76,7 +80,7 @@ class DatasetDocument(Document):
     produced_by: str | None = None
 
     @model_validator(mode="after")
-    def _measurements_travel_together(self) -> DatasetDocument:
+    def _measurements_travel_together(self) -> DatasetCodec:
         if (self.field_types is None) != (self.aggregated is None):
             raise ValueError(
                 "field_types and aggregated are one measurement; declare both or neither"
@@ -120,7 +124,7 @@ class DatasetDocument(Document):
         return registration
 
     @classmethod
-    def from_domain(cls, registration: DatasetRegistration) -> DatasetDocument:
+    def from_domain(cls, registration: DatasetRegistration) -> DatasetCodec:
         return cls(
             source=str(registration.source),
             instrument_field=registration.instrument_field,
@@ -137,7 +141,7 @@ class DatasetDocument(Document):
         )
 
 
-class FillDocument(Document):
+class FillCodec(Document):
     """`execution_inputs.<id>.fill`: which session instant, which price, and the DST proof."""
 
     selector: FillSelector
@@ -170,7 +174,7 @@ class FillDocument(Document):
         )
 
     @classmethod
-    def from_domain(cls, fill: FillConvention) -> FillDocument:
+    def from_domain(cls, fill: FillConvention) -> FillCodec:
         return cls(
             selector=fill.selector,
             local_time=fill.local_time,
@@ -181,7 +185,7 @@ class FillDocument(Document):
         )
 
 
-class ExecutionInputDocument(Document):
+class ExecutionInputCodec(Document):
     """`execution_inputs.<execution_input_id>` on disk."""
 
     source: str
@@ -189,7 +193,7 @@ class ExecutionInputDocument(Document):
     instrument_field: str
     is_tradable_field: str
     price_fields: dict[str, str]
-    fill: FillDocument
+    fill: FillCodec
 
     def to_domain(self, execution_input_id: str, source: SourceSpec) -> ExecutionInputRegistration:
         return ExecutionInputRegistration.of(
@@ -205,7 +209,7 @@ class ExecutionInputDocument(Document):
         )
 
     @classmethod
-    def from_domain(cls, registration: ExecutionInputRegistration) -> ExecutionInputDocument:
+    def from_domain(cls, registration: ExecutionInputRegistration) -> ExecutionInputCodec:
         table = registration.table
         return cls(
             source=str(table.source.source_id),
@@ -213,7 +217,7 @@ class ExecutionInputDocument(Document):
             instrument_field=table.instrument_field,
             is_tradable_field=table.is_tradable_field,
             price_fields=dict(table.price_fields),
-            fill=FillDocument.from_domain(registration.fill),
+            fill=FillCodec.from_domain(registration.fill),
         )
 
 
@@ -339,8 +343,8 @@ class WorkspaceDocument(Document):
 
     sources: dict[str, dict[str, Any]]
     """Each entry is a `SourceSpec` read under its own key by `_linked` (one-shape Step 5)."""
-    datasets: dict[str, DatasetDocument]
-    execution_inputs: dict[str, ExecutionInputDocument] = {}
+    datasets: dict[str, DatasetCodec]
+    execution_inputs: dict[str, ExecutionInputCodec] = {}
     components: dict[str, dict[str, Any]] = {}
     """Each entry is a `ComponentRef` read under its own key by `_linked` (one-shape Step 5)."""
     runs: dict[str, dict[str, Any]] = {}
@@ -479,9 +483,9 @@ def write_workspace(
             str(k): v.model_dump(mode="json", exclude={"source_id"})
             for k, v in by_id(sources.items())
         },
-        datasets={str(k): DatasetDocument.from_domain(v) for k, v in by_id(datasets.items())},
+        datasets={str(k): DatasetCodec.from_domain(v) for k, v in by_id(datasets.items())},
         execution_inputs={
-            str(k): ExecutionInputDocument.from_domain(v)
+            str(k): ExecutionInputCodec.from_domain(v)
             for k, v in by_id(execution_inputs.items())
         },
         components={
@@ -502,13 +506,13 @@ def write_workspace(
 
 __all__ = [
     "ComponentDeclaration",
+    "DatasetCodec",
     "DatasetDeclaration",
-    "DatasetDocument",
     "Document",
+    "ExecutionInputCodec",
     "ExecutionInputDeclaration",
-    "ExecutionInputDocument",
+    "FillCodec",
     "FillDeclaration",
-    "FillDocument",
     "TableDeclaration",
     "WorkspaceDocument",
     "read_workspace",

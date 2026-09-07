@@ -30,7 +30,7 @@ trailing window is consumed, so the member computes that statistic directly with
 
 | | |
 |---|---|
-| sessions / callbacks | 22 / 21 |
+| sessions / member callbacks / ensemble callbacks | 22 / 21 / 11 |
 | reversal published | 16 occurrences, 64 rows |
 | momentum published | 11 occurrences, 44 rows |
 | low-vol published | 11 occurrences, 44 rows |
@@ -52,8 +52,11 @@ showcase does not make one. What is demonstrated is that the measurement runs on
 artifact and is checked by an independent oracle — not that the alpha works.
 
 Both members with an eleven-close lookback publish 11 occurrences; reversal, needing six, publishes
-16. The agenda is not trimmed to fit the signal: sessions without enough history decline, and that
-is asserted rather than hidden.
+16. The members' agenda is not trimmed to fit the signal: sessions without enough history decline,
+and that is asserted rather than hidden. The ensemble's horizon opens on the first day all three
+members have a weight on record, because a decision that reads an empty window is what
+`vqapr check` refuses (`check.lookback.uncovered`) and, since record 168, what `preflight_run`
+refuses as well.
 
 ## What is checked, and what each check would catch
 

@@ -48,7 +48,10 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
   (`show_005` demonstrates the benchmark-relative path).
 - **No warm-up trimming.** The reversal member needs six closes and the momentum member eleven;
   earlier occurrences on each agenda decline with `NoDecision` rather than being excluded from the
-  callback calendar. The ensemble only nets on occurrences where both members actually published.
+  callback calendar. The ensemble only nets on occurrences where both members actually published,
+  and its own horizon opens on the first day both have a weight on record: before that day its
+  first decision would read an empty window, which `vqapr check` refuses
+  (`check.lookback.uncovered`) and which `preflight_run` refuses too since record 168.
 
 ## Reading the netting evidence
 
@@ -62,13 +65,14 @@ whenever the members agreed on direction and positive only where they genuinely 
 
 ## Results
 
-Last verified 2026-08-18 against `vqapr-0.1.0+show-006-working-tree`, on the committed April 2026
-KRX slice (22 sessions, 21 callbacks, 4 instruments).
+Last verified 2026-09-08 against `vqapr-0.6.0`, on the committed April 2026 KRX slice
+(22 sessions, 21 member callbacks, 11 ensemble callbacks, 4 instruments).
 
 | Metric | Value |
 |---|---|
 | reversal occurrences published | 16 |
 | momentum occurrences published | 11 |
+| ensemble callbacks (from the first day both members published) | 11 |
 | reversal state_path | `["moved"]` |
 | momentum state_path | `["constant"]` |
 | subscribed allocation inputs | `momentum_allocation` + `reversal_allocation` |

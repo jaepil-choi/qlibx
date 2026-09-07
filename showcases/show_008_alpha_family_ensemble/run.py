@@ -54,6 +54,7 @@ from fractions import Fraction
 from pathlib import Path
 from statistics import stdev
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import duckdb
 
@@ -123,7 +124,7 @@ the whole history.
 """
 
 VERIFIED_AGAINST = "vqapr-0.6.0"
-LAST_VERIFIED_AT = "2026-09-07"
+LAST_VERIFIED_AT = "2026-09-08"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:
@@ -738,6 +739,8 @@ class _Registered:
     directory: Path
     row_count: int
     occurrences: int
+    first_day: date
+    """The venue-local day of the first row, which is the first day a reader can read it."""
 
 
 def _register_run_table(
@@ -778,13 +781,16 @@ def _register_run_table(
     )
     con = duckdb.connect()
     try:
-        rows, occurrences = con.execute(
-            f"SELECT count(*), count(DISTINCT event_time) "
+        rows, occurrences, first = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time), min(event_time) "
             f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
         ).fetchone()
     finally:
         con.close()
-    return _Registered(dataset_id, directory, int(rows), int(occurrences))
+    first_day = (
+        first.astimezone(ZoneInfo(VENUE)) if first.tzinfo is not None else first
+    ).date()
+    return _Registered(dataset_id, directory, int(rows), int(occurrences), first_day)
 
 
 def _measure_published_signal(
@@ -1148,15 +1154,25 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         )
         memories[label] = _memory(result)
 
+    # The ensemble reads what its members published, so its horizon opens on the first day EVERY
+    # member has a weight on record. A member declines until its lookback fills, and a decline
+    # records no weight, so the allocation datasets begin days after the members' own agenda
+    # does; an ensemble opening with the members would ask its first decision to read an empty
+    # window, which `vqapr check` refuses (`check.lookback.uncovered`) -- and since record 168
+    # `preflight_run` asks the same judgments, so this script was refused too. The members'
+    # declines above are still asserted, not trimmed; only the ensemble waits for its inputs.
+    ensemble_opens = max(member.first_day for member in published.values())
+    ensemble_days = [day for day in callback_days if day >= ensemble_opens]
+    ensemble_start = datetime.fromisoformat(f"{ensemble_days[0].isoformat()}T00:00:00{OFFSET}")
     ensemble_definition = RunDefinition(
         run_id="show008-ensemble",
         strategies=(StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),),
-        sessions=tuple(callback_days),
+        sessions=tuple(ensemble_days),
         timezone=VENUE,
         at=time(9, 0),
         exchange="show008-krx",
         execution_input_id="krx-daily",
-        start=start,
+        start=ensemble_start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
@@ -1292,6 +1308,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "universe": list(universe),
         "sessions": len(sessions),
         "callbacks": len(callback_days),
+        "ensemble_callbacks": len(ensemble_days),
         "crossing_occurrences": crossing_occurrences,
         "max_offset_weight": str(max_offset),
         "split_ticker_occurrences": len(split_rows),

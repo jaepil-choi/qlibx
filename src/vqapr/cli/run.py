@@ -26,7 +26,6 @@ from vqapr.domain.errors import (
     FailureSource,
     VqaprError,
 )
-from vqapr.flow.judgments import judgments
 from vqapr.flow.orchestration import COMPLETED, FAILED
 from vqapr.flow.record import (
     RunRecordConflict,
@@ -90,7 +89,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-JUDGMENT_STAGE = "run.judgments"
 PREFLIGHT_STAGE = "run.check"
 """`run`'s preflight refusals carry `check`'s stage and codes, because they are the same judgment.
 
@@ -158,45 +156,6 @@ def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     )
 
 
-def _refuse_if_judged(failures: list[Failure], blocked: list[dict[str, str]], run_id: str) -> None:
-    """Refuse the run when a judgment refused, or when one could not answer.
-
-    `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
-    15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
-    wrote a permanent record nothing marked (`docs/issues/015`). Refusing outright, with no flag
-    to bypass, is the decision recorded in `docs/implementations/087`.
-
-    **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
-    letting it through would let a run nothing was proven about run to completion.
-
-    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means.
-    """
-    if not failures and not blocked:
-        return
-    reported = list(failures)
-    for entry in blocked:
-        reported.append(
-            Failure.bounded(
-                "run.check.judgment_blocked",
-                "every judgment must be answerable before the run starts",
-                observed=(
-                    f"the {entry.get('check')} judgment could not answer: {entry.get('blocked_by')}"
-                ),
-                fix=(
-                    f"run `vqapr check {run_id}` to see the full report, then fix what stopped "
-                    "the judgment from answering"
-                ),
-                explain=ExplainTopic.RUN_PRECONDITION,
-                source=FailureSource(key_path=f"runs.{run_id}"),
-            )
-        )
-    raise VqaprError(
-        stage=JUDGMENT_STAGE,
-        family=FailureFamily.INTENT,
-        failures=reported,
-    )
-
-
 def refuse_a_path(target: str, *, verb: str) -> None:
     """A run is named by id. A YAML path here is the spec file record `148` retired.
 
@@ -223,14 +182,14 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
 
     workspace = Workspace.open(project_root)
     definition: RunDefinition = workspace.run_definition(target)
-    # Before the freeze, and in the order `check` asks them: a run that cannot pass these has
-    # nothing to gain from being frozen first.
-    _refuse_if_judged(*judgments(definition, workspace), definition.run_id)
     selected = tuple(getattr(args, "strategies", None) or ())
     for name in selected:
         definition.member(name)  # KeyError names the models the run does hold
     # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
-    # the judgments above, the freeze and the roster read all see the same document.
+    # the judgments, the freeze and the roster read all see the same document. The judgments are
+    # asked inside `preflight_run`, in the order `check` asks them, so this verb and a Python
+    # caller refuse the same run for the same reasons (record `168`); a refusal arrives as the
+    # `VqaprError` below deliberately lets through.
     try:
         frozen = preflight_run(workspace, definition)
     except (TypeError, ValueError) as refused:

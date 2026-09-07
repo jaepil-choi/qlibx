@@ -35,8 +35,9 @@ from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.flow.judgments import judgments
+from vqapr.flow.preflight import preflight_run as freeze_run
 from vqapr.inputs import InputError
-from vqapr.public import Workspace, preflight_run
+from vqapr.public import Workspace
 
 STAGE = "run.check"
 
@@ -89,6 +90,7 @@ _PHASES = (
 the definition it found. Everything else runs regardless of what else failed.
 """
 
+
 def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     """Run every answerable judgment and report all of them together.
 
@@ -133,7 +135,12 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 if judged:
                     continue
             elif phase.name == "preflight":
-                preflight_run(project_root, definition)  # type: ignore[arg-type]
+                # The freeze alone. The public `preflight_run` asks the judgments first (record
+                # `168`), and this verb has just asked them itself, collecting rather than
+                # raising; asking again would render a blocked judgment a second time as a
+                # failure. Same workspace snapshot as the judgments read (`docs/issues/070`).
+                assert workspace is not None
+                freeze_run(workspace, definition)  # type: ignore[arg-type]
         except VqaprError as error:
             # The framework already judged this and said why, in codes a reader may already have
             # handling for. Re-wrapping would replace an actionable refusal with a vaguer one.

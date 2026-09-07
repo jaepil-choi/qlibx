@@ -36,7 +36,7 @@ from difflib import get_close_matches
 from typing import Any
 
 from vqapr.account.account import AccountMode
-from vqapr.domain.errors import ExplainTopic, Failure, FailureSource
+from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
 
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
@@ -51,7 +51,51 @@ from vqapr.flow.run import RunDefinition
 # tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
 from vqapr.workspace import Workspace
 
-__all__ = ["judgments"]
+__all__ = ["JUDGMENT_STAGE", "judgments", "require_judged"]
+
+JUDGMENT_STAGE = "run.judgments"
+"""The stage a refused judgment is reported under, by every door that asks them."""
+
+
+def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
+    """Ask the judgments and refuse when one refused, or when one could not answer.
+
+    This is the one gate in front of the freeze, and every door passes through it: the public
+    `preflight_run`, which the CLI's `run` and the sample's `execute` both call (record `168`).
+    `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
+    15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
+    wrote a permanent record nothing marked (`docs/issues/015`); `run` then asked them and the
+    Python surface still did not, so the same run was refused by the CLI and executed from
+    Python (record `167`, R7). Refusing outright, with no flag to bypass, is the decision
+    recorded in `docs/implementations/087`.
+
+    **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
+    letting it through would let a run nothing was proven about run to completion.
+
+    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means.
+    """
+    failures, blocked = judgments(definition, workspace)
+    if not failures and not blocked:
+        return
+    run_id = definition.run_id
+    reported = list(failures)
+    for entry in blocked:
+        reported.append(
+            Failure.bounded(
+                "run.check.judgment_blocked",
+                "every judgment must be answerable before the run starts",
+                observed=(
+                    f"the {entry.get('check')} judgment could not answer: {entry.get('blocked_by')}"
+                ),
+                fix=(
+                    f"run `vqapr check {run_id}` to see the full report, then fix what stopped "
+                    "the judgment from answering"
+                ),
+                explain=ExplainTopic.RUN_PRECONDITION,
+                source=FailureSource(key_path=f"runs.{run_id}"),
+            )
+        )
+    raise VqaprError(stage=JUDGMENT_STAGE, family=FailureFamily.INTENT, failures=reported)
 
 
 def judgments(

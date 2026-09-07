@@ -42,6 +42,7 @@ from vqapr.extension.loading import (
 )
 from vqapr.flow.datamodel import DataModelFlow, DataModelOutput, DataModelResult
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.judgments import require_judged
 from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.record import (
     DATAMODEL_KIND,
@@ -62,7 +63,13 @@ from vqapr.workspace import Workspace
 def preflight_run(
     workspace_or_root: Workspace | str | Path, definition: RunDefinition
 ) -> FrozenRun:
-    """Resolve a run definition against registered declarations without running it.
+    """Judge a run definition against registered declarations, then freeze it, without running it.
+
+    The judgments come first, and here rather than in the CLI: the CLI and the Python surface are
+    two spellings of one process, and a run the CLI refused must not freeze from Python (record
+    `168`; before it, `vqapr run` asked the judgments and this function did not, so the sample's
+    own `execute` ran what `vqapr run` refused). A refused or blocked judgment raises the
+    `VqaprError` `check` renders, in `check`'s codes.
 
     Takes the `Workspace` a caller already holds, or a root to open one from. A CLI command
     opens the document once and hands that one snapshot to every step (`docs/issues/070`):
@@ -76,6 +83,7 @@ def preflight_run(
         if isinstance(workspace_or_root, Workspace)
         else Workspace.open(workspace_or_root)
     )
+    require_judged(definition, workspace)
     return _preflight_run(workspace, definition)
 
 

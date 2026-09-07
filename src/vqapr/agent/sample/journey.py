@@ -143,8 +143,9 @@ def definition(panel: SamplePanel, run_id: str = RUN_ID) -> RunDefinition:
     # out because its close is published at 15:30 and the decision is made at 08:00: a run whose
     # horizon opened there asked its first decision to read history the dataset did not have
     # yet, and `vqapr check` refused exactly that (`check.lookback.uncovered`) while `execute`
-    # below, which reaches `preflight_run` and `run` directly, accepted it (record 167). The
-    # strategy Holds until six closes exist either way, so nothing economic moved.
+    # below accepted it, because `preflight_run` did not yet ask the judgments (record 167; it
+    # does since record 168). The strategy Holds until six closes exist either way, so nothing
+    # economic moved.
     sessions = _sessions(panel)[1:]
     return RunDefinition(
         run_id=run_id,

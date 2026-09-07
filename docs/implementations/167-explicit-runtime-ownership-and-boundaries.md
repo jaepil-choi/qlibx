@@ -92,11 +92,10 @@ readability, not measurable time.
   per member per command does not pay for that signature. Decision: leave it; if a member load
   ever becomes expensive, the fix is to pass the validated declaration, not the instance, and
   never a module-level cache (a cache would hide a source edit under `--jobs`).
-- **The two doors are still two doors.** `judgments` is not on `vqapr.public`, so a Python
-  caller has no `check`; the sample's `execute` cannot ask what the CLI asks without reaching
-  below the facade, which `tests/boundaries` forbids it to do. Whether `check` belongs on the
-  public surface is an owner decision about the surface design, not a runtime one, and is left
-  open here rather than decided by a sample.
+- **The two doors were still two doors** when this record closed: `judgments` was asked by
+  `vqapr run` and not by the public `preflight_run`, so the sample's `execute` could not ask
+  what the CLI asked. Left open here as an owner decision about the surface; decided the next
+  day and closed by record [`168`](168-the-python-door-asks-the-judgments-too.md).
 - **`OccurrenceFlow` inheritance, `RunResult`'s four mappings, `record.py`'s size,
   `observation_rows`'s branches**: per the proposal's §6, no evidence from this work argues for
   touching them.

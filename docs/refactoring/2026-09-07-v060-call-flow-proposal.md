@@ -1,6 +1,6 @@
 # vqapr 0.6.0 호출 흐름 정리 제안
 
-Status: 1-4와 6의 sample 절반은 기록 [`167`](../implementations/167-explicit-runtime-ownership-and-boundaries.md)이 구현했다(2026-09-07). 5는 같은 기록이 측정하고 변경하지 않기로 결정했다. 6의 공개 `check` 표면 여부는 열려 있다.
+Status: 1-4와 6의 sample 절반은 기록 [`167`](../implementations/167-explicit-runtime-ownership-and-boundaries.md)이 구현했다(2026-09-07). 5는 같은 기록이 측정하고 변경하지 않기로 결정했다. 6의 나머지 — Python 표면도 같은 판정을 거친다 — 는 기록 [`168`](../implementations/168-the-python-door-asks-the-judgments-too.md)이 닫았다(2026-09-08).
 
 근거: [호출 흐름 진단](../diagnostics/2026-09-07-v060-call-flow-review.md). 원칙은 모듈 수 목표를 새로 세우는 대신, 생성 완료 시점·상태 소유권·한 단계의 입력과 출력을 코드에서 직접 읽을 수 있게 하는 것이다.
 

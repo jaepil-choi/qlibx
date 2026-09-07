@@ -23,6 +23,8 @@ import pytest
 from test_commands import _cli, _register_run, _workspace_for_run
 
 from vqapr.cli.check import check
+from vqapr.domain.errors import VqaprError
+from vqapr.public import Workspace, preflight_run
 
 
 def _run(capsys: pytest.CaptureFixture[str], root: Path, run_id: str) -> tuple[int, dict]:
@@ -192,3 +194,41 @@ def test_a_run_check_passes_still_runs(
     assert code == 0, payload
     assert payload["ok"] is True
     assert payload["stage"] == "run.complete"
+
+
+def test_the_python_door_refuses_what_check_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The CLI and the Python surface are two spellings of one process (record `168`).
+
+    `run` learned to ask the judgments in record `087`; `preflight_run` on the public surface
+    did not, so the same registered run was refused by `vqapr run` and frozen -- and executed --
+    from Python. The 0.6.0 call-flow review met exactly that with the shipped sample
+    (record `167`, R7). The judgments now sit inside `preflight_run`, where every door passes.
+    """
+    _workspace_for_run(tmp_path, capsys)
+    _lookahead_run(tmp_path, capsys, "lookahead")
+    judged = check("lookahead", tmp_path)
+    refused_codes = {failure["code"] for failure in judged["failures"]}
+    assert "check.execution.not_after_decision" in refused_codes, refused_codes
+
+    workspace = Workspace.open(tmp_path)
+    with pytest.raises(VqaprError) as refused:
+        preflight_run(workspace, workspace.run_definition("lookahead"))
+
+    assert refused.value.stage == "run.judgments"
+    assert {failure.code for failure in refused.value.failures} & refused_codes
+    assert not (tmp_path / ".vqapr" / "runs" / "lookahead").exists()
+
+
+def test_the_python_door_freezes_what_check_passes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gate is a gate, not a wall: a run `check` certifies still freezes from Python."""
+    _workspace_for_run(tmp_path, capsys)
+    assert check("r1", tmp_path)["ok"] is True
+
+    workspace = Workspace.open(tmp_path)
+    frozen = preflight_run(workspace, workspace.run_definition("r1"))
+
+    assert frozen.run_id == "r1"

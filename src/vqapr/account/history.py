@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from vqapr.account.snapshot import AccountMark
+from vqapr.domain.account_state import AccountMark
 
 if TYPE_CHECKING:
     # The declaration is `authoring`'s, and `authoring` imports this module for the field

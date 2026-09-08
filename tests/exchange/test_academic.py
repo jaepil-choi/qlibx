@@ -8,15 +8,15 @@ import pytest
 
 from tests.exchange.support import execution_call
 from vqapr.account.marking import ValuationService
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.costs import SideCost
+from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
+from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.domain.values import Side
-from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, TradeRule
-from vqapr.orders.batches import OrderBatch, OrderRequest
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 

@@ -23,12 +23,12 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.marking import ValuationService
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
 from vqapr.authoring_records import TableSpec
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.instruments import InstrumentRoster

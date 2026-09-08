@@ -15,7 +15,6 @@ from typing import NoReturn
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from vqapr.account.history import AccountHistory
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import EconomicAccountView, Hold, Rebalance
 from vqapr.authoring_records import InvocationRecorder, TableSpec
 from vqapr.calls import StrategyModelContext
@@ -25,6 +24,7 @@ from vqapr.constraints.evaluation import (
     project_constraints,
 )
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import ModelStateRef

@@ -16,10 +16,10 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory

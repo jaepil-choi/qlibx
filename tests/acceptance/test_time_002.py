@@ -12,7 +12,6 @@ import pytest
 
 import vqapr.flow.strategy.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
@@ -29,19 +28,10 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.artifacts import (
-    AccountCommitEvidence,
-    CallbackEvidence,
-    DueExecutionEvidence,
-    FeedbackEvidence,
-    MarkEvidence,
-    SimulationFailure,
-    SimulationFailureKind,
-    SimulationStage,
-)
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
     ExecutionTable,
@@ -52,6 +42,16 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.artifacts import (
+    AccountCommitEvidence,
+    CallbackEvidence,
+    DueExecutionEvidence,
+    FeedbackEvidence,
+    MarkEvidence,
+    SimulationFailure,
+    SimulationFailureKind,
+    SimulationStage,
+)
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository

@@ -22,12 +22,13 @@ from decimal import Decimal
 
 from pydantic import field_validator
 
+from vqapr.domain.costs import FREE, FillCost, SideCost
+from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
+from vqapr.domain.orders import OrderRequest
 from vqapr.domain.values import Side, side_of
-from vqapr.exchange.costs import FREE, FillCost, SideCost
 from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
-from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
     ExecutionFieldRequirement,
@@ -37,7 +38,6 @@ from vqapr.exchange.listings import (
     trade_rules_by_kind,
 )
 from vqapr.exchange.venue import Exchange, ExecutionCall
-from vqapr.orders.batches import OrderRequest
 
 COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides."""

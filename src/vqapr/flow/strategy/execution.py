@@ -11,6 +11,7 @@ from decimal import Decimal
 
 from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
 from vqapr.exchange.listings import ExchangeRulesView
+from vqapr.exchange.planning import plan_orders
 from vqapr.exchange.venue import ExecutionCall
 from vqapr.flow.artifacts import (
     AccountCommitEvidence,
@@ -29,7 +30,6 @@ from vqapr.flow.strategy.context import (
     FlowContext,
 )
 from vqapr.flow.strategy.valuation import ValuationHandler, _marks_from_execution_snapshot
-from vqapr.orders.planning import plan_orders
 
 
 class ExecutionHandler:

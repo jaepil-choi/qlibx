@@ -23,6 +23,7 @@ from typing import Any
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import (
     Diagnosis,
     Failure,
@@ -32,6 +33,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import DatasetId, dataset_id
+from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import side_of
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillConvention
 from vqapr.exchange.listings import ExchangeRulesView
@@ -531,9 +533,6 @@ def accepted_requests(orders: Any, account: Any, snapshot: Any) -> tuple[Any, ..
     shared steps and every caller needs its result -- returning it is what stops the sort itself
     from being the twelfth duplicated line.
     """
-    from vqapr.account.snapshot import AccountSnapshot
-    from vqapr.orders.batches import OrderBatch
-
     if not isinstance(orders, OrderBatch):
         raise TypeError("orders must be an OrderBatch")
     if not isinstance(account, AccountSnapshot):

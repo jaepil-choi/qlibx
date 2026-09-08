@@ -24,14 +24,14 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import InstrumentRoster, instrument
+from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ListingAccess, TradeRule
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, krx_listings
-from vqapr.orders.batches import OrderBatch, OrderRequest
 
 _AT = datetime(2026, 8, 22, 6, 30, tzinfo=UTC)
 _PRICE = Decimal("70000")

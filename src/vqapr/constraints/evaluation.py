@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Constraint, ConstraintBounds, ConstraintFinding, EconomicAccountView
 from vqapr.calls import ConstraintContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.shapes import CrossSection
 from vqapr.domain.values import MarkBatch
 

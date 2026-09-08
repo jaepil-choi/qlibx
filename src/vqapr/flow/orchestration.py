@@ -19,7 +19,6 @@ from types import MappingProxyType
 
 from vqapr.account.account import Account
 from vqapr.account.history import retained_marks
-from vqapr.account.snapshot import AccountState
 from vqapr.authoring import Component
 from vqapr.constraints.evaluation import (
     constraint_requirements as declared_constraint_requirements,
@@ -29,6 +28,7 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountState
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.exchange.execution_table import validate_execution_table

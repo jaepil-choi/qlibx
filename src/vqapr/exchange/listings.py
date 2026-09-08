@@ -32,6 +32,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
+from vqapr.domain.costs import FREE, FillCost, SideCost
 from vqapr.domain.instruments import (
     INSTRUMENT_TYPES,
     Instrument,
@@ -41,7 +42,6 @@ from vqapr.domain.instruments import (
     base_quantity_for,
 )
 from vqapr.domain.values import Side
-from vqapr.exchange.costs import FREE, FillCost, SideCost
 
 
 class ListingAccess(StrEnum):

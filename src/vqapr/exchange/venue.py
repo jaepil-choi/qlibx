@@ -28,9 +28,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import ClassVar
 
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Component
+from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instruments import InstrumentKind
+from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import require_tz_aware, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
@@ -38,14 +40,12 @@ from vqapr.exchange.execution_table import (
     requested_rows,
     validate_requests,
 )
-from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
     ExecutionFieldRequirement,
     TradeRule,
     TradeTerms,
 )
-from vqapr.orders.batches import OrderBatch
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

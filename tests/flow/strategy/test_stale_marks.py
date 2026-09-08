@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.account.marking import SelectedMark
-from vqapr.account.snapshot import AccountMark
+from vqapr.domain.account_state import AccountMark
 from vqapr.domain.values import Mark, MarkBatch
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.flow.strategy.loop import _marks_from_execution_snapshot

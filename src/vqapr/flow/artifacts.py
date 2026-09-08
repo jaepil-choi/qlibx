@@ -7,7 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import Failure, FailureSource, VqaprError, status_of
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import require_tz_aware

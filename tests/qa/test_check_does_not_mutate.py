@@ -22,10 +22,10 @@ import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry

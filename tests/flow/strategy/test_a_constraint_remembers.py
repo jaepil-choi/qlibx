@@ -26,7 +26,6 @@ import duckdb
 import pytest
 
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
@@ -39,12 +38,13 @@ from vqapr.authoring import (
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.artifacts import SimulationFailure
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.artifacts import SimulationFailure
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
@@ -55,7 +55,7 @@ RULE = "three-strikes"
 
 
 class _Holds(StrategyModel):
-    def decide(self, call):  # noqa: ANN001 - the authored signature
+    def decide(self, call):
         return Hold(reason="held")
 
 
@@ -257,10 +257,10 @@ def test_the_root_and_the_instance_carry_no_memory_a_failed_callback_left(tmp_pa
 
     # `project` runs before `decide` in a callback, so a `decide` that raises fails the
     # callback after the constraint has already mutated its memory.
-    def failing_decide(call):  # noqa: ANN001, ANN202
+    def failing_decide(call):
         raise RuntimeError("decide fault after project")
 
-    flow._context.strategy.decide = failing_decide  # type: ignore[method-assign]  # noqa: SLF001
+    flow._context.strategy.decide = failing_decide  # type: ignore[method-assign]
 
     with pytest.raises(SimulationFailure, match="decide fault after project"):
         flow.run()

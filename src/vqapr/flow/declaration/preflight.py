@@ -9,11 +9,11 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Constraint, StrategyModel
 from vqapr.data.datasets import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import OperationAgenda
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import agenda_id

@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.instruments import Instrument, InstrumentRoster
+from vqapr.domain.orders import OrderBatch
 from vqapr.exchange.execution_table import ExactExecutionSnapshot
 from vqapr.exchange.venue import Exchange, ExecutionCall
-from vqapr.orders.batches import OrderBatch
 
 
 def execution_call(

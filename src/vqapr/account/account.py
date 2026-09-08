@@ -8,9 +8,9 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
+from vqapr.domain.account_state import AccountMark, AccountSnapshot, AccountState
+from vqapr.domain.fills import Fill, FillBatch
 from vqapr.domain.values import MarkBatch
-from vqapr.exchange.fills import Fill, FillBatch
 
 
 class AccountMode(StrEnum):

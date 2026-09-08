@@ -20,7 +20,7 @@ import pytest
 
 from tests.exchange.support import execution_call
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.instruments import (
     EtfInstrument,
     Instrument,
@@ -30,9 +30,11 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.domain.values import LocalInstantDeclaration, Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import TradeRule
+from vqapr.exchange.planning import plan_orders
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import (
     COMMISSION_RATE,
@@ -41,8 +43,6 @@ from vqapr.exchange.venues.krx import (
     krx_listing,
     krx_rules,
 )
-from vqapr.orders.batches import OrderBatch, OrderRequest
-from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"

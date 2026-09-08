@@ -19,11 +19,12 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import InstrumentRoster
+from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.venues.krx import (
     BASE_PRICE,
     PRICE_LIMIT_RATE,
@@ -31,7 +32,6 @@ from vqapr.exchange.venues.krx import (
     KrxTradeRule,
     krx_rules,
 )
-from vqapr.orders.batches import OrderBatch, OrderRequest
 
 NAME = "A005930"
 BASE = Decimal("10000")

@@ -10,9 +10,9 @@ import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec

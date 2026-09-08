@@ -34,8 +34,8 @@ from pydantic import (
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.requirements import DataRequirement
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
 from vqapr.exchange.conventions import FillConvention, FillSelector

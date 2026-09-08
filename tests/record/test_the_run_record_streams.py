@@ -26,7 +26,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
@@ -40,14 +39,15 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
+from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 
 ROWS_PER_OCCURRENCE = 200
 PADDING = "x" * 100

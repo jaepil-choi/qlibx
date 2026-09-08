@@ -23,8 +23,14 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 12  # record `186`: the lazy roster import in `exchange/listings.py` moved to the top
-"""Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+CEILING = 10  # record `191`: `exchange/execution_table.py`'s two guards, hoisted
+"""Was 12 after record `186` (the lazy roster import in `exchange/listings.py` moved to the top).
+Record `191` (layering campaign M2) hoisted the two `accepted_requests` guards in
+`exchange/execution_table.py`: they deferred `account.snapshot` and `orders.batches` because
+`exchange` importing either at module level was a cycle, and both types are now
+`domain/account_state.py` and `domain/orders.py`. The cycle is gone rather than deferred.
+
+Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 Was 18 after record `149`. Record `162` (one-shape Step 7) removed `data/store.py`'s
 `_window_types` and the two `ExecutionTable` guards in `exchange/conventions.py`:
 each deferred an import that was a cycle, and the cycle is gone rather than deferred.

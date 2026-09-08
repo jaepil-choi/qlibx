@@ -11,7 +11,6 @@ import duckdb
 import pytest
 
 from tests.constraints.support import reading_call, weightless_call
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
@@ -34,6 +33,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch
 from vqapr.portfolio.allocation import AllocationViolation
 

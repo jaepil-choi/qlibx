@@ -73,7 +73,6 @@ LAYERS: dict[str, int] = {
     # sit above every contract that code is written against.
     "extension": 40,
     "constraints": 40,
-    "orders": 40,
     # 45-55 -- what a project accumulates between commands, and how a document enters it.
     "workspace_document": 45,
     "workspace": 50,
@@ -103,10 +102,9 @@ LAYERS: dict[str, int] = {
 """
 
 OPEN: dict[tuple[str, str], str] = {
-    # Closed by M2 -- the values move to `domain/` and `orders/` folds into `exchange/`.
-    ("account", "authoring"): "M2: AccountHistory moves to authoring/",
-    ("account", "exchange"): "M2: Fill/FillBatch move to domain/",
-    ("exchange", "orders"): "M2: OrderRequest/OrderBatch move to domain/",
+    # Closed by M3 -- AccountHistory is what a StrategyModel receives and
+    # AccountHistoryInput is what it declares; they belong in one package.
+    ("account", "authoring"): "M3: account/history.py moves to authoring/history.py",
     # Closed by M4 -- the conformance suite is what registration proves, not a peer above it.
     ("extension", "testing"): "M4: testing/conformance moves to extension/conformance.py",
     # Closed by M5 -- the project layer.

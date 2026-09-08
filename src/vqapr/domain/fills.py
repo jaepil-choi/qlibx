@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 
+from vqapr.domain.costs import FillCost
 from vqapr.domain.instruments import InstrumentKind
-from vqapr.exchange.costs import FillCost
 
 
 class ZeroDealtReason(StrEnum):

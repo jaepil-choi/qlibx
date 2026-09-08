@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -31,9 +31,9 @@ from vqapr.domain.instruments import (
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
+from vqapr.exchange.planning import plan_orders
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import krx_listing
-from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 BOTH = ListingAccess.SIGNED
@@ -99,7 +99,7 @@ def test_a_venue_publishes_an_index_by_permitting_no_side() -> None:
 
 def test_cost_is_a_field_on_the_rule_not_a_band_to_match() -> None:
     """A merged rule has exactly one answer per side, so matching cannot fail."""
-    from vqapr.exchange.costs import SideCost
+    from vqapr.domain.costs import SideCost
 
     exempt = _fractional("KODEX", BOTH)
     taxed = TradeRule(

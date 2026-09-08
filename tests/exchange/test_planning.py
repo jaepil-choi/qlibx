@@ -6,18 +6,18 @@ import pytest
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.marking import ValuationService
-from vqapr.account.snapshot import AccountSnapshot, AccountState
+from vqapr.domain.account_state import AccountSnapshot, AccountState
+from vqapr.domain.costs import SideCost
+from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.values import Side
-from vqapr.exchange.costs import SideCost
-from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
     ListingAccess,
     TradeRule,
     TradeTerms,
 )
-from vqapr.orders.planning import plan_orders
+from vqapr.exchange.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 

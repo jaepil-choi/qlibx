@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from vqapr.account.account import Account, AccountMode
-from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
@@ -22,6 +21,7 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef

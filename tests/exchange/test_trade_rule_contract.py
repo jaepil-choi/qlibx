@@ -16,12 +16,12 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.account.snapshot import AccountSnapshot
+from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, krx_listing
-from vqapr.orders.batches import OrderBatch, OrderRequest
 
 FRACTIONAL = TradeRule("A", Decimal("0.01"), Decimal("0.1"), True, ListingAccess.SIGNED)
 WHOLE = TradeRule("B", Decimal("1"), Decimal("1"), False, ListingAccess.LONG_ONLY)

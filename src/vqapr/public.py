@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.analysis.performance import drawdown, nav_series, returns
 from vqapr.analysis.signal import (
     decay,
@@ -40,10 +39,13 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import ObservationBatch
 from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
+from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import (
     OperationOccurrence,
 )
+from vqapr.domain.costs import FillCost, SideCost
 from vqapr.domain.errors import Stage, Status, VqaprError
+from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -66,12 +68,10 @@ from vqapr.domain.values import (
     declare_local_instant,
 )
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
-from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
 )
-from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
     ExecutionFieldRequirement,

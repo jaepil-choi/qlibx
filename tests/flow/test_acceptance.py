@@ -6,8 +6,8 @@ import pytest
 
 import vqapr.flow.run_state as model_state
 from vqapr.domain.values import normalize_memory
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.evidence.tables import TableSpec
+from vqapr.authoring_records import InvocationRecorder
+from vqapr.authoring_records import TableSpec
 from vqapr.flow.run_state import (
     AcceptedRunState,
     LifecycleKind,

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.evidence.artifacts import (
+from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
+from vqapr.exchange.listings import ExchangeRulesView
+from vqapr.exchange.venue import ExecutionCall
+from vqapr.flow.artifacts import (
     AccountCommitEvidence,
     DueExecutionEvidence,
     FeedbackEvidence,
@@ -18,9 +21,6 @@ from vqapr.evidence.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
-from vqapr.exchange.listings import ExchangeRulesView
-from vqapr.exchange.venue import ExecutionCall
 from vqapr.flow.context import (
     CALLBACK_STAGE,
     AcceptedIntent,

@@ -31,7 +31,6 @@ from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import normalize_memory
-from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
@@ -41,6 +40,7 @@ from vqapr.extension.loading import (
     load_exchange,
     load_strategy_model,
 )
+from vqapr.flow.artifacts import SimulationFailure
 from vqapr.flow.datamodel import DataModelEventLoop, DataModelOutput, DataModelResult
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.judgments import require_judged

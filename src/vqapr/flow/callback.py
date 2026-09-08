@@ -17,6 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from vqapr.account.history import AccountHistory
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import EconomicAccountView, Hold, Rebalance
+from vqapr.authoring_records import InvocationRecorder, TableSpec
 from vqapr.calls import StrategyModelContext
 from vqapr.constraints.evaluation import (
     build_account_view,
@@ -28,16 +29,14 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
-from vqapr.evidence.artifacts import (
+from vqapr.exchange.conventions import ExecutionHorizon
+from vqapr.exchange.execution_table import ExecutionTable
+from vqapr.flow.artifacts import (
     CallbackEvidence,
     SimulationFailure,
     SimulationFailureKind,
     SimulationStage,
 )
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.evidence.tables import TableSpec
-from vqapr.exchange.conventions import ExecutionHorizon
-from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.flow.context import (
     _ACCOUNT_IDENTITY,
     _VALUATION_NAMESPACE,

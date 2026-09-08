@@ -1,15 +1,79 @@
-"""Invocation-local, write-only diagnostic recorder."""
+"""What an author declares to record, and the write-only recorder that stages it.
+
+The authoring contract's third piece, beside `authoring.py` (the four Components and the values
+they exchange) and `authoring_lookback.py`. A `StrategyModel` returns `TableSpec`s from
+`tables()` and writes rows into the `InvocationRecorder` the engine hands it; only the Flow's
+acceptance root publishes what was staged. Both were `evidence/tables.py` and
+`evidence/recorder.py` until record `188`: `evidence/` grouped three files by *who reads them*
+rather than by what they are, and these two are one thing -- a declaration and the buffer that
+enforces it -- so they are one module.
+
+`vqapr.authoring` re-exports both, which is how an author imports them.
+"""
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 
 from vqapr.domain.shapes import Row, Rows, normalize_rows
 from vqapr.domain.values import require_tz_aware
-from vqapr.evidence.tables import FLOW_ENVELOPE_FIELDS, TableSpec
+
+FLOW_ENVELOPE_FIELDS = frozenset({"run_id", "producer_id", "stage", "event_time", "sequence"})
+
+
+@dataclass(frozen=True, slots=True)
+class TableSpec:
+    """A closed user-column declaration for one write-only recorder table."""
+
+    table_id: str
+    fields: tuple[str, ...]
+    field_set: frozenset[str] = field(default=frozenset(), init=False, compare=False, repr=False)
+    """`fields` as a set, so the recorder does not rebuild one per appended row.
+
+    A callback appends one row per target, and the row-shape check compares two sets. Building the
+    declared side once per spec instead of once per row removes an allocation from the innermost
+    recorder loop.
+    """
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.table_id, str) or not self.table_id.strip():
+            raise ValueError("table_id must be a non-empty string")
+        if not isinstance(self.fields, tuple):
+            raise TypeError("fields must be a tuple of field names")
+        if not self.fields:
+            raise ValueError("fields must not be empty")
+        if any(not isinstance(field, str) or not field.strip() for field in self.fields):
+            raise ValueError("fields must contain non-empty strings")
+        if len(set(self.fields)) != len(self.fields):
+            raise ValueError("fields must be unique")
+        # These are names a human reads back later. Control and format characters are invisible, so
+        # they cannot help a reader and can only disguise one name as another -- including as a
+        # package-owned one. A field called `run_id` carrying a zero-width character would slip past
+        # the reserved-name check below and sit beside the real envelope column; the same disguise
+        # one level down from the table id. Refusing both here closes it at the validation boundary
+        # instead of leaving every consumer to normalise defensively.
+        hidden = sorted(
+            {
+                ch
+                for name in (self.table_id, *self.fields)
+                for ch in name
+                if unicodedata.category(ch) in {"Cc", "Cf"}
+            }
+        )
+        if hidden:
+            raise ValueError(
+                "table_id and fields must not contain control or format characters: "
+                f"{[hex(ord(ch)) for ch in hidden]}"
+            )
+        declared = frozenset(self.fields)
+        reserved = sorted(declared & FLOW_ENVELOPE_FIELDS)
+        if reserved:
+            raise ValueError(f"Flow envelope fields are reserved: {reserved}")
+        object.__setattr__(self, "field_set", declared)
 
 
 @dataclass(frozen=True, slots=True)

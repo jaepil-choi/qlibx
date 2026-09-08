@@ -32,7 +32,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.evidence.artifacts import (
+from vqapr.flow.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
     DueExecutionEvidence,

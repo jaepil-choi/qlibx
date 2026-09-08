@@ -28,6 +28,7 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
+from vqapr.authoring_records import TableSpec
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.evaluation import ConstraintReport
@@ -64,8 +65,6 @@ from vqapr.domain.values import (
     Side,
     declare_local_instant,
 )
-from vqapr.evidence.artifacts import SimulationFailure
-from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
@@ -100,6 +99,7 @@ from vqapr.extension.registration import (
     register_exchange,
     register_strategy_model,
 )
+from vqapr.flow.artifacts import SimulationFailure
 from vqapr.flow.datamodel import DataModelResult
 from vqapr.flow.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run

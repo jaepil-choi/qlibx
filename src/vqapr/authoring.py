@@ -35,13 +35,12 @@ from typing import BinaryIO, Literal, Self
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
 from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
+from vqapr.authoring_records import InvocationRecorder, TableSpec
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, Lookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.shapes import CrossSection, Observation, Rows
 from vqapr.domain.values import ModelMemory, require_tz_aware
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.evidence.tables import TableSpec
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 from vqapr.portfolio.weighting import rescale

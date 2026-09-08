@@ -22,8 +22,8 @@ import pytest
 from vqapr.data import scan, store
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.evidence.tables import TableSpec
+from vqapr.authoring_records import InvocationRecorder
+from vqapr.authoring_records import TableSpec
 from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.public import (
     DatasetRegistration,

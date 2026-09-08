@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from vqapr.account.marking import SelectedMark
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
+from vqapr.authoring_records import InvocationRecorder
 from vqapr.constraints.evaluation import (
     ConstraintReport,
     evaluate_constraints,
@@ -19,14 +20,13 @@ from vqapr.constraints.evaluation import (
 )
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import MarkBatch
-from vqapr.evidence.artifacts import (
+from vqapr.exchange.execution_table import exact_execution_snapshot
+from vqapr.flow.artifacts import (
     MonitoringEvidence,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.context import (
     _ACCOUNT_IDENTITY,
     DEFAULT_TABLE_PREFIX,

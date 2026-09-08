@@ -41,7 +41,7 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.evidence.artifacts import SimulationFailure
+from vqapr.flow.artifacts import SimulationFailure
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef

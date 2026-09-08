@@ -25,6 +25,7 @@ from vqapr.account.account import Account
 from vqapr.account.marking import ValuationService
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
+from vqapr.authoring_records import TableSpec
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
@@ -32,7 +33,10 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
-from vqapr.evidence.artifacts import (
+from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
+from vqapr.exchange.venue import Exchange
+from vqapr.extension.component import ComponentRef
+from vqapr.flow.artifacts import (
     CallbackEvidence,
     DueExecutionEvidence,
     FailureObservation,
@@ -43,10 +47,6 @@ from vqapr.evidence.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.evidence.tables import TableSpec
-from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
-from vqapr.exchange.venue import Exchange
-from vqapr.extension.component import ComponentRef
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import DueEvent
 from vqapr.flow.run_state import (

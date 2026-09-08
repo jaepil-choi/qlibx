@@ -23,11 +23,11 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.instruments import InstrumentRoster
-from vqapr.evidence.artifacts import (
+from vqapr.exchange.venue import Exchange
+from vqapr.flow.artifacts import (
     FinalizationEvidence,
     SimulationStage,
 )
-from vqapr.exchange.venue import Exchange
 from vqapr.flow.callback import CallbackHandler
 from vqapr.flow.context import (
     DEFAULT_TABLE_PREFIX,

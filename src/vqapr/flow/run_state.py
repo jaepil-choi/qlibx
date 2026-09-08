@@ -17,9 +17,9 @@ from vqapr.account.account import (
     PreparedAccountValuation,
 )
 from vqapr.account.snapshot import AccountState
+from vqapr.authoring_records import InvocationRecorder, RecorderManifest
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
-from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
 
 
 class LifecycleKind(StrEnum):

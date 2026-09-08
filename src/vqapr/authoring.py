@@ -293,9 +293,12 @@ class Component(ABC):  # noqa: B024 - concrete roles add their abstract callback
     computed in any order. The engine relies on the same instance living for the whole run: it
     never builds one per callback.
 
-    `Exchange` is not yet a subclass: it still reads through its own declaration and receives
-    its inputs as arguments rather than a `Call`. It joins when the execution table becomes a
-    registered dataset (campaign M4).
+    `Exchange` is the fourth role and joined at record `184`, but it is declared in
+    `exchange/venue.py` rather than here: what a user subclasses is a shipped profile, not a
+    blank surface -- `load_exchange` refuses a subclass that replaces `execute`, because the
+    realism claim of a profile is its fill semantics. It is a Component in every other respect:
+    called on the due event a callback minted, handed an `ExecutionCall`, carrying `memory` the
+    run commits with that fill's account commit.
     """
 
     memory: ModelMemory = None

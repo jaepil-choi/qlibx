@@ -171,3 +171,41 @@ def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(tmp_path
     assert not any(
         failure["code"] == "run.declaration_invalid" for failure in checked.get("failures", [])
     ), "the scaffold's shape was refused, not its placeholders"
+
+
+@pytest.mark.slow
+def test_the_datamodel_scaffold_computes_a_dataset_without_a_single_edit(tmp_path: Path) -> None:
+    """With real instruments in place of the placeholders, the emitted `compute()` runs to a
+    registered dataset.
+
+    Record `173` made a DataModel's output types declarable-only, and the scaffold's trailing
+    return was a `Decimal`: the unedited file was refused at its first session as
+    `datamodel.output.field_type` (found by the 0.7.0 scenario trace). The scaffold crosses back
+    to `float` now; this test is what keeps it that way.
+    """
+    panel = journey.install(tmp_path)
+    source = tmp_path / "scaffolded_model.py"
+
+    code, created = _cli(
+        tmp_path, "new", "datamodel", "signal",
+        "--dataset", journey.DATASET_ID, "--lookback", "2", "--out", str(source),
+    )
+    assert code == 0, created
+    declaration = Path(created["declaration"])
+    text = declaration.read_text(encoding="utf-8")
+    first, second = panel.instruments[:2]
+    text = text.replace("    - INSTRUMENT_A", f"    - {first}").replace(
+        "    - INSTRUMENT_B", f"    - {second}"
+    )
+    declaration.write_text(text, encoding="utf-8")
+
+    code, registered = _cli(tmp_path, "register", str(declaration))
+    assert code == 0, registered
+
+    code, ran = _cli(tmp_path, "run", "signal-run")
+    assert code == 0, ran
+    assert ran["ok"] is True, ran
+
+    code, datasets = _cli(tmp_path, "list", "datasets")
+    assert code == 0, datasets
+    assert any(row["dataset_id"] == "signal-values" for row in datasets["items"]), datasets

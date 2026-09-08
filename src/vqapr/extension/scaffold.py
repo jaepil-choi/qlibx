@@ -97,8 +97,10 @@ class {class_name}(va.DataModel):
 
         # One dict per instrument. The fields are the ones the materialization spec declares;
         # `available_at` is the package's to stamp and a row that carries one is refused.
+        # The value crosses back to `float`: a dataset field is DOUBLE, never DECIMAL (record
+        # 173), and the first session's row types the output for every later one.
         return [
-            {{"instrument": name, "{output_field}": value}}
+            {{"instrument": name, "{output_field}": float(value)}}
             for name, value in sorted(derived.items())
         ]
 '''

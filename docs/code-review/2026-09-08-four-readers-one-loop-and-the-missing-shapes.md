@@ -195,10 +195,10 @@ class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelRes
 
 아키텍처 §10의 판정 규칙 셋째 줄 — *"이름: 개념인가 패턴인가? base · protocol · service · manager는
 패턴이다"* — 는 **패턴 이름을 피하라**는 규칙이다. 오너의 오늘 진술은 그 반대다: *"클래스에 그것이
-쓰는 패턴을 크게 박아라"*. 둘 다 근거가 있고(§10은 `utils/`·`common/`로 흘러내리는 것을 막으려는
-규칙이다) 이 리뷰는 판정하지 않는다. 다만 **`EventLoop`·`Handler`·`Component`를 채택하면 §10의 그 줄을
-같이 고쳐야 한다.** 안 고치면 다음 세션이 그 줄을 근거로 되돌린다 — record 104가 잡은 것과 같은 종류의
-뒤집힘이다.
+쓰는 패턴을 크게 박아라"*. **오너가 같은 날 판정했다(§8-1):** §10의 그 줄은 처음 쓸 때 패턴을 섣불리
+강제할까 봐 적은 것이고, 원칙은 *intent·behavior > pattern·implementation*이다. 패턴 이름은 쓰되,
+아키텍처는 그 패턴이 현재 선택이고 요구가 바뀌면 바뀔 수 있다고 적는다. §10의 그 줄은 그렇게 다시
+쓴다 — 안 고치면 다음 세션이 그 줄을 근거로 되돌린다.
 
 ---
 
@@ -388,10 +388,12 @@ breaking change가 허용되므로 호환 계층은 만들지 않는다. 순서�
 
 ## 8. 열린 결정 — 오너 판정이 필요한 것
 
-**8-1. 이름 규칙.** 아키텍처 §10 *"base · protocol · service · manager는 패턴이다"*와 오늘의 *"패턴을
-클래스에 박아라"*는 충돌한다. `EventLoop`·`Handler`·`Component`를 쓰기로 하면 §10의 그 줄을 어떻게
-다시 쓸 것인가. 제안: **디렉터리·파일 이름은 개념(§10 유지), 클래스 이름은 패턴을 담아도 된다.**
-`flow/` → `engine/` 개명은 이 판정에 딸린다.
+**8-1. 이름 규칙 — RESOLVED 2026-09-08, 오너 판정.** 아키텍처는 **intent·behavior > pattern·
+implementation**이다. 절대적 요구사항은 의도와 행동으로 적고, 현재 구현이 어떤 패턴을 채택했는지와 그
+이유를 적되, **그 패턴은 PRD 요구가 바뀌면 유연하게 바뀔 수 있다**고 명시한다. §10의 *"base ·
+protocol · service · manager는 패턴이다"*는 아키텍처를 처음 쓸 때 섣불리 패턴을 강제하게 될까 봐 적은
+것이지 패턴 이름을 피하라는 뜻이 아니었다. 따라서 `EventLoop`·`Handler`·`Component`는 채택 가능하고,
+§10의 그 줄은 위 원칙으로 다시 쓴다. `flow/` → `engine/` 개명은 이 판정에 딸린 작은 결정으로 남는다.
 
 **8-2. Exchange는 Component인가.** 넣으면: `ExecutionFieldRequirement` → `DatasetInput`의 point grain,
 `ExecutionCall(orders, account, snapshot, rules)` 신설, `bind_registry_to_venue` 삭제, 로더 하나.

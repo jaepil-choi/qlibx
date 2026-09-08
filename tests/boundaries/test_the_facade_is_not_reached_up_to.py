@@ -105,7 +105,7 @@ def test_no_module_below_the_cli_reaches_up_to_the_facade() -> None:
         "these modules import `vqapr.public` and are not permitted to:\n  "
         + "\n  ".join(added)
         + "\n\nThe facade is the CLI's supported surface and sits ABOVE these layers. Import the "
-        "class from where it is defined -- `vqapr.workspace`, `vqapr.domain.*`, `vqapr.flow.*` -- "
+        "class from where it is defined -- `vqapr.project.store`, `vqapr.domain.*`, `vqapr.flow.*` -- "
         "as `flow/declaration/preflight.py` does. If this import is genuinely correct, the ruling in "
         "docs/design/agent-first-surface.md has to change first, and this list with it."
     )

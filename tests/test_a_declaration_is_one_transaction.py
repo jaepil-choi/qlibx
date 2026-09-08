@@ -24,12 +24,12 @@ from pathlib import Path
 
 import pytest
 
-from vqapr import workspace as workspace_module
-from vqapr.declarations import apply
+from vqapr.project import store as workspace_module
+from vqapr.project.registration import apply
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.domain.inputs import InputError
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 
 def _fingerprint(root: Path) -> dict[str, str]:

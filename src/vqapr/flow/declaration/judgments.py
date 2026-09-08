@@ -45,11 +45,12 @@ from vqapr.extension.loading import load_data_model, load_exchange, load_strateg
 from vqapr.flow.declaration.preflight import derived_agenda
 from vqapr.flow.declaration.run import RunDefinition
 
-# `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
-# this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
-# to sit beneath. `flow/declaration/preflight.py` takes the same class from the same place, and
-# the boundary tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
-from vqapr.workspace import Workspace
+# `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
+# ABOVE this layer; a module under `flow/` importing it reaches back up through the thing it is
+# supposed to sit beneath. `flow/declaration/preflight.py` takes the same class from the same
+# place, and the boundary tripwire in `docs/design/agent-first-surface.md` counts modules that do
+# otherwise.
+from vqapr.project.store import Workspace
 
 __all__ = [
     "JUDGMENT_BLOCKED",

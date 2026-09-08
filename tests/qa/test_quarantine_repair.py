@@ -28,7 +28,7 @@ from vqapr.data.datasets import DatasetRegistration, require_declared
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.public import register_dataset as pub_register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def _cli(

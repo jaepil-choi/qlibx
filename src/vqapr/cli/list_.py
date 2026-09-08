@@ -23,11 +23,12 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.declarations import AUTHORED_KINDS
 from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
 from vqapr.flow.declaration.run import RunDefinition
+from vqapr.project.registration import AUTHORED_KINDS
+from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 from vqapr.record import (
     STATUS_COMPLETED,
     datamodel_progress,
@@ -40,7 +41,6 @@ from vqapr.record import (
     unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 KINDS = (
     "datasets",

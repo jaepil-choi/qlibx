@@ -21,7 +21,7 @@ from enum import StrEnum
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from vqapr.declarations import refusals_from
+from vqapr.project.registration import refusals_from
 from vqapr.domain.errors import Stage, Status, VqaprError
 
 

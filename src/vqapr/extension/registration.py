@@ -22,7 +22,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.conformance import conformance
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError:

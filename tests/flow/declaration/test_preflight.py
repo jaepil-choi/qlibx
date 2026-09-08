@@ -24,7 +24,7 @@ from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.flow.run_state import prepare_model_state
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 _ZONE = ZoneInfo("Asia/Seoul")
 SESSION = date(2024, 3, 5)

@@ -198,7 +198,7 @@ def test_the_authored_class_is_found_however_it_was_written(
     Matching direct bases by bare name in the module body only was wrong three ways, and each way
     produced a confident wrong answer rather than an error.
     """
-    from vqapr.declarations import _sole_subclass
+    from vqapr.project.registration import _sole_subclass
 
     source = tmp_path / f"{label.replace(' ', '_')}.py"
     source.write_text(
@@ -212,7 +212,7 @@ def test_the_authored_class_is_found_however_it_was_written(
 
 def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None:
     """AC-A4. Wrote none, versus which one did you mean: different mistakes, different repairs."""
-    from vqapr.declarations import _sole_subclass
+    from vqapr.project.registration import _sole_subclass
     from vqapr.domain.inputs import InputError
 
     empty = tmp_path / "empty.py"
@@ -226,7 +226,7 @@ def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None
 
 def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
     """AC-A4's other half: the count AND the names, because the reader has to choose."""
-    from vqapr.declarations import _sole_subclass
+    from vqapr.project.registration import _sole_subclass
     from vqapr.domain.inputs import InputError
 
     crowded = tmp_path / "two.py"

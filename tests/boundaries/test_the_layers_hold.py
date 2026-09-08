@@ -70,11 +70,8 @@ LAYERS: dict[str, int] = {
     # sit above every contract that code is written against.
     "extension": 40,
     "constraints": 40,
-    # 45-55 -- what a project accumulates between commands, and how a document enters it.
-    "workspace_document": 45,
-    "workspace": 50,
+    # 50 -- what a project accumulates between commands, and how a document enters it.
     "project": 50,
-    "declarations": 55,
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.
     "flow.engine": 60,
     "flow.declaration": 63,
@@ -98,13 +95,14 @@ LAYERS: dict[str, int] = {
 
 OPEN: dict[tuple[str, str], str] = {
     # Closed by M5 -- the project layer.
-    ("extension", "workspace"): (
-        "M5: register_component's persisting half moves to project/; extension keeps "
+    ("extension", "project"): (
+        "M5c: register_component's persisting half moves to project/; extension keeps "
         "prepare_component and stops opening a Workspace transaction"
     ),
-    ("declarations", "flow.declaration"): "M5: flow/declaration/run.py moves to project/",
-    ("workspace", "flow.declaration"): "M5: RunDefinition is a registered declaration",
-    ("workspace_document", "flow.declaration"): "M5: RunDefinition is a registered declaration",
+    ("project", "flow.declaration"): (
+        "M5b: flow/declaration/run.py moves to project/ -- a RunDefinition is a registered "
+        "declaration, and five modules of the project layer read one"
+    ),
     # Closed by M6 -- the substrate the phases read moves out of the assembly layer.
     ("flow.strategy", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
     ("flow.datamodel", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",

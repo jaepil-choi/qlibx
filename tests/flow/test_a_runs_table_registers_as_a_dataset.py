@@ -29,7 +29,7 @@ from vqapr.public import (
     SourceSpec,
     register_dataset,
 )
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 T1 = datetime(2024, 3, 5, 15, 30, tzinfo=UTC)
 T2 = T1 + timedelta(days=1)

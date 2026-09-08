@@ -31,7 +31,7 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.domain.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 

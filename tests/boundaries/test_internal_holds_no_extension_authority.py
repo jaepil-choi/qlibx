@@ -28,7 +28,7 @@ PERMITTED: frozenset[str] = frozenset(
         # Reaches `_internal.atomic` for the one durable write (record `107`).
         "src/vqapr/record/writer.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
-        "src/vqapr/workspace.py",
+        "src/vqapr/project/store.py",
     }
 )
 

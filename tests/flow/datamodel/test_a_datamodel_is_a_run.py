@@ -42,7 +42,7 @@ from vqapr.record import (
 from vqapr.record.schema import _DATAMODEL_FIELDS
 from vqapr.flow.declaration.run import DataModelEntry, RunDefinition
 from vqapr.public import register_data_model, register_dataset, register_run
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 START = datetime(2024, 3, 6, tzinfo=KST)

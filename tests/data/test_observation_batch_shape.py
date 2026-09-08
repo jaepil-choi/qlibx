@@ -35,7 +35,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, ObservationBatch
 from vqapr.data.windows import ModelWindow
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 EVALUATED_AT = datetime(2024, 3, 7, 16, tzinfo=KST)

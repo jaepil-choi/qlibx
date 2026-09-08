@@ -38,7 +38,7 @@ from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError, refuse_ex
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.lookback import lookback_declaration
 from vqapr.extension.scaffold import _class_name, render
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,

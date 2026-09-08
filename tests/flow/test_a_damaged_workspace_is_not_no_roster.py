@@ -38,7 +38,7 @@ from vqapr.cli.run import _roster_envelope
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.instruments import export_roster
 from vqapr.flow.roster import registered_roster, roster_report
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 WHOLE_ROSTER = {"A005930": "stock", "A069500": "etf"}
 

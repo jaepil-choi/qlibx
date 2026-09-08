@@ -42,7 +42,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 RUN = "probe"

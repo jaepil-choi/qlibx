@@ -38,7 +38,6 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import ObservationBatch
 from vqapr.data.windows import ModelWindow
-from vqapr.declarations import register_dataset as register_dataset
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import (
     OperationOccurrence,
@@ -139,6 +138,8 @@ from vqapr.portfolio.weighting import (
     rescale,
     signal_weight,
 )
+from vqapr.project.registration import register_dataset as register_dataset
+from vqapr.project.store import Workspace
 from vqapr.record import (
     RunRecordMissing,
     read_run_record,
@@ -152,7 +153,6 @@ from vqapr.report.record import run_report, strategy_report
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
-from vqapr.workspace import Workspace
 
 __all__ = (
     "QUANTUM",

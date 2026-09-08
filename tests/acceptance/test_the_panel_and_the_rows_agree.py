@@ -26,7 +26,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.declaration.run import DataModelEntry, RunDefinition
 from vqapr.public import preflight_run, register_data_model, register_dataset, run
-from vqapr.workspace import WORKSPACE_DIRECTORY
+from vqapr.project.store import WORKSPACE_DIRECTORY
 
 KST = ZoneInfo("Asia/Seoul")
 

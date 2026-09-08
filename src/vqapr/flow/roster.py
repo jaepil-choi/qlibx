@@ -22,11 +22,11 @@ from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 # Hoisted from four function-local imports by record `115`. They were deferred inside
 # `vqapr.public`, where the facade sits above everything and importing eagerly would have been
 # a cycle. That justification did not travel with the code: this module is in `flow/`, and
-# `flow/orchestration.py` already imports `vqapr.workspace` at module scope. An architecture
+# `flow/orchestration.py` already imports `vqapr.project.store` at module scope. An architecture
 # review of VB002 found them being carried at full weight against a ratchet whose stated point
 # is that lowering it is the goal.
 from vqapr.domain.instruments import InstrumentRoster, build_roster, read_roster_table
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 WORKSPACE_ABSENT = "workspace.missing"
 """The one refusal from `Workspace.open` that means "there is no roster here to find".

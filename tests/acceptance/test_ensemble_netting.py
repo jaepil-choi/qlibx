@@ -40,7 +40,7 @@ from vqapr.public import (
     register_dataset,
     rescale,
 )
-from vqapr.workspace import Workspace  # scaffolding only; deliberately not a public name
+from vqapr.project.store import Workspace  # scaffolding only; deliberately not a public name
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 SHOWCASE = Path(__file__).resolve().parents[2] / "showcases" / "show_006_ensemble_netting"

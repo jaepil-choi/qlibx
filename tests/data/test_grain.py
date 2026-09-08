@@ -24,10 +24,10 @@ from vqapr.data.datasets import (
     require_declared,
 )
 from vqapr.data.sources import SourceSpec
-from vqapr.declarations import apply
+from vqapr.project.registration import apply
 from vqapr.domain.errors import VqaprError
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def _registration(grain: object = Grain.INSTRUMENT_INSTANT, **overrides) -> DatasetRegistration:

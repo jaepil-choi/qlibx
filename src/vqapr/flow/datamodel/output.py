@@ -32,8 +32,8 @@ from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.shapes import Grain, Row, Rows, normalize_rows
 from vqapr.domain.values import require_tz_aware
 from vqapr.flow.declaration.frozen import FrozenDataModel
+from vqapr.project.store import Workspace
 from vqapr.record import COMPACT_FILENAME, SPILL_BYTES
-from vqapr.workspace import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"
 """Under `.vqapr/`: one directory per output dataset, one parquet file (`all.parquet`) once

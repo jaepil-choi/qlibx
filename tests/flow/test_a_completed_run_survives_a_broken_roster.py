@@ -34,7 +34,7 @@ import pytest
 import vqapr.flow.orchestration as orchestration
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.flow.orchestration import _roster_report_or_stale
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def _unreadable(*_args: object, **_kwargs: object) -> object:

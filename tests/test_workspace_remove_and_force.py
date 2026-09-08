@@ -25,7 +25,7 @@ from vqapr.extension.component import ComponentKind
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.registration import ComponentRef
 from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 ZONE = "Asia/Seoul"
 

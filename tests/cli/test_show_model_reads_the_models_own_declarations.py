@@ -15,7 +15,7 @@ import pytest
 from vqapr.cli.main import main
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 STRATEGY = '''
 from vqapr import authoring as va

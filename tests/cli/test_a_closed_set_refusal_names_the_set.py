@@ -23,9 +23,9 @@ from pathlib import Path
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.declarations import _enum, apply
+from vqapr.project.registration import _enum, apply
 from vqapr.domain.errors import VqaprError
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 class _Selector(StrEnum):

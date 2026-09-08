@@ -26,7 +26,7 @@ import pytest
 
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.public import Workspace
-from vqapr.workspace import WORKSPACE_LOCK_FILENAME
+from vqapr.project.store import WORKSPACE_LOCK_FILENAME
 
 
 def _component(raw_id: str) -> ComponentRef:
@@ -105,7 +105,7 @@ def test_a_stale_lock_does_not_block_forever(tmp_path: Path, monkeypatch) -> Non
 
     The recovery must not be "delete a file we never told you about".
     """
-    import vqapr.workspace as module
+    import vqapr.project.store as module
 
     space = Workspace.create(tmp_path)
     lock = space.path.parent / WORKSPACE_LOCK_FILENAME
@@ -123,7 +123,7 @@ def test_a_stale_lock_does_not_block_forever(tmp_path: Path, monkeypatch) -> Non
 
 def test_a_held_lock_fails_loudly_rather_than_hanging(tmp_path: Path, monkeypatch) -> None:
     """Waiting forever behind a holder that never finishes is not an option a user can debug."""
-    import vqapr.workspace as module
+    import vqapr.project.store as module
     from vqapr.domain.errors import VqaprError
 
     space = Workspace.create(tmp_path)

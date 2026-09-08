@@ -1041,7 +1041,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
 
 
 def _runtime_declaration_read(tmp_path: Path) -> list[str]:
-    from vqapr.declarations import apply
+    from vqapr.project.registration import apply
     from vqapr.domain.errors import VqaprError
 
     # A run is the declaration that carries the sessions and the wall time since record `148`
@@ -1080,7 +1080,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     from vqapr.data.datasets import DatasetRegistration
     from vqapr.data.sources import SourceSpec
     from vqapr.domain.errors import VqaprError
-    from vqapr.workspace import Workspace
+    from vqapr.project.store import Workspace
 
     codes: list[str] = []
     workspace = Workspace.create(tmp_path)
@@ -1199,7 +1199,7 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
     from vqapr.data.store import DuckDbObservationStore
     from vqapr.data.windows import ModelWindow
     from vqapr.domain.errors import VqaprError
-    from vqapr.workspace import Workspace
+    from vqapr.project.store import Workspace
 
     workspace = Workspace.create(tmp_path)
     prices = _write_parquet(

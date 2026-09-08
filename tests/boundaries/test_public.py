@@ -13,7 +13,7 @@ import pytest
 import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
 from vqapr.exchange.execution_table import validate_execution_table
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 from vqapr.public import (
     QUANTUM,
     SHIPPED_CONSTRAINTS,

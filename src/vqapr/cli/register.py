@@ -42,9 +42,11 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.declarations import AUTHORED_KINDS, apply, register_authored
-from vqapr.declarations import cli_kind as cli_kind  # re-export: cli/check.py, run.py, list_.py
 from vqapr.domain.inputs import read_yaml_mapping
+from vqapr.project.registration import AUTHORED_KINDS, apply, register_authored
+from vqapr.project.registration import (
+    cli_kind as cli_kind,  # re-export: cli/check.py, run.py, list_.py
+)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

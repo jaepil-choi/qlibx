@@ -773,7 +773,7 @@ def test_one_run_command_opens_the_workspace_document_once(
     up, again inside preflight, again for the roster at run start, and again for the envelope's
     roster after the run. Four reads of a file other commands write is four chances to judge
     one document and freeze another. One open, and everything else is handed that snapshot."""
-    from vqapr.workspace import Workspace
+    from vqapr.project.store import Workspace
 
     _workspace_for_run(tmp_path, capsys)
     code, registered_run = _register_run(tmp_path, capsys, "once")
@@ -839,7 +839,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
     """
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.workspace import Workspace
+    from vqapr.project.store import Workspace
 
     _workspace_for_run(tmp_path, capsys)
 

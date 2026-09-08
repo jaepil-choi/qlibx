@@ -18,7 +18,7 @@ import yaml
 
 from vqapr.cli.new import run as new_run
 from vqapr.cli.register import run as register_run
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 KINDS = ("stock", "etf", "index", "factor")
 

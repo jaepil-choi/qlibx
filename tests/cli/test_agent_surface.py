@@ -586,7 +586,7 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     than as a YAML template, so they are the two the YAML templates need not carry.
     """
     from vqapr.cli.new import _DATASET_TEMPLATE, _RUN_TEMPLATE
-    from vqapr.declarations import SECTIONS
+    from vqapr.project.registration import SECTIONS
 
     emitted = "\n".join((_DATASET_TEMPLATE, _RUN_TEMPLATE))
 

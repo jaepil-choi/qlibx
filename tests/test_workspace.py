@@ -12,7 +12,7 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
 # during validation and a stored registration missing it would force the next reader to re-read

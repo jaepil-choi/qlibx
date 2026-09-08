@@ -25,12 +25,12 @@ from pydantic import ValidationError
 from vqapr.account.account import AccountMode
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.declarations import apply
+from vqapr.project.registration import apply
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))

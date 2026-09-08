@@ -40,7 +40,7 @@ from vqapr.flow.declaration.run import (
     StrategyConfig,
     StrategyEntry,
 )
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def derived_agenda(workspace: Workspace, definition: RunDefinition) -> OperationAgenda:

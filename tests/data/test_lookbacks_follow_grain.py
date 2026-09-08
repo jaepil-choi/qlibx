@@ -26,7 +26,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 

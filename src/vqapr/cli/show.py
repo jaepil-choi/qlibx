@@ -22,6 +22,7 @@ from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
     RECORD_FIELDS_BY_KIND,
@@ -39,7 +40,6 @@ from vqapr.record import (
     table_ids,
     unfinished_member_refs,
 )
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 KINDS = ("run", "strategy", "datamodel", "model", "dataset")
 

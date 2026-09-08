@@ -60,7 +60,7 @@ over stamping the intent. Lowering the constant in the same commit is what this 
 Was 104 before that. Record `115` hoisted five function-local imports out of `flow/roster.py` and
 `flow/records.py` that had been deferred inside `vqapr.public`, where the facade sits above
 everything; that justification did not travel when the code moved to `flow/`, and
-`flow/orchestration.py` already imports `vqapr.workspace` eagerly.
+`flow/orchestration.py` already imports `vqapr.workspace` (now `vqapr.project.store`) eagerly.
 
 This number may go DOWN freely; it may not go up.
 

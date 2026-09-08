@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 
 def _cli(

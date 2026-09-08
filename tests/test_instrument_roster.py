@@ -16,7 +16,7 @@ import pytest
 from vqapr.cli.register import run as register_run
 from vqapr.domain.instruments import InstrumentKind, build_roster, export_roster, read_roster_table
 from vqapr.domain.inputs import InputError
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 UNIVERSE = {"A005930": "stock", "A000660": "stock", "A069500": "etf"}
 

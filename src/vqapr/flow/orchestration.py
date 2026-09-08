@@ -55,13 +55,13 @@ from vqapr.flow.freeze import (
 from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
+from vqapr.project.store import Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
     RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
 )
-from vqapr.workspace import Workspace
 
 
 def preflight_run(

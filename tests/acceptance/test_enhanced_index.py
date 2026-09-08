@@ -39,7 +39,7 @@ from vqapr.portfolio.intents import (
 )
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, optimize
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real"
 CAP = Decimal("0.10")

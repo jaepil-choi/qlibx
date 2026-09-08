@@ -63,7 +63,7 @@ from vqapr.portfolio.intents import (
     validate_economic_intent,
 )
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 

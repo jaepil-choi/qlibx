@@ -32,6 +32,7 @@ from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
 from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.flow.datamodel.output import MATERIALIZED_DIRECTORY
+from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
     RunRecordLive,
@@ -43,7 +44,6 @@ from vqapr.record import (
     unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {

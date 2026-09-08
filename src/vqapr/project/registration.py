@@ -44,12 +44,12 @@ from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
 from vqapr.flow.declaration.run import RunDefinition
-from vqapr.workspace import Transaction, Workspace
-from vqapr.workspace_document import (
+from vqapr.project.document import (
     ComponentDeclaration,
     DatasetDeclaration,
     InstrumentsDeclaration,
 )
+from vqapr.project.store import Transaction, Workspace
 
 _COMPONENT_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,

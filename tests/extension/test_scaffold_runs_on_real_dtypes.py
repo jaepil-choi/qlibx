@@ -36,7 +36,7 @@ import duckdb
 import pytest
 
 from vqapr.authoring import EconomicAccountView
-from vqapr.calls import DataModelContext, StrategyModelContext
+from vqapr.authoring.context import DataModelContext, StrategyModelContext
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement

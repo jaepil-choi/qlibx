@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from vqapr.authoring import DataModel
-from vqapr.calls import DataModelContext
+from vqapr.authoring.context import DataModelContext
 from vqapr.data.store import AccessRecord
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence

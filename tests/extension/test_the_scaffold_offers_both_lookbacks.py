@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.calls import DataModelContext
+from vqapr.authoring.context import DataModelContext
 from vqapr.cli.new import run as new_command
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback

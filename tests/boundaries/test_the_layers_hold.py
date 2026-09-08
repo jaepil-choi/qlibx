@@ -61,11 +61,9 @@ LAYERS: dict[str, int] = {
     "account": 10,
     "record": 10,
     "analysis": 10,
-    "authoring_records": 10,
     "inputs": 10,
     # 20 -- the extension contract: everything a Component sees, and nothing above it.
     "authoring": 20,
-    "calls": 25,
     # 30 -- the venue. Reads the execution table, executes orders, and subclasses `Component`,
     # which is why the contract must sit below it.
     "exchange": 30,
@@ -102,9 +100,6 @@ LAYERS: dict[str, int] = {
 """
 
 OPEN: dict[tuple[str, str], str] = {
-    # Closed by M3 -- AccountHistory is what a StrategyModel receives and
-    # AccountHistoryInput is what it declares; they belong in one package.
-    ("account", "authoring"): "M3: account/history.py moves to authoring/history.py",
     # Closed by M4 -- the conformance suite is what registration proves, not a peer above it.
     ("extension", "testing"): "M4: testing/conformance moves to extension/conformance.py",
     # Closed by M5 -- the project layer.

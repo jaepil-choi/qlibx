@@ -16,7 +16,7 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
-from vqapr.calls import StrategyModelContext
+from vqapr.authoring.context import StrategyModelContext
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore

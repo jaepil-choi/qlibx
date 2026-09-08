@@ -58,9 +58,9 @@ STRATEGIES = textwrap.dedent(
     from decimal import Decimal
 
     from vqapr.authoring import (
-        Budget, DatasetInput, Hold, PortfolioDirection, Rebalance, RowsLookback,
-        StrategyModel,
+        DatasetInput, Hold, Rebalance, RowsLookback, StrategyModel,
     )
+    from vqapr.portfolio.budgets import Budget, PortfolioDirection
     from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
     BUDGET = Budget(

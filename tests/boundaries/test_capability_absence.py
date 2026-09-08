@@ -29,10 +29,10 @@ import pytest
 FORBIDDEN = (
     "vqapr.account",
     "vqapr.data",
-    "vqapr.authoring_records",
+    "vqapr.authoring.records",
     "vqapr.exchange",
     "vqapr.flow",
-    "vqapr.calls",
+    "vqapr.authoring.context",
     # `vqapr.runtime` was listed here until one-shape Step 7 (record 162) moved its agendas to
     # `domain/` (which a leaf may import) and its envelopes into `flow/loop` (already listed).
     "duckdb",

@@ -18,8 +18,8 @@ from pathlib import Path
 from types import MappingProxyType
 
 from vqapr.account.account import Account
-from vqapr.account.history import retained_marks
 from vqapr.authoring import Component
+from vqapr.authoring.history import retained_marks
 from vqapr.constraints.evaluation import (
     constraint_requirements as declared_constraint_requirements,
 )

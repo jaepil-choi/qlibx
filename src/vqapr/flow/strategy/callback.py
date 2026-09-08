@@ -14,10 +14,10 @@ from io import BytesIO
 from typing import NoReturn
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from vqapr.account.history import AccountHistory
 from vqapr.authoring import EconomicAccountView, Hold, Rebalance
-from vqapr.authoring_records import InvocationRecorder, TableSpec
-from vqapr.calls import StrategyModelContext
+from vqapr.authoring.context import StrategyModelContext
+from vqapr.authoring.history import AccountHistory
+from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.constraints.evaluation import (
     build_account_view,
     merged_constraint_bounds,

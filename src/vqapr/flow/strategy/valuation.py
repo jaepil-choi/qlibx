@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from vqapr.account.marking import SelectedMark
-from vqapr.authoring_records import InvocationRecorder
+from vqapr.authoring.records import InvocationRecorder
 from vqapr.constraints.evaluation import (
     ConstraintReport,
     evaluate_constraints,

@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from vqapr.account.account import Account
 from vqapr.account.marking import ValuationService
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
-from vqapr.authoring_records import TableSpec
+from vqapr.authoring.records import TableSpec
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow

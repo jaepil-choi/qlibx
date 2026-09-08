@@ -27,7 +27,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from vqapr.account.history import AccountHistory
 from vqapr.authoring import (
     ConstraintBounds,
     ConstraintCall,
@@ -38,6 +37,7 @@ from vqapr.authoring import (
     StrategyCall,
     requirements_for,
 )
+from vqapr.authoring.history import AccountHistory
 from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence

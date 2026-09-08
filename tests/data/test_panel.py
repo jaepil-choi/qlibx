@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from vqapr.authoring import DatasetInput, RowsLookback
-from vqapr.calls import DataModelContext, requirements_for
+from vqapr.authoring.context import DataModelContext, requirements_for
 from vqapr.data import store as store_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback

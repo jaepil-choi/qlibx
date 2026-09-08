@@ -1,7 +1,17 @@
-"""Bounded projections of what the Account already committed.
+"""The account history a StrategyModel declares, and the projection it receives.
 
-A Strategy that wants to act on its own realised path -- stop-loss, cooldown, drawdown -- needs
-the account's recent history. Two rules make that affordable.
+Moved here from `account/history.py` by the layering campaign (record `192`). The two halves were
+in different packages and each needed the other: `authoring` imported the field names and the
+projection type, and `account/history.py` imported the declaration back under `TYPE_CHECKING` --
+a cycle, deferred rather than resolved. Its own comment said as much:
+
+    The declaration is `authoring`'s, and `authoring` imports this module for the field
+    names and the projection type, so the type lives here as an annotation only.
+
+They are one contract. `AccountHistoryInput` is what a StrategyModel declares and `AccountHistory`
+is what it is then handed, and neither is meaningful without the other, so they live in one module
+and the deferral is gone rather than relocated. The account package keeps the behaviour that
+produces the marks; this is the shape the author sees.
 
 **Declared, like data.** A consumer states which fields it reads and how far back, exactly as it
 declares a `DataRequirement`. There is no unbounded read: the lookback is required, so a
@@ -23,14 +33,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import Literal
 
+from pydantic import BaseModel, field_validator
+
+from vqapr.authoring._validation import _VALUE_CONFIG, _unique_identifiers
+from vqapr.data.lookback import RowsLookback
 from vqapr.domain.account_state import AccountMark
-
-if TYPE_CHECKING:
-    # The declaration is `authoring`'s, and `authoring` imports this module for the field
-    # names and the projection type, so the type lives here as an annotation only.
-    from vqapr.authoring import AccountHistoryInput
 
 ACCOUNT_FIELDS = ("nav", "cash")
 """One value per marked instant."""
@@ -112,3 +121,31 @@ class AccountHistory:
         return MappingProxyType(
             {instrument: tuple(values) for instrument, values in sorted(panel.items())}
         )
+
+
+_HISTORY_FIELDS = frozenset(ACCOUNT_FIELDS) | frozenset(INSTRUMENT_FIELDS)
+"""The closed set `AccountHistoryInput.fields` is checked against."""
+
+
+class AccountHistoryInput(BaseModel):
+    """A StrategyModel's declaration of which committed account history it reads."""
+
+    model_config = _VALUE_CONFIG
+
+    fields: tuple[Literal["nav", "cash", "quantity", "price", "observed_at"], ...]
+    lookback: RowsLookback
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def _known(cls, value: object) -> tuple[str, ...]:
+        # Before the `Literal` check, so an unknown name is refused with the two lists it could
+        # have come from rather than with the bare literal set.
+        fields = _unique_identifiers(value, name="fields")
+        unknown = sorted(set(fields) - _HISTORY_FIELDS)
+        if unknown:
+            raise ValueError(
+                f"unknown account history fields {unknown}; "
+                f"account series are {ACCOUNT_FIELDS} and "
+                f"instrument panels are {INSTRUMENT_FIELDS}"
+            )
+        return fields

@@ -8,7 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from vqapr.authoring import Constraint, ConstraintBounds, ConstraintFinding, EconomicAccountView
-from vqapr.calls import ConstraintContext
+from vqapr.authoring.context import ConstraintContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountSnapshot

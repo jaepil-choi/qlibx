@@ -27,8 +27,8 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
-from vqapr.authoring_records import TableSpec
-from vqapr.calls import DataModelContext, StrategyModelContext
+from vqapr.authoring.context import DataModelContext, StrategyModelContext
+from vqapr.authoring.records import TableSpec
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.datasets import DatasetRegistration, ExecutionRole

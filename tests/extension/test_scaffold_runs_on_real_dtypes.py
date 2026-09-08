@@ -56,7 +56,6 @@ KST = ZoneInfo("Asia/Seoul")
 EVALUATION_TIME = datetime(2024, 3, 7, 16, tzinfo=KST)
 LOOKBACK = 3
 
-
 @pytest.fixture(scope="session")
 def float_price_parquet(tmp_path_factory) -> Path:
     """A price column that is genuinely `DOUBLE`, which is what a real parquet holds.
@@ -89,7 +88,6 @@ def float_price_parquet(tmp_path_factory) -> Path:
     con.close()
     return out
 
-
 def _workspace(project: Path, prices: Path) -> Workspace:
     # Registered through the public entry point, which measures the span persistence requires.
     register_dataset(
@@ -108,7 +106,6 @@ def _workspace(project: Path, prices: Path) -> Workspace:
     )
     return Workspace.open(project)
 
-
 def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:
     return ModelWindow(
         evaluation_time=EVALUATION_TIME,
@@ -118,7 +115,6 @@ def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:
         consumer_id="test-consumer",
     )
 
-
 def _emit(project: Path, kind: ComponentKind, component_id: str) -> Path:
     path = project / f"{component_id.replace('-', '_')}.py"
     path.write_text(
@@ -126,7 +122,6 @@ def _emit(project: Path, kind: ComponentKind, component_id: str) -> Path:
         encoding="utf-8",
     )
     return path
-
 
 def test_the_price_fixture_really_holds_python_floats(
     tmp_path: Path, float_price_parquet: Path
@@ -144,7 +139,6 @@ def test_the_price_fixture_really_holds_python_floats(
     assert rows, "fixture produced no rows"
     assert all(type(row["close"]) is float for row in rows)
 
-
 def test_the_datamodel_scaffold_computes_against_a_float64_column(
     tmp_path: Path, float_price_parquet: Path
 ) -> None:
@@ -158,13 +152,13 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
         DataModelContext(window=_window(workspace, model.requirements()[0]), reads=model.inputs())
     )
 
-    # A: 105/100 - 1 = 0.05.  B: 53/50 - 1 = 0.06. Exact, because `str` was the bridge -- through
-    # `Decimal(float)` these carry the binary expansion and compare unequal.
+    # A: 105/100 - 1 = 0.05.  B: 53/50 - 1 = 0.06. Floats, because the scaffold returns the
+    # `double` it declares (record 174); the crossing to Decimal, if an author wants one, is theirs.
     assert rows == [
-        {"instrument": "A", "value": Decimal("0.05")},
-        {"instrument": "B", "value": Decimal("0.06")},
+        {"instrument": "A", "value": 0.05},
+        {"instrument": "B", "value": 0.06},
     ]
-    assert all(type(row["value"]) is Decimal for row in rows)
+    assert all(type(row["value"]) is float for row in rows)
 
 
 def test_the_strategy_scaffold_decides_against_a_float64_column(
@@ -205,7 +199,6 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     # fix this raised `TypeError` instead of returning any decision.
     assert decision is not None
     assert type(decision).__name__ in {"Hold", "Rebalance"}
-
 
 @pytest.mark.parametrize("kind", [ComponentKind.DATA_MODEL, ComponentKind.STRATEGY_MODEL])
 def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:

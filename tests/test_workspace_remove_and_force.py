@@ -23,7 +23,7 @@ import pytest
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.extension.registration import ComponentRef
+from vqapr.extension.component import ComponentRef
 from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
 from vqapr.project.store import Workspace
 

@@ -1,4 +1,13 @@
-"""Validate, fingerprint, and persist project-local extension references.
+"""Validate and fingerprint a project-local extension reference; write nothing.
+
+The persisting half is `project/registration.py` since record `196`. It was here, and it opened
+a `Workspace.transaction` from inside `extension/` -- so the layer that installs a component sat
+below the layer it wrote to, while `project/registration.py` called back down into it. A cycle,
+and the wrong way round: what a workspace holds is the project's to decide.
+
+What stays is the half that can refuse, which is the half that needs this package: fingerprint
+the source, build the `ComponentRef`, and prove it conforms. `prepare_component` writes nothing
+and never could.
 
 This module is the extension registration authority, and `vqapr.extension.registration` is where
 it lives.
@@ -22,7 +31,6 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.conformance import conformance
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.project.store import Workspace
 
 
 def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError:
@@ -91,112 +99,3 @@ def prepare_component(
     )
     conformance(ref, project_root=project_root).raise_if_failed()
     return ref
-
-
-def register_component(
-    project_root: str | Path,
-    raw_component_id: str,
-    path: str | Path,
-    object_name: str,
-    *,
-    kind: ComponentKind,
-    config: Mapping[str, object] | None = None,
-) -> ComponentRef:
-    """Prove the component conforms, then persist the reference.
-
-    Nothing is written until conformance passes, so a workspace never holds a reference to a
-    component Flow could not call.
-    """
-    ref = prepare_component(
-        project_root, raw_component_id, path, object_name, kind=kind, config=config
-    )
-    with Workspace.transaction(project_root) as transaction:
-        transaction.register_component(ref)
-    return ref
-
-
-def register_data_model(
-    project_root: str | Path,
-    raw_component_id: str,
-    path: str | Path,
-    object_name: str,
-    *,
-    config: Mapping[str, object] | None = None,
-) -> ComponentRef:
-    """Register a project-local DataModel after proving it loads."""
-    return register_component(
-        project_root,
-        raw_component_id,
-        path,
-        object_name,
-        kind=ComponentKind.DATA_MODEL,
-        config=config,
-    )
-
-
-def register_strategy_model(
-    project_root: str | Path,
-    raw_component_id: str,
-    path: str | Path,
-    object_name: str,
-    *,
-    config: Mapping[str, object] | None = None,
-) -> ComponentRef:
-    """Register a project-local StrategyModel after proving it loads."""
-    return register_component(
-        project_root,
-        raw_component_id,
-        path,
-        object_name,
-        kind=ComponentKind.STRATEGY_MODEL,
-        config=config,
-    )
-
-
-def register_constraint(
-    project_root: str | Path,
-    raw_component_id: str,
-    path: str | Path,
-    object_name: str,
-    *,
-    config: Mapping[str, object] | None = None,
-) -> ComponentRef:
-    """Register a project-local Constraint after proving it loads.
-
-    `load_constraint` checks the public Constraint contract and that the component declares its
-    data requirements, so a constraint that cannot state what it reads is refused here rather
-    than at the first occurrence that projects it.
-    """
-    return register_component(
-        project_root,
-        raw_component_id,
-        path,
-        object_name,
-        kind=ComponentKind.CONSTRAINT,
-        config=config,
-    )
-
-
-def register_exchange(
-    project_root: str | Path,
-    raw_component_id: str,
-    path: str | Path,
-    object_name: str,
-    *,
-    config: Mapping[str, object] | None = None,
-) -> ComponentRef:
-    """Register a project-local Exchange after proving it loads.
-
-    `load_exchange` is the strictest of the four: it requires one of the shipped execution
-    profiles, refuses a subclass that replaces `execute()` -- whose realism claim would be
-    unverified -- and requires the component to expose its own `ExchangeRulesView`. Registering
-    through this door is what makes those checks happen before a run rather than during one.
-    """
-    return register_component(
-        project_root,
-        raw_component_id,
-        path,
-        object_name,
-        kind=ComponentKind.EXCHANGE,
-        config=config,
-    )

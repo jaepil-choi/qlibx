@@ -41,8 +41,8 @@ from vqapr.domain.errors import (
 )
 from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.exchange.conventions import FillSelector
-from vqapr.extension.component import ComponentKind
-from vqapr.extension.registration import prepare_component, register_component
+from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.extension.registration import prepare_component
 from vqapr.project.document import (
     ComponentDeclaration,
     DatasetDeclaration,
@@ -1157,3 +1157,120 @@ def cli_kind(kind: object) -> str:
         if authored is kind:
             return spelling
     return str(getattr(kind, "value", kind))
+
+# ---------------------------------------------------------------------------------------
+# Registering one authored component, without a declaration document.
+#
+# Moved down from `extension/registration.py` by record `196`. `prepare_component` above is the
+# half that can refuse and it stays in `extension/`; these are that plus one write, and the write
+# is the workspace's. `register_authored` below already called `register_component` from here.
+# ---------------------------------------------------------------------------------------
+
+
+def register_component(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    kind: ComponentKind,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Prove the component conforms, then persist the reference.
+
+    Nothing is written until conformance passes, so a workspace never holds a reference to a
+    component Flow could not call.
+    """
+    ref = prepare_component(
+        project_root, raw_component_id, path, object_name, kind=kind, config=config
+    )
+    with Workspace.transaction(project_root) as transaction:
+        transaction.register_component(ref)
+    return ref
+
+
+def register_data_model(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Register a project-local DataModel after proving it loads."""
+    return register_component(
+        project_root,
+        raw_component_id,
+        path,
+        object_name,
+        kind=ComponentKind.DATA_MODEL,
+        config=config,
+    )
+
+
+def register_strategy_model(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Register a project-local StrategyModel after proving it loads."""
+    return register_component(
+        project_root,
+        raw_component_id,
+        path,
+        object_name,
+        kind=ComponentKind.STRATEGY_MODEL,
+        config=config,
+    )
+
+
+def register_constraint(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Register a project-local Constraint after proving it loads.
+
+    `load_constraint` checks the public Constraint contract and that the component declares its
+    data requirements, so a constraint that cannot state what it reads is refused here rather
+    than at the first occurrence that projects it.
+    """
+    return register_component(
+        project_root,
+        raw_component_id,
+        path,
+        object_name,
+        kind=ComponentKind.CONSTRAINT,
+        config=config,
+    )
+
+
+def register_exchange(
+    project_root: str | Path,
+    raw_component_id: str,
+    path: str | Path,
+    object_name: str,
+    *,
+    config: Mapping[str, object] | None = None,
+) -> ComponentRef:
+    """Register a project-local Exchange after proving it loads.
+
+    `load_exchange` is the strictest of the four: it requires one of the shipped execution
+    profiles, refuses a subclass that replaces `execute()` -- whose realism claim would be
+    unverified -- and requires the component to expose its own `ExchangeRulesView`. Registering
+    through this door is what makes those checks happen before a run rather than during one.
+    """
+    return register_component(
+        project_root,
+        raw_component_id,
+        path,
+        object_name,
+        kind=ComponentKind.EXCHANGE,
+        config=config,
+    )

@@ -8,7 +8,7 @@ import pytest
 
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind
-from vqapr.extension.registration import register_strategy_model
+from vqapr.project.registration import register_strategy_model
 from vqapr.extension.scaffold import render
 
 _HEAD = """from __future__ import annotations
@@ -136,6 +136,6 @@ def test_a_generated_template_registers_unedited(
     if kind is ComponentKind.STRATEGY_MODEL:
         assert register_strategy_model(tmp_path, "sample", path, object_name) is not None
     else:
-        from vqapr.extension.registration import register_data_model
+        from vqapr.project.registration import register_data_model
 
         assert register_data_model(tmp_path, "sample", path, object_name) is not None

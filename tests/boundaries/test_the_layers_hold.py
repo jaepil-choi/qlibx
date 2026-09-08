@@ -94,11 +94,6 @@ LAYERS: dict[str, int] = {
 """
 
 OPEN: dict[tuple[str, str], str] = {
-    # Closed by M5 -- the project layer.
-    ("extension", "project"): (
-        "M5c: register_component's persisting half moves to project/; extension keeps "
-        "prepare_component and stops opening a Workspace transaction"
-    ),
     # Closed by M6 -- the substrate the phases read moves out of the assembly layer.
     ("flow.strategy", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
     ("flow.datamodel", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",

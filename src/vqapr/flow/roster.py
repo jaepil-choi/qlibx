@@ -17,12 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from vqapr.domain.errors import (
-    ExplainTopic,
-    Failure,
-    FailureFamily,
-    VqaprError,
-)
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 
 # Hoisted from four function-local imports by record `115`. They were deferred inside
 # `vqapr.public`, where the facade sits above everything and importing eagerly would have been
@@ -31,13 +26,13 @@ from vqapr.domain.errors import (
 # review of VB002 found them being carried at full weight against a ratchet whose stated point
 # is that lowering it is the goal.
 from vqapr.domain.instruments import InstrumentRoster, build_roster, read_roster_table
-from vqapr.workspace import OPEN_STAGE, Workspace
+from vqapr.workspace import Workspace
 
-WORKSPACE_ABSENT = f"{OPEN_STAGE}.missing"
+WORKSPACE_ABSENT = "workspace.missing"
 """The one refusal from `Workspace.open` that means "there is no roster here to find".
 
-`Workspace.open` also raises `workspace.open.unreadable` for a permission problem and
-`workspace.open.invalid` for a file that does not decode. Those are damaged workspaces, not absent
+`Workspace.open` also raises `workspace.unreadable` for a permission problem and
+`workspace.invalid` for a file that does not decode. Those are damaged workspaces, not absent
 ones, and `docs/issues/050` is what treating them as absent cost.
 """
 
@@ -92,7 +87,7 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
             raise
         return None
     # OUTSIDE the guard above, deliberately. `registered_instruments()` raises a typed
-    # `workspace.instruments.unreadable` for a roster whose POINTER is damaged, and its docstring
+    # `roster.unreadable` for a roster whose POINTER is damaged, and its docstring
     # states why: "'no roster' and 'a roster whose record is damaged' are different states, and
     # only the first is ordinary." Catching it here collapsed them -- a truncated
     # `.vqapr/instruments.json` made a registered roster read as absent, so the run completed with
@@ -119,11 +114,12 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     except (OSError, ValueError, KeyError, TypeError) as unreadable:
         declared = ", ".join(f"{kind}={path}" for kind, path in sorted(declared_tables.items()))
         raise VqaprError(
-            stage="run.roster",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="run.roster.unreadable",
+                    code="roster.unreadable",
+                    status=Status.UNAVAILABLE,
+                    cause=unreadable,
                     requirement=(
                         "a registered instrument roster must be readable at run start, because "
                         "every fill is charged and sized against the category it declares"
@@ -134,7 +130,6 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
                         "with `vqapr register <instruments>.yaml`; `vqapr list instruments` shows "
                         "what this project has registered"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
                 )
             ],
             mutation=False,

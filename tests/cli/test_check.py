@@ -42,6 +42,7 @@ from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.flow.judgments import JUDGMENT_CODES
 from vqapr.flow.run import RunDefinition, StrategyEntry
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
@@ -194,10 +195,10 @@ def workspace(tmp_path: Path) -> Path:
 
 
 FOUR = {
-    "check.execution.not_after_decision",
-    "check.lookback.uncovered",
-    "check.field.absent",
-    "check.weights.mode_conflict",
+    "execution.not_after_decision",
+    "lookback.uncovered",
+    "field.absent",
+    "weights.mode_conflict",
 }
 
 
@@ -206,8 +207,8 @@ def test_a_missing_run_is_reported_rather_than_raised(workspace: Path) -> None:
     body = check("nope", workspace)
 
     assert body["ok"] is False
-    assert [entry["code"] for entry in body["failures"]] == ["workspace.run.register.missing"]
-    assert body["stage"] == "run.check"
+    assert [entry["code"] for entry in body["failures"]] == ["run.unregistered"]
+    assert body["stage"] == "check"
 
 
 def test_every_check_that_ran_is_named_alongside_every_one_that_could_not(
@@ -223,12 +224,12 @@ def test_every_check_that_ran_is_named_alongside_every_one_that_could_not(
 
     assert set(body["checked"]) == {"workspace", "run", "judgments", "preflight"}
     assert body["passed"] == ["workspace"]
-    blocked_names = {entry["check"] for entry in body["blocked"]}
-    assert {"judgments", "preflight"} <= blocked_names, (
-        "judgments that could not run must be reported as blocked, not silently omitted"
+    skipped_names = {entry["check"] for entry in body["skipped"]}
+    assert {"judgments", "preflight"} <= skipped_names, (
+        "phases that could not run must be reported as skipped, not silently omitted"
     )
-    for entry in body["blocked"]:
-        assert entry["blocked_by"], f"{entry['check']} is blocked by nothing, which cannot be"
+    for entry in body["skipped"]:
+        assert entry["blocked_by"], f"{entry['check']} is skipped for no reason, which cannot be"
 
 
 def test_an_unopenable_workspace_blocks_everything_that_needs_it_and_says_so(
@@ -238,8 +239,8 @@ def test_an_unopenable_workspace_blocks_everything_that_needs_it_and_says_so(
     body = check("missing", tmp_path / "no-such-project")
 
     assert body["ok"] is False
-    assert [entry["code"] for entry in body["failures"]] == ["workspace.open.missing"]
-    assert {entry["check"] for entry in body["blocked"]} == {"run", "judgments", "preflight"}
+    assert [entry["code"] for entry in body["failures"]] == ["workspace.missing"]
+    assert {entry["check"] for entry in body["skipped"]} == {"run", "judgments", "preflight"}
 
 
 def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: Path) -> None:
@@ -255,14 +256,18 @@ def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: 
     assert reported >= FOUR, f"a judgment did not report its own defect: {sorted(reported)}"
 
 
-def test_each_judgment_carries_the_five_fields_a_reader_acts_on(workspace: Path) -> None:
+def test_each_judgment_carries_the_fields_a_reader_acts_on(workspace: Path) -> None:
     """AC-C4. A refusal without `fix` is a diagnosis, which is what this envelope replaced."""
     for entry in check(RUN, workspace)["failures"]:
-        for field in ("code", "source", "requirement", "observed", "fix", "explain"):
+        for field in (
+            "code", "status", "source", "requirement", "observed", "fix", "cause",
+            "examples", "example_total",
+        ):
             assert field in entry, f"{entry['code']} lost {field}"
         assert entry["fix"], f"{entry['code']} says what is wrong but not what to do"
-        assert entry["explain"], f"{entry['code']} points at no recovery guidance"
-        if entry["code"].startswith("check."):
+        assert entry["status"] >= 400, f"{entry['code']} says nothing about who must act"
+        assert entry["cause"]["where"], f"{entry['code']} does not say where it was decided"
+        if entry["code"] in JUDGMENT_CODES:
             assert str(entry["source"]["key_path"]).startswith(f"runs.{RUN}"), (
                 f"{entry['code']} does not name the run it refused, so the reader must guess"
             )
@@ -284,9 +289,9 @@ def test_repairing_one_defect_leaves_the_others_reported(workspace: Path) -> Non
         )
     after = {entry["code"] for entry in check("repaired", workspace)["failures"]}
 
-    assert "check.weights.mode_conflict" in before
-    assert "check.weights.mode_conflict" not in after, "the repair was not observed"
-    assert FOUR - {"check.weights.mode_conflict"} <= after, (
+    assert "weights.mode_conflict" in before
+    assert "weights.mode_conflict" not in after, "the repair was not observed"
+    assert FOUR - {"weights.mode_conflict"} <= after, (
         "repairing one judgment changed what another reported, so they are not independent"
     )
 
@@ -305,7 +310,7 @@ def test_a_period_that_is_a_point_is_reported_and_a_real_one_across_offsets_is_a
     point = datetime(2024, 1, 2, tzinfo=UTC)
     definition = _definition(start=point, end=point)
     assert [failure.code for failure in _judge_period(definition, at)] == [
-        "check.period.uncovered"
+        "period.uncovered"
     ]
 
     across = _definition(
@@ -315,12 +320,12 @@ def test_a_period_that_is_a_point_is_reported_and_a_real_one_across_offsets_is_a
     assert _judge_period(across, at) == [], "a valid one-hour period was refused"
 
 
-def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> None:
+def test_a_blocked_judgment_carries_its_cause_separately(workspace: Path) -> None:
     """A framework bug and a routine block must not read the same.
 
-    `blocked_by` is one sentence; `error_type` is the field a reader filters on. Without it a
-    `KeyError` -- which almost certainly means this verb is wrong -- looks exactly like a
-    `VqaprError`, which means the framework declined to answer.
+    `observed` is one sentence; `cause` is the structure a reader filters on, and `status` says
+    whose fault it is. Without them a `KeyError` -- which almost certainly means this verb is
+    wrong -- looks exactly like a `VqaprError`, which means the framework declined to answer.
     """
     import vqapr.flow.judgments as judgments_module
 
@@ -333,9 +338,16 @@ def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> 
     finally:
         judgments_module._judge_universe = original
 
-    entry = next(item for item in body["blocked"] if item["check"] == "universe")
-    assert entry["error_type"] == "KeyError"
-    assert entry["blocked_by"].startswith("KeyError:")
+    entry = next(
+        item for item in body["blocked"] if item["observed"].startswith("universe could not")
+    )
+    assert entry["code"] == "judgment.blocked"
+    assert entry["cause"]["type"] == "KeyError"
+    assert entry["cause"]["message"] == "'a judgment read a key nobody wrote'"
+    assert "KeyError" in entry["cause"]["traceback"]
+    # The stand-in judge is defined in THIS file, so the innermost frame is not the package's:
+    # 502, the way a user's own code crashing reads. The framework's own bug would be 500.
+    assert entry["status"] == 502
 
 
 def _judge(root: Path, definition: RunDefinition) -> list[str]:
@@ -373,7 +385,7 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(tmp_path:
     Workspace.create(tmp_path)
     _strategy_reading(tmp_path, "model", "absent_dataset", "close")
 
-    assert _judge(tmp_path, _definition()) == ["check.dataset.unregistered"]
+    assert _judge(tmp_path, _definition()) == ["dataset.unregistered"]
 
 
 def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
@@ -414,14 +426,14 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
         _agenda_once(space, definition),
     )
 
-    assert [failure.code for failure in failures] == ["check.dataset.unregistered"]
+    assert [failure.code for failure in failures] == ["dataset.unregistered"]
     assert failures[0].examples == ("close", "volume", "turnover")
     assert failures[0].example_total == 3
     assert "3 field(s)" in failures[0].observed
 
 
 def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> None:
-    """`check.field.absent`, reachable only once the model is loaded."""
+    """`field.absent`, reachable only once the model is loaded."""
     space = Workspace.create(tmp_path)
     with Workspace.transaction(space) as t:
         t.register_dataset(
@@ -439,11 +451,11 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
     _strategy_reading(tmp_path, "model", "prices", "close")
 
     # On a session the data covers, so the absent field is the only thing wrong.
-    assert _judge(tmp_path, _definition(sessions=(date(2024, 6, 3),))) == ["check.field.absent"]
+    assert _judge(tmp_path, _definition(sessions=(date(2024, 6, 3),))) == ["field.absent"]
 
 
 def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -> None:
-    """`check.lookback.uncovered`, measured at the first instant that actually READS.
+    """`lookback.uncovered`, measured at the first instant that actually READS.
 
     Not at the run's `start`. Nothing reads there -- `start` bounds the horizon, and the strategy
     reads at the run's sessions inside it. Measuring at `start` refused any run whose dataset's
@@ -472,7 +484,7 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     early = begins.date().replace(day=1)
     start = datetime.combine(early, time(0), tzinfo=UTC)
     assert _judge(tmp_path, _definition(start=start, sessions=(early,), at=time(4, 0))) == [
-        "check.lookback.uncovered"
+        "lookback.uncovered"
     ]
 
     # The same run, deciding on a day the data covers, is not refused -- even though `start` is
@@ -526,7 +538,9 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
 
     found, blocked = judgments(unanswerable, Workspace.open(tmp_path))
     assert blocked, found
-    assert {entry["check"] for entry in blocked} >= {"execution_ordering"}
+    assert {entry.observed.split(" could not answer", 1)[0] for entry in blocked} >= {
+        "execution_ordering"
+    }
 
 
 def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) -> None:
@@ -562,7 +576,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
         FailureSource(key_path="runs.x"),
     )
 
-    assert [failure.code for failure in judged] == ["check.weights.venue_conflict"], (
+    assert [failure.code for failure in judged] == ["weights.venue_conflict"], (
         "a signed account on a long-only listing was not caught, so the judgment is a no-op"
     )
     assert "long_only" in (judged[0].observed or "")
@@ -596,24 +610,20 @@ def test_check_creates_no_workspace_where_none_existed(tmp_path: Path) -> None:
 def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path) -> None:
     """`check` is not a second judge, and the reported codes are the evidence.
 
-    An unopenable workspace already refuses with the framework's own code. Re-coding it as
-    `run.check.*` would rename a defect a reader may already have handling for, so the verb passes
-    that body through untouched. Its own two codes exist only for the case with no code at all --
-    a bare framework invariant that would otherwise surface as `stage: unhandled`.
+    An unopenable workspace already refuses with the framework's own code. Re-coding it as one of
+    this verb's own would rename a defect a reader may already have handling for, so the verb
+    passes that body through untouched. Its own two codes exist only for the case with no code at
+    all -- a bare framework invariant that would otherwise surface as an `unhandled` failure.
     """
     body = check("gone", tmp_path / "none")
     reported = {entry["code"] for entry in body["failures"]}
 
     assert reported, "the workspace judgment failed, so something must have been reported"
-    assert not any(code.startswith("run.check.") for code in reported), (
+    assert not reported & {"run.declaration_invalid", "preflight.refused"}, (
         f"check re-coded a refusal that already had a code: {sorted(reported)}"
     )
 
     assert len(set(CODES)) == len(CODES)
-    for code in CODES:
-        assert code.startswith(("check.", "run.check.")), (
-            f"{code} is not in this verb's namespace"
-        )
 
     import inspect
     import re
@@ -624,7 +634,7 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
 
     # One set, owned by the judges. `check` used to hold a hand-written copy of the codes
     # `flow/judgments.py` raises and pin its length here; the copy drifted when a judge was added
-    # (`check.datamodel.output_registered`) and the pin kept certifying the stale count. Record
+    # (`datamodel.output_registered`) and the pin kept certifying the stale count. Record
     # 148 closed the spec-file door: a datamodel is a `runs:` entry and its judgments
     # (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
     # `check.materialize.*` codes a spec used to settle are gone rather than merged.
@@ -636,19 +646,22 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
         "the materialization spec's judgment set retired with the spec file (record 148)"
     )
     assert set(CODES) == set(JUDGMENT_CODES) | {
-        "run.check.declaration_invalid",
-        "run.check.preflight_refused",
+        "run.declaration_invalid",
+        "preflight.refused",
     }, "CODES must be exactly the judgment set plus the two framework-invariant codes"
     assert JUDGMENT_BLOCKED not in CODES, (
         "check reports a judgment that could not answer as blocked, never as a failure, so it "
         "cannot emit require_judged's code"
     )
 
-    # The tuple cannot drift from the judges: every `check.` code spelled anywhere in the
+    # The tuple cannot drift from the judges: every code constant spelled at module level in the
     # judgments module -- which, by construction, is the constant each judge raises through --
-    # must be a member. A tenth judge added with a literal or a constant but no line in
-    # `JUDGMENT_CODES` fails here rather than in a reader's handling.
-    spelled = set(re.findall(r'"(check\.[a-z_.]+)"', inspect.getsource(judgments_module)))
+    # must be a member. A tenth judge added with a constant but no line in `JUDGMENT_CODES`
+    # fails here rather than in a reader's handling. The codes lost their `check.` prefix with
+    # record `171`, so the shape matched is `NAME = "<subject>.<detail>"`, less the blocked code.
+    spelled = set(
+        re.findall(r'^[A-Z_]+ = "([a-z_]+\.[a-z_.]+)"$', inspect.getsource(judgments_module), re.M)
+    ) - {JUDGMENT_BLOCKED}
     assert spelled, "the regex found no codes, so it proves nothing about drift"
     published = set(JUDGMENT_CODES)
     assert spelled == published, (
@@ -671,4 +684,4 @@ def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(
             ),
             space.source("prices-source"),
         )
-    assert "check.field.absent" in {entry["code"] for entry in check(RUN, workspace)["failures"]}
+    assert "field.absent" in {entry["code"] for entry in check(RUN, workspace)["failures"]}

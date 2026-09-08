@@ -131,8 +131,8 @@ def test_the_emitted_run_template_is_refused_for_its_placeholders_not_for_its_sh
     refusal = json.loads((result.stdout or result.stderr).strip().splitlines()[-1])
     assert refusal["stage"] != "unhandled"
     codes = [failure["code"] for failure in refusal["failures"]]
-    assert codes == ["workspace.run.register.reference"], codes
-    assert "declaration.read.unknown_section" not in codes, "`runs:` is a known section now"
+    assert codes == ["run.reference_invalid"], codes
+    assert "declaration.unknown_section" not in codes, "`runs:` is a known section now"
 
 
 def test_the_help_promises_the_key_for_every_kind_again() -> None:

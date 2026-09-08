@@ -66,7 +66,7 @@ def test_the_account_mode_refusal_names_the_permitted_set(tmp_path: Path) -> Non
     """The journey's own value, and the exact shape it produced."""
     failure = _register_run_with_mode(tmp_path, "LONG_SHORT")
 
-    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["code"] == "declaration.value_not_permitted"
     assert failure["requirement"] == "runs.r.initial_account.mode must be one of: long_only, signed"
     assert failure["examples"] == ["long_only", "signed"]
     assert failure["source"]["key_path"] == "runs.r.initial_account.mode"
@@ -135,5 +135,5 @@ def test_a_permitted_value_is_still_accepted_in_either_case(tmp_path: Path) -> N
     """
     for spelling in ("SIGNED", "signed"):
         failure = _register_run_with_mode(tmp_path / spelling, spelling)
-        assert failure["code"] == "workspace.run.register.reference", failure
+        assert failure["code"] == "run.reference_invalid", failure
     assert _enum(AccountMode, "signed", name="k") is AccountMode.SIGNED

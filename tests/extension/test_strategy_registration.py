@@ -43,7 +43,7 @@ def test_a_syntax_error_is_refused_at_registration(tmp_path: Path) -> None:
     path.write_text("class S:\n    def __init__(self)\n        pass\n", encoding="utf-8")
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "broken", path, "S")
-    assert _codes(raised.value) == {"component.load.construction_failed"}
+    assert _codes(raised.value) == {"component.construction_failed"}
     assert "SyntaxError" in (raised.value.failures[0].observed or "")
 
 
@@ -52,7 +52,7 @@ def test_an_object_outside_the_contract_is_refused(tmp_path: Path) -> None:
     path.write_text("class S:\n    pass\n", encoding="utf-8")
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "plain", path, "S")
-    assert _codes(raised.value) == {"component.load.wrong_type"}
+    assert _codes(raised.value) == {"component.wrong_type"}
 
 
 def test_a_renamed_callback_parameter_is_accepted(tmp_path: Path) -> None:
@@ -79,7 +79,7 @@ def test_an_extra_required_parameter_is_refused(tmp_path: Path) -> None:
     )
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "extra", path, "S")
-    assert _codes(raised.value) == {"component.load.signature_invalid"}
+    assert _codes(raised.value) == {"component.signature_invalid"}
 
 
 def test_an_unannotated_callback_is_accepted(tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path
     )
     with pytest.raises(VqaprError) as raised:
         register_strategy_model(tmp_path, "badreq", path, "S")
-    assert _codes(raised.value) == {"component.load.requirements_invalid"}
+    assert _codes(raised.value) == {"component.requirements_invalid"}
 
 
 @pytest.mark.parametrize(

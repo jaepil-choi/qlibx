@@ -25,7 +25,7 @@ import pytest
 
 from vqapr.data.datasets import DatasetRegistration, Grain
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
+from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 from vqapr.flow.datamodel import DataModelResult, output_directory, output_source_id
 from vqapr.flow.judgments import judgments
 from vqapr.flow.orchestration import RunResult, run
@@ -336,10 +336,13 @@ def test_a_compute_failure_leaves_no_output_and_registers_nothing(
     with pytest.raises(VqaprError) as caught:
         _run(tmp_path, _definition("partial", DataModelEntry("failing", "partial", ("score",))))
 
-    assert caught.value.stage == "datamodel.compute"
+    assert caught.value.stage is Stage.RUN
     assert caught.value.mutation is False
     (failure,) = caught.value.failures
-    assert failure.code == "datamodel.compute.failed"
+    assert failure.code == "datamodel.compute_failed"
+    assert failure.status is Status.CRASHED, "the user's own compute raised"
+    assert failure.cause is not None and failure.cause.origin == "user"
+    assert (failure.cause.traceback or "").startswith("Traceback")
     assert "intentional second-session failure" in failure.observed
     assert _chunks(tmp_path, "partial") == []
     assert "partial" not in _dataset_ids(tmp_path)
@@ -410,7 +413,7 @@ def test_an_output_breach_is_refused_by_its_code_and_registers_nothing(
             ),
         )
 
-    assert caught.value.stage == "datamodel.output"
+    assert caught.value.stage is Stage.RUN
     assert caught.value.mutation is False
     (failure,) = caught.value.failures
     assert failure.code == code
@@ -481,14 +484,15 @@ def test_a_second_run_is_refused_before_it_computes(
     with pytest.raises(VqaprError) as refused:
         preflight_run(tmp_path, definition)
 
-    assert refused.value.stage == "preflight.datamodel"
+    assert refused.value.stage is Stage.FREEZE
     assert refused.value.mutation is False
     (failure,) = refused.value.failures
-    assert failure.code == "preflight.datamodel.output_registered"
+    assert failure.code == "datamodel.output_registered"
+    assert failure.status is Status.CONFLICT
     assert "reversal_2d" in failure.observed
     found, blocked = judgments(definition, Workspace.open(tmp_path))
     assert blocked == []
-    assert [item.code for item in found] == ["check.datamodel.output_registered"]
+    assert [item.code for item in found] == ["datamodel.output_registered"]
     assert found[0].source is not None
     assert found[0].source.key_path == "runs.factors.datamodels.reversal.dataset_id"
     assert _chunks(tmp_path, "reversal_2d") == chunks_before, "the refusal touches no chunk"
@@ -555,7 +559,7 @@ def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raise
     with pytest.raises(VqaprError) as caught:
         _run(tmp_path, definition, jobs=2)
 
-    assert caught.value.stage == "datamodel.output"
+    assert caught.value.stage is Stage.RUN
     (failure,) = caught.value.failures
     assert failure.code == "datamodel.output.instrument_unrequested"
     assert "stray_2d" not in _dataset_ids(tmp_path)

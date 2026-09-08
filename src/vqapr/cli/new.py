@@ -34,7 +34,7 @@ from vqapr.authoring_lookback import lookback_declaration
 from vqapr.cli.envelope import success
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import _class_name, render
-from vqapr.inputs import VALUE_INVALID, InputError, refuse_existing
+from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
@@ -366,7 +366,7 @@ def _run_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any
 def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     if not args.component_id:
         raise InputError(
-            "cli.input.keys_missing",
+            INCOMPLETE,
             requirement="datamodel and strategy require a positional component_id",
             observed="no component_id given",
         )
@@ -393,7 +393,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     else:
         if not args.dataset:
             raise InputError(
-                "cli.input.keys_missing",
+                INCOMPLETE,
                 requirement="datamodel and strategy require --dataset",
                 observed="--dataset not given",
             )
@@ -478,7 +478,7 @@ def _require_registered_dataset(dataset_id: str, project_root: Path) -> None:
     known = ", ".join(sorted(registered)) or "(none registered)"
     close = get_close_matches(dataset_id, sorted(registered), n=1)
     raise InputError(
-        "cli.input.value_invalid",
+        VALUE_INVALID,
         requirement="--dataset must name a dataset this workspace has registered",
         observed=f"{dataset_id!r}; registered: {known}",
         retry=(

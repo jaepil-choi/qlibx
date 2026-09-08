@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
-
-_STAGE = "observation_store.resolve"
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 
 
 def resolve_field(registration: DatasetRegistration, requirement: DataRequirement) -> str:
@@ -21,11 +19,11 @@ def resolve_field(registration: DatasetRegistration, requirement: DataRequiremen
     if expression is not None:
         return expression
     raise VqaprError(
-        stage=_STAGE,
-        family=FailureFamily.DATA,
+        stage=Stage.RUN,
         failures=[
             Failure.bounded(
-                code=f"{_STAGE}.field_missing",
+                code="store.field_missing",
+                status=Status.MISSING,
                 requirement=(
                     f"dataset {str(registration.dataset_id)!r} must expose the field a "
                     "requirement names"
@@ -39,7 +37,6 @@ def resolve_field(registration: DatasetRegistration, requirement: DataRequiremen
                     f"{str(registration.dataset_id)!r} under `fields`, or name a field it "
                     "already exposes"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         ],
         mutation=False,

@@ -6,9 +6,10 @@ bare `FileNotFoundError`/`TypeError`/`FileExistsError`로 나가면 `envelope.py
 `stage:"unhandled"`로 표시한다. agent에게 그것은 "framework가 고장났다"는 신호이므로, 자기 파일을
 고치는 대신 framework를 의심하게 만든다.
 
-`family`는 `UsageError`와 같은 이유로 `None`이다. `FailureFamily`는 package 단계의 닫힌
-집합인데(architecture §8.3) 이 실패들은 그 어느 단계에도 도달하지 못했다 — 읽히지 않은 파일은
-어떤 단계에도 들어가지 않는다.
+The stage is `Stage.USAGE` (record `171`): the argument never reached the package, so the
+operation under way was the command line itself. Each code carries the `Status` that says who
+must act -- a missing file is 404, an unreadable one 503, a wrong shape 400 -- and the failure
+carries its cause whole: the `OSError` or `YAMLError` that was in hand, or the line that refused.
 
 여기서도 remedy는 만들지 않는다. `requirement`는 무엇이 필요했는지, `observed`는 무엇을 봤는지만
 말하고, 대화는 skill이 담당한다(PRD §2.6).
@@ -22,17 +23,33 @@ from typing import Any
 
 import yaml
 
-from vqapr.domain.errors import MAX_EXAMPLES, ExplainTopic, Failure, FailureSource
+from vqapr.domain.errors import (
+    MAX_EXAMPLES,
+    Cause,
+    Failure,
+    FailureSource,
+    Stage,
+    Status,
+)
 
-INPUT_STAGE = "cli.input"
+INPUT_STAGE = Stage.USAGE
 
-MISSING = f"{INPUT_STAGE}.file_missing"
-UNREADABLE = f"{INPUT_STAGE}.file_unreadable"
-NOT_A_MAPPING = f"{INPUT_STAGE}.not_a_mapping"
-EXISTS = f"{INPUT_STAGE}.file_exists"
-INCOMPLETE = f"{INPUT_STAGE}.keys_missing"
-VALUE_INVALID = f"{INPUT_STAGE}.value_invalid"
+MISSING = "argument.file_missing"
+UNREADABLE = "argument.file_unreadable"
+NOT_A_MAPPING = "argument.not_a_mapping"
+EXISTS = "argument.file_exists"
+INCOMPLETE = "argument.keys_missing"
+VALUE_INVALID = "argument.value_invalid"
 
+_STATUS_BY_CODE: dict[str, Status] = {
+    MISSING: Status.MISSING,
+    UNREADABLE: Status.UNAVAILABLE,
+    NOT_A_MAPPING: Status.INVALID,
+    EXISTS: Status.CONFLICT,
+    INCOMPLETE: Status.INVALID,
+    VALUE_INVALID: Status.INVALID,
+}
+"""The status each shared code carries. A site raising a code of its own passes `status=`."""
 
 
 # `BoundedRefusal` moved here from `cli/envelope.py` by record `112`. It is the base type for a
@@ -43,10 +60,10 @@ VALUE_INVALID = f"{INPUT_STAGE}.value_invalid"
 class BoundedRefusal(Exception):
     """입력이 package 단계에 도달하기 전에 거부된 경우.
 
-    이런 실패의 본문은 이미 유계다 — 요구한 것과 관찰한 것이 전부이고, 그것을 만든 프레임은 증거가
-    아니라 잡음이다. 특히 `raise ... from error`로 원인을 붙이면 traceback이 두 배로 길어져
-    `MAX_INLINE_TRACEBACK_LINES`를 넘고, 그러면 **읽기만 하는 명령이 dump 파일을 쓰려고**
-    `.vqapr/`를 만든다. 거부가 부작용을 남기는 것은 거부가 아니다.
+    이런 실패의 본문은 이미 유계다 — 요구한 것과 관찰한 것이 전부다. 원인(`cause`)은 그 본문
+    안의 한 항목으로 실려 나가고(record `171`), 봉투는 그 밖에 아무것도 덧붙이지 않는다: 읽기만
+    하는 명령이 거부하면서 `.vqapr/`에 dump 파일을 만드는 일은 없다. 거부가 부작용을 남기는
+    것은 거부가 아니다.
 
     `failure()`는 이 타입을 본문만 실어 내보낸다.
     """
@@ -68,7 +85,7 @@ class InputError(BoundedRefusal):
         examples: Sequence[str] = (),
         source: FailureSource | None = None,
         fix: str | None = None,
-        explain: ExplainTopic = ExplainTopic.DECLARATION_SHAPE,
+        status: Status | None = None,
     ) -> None:
         self.code = code
         self.requirement = requirement
@@ -80,10 +97,14 @@ class InputError(BoundedRefusal):
         # keeps every existing call site emitting a real `fix` instead of an empty one, rather
         # than requiring sixteen edits to say what the site already says.
         self.fix = fix or retry or "correct the input named above, then retry"
-        self.explain = explain
+        # The six shared codes know their status; a site with a code of its own says it. A code
+        # that is neither is a programming error, and it is refused here, at construction.
+        self.status = status if status is not None else _STATUS_BY_CODE[code]
         # 상한은 `Failure.bounded`와 같은 이유로 둔다. 잘린 뒤에도 전체 개수는 남긴다.
         self.examples = tuple(str(item) for item in examples[:MAX_EXAMPLES])
         self.example_total = len(examples)
+        # The `raise InputError(...)` line, one frame out from this constructor.
+        self.raised_at = Cause.here(skip=1)
         super().__init__(requirement)
 
     def as_failure(self) -> Failure:
@@ -93,24 +114,28 @@ class InputError(BoundedRefusal):
         refusal that shipped four of them made the envelope conditional on which layer happened to
         refuse -- which is precisely what a single documented shape exists to prevent. `check`
         renders an `InputError` through this too, rather than through a second literal of its own.
+
+        The cause is the exception this refusal was raised `from`, when there was one -- the
+        `FileNotFoundError`, the `YAMLError` -- whole; otherwise `Failure` records the line that
+        decided to refuse.
         """
         # Already bounded in `__init__`, so the direct constructor rather than `bounded`: cutting
         # the examples again would report `example_total` against a list cut twice.
         return Failure(
             code=self.code,
+            status=self.status,
             requirement=self.requirement,
             fix=self.fix,
-            explain=self.explain,
             source=self.source,
             observed=self.observed,
+            cause=self.raised_at if self.__cause__ is None else Cause.of(self.__cause__),
             examples=self.examples,
             example_total=self.example_total,
         )
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "stage": INPUT_STAGE,
-            "family": None,
+            "stage": str(INPUT_STAGE),
             "mutation": False,
             "retry_precondition": self.retry,
             "correlation_id": None,

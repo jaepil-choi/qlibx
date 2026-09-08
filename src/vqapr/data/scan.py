@@ -20,7 +20,7 @@ from enum import StrEnum
 import duckdb
 
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 
 _EXAMPLE_LIMIT = 5
 
@@ -216,11 +216,11 @@ def _require_path(spec: SourceSpec) -> None:
     """
     if not spec.path.exists():
         raise VqaprError(
-            stage="source.scan.open",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.path_missing",
+                    code="source.path_missing",
+                    status=Status.MISSING,
                     requirement=f"source '{spec.source_id}' must point at an existing path",
                     observed=str(spec.path),
                     source=FailureSource(file=str(spec.path)),
@@ -228,7 +228,6 @@ def _require_path(spec: SourceSpec) -> None:
                         f"check the path declared for source '{spec.source_id}', then create "
                         "or restore the file or directory at it"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             retry_precondition="create the path, then retry the same operation",
@@ -368,11 +367,11 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
         rows = con.execute(f"DESCRIBE SELECT * FROM {_relation(spec)}").fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.describe",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.unreadable",
+                    code="source.unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=f"source '{spec.source_id}' must be readable parquet",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path)),
@@ -380,7 +379,7 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
                         f"open '{spec.path}' with duckdb directly to see the underlying error, "
                         "then repair or re-export the parquet at that path"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -572,11 +571,11 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
         ).fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.distinct",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.distinct.unreadable",
+                    code="source.distinct_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=f"field {field!r} must be readable from source '{spec.source_id}'",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path), key_path=field),
@@ -584,7 +583,7 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
                         f"confirm column {field!r} exists with that exact name in "
                         f"'{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -613,11 +612,11 @@ def candidate_instants(
         ).fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.execution_candidates",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.execution_candidates.unreadable",
+                    code="source.execution_candidates_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement="the execution instant field must be queryable",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path), key_path=trade_at_field),
@@ -625,7 +624,7 @@ def candidate_instants(
                         f"confirm column {trade_at_field!r} exists with that exact name in "
                         f"'{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
             mutation=False,
@@ -680,11 +679,11 @@ def exact_snapshot_rows(
         )
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.execution_snapshot",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.execution_snapshot.unreadable",
+                    code="source.execution_snapshot_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement="the exact execution snapshot fields must be queryable",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path)),
@@ -692,7 +691,7 @@ def exact_snapshot_rows(
                         f"confirm {trade_at_field!r}, {instrument_field!r}, and the requested "
                         f"fields all exist with those exact names in '{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
             mutation=False,
@@ -804,11 +803,11 @@ def positive_finite_when_true(
             examples = tuple(repr(row) for row in rows)
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.conditional_positive",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.conditional_positive.unreadable",
+                    code="source.conditional_positive_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=(
                         f"fields {condition_field!r} and {value_field!r} must be readable "
                         f"from source '{spec.source_id}'"
@@ -819,7 +818,7 @@ def positive_finite_when_true(
                         f"confirm {condition_field!r} and {value_field!r} exist with those "
                         f"exact names in '{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -878,11 +877,11 @@ def finite_check(
             examples.append((column, tuple(repr(row) for row in rows)))
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.finite",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.finite.unreadable",
+                    code="source.finite_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=(
                         f"columns {', '.join(repr(c) for c in selected)} must be readable "
                         f"from source '{spec.source_id}'"
@@ -893,7 +892,7 @@ def finite_check(
                         f"confirm those columns exist with those exact names in '{spec.path}', "
                         "then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -1342,11 +1341,11 @@ def observation_rows(
         fetched = cursor.fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.observations",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.observations.unreadable",
+                    code="source.observations_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=(
                         "the registered source and its field expressions must be queryable"
                     ),
@@ -1356,7 +1355,7 @@ def observation_rows(
                         f"confirm every registered field expression still evaluates against "
                         f"'{spec.path}', then re-register or fix the source"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
             mutation=False,

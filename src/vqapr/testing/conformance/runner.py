@@ -41,13 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.authoring import Constraint, DataModel, StrategyModel
-from vqapr.domain.errors import (
-    Diagnosis,
-    ExplainTopic,
-    Failure,
-    FailureFamily,
-    collector,
-)
+from vqapr.domain.errors import Diagnosis, Failure, Stage, Status, collector
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
@@ -59,7 +53,8 @@ from vqapr.extension.loading import (
     positional_arity,
 )
 
-STAGE = "component.conformance"
+STAGE = Stage.REGISTER
+"""Conformance is the proving half of registration, so its refusals are the `register` stage's."""
 _RETRY = "fix the component to match its contract, then register it again"
 
 
@@ -119,11 +114,11 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
         if implementation is None:
             found.add(
                 Failure.bounded(
-                    f"{STAGE}.method_missing",
+                    "component.method_missing",
                     f"{base.__name__}.{name}() must be implemented",
+                    status=Status.CONTRACT,
                     observed=type(component).__name__,
                     fix=f"implement {name}() on the component so it satisfies {base.__name__}",
-                    explain=ExplainTopic.COMPONENT_CONTRACT,
                 )
             )
             continue
@@ -131,11 +126,11 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
             actual = type(implementation).__name__
             found.add(
                 Failure.bounded(
-                    f"{STAGE}.method_not_callable",
+                    "component.method_not_callable",
                     f"{base.__name__}.{name} must be a method, not a value",
+                    status=Status.CONTRACT,
                     observed=f"{type(component).__name__}.{name} is {actual}",
                     fix=f"define {name} as a method on the component, not as a {actual} attribute",
-                    explain=ExplainTopic.COMPONENT_CONTRACT,
                 )
             )
             continue
@@ -150,8 +145,9 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
             continue
         found.add(
             Failure.bounded(
-                f"{STAGE}.signature_invalid",
+                "component.signature_invalid",
                 f"{base.__name__}.{name}() must accept {wanted[1]} positional arguments",
+                status=Status.CONTRACT,
                 observed=(
                     f"{type(component).__name__}.{name} takes "
                     f"{'any number' if observed[1] == -1 else observed[1]}"
@@ -164,7 +160,6 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
                     f"define it as {name}({_signature_hint(wanted[1])}) so it accepts "
                     f"exactly {wanted[1]} positional arguments"
                 ),
-                explain=ExplainTopic.COMPONENT_CONTRACT,
             )
         )
 
@@ -177,7 +172,7 @@ def conformance(ref: ComponentRef, *, project_root: str | Path | None = None) ->
     """
     if not isinstance(ref, ComponentRef):
         raise TypeError("ref must be a ComponentRef")
-    found = collector(STAGE, FailureFamily.DATA)
+    found = collector(STAGE)
 
     try:
         component = _LOADERS[ref.kind](ref, project_root=project_root)
@@ -191,14 +186,15 @@ def conformance(ref: ComponentRef, *, project_root: str | Path | None = None) ->
         else:
             found.add(
                 Failure.bounded(
-                    f"{STAGE}.load_failed",
+                    "component.import_failed",
                     "component must load before its contract can be judged",
+                    status=Status.CRASHED,
                     observed=f"{type(error).__name__}: {error}",
                     fix=(
                         "fix the exception raised while loading the component, then "
-                        "register it again"
+                        "register it again; the traceback is in `cause`"
                     ),
-                    explain=ExplainTopic.COMPONENT_CONTRACT,
+                    cause=error,
                 )
             )
         return found.done(retry=_RETRY)

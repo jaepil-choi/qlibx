@@ -24,6 +24,7 @@ from test_commands import _cli, _register_run, _workspace_for_run
 
 from vqapr.cli.check import check
 from vqapr.domain.errors import VqaprError
+from vqapr.flow.judgments import JUDGMENT_CODES
 from vqapr.public import Workspace, preflight_run
 
 
@@ -38,7 +39,7 @@ def _lookahead_run(
 
     The run's own `at` is the decision time (record 148), so the look-ahead is one key: `15:30`
     coincides with the workspace's fill at 15:30, which is exactly what
-    `check.execution.not_after_decision` refuses -- and `register` accepts, since every id the
+    `execution.not_after_decision` refuses -- and `register` accepts, since every id the
     run names is registered and a wall time is not a reference it can check.
     """
     code, payload = _register_run(root, capsys, run_id, at="15:30", **overrides)
@@ -59,7 +60,7 @@ def test_a_run_check_refuses_is_not_executed_by_run(
     judged = check("lookahead", tmp_path)
     assert judged["ok"] is False, "fixture must be a run check actually refuses"
     refused_codes = {failure["code"] for failure in judged["failures"]}
-    assert "check.execution.not_after_decision" in refused_codes, refused_codes
+    assert "execution.not_after_decision" in refused_codes, refused_codes
 
     code, payload = _run(capsys, tmp_path, "lookahead")
 
@@ -85,14 +86,15 @@ def test_the_refusal_carries_the_six_fields_in_checks_own_codes(
     _, payload = _run(capsys, tmp_path, "lookahead")
     failure = payload["failures"][0]
 
-    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
+    for field in ("code", "status", "source", "requirement", "observed", "fix", "cause"):
         assert field in failure, f"the refusal dropped {field!r}"
         assert failure[field] not in (None, "", {}), f"{field!r} is present but empty"
 
-    assert failure["code"].startswith("check."), (
+    assert failure["code"] in JUDGMENT_CODES, (
         "run invented its own code instead of reusing the one check publishes"
     )
-    assert failure["explain"] == "run-precondition"
+    assert failure["status"] == 412, "a look-ahead is a precondition the submission fails"
+    assert failure["cause"]["where"], "a refusal names the line that decided it"
     # A registered run has no file to point at; the key path into the declaration is its location.
     assert failure["source"]["file"] is None
     assert failure["source"]["key_path"].startswith("runs.lookahead")
@@ -117,7 +119,7 @@ def test_an_unknown_strategy_name_is_a_bounded_refusal_not_an_unhandled_error(
     assert code != 0
     assert payload["stage"] != "unhandled"
     (failure,) = payload["failures"]
-    assert failure["code"] == "cli.input.value_invalid"
+    assert failure["code"] == "argument.value_invalid"
     assert "typo" in failure["observed"]
     assert "lookahead" in failure["requirement"]
 
@@ -146,11 +148,11 @@ def test_run_refuses_when_a_judgment_could_not_answer(
 
     assert code == 1, "run executed a run whose judgment could not answer"
     codes = {failure["code"] for failure in payload["failures"]}
-    assert "run.check.judgment_blocked" in codes, codes
+    assert "judgment.blocked" in codes, codes
     blocked = next(
         failure
         for failure in payload["failures"]
-        if failure["code"] == "run.check.judgment_blocked"
+        if failure["code"] == "judgment.blocked"
     )
     assert "universe" in blocked["observed"]
     assert "KeyError" in blocked["observed"]
@@ -174,7 +176,7 @@ def test_every_independent_defect_is_reported_not_just_the_first(
     _, payload = _run(capsys, tmp_path, "twice-wrong")
     codes = {failure["code"] for failure in payload["failures"]}
 
-    assert {"check.execution.not_after_decision", "check.weights.mode_conflict"} <= codes, codes
+    assert {"execution.not_after_decision", "weights.mode_conflict"} <= codes, codes
 
 
 def test_a_refused_run_writes_no_record(
@@ -234,13 +236,13 @@ def test_the_python_door_refuses_what_check_refuses(
     _lookahead_run(tmp_path, capsys, "lookahead")
     judged = check("lookahead", tmp_path)
     refused_codes = {failure["code"] for failure in judged["failures"]}
-    assert "check.execution.not_after_decision" in refused_codes, refused_codes
+    assert "execution.not_after_decision" in refused_codes, refused_codes
 
     workspace = Workspace.open(tmp_path)
     with pytest.raises(VqaprError) as refused:
         preflight_run(workspace, workspace.run_definition("lookahead"))
 
-    assert refused.value.stage == "run.judgments"
+    assert refused.value.stage == "check", "the judgments are `check`'s, whichever door asks"
     assert {failure.code for failure in refused.value.failures} & refused_codes
     assert not (tmp_path / ".vqapr" / "runs" / "lookahead").exists()
 

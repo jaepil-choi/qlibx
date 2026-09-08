@@ -168,8 +168,10 @@ def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(
     # them refuses the declaration's SHAPE. (The placeholder instruments are not a judgment
     # today; whether an instrument the sessions dataset never holds should be one is open.)
     code, checked = _cli(tmp_path, "check", "signal-run")
-    assert checked["stage"] != "unhandled", checked
+    assert not any(
+        failure["code"] == "unhandled" for failure in checked.get("failures", [])
+    ), checked
     assert checked["checked"] == ["workspace", "run", "judgments", "preflight"]
     assert not any(
-        failure["code"].startswith("run.check.") for failure in checked.get("failures", [])
+        failure["code"] == "run.declaration_invalid" for failure in checked.get("failures", [])
     ), "the scaffold's shape was refused, not its placeholders"

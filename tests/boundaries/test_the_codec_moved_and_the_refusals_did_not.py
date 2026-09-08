@@ -14,6 +14,10 @@ same file. `workspace.py` already said so about the constants:
     statically; an alias to another module's constant is opaque to that pass and the code would drop
     out of the inventory silently.
 
+(Record `171` retired the interpolated stage constants: a code is now a plain literal and the
+stage a `Stage` member, so the literal-constant guard below that pinned them is gone. The
+same-file `_workspace_error` funnel is still what the inventory resolves through.)
+
 **What that costs a split.** The resolver unions all callers of a parameter, so one unresolvable
 caller collapses the entire set. An attempt that moved `Workspace` away from `_workspace_error`
 measured **0 codes added and 37 removed** — every `workspace.dataset.*`, `workspace.agenda.*`,
@@ -86,26 +90,6 @@ def test_the_error_constructor_still_lives_with_its_callers() -> None:
         "the callers left `workspace.py` while the constructor stayed, which loses the inventory "
         "the same way round"
     )
-
-
-def test_the_stage_constants_are_literals_where_they_are_interpolated() -> None:
-    """An alias would be opaque to the folding pass, which is how a code drops out silently."""
-    tree = ast.parse(WORKSPACE.read_text(encoding="utf-8"))
-    literals = {
-        node.targets[0].id
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and isinstance(node.targets[0], ast.Name)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
-    }
-
-    for stage in ("WRITE_STAGE", "REGISTER_STAGE", "LOOKUP_STAGE", "REMOVE_STAGE", "SPAN_STAGE"):
-        assert stage in literals, (
-            f"{stage} is no longer a module-level string literal in workspace.py. The inventory "
-            "folds it by reading that literal; an import or an alias makes every code built from "
-            "it vanish from the baseline."
-        )
 
 
 def test_the_codec_is_the_region_a_later_step_can_discard() -> None:

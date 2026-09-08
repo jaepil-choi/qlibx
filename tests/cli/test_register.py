@@ -87,9 +87,9 @@ def test_a_duplicated_logical_key_is_refused_with_the_offending_group(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "dataset.register.key"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "dataset.register.key.duplicate"
+    assert failure["code"] == "dataset.key_duplicate"
     assert "must be unique" in failure["requirement"]
     assert failure["examples"], "the duplicated group must be shown, not merely counted"
     assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
@@ -106,9 +106,9 @@ def test_a_column_that_does_not_exist_is_refused_against_the_real_file(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "dataset.register.schema"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "dataset.register.schema.field_missing"
+    assert failure["code"] == "dataset.field_missing"
     assert "NOT_A_COLUMN" in failure["requirement"]
     # The columns that do exist are the evidence a user needs to fix the declaration.
     assert "close" in failure["observed"]
@@ -130,7 +130,7 @@ def test_a_naive_available_at_is_refused(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["failures"][0]["code"].startswith("dataset.register.schema.available_at")
+    assert payload["failures"][0]["code"].startswith("dataset.available_at")
 
 
 def test_the_first_registration_creates_the_workspace(
@@ -209,8 +209,8 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "component.conformance"
-    assert payload["failures"][0]["code"] == "component.conformance.signature_invalid"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "component.signature_invalid"
 
 
 def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an_id(
@@ -255,9 +255,9 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
                 capsys, "--project-root", str(tmp_path), "register", document
             )
             assert code == 1, (section, spelling, payload)
-            assert payload["stage"] == "declaration.read", (section, spelling)
+            assert payload["stage"] == "register", (section, spelling)
             assert [failure["code"] for failure in payload["failures"]] == [
-                "declaration.read.value_invalid"
+                "declaration.value_invalid"
             ], (section, spelling)
             assert payload["failures"][0]["source"]["key_path"] == section
 
@@ -322,7 +322,7 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.load.constraint_id_mismatch"
+    assert failure["code"] == "component.constraint_id_mismatch"
     # Both strings, in the refusal itself. A reader must not have to open the file to learn which
     # two ids disagreed.
     assert "'position-cap'" in failure["observed"]
@@ -357,7 +357,7 @@ def test_a_constraint_id_computed_at_runtime_is_still_checked(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.load.constraint_id_mismatch"
+    assert failure["code"] == "component.constraint_id_mismatch"
     assert "'position-cap'" in failure["observed"], "the computed id must be reported as computed"
 
 
@@ -382,7 +382,7 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", refused)
     assert code == 1
-    assert payload["failures"][0]["code"] == "component.load.constraint_id_mismatch"
+    assert payload["failures"][0]["code"] == "component.constraint_id_mismatch"
 
     accepted = _write(
         tmp_path,
@@ -433,8 +433,8 @@ def test_an_unknown_section_is_named_rather_than_ignored(
 
     assert code == 1
     assert payload["ok"] is False
-    assert payload["stage"] == "declaration.read"
-    assert payload["failures"][0]["code"] == "declaration.read.unknown_section"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "declaration.unknown_section"
     assert "dataset" in payload["failures"][0]["observed"]
 
 
@@ -476,10 +476,10 @@ def test_a_run_must_declare_exactly_one_source_of_sessions(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
-    assert payload["family"] == "DATA"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
+    assert failure["status"] == 400
     assert "exactly one of sessions_from" in failure["observed"]
     assert failure["source"]["key_path"] == "runs.r"
 
@@ -497,7 +497,7 @@ def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
 
     `apply` opens the workspace lazily for exactly this reason. Passing `workspace()` rather than
     `workspace` into a section's builder once defeated it: Python evaluates the argument first,
-    so a declaration with a bad entry reported `workspace.open.missing` and sent the reader to
+    so a declaration with a bad entry reported `workspace.missing` and sent the reader to
     inspect a directory that was fine.
     """
     document = _write(tmp_path, "w.yaml", 'runs:\n  r:\n    at: "04:00"\n')
@@ -505,8 +505,8 @@ def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read", "the file is what is wrong, not the workspace"
-    assert payload["failures"][0]["code"] == "declaration.read.run_invalid"
+    assert payload["stage"] == "register", "the file is what is wrong, not the workspace"
+    assert payload["failures"][0]["code"] == "declaration.run_invalid"
 
 
 def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
@@ -518,9 +518,9 @@ def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["code"] == "declaration.value_not_permitted"
     assert failure["observed"] == "model"
     assert set(failure["examples"]) == {"datamodel", "strategy", "constraint", "exchange"}
 
@@ -536,9 +536,9 @@ def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert "sessions" in failure["observed"], "the key that was mistyped is named"
     assert failure["source"]["key_path"] == "runs.r"
 

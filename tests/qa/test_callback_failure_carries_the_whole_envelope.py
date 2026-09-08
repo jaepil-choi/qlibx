@@ -1,13 +1,15 @@
-"""A failure raised inside the strategy callback carries all six advertised fields.
+"""A failure raised inside the strategy callback carries every advertised field.
 
-The skill states the guarantee without qualification -- *every entry carries `code`, `source`,
-`requirement`, `observed`, `fix` and `explain`* -- and tells the reader to read `fix` first,
-because it is the sentence that fixes this occurrence.
+The skill states the guarantee without qualification -- *every entry carries `code`, `status`,
+`source`, `requirement`, `observed`, `fix` and `cause`* -- and tells the reader to read `fix`
+first, because it is the sentence that fixes this occurrence.
 
-A raise inside `decide()` delivered four of the six. `fix`, `explain` and `source` were absent
-entirely, and `requirement` degraded to "the guarded boundary must complete without raising", which
-is a statement about this package's plumbing rather than about anything the author did. Recorded as
-`docs/issues/016`, which is the cross-cutting half of three separate entries in the journey log.
+A raise inside `decide()` delivered four of the six fields of the day. `fix`, `explain` and
+`source` were absent entirely, and `requirement` degraded to "the guarded boundary must complete
+without raising", which is a statement about this package's plumbing rather than about anything
+the author did. Recorded as `docs/issues/016`, which is the cross-cutting half of three separate
+entries in the journey log. Record `171` replaced `explain` with `status` and put the exception
+itself on the entry as `cause`.
 """
 
 from __future__ import annotations
@@ -16,20 +18,23 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vqapr.evidence.artifacts import (
-    SimulationFailure,
-    SimulationFailureFamily,
-    SimulationStage,
-)
+from vqapr.evidence.artifacts import SimulationFailure, SimulationStage
 
-_SIX = ("code", "source", "requirement", "observed", "fix", "explain")
+_FIELDS = ("code", "status", "source", "requirement", "observed", "fix", "cause")
+
+
+def _raised(error: Exception) -> Exception:
+    """The exception with a traceback on it, the way a callback's raise arrives."""
+    try:
+        raise error
+    except Exception as raised:
+        return raised
 
 
 def _failure(stage: SimulationStage, cause: Exception) -> dict:
     """One boundary failure, serialized the way an agent reads it."""
     moment = datetime(2024, 3, 6, 4, 0, tzinfo=UTC)
     return SimulationFailure(
-        family=SimulationFailureFamily.INTENT,
         stage=stage,
         clock=moment,
         failed_requirement=None,
@@ -55,15 +60,20 @@ def _failure(stage: SimulationStage, cause: Exception) -> dict:
         "decide() emitted undeclared diagnostic tables: ['ff3.formation']",
     ],
 )
-def test_a_callback_valueerror_carries_all_six_fields(message: str) -> None:
+def test_a_callback_valueerror_carries_every_field(message: str) -> None:
     """Both failures the journey hit, and both used to arrive with three fields missing."""
-    body = _failure(SimulationStage.CALLBACK_INTENT, ValueError(message))
+    body = _failure(SimulationStage.CALLBACK_INTENT, _raised(ValueError(message)))
     entry = body["failures"][0]
 
-    missing = [field for field in _SIX if field not in entry or not entry[field]]
+    missing = [field for field in _FIELDS if field not in entry or not entry[field]]
     assert not missing, f"the envelope dropped {missing}"
 
     assert entry["observed"] == message, "the author's own message must survive intact"
+    assert entry["code"] == "strategy.callback.intent"
+    assert entry["cause"]["type"] == "ValueError"
+    assert entry["cause"]["message"] == message
+    assert message in entry["cause"]["traceback"], "the exception rides whole"
+    assert entry["cause"]["where"]
 
 
 def test_the_requirement_is_about_the_author_not_the_plumbing() -> None:
@@ -96,46 +106,40 @@ def test_fix_names_where_to_look_and_that_re_registration_is_in_place() -> None:
     assert "replaces in place" in fix, "fix implies the author needs a new registration"
 
 
-def test_explain_resolves_to_a_real_recovery_topic() -> None:
-    """`explain` must name a topic the skill actually has a section for.
+def test_status_says_whose_frame_raised() -> None:
+    """`status` is the key to the skill's recovery sections, and it is read off the traceback.
 
-    `tests/characterization/test_explain_topics.py` pins topics and `### Recovering from:` sections
-    to each other in both directions, so a topic invented here would fail that test rather than
-    silently pointing a reader at a section that does not exist.
+    An exception raised from a file outside the package -- this test's, or an author's strategy
+    -- is the user's code crashing (502); one raised from inside the package is the framework's
+    (500). Both are 5xx: the submission was fine, and what ran failed.
     """
-    from vqapr.domain.errors import ExplainTopic
+    intent = _failure(SimulationStage.CALLBACK_INTENT, _raised(ValueError("boom")))
+    publication = _failure(SimulationStage.CALLBACK_PUBLICATION, _raised(RuntimeError("boom")))
 
-    intent = _failure(SimulationStage.CALLBACK_INTENT, ValueError("boom"))
-    publication = _failure(SimulationStage.CALLBACK_PUBLICATION, RuntimeError("boom"))
-
-    assert intent["failures"][0]["explain"] == str(ExplainTopic.COMPONENT_CONTRACT)
-    assert publication["failures"][0]["explain"] == str(ExplainTopic.PUBLICATION)
+    assert intent["failures"][0]["status"] == 502
+    assert intent["failures"][0]["cause"]["origin"] == "user"
+    assert publication["failures"][0]["status"] == 502
+    assert "explain" not in intent["failures"][0]
+    assert "family" not in intent
 
 
 def test_a_framework_refusal_is_still_passed_through_unchanged() -> None:
-    """A `VqaprError` already carries all six, and must not be rewritten by this path.
+    """A `VqaprError` already carries every field, and must not be rewritten by this path.
 
     The synthesis above exists only for exceptions that carry no envelope of their own. Re-coding a
     refusal that already has one would rename a defect the reader may already handle.
     """
-    from vqapr.domain.errors import (
-        ExplainTopic,
-        Failure,
-        FailureFamily,
-        FailureSource,
-        VqaprError,
-    )
+    from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 
     original = VqaprError(
-        stage="declaration.parse",
-        family=FailureFamily.INTENT,
+        stage=Stage.REGISTER,
         failures=[
             Failure.bounded(
                 "declaration.keys_missing",
                 "a declaration must name its component",
+                status=Status.INVALID,
                 observed="missing component",
                 fix="add `component:`",
-                explain=ExplainTopic.DECLARATION_SHAPE,
                 source=FailureSource(file="spec.yaml"),
             )
         ],
@@ -145,4 +149,4 @@ def test_a_framework_refusal_is_still_passed_through_unchanged() -> None:
 
     assert entry["code"] == "declaration.keys_missing"
     assert entry["fix"] == "add `component:`"
-    assert entry["explain"] == str(ExplainTopic.DECLARATION_SHAPE)
+    assert entry["status"] == 400

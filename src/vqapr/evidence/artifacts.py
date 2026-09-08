@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, VqaprError, status_of
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import require_tz_aware
 
@@ -63,19 +63,6 @@ def _fix_for(stage: StrEnum, cause: BaseException) -> str:
     )
 
 
-class SimulationFailureFamily(StrEnum):
-    """Closed ownership family for a failed simulation operation."""
-
-    DATA = "DATA"
-    INTENT = "INTENT"
-    ORDER = "ORDER"
-    EXCHANGE = "EXCHANGE"
-    ACCOUNT = "ACCOUNT"
-    VALUATION = "VALUATION"
-    PUBLICATION = "PUBLICATION"
-    FINALIZATION = "FINALIZATION"
-
-
 class SimulationFailureKind(StrEnum):
     """Closed mutation taxonomy; retry behaviour is determined from this value."""
 
@@ -106,20 +93,16 @@ class SimulationStage(StrEnum):
 
 _PRE_COMMIT: Final = SimulationFailureKind.PRE_COMMIT
 
-_EXPLAIN_BY_STAGE: Final[dict[SimulationStage, ExplainTopic]] = {
-    SimulationStage.CALLBACK_STATE: ExplainTopic.COMPONENT_CONTRACT,
-    SimulationStage.CALLBACK_WINDOW: ExplainTopic.COMPONENT_CONTRACT,
-    SimulationStage.CALLBACK_INTENT: ExplainTopic.COMPONENT_CONTRACT,
-    SimulationStage.CALLBACK_PUBLICATION: ExplainTopic.PUBLICATION,
-}
-"""Which recovery section answers a raise at each stage.
 
-Only existing topics are used. Every one of these already resolves to a `### Recovering from:`
-section in `SKILL.md`, and `tests/characterization/test_explain_topics.py` pins that correspondence
-in both directions -- so adding a topic here without writing its section, or writing a section with
-no topic, fails the suite. Stages absent from this map fall back to `run-precondition`, which is
-the topic for "a precondition of the run did not hold".
-"""
+def _code_for(stage: SimulationStage) -> str:
+    """`strategy.<stage>`: the code of a bare raise inside a strategy's flow.
+
+    `strategy.callback.intent`, `strategy.due.account_commit`, ... -- the subject is the strategy
+    whose flow raised, and the detail is the `SimulationStage` without its `simulation.` prefix.
+    Who must act rides on `status` (502 when the innermost frame is the author's, 500 when it is
+    the framework's), not on the code (record `171`).
+    """
+    return f"strategy.{stage.value.removeprefix('simulation.')}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +127,6 @@ class SimulationFailure(RuntimeError, ValueError):
     def __init__(
         self,
         *,
-        family: SimulationFailureFamily,
         stage: SimulationStage,
         clock: datetime,
         failed_requirement: object | None,
@@ -167,8 +149,6 @@ class SimulationFailure(RuntimeError, ValueError):
         author's own file it was raised from, when a frame of that file is on the traceback.
         Both were absent (`docs/issues/071`): an eight-strategy run refused with a message
         that named no strategy, and `source` was three nulls on every callback failure."""
-        if not isinstance(family, SimulationFailureFamily):
-            raise TypeError("family must be a SimulationFailureFamily")
         if not isinstance(stage, SimulationStage):
             raise TypeError("stage must be a SimulationStage")
         require_tz_aware(clock, name="clock")
@@ -180,7 +160,6 @@ class SimulationFailure(RuntimeError, ValueError):
         if kind is _PRE_COMMIT and pending_id is None and stage.name.startswith("DUE_"):
             # A due operation always has an accepted pending identity before its commit.
             raise ValueError("pre-commit due failures must retain their pending identity")
-        self.family = family
         self.kind = kind
         self.stage = stage
         self.clock = clock
@@ -211,9 +190,10 @@ class SimulationFailure(RuntimeError, ValueError):
         Top-level keys match ``VqaprError.as_dict()`` so a caller can serialize either failure
         through one path instead of branching on the exception type, and each failure entry IS
         ``Failure.as_dict()``: a bare raise is given a ``Failure`` here and rendered by the one
-        implementation rather than by a second literal of the same eight keys. Only bounded
-        scalars are included: the replay coordinates collect into ``at``, while unbounded owner
-        objects and the traceback stay out and belong in a dump file.
+        implementation rather than by a second literal of the same keys. The exception rides
+        whole in that entry's ``cause`` -- type, message, the full traceback -- with a status by
+        whose frame raised it (record `171`); unbounded owner objects stay out, and the replay
+        coordinates collect into ``at``.
         """
         cause = self.cause
         if isinstance(cause, VqaprError):
@@ -224,18 +204,18 @@ class SimulationFailure(RuntimeError, ValueError):
                 observed = observed[:MAX_OBSERVED_CHARS] + "..."
             failures = [
                 Failure.bounded(
-                    f"{self.stage.value}.{type(cause).__name__}",
+                    _code_for(self.stage),
                     _requirement_for(self.stage),
+                    status=status_of(cause),
                     observed=observed,
                     fix=_fix_for(self.stage, cause),
-                    explain=_EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION),
+                    cause=cause,
                     source=self.source,
                 ).as_dict()
             ]
         retry = self.retry_precondition
         return {
             "stage": str(self.stage),
-            "family": str(self.family),
             "kind": str(self.kind),
             # Which strategy of the run this is about. A run holds several (record `139`), and
             # the envelope carried a clock and an account version but no name.

@@ -131,7 +131,7 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
         t.register_component(ref)
     _register_a_run(workspace, ref)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.referenced") as error:
+    with pytest.raises(VqaprError, match=r"remove\.referenced") as error:
         workspace.remove("component", "mom")
     # Asserted on `observed` and `fix` rather than on str(error): those are the fields a reader
     # is shown, and naming the blocker is the whole requirement here.
@@ -214,5 +214,5 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
 def test_an_unknown_kind_is_refused_with_the_permitted_set(tmp_path: Path) -> None:
     workspace, _ = _workspace(tmp_path)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.unsupported_kind"):
+    with pytest.raises(VqaprError, match=r"remove\.unsupported_kind"):
         workspace.remove("nonsense", "x")

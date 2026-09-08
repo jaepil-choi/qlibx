@@ -21,7 +21,6 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence, OperationRole
 from vqapr.evidence.artifacts import (
     FinalizationEvidence,
-    SimulationFailureFamily,
     SimulationStage,
 )
 from vqapr.exchange.venue import Exchange
@@ -213,7 +212,6 @@ class SimulationFlow(OccurrenceFlow):
         with self._context.guard(
             SimulationStage.START,
             cutoff,
-            family=SimulationFailureFamily.DATA,
             owner=self._context.layer.config,
         ):
             self._callback.load_visible_strategy_state()
@@ -236,7 +234,6 @@ class SimulationFlow(OccurrenceFlow):
             self._context.guard(
                 SimulationStage.DUE_SNAPSHOT,
                 due.due_time,
-                family=SimulationFailureFamily.DATA,
                 owner=self._context.frozen_run.execution_input,
             ),
         ):
@@ -258,7 +255,6 @@ class SimulationFlow(OccurrenceFlow):
         with self._context.guard(
             SimulationStage.FINALIZE,
             self._context.frozen_run.end,
-            family=SimulationFailureFamily.FINALIZATION,
             owner=finalization,
         ):
             root = self._context.state.finalize(RunFinalization(finalization))

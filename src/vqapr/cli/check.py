@@ -34,13 +34,13 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import Stage, VqaprError
 from vqapr.flow.judgments import JUDGMENT_CODES, judgments
 from vqapr.flow.preflight import preflight_run as freeze_run
 from vqapr.inputs import InputError
 from vqapr.public import Workspace
 
-STAGE = "run.check"
+STAGE = Stage.CHECK
 
 SIMULATION_CODES = frozenset(JUDGMENT_CODES)
 """The judgments this verb makes about a registered RUN -- `flow/judgments.py`'s list, not a copy.
@@ -52,18 +52,18 @@ publishes them.
 
 CODES = (
     *JUDGMENT_CODES,
-    f"{STAGE}.declaration_invalid",
-    f"{STAGE}.preflight_refused",
+    "run.declaration_invalid",
+    "preflight.refused",
 )
-"""Everything this verb can emit: the judgments, plus two framework-invariant codes.
+"""Everything this verb can emit as a failure: the judgments, plus two framework-invariant codes.
 
-The two `run.check.*` codes name a bare `TypeError`/`ValueError` from a framework invariant, which
-has no structured body of its own and would otherwise surface as `stage: unhandled`.
+The two named here (`cli/run.preflight_refusal`) carry a bare `TypeError`/`ValueError` from a
+framework invariant, which has no structured body of its own and would otherwise surface as an
+`unhandled` failure.
 
-`run.check.judgment_blocked` (`flow/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
-raised by `require_judged` when a judgment could not answer on the run path; this verb asks the
-judgments itself and reports such an entry under `blocked`, never as a failure, so `check` cannot
-emit it.
+`judgment.blocked` (`flow/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is the entry
+for a judgment that could not answer; on the run path `require_judged` raises it, while this verb
+asks the judgments itself and reports such an entry under `blocked`, never under `failures`.
 """
 
 
@@ -98,7 +98,8 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     refuse_a_path(target, verb="check")
     failures: list[dict[str, Any]] = []
     passed: list[str] = []
-    blocked: list[dict[str, str]] = []
+    blocked: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
     done: set[str] = set()
 
     workspace: Workspace | None = None
@@ -108,7 +109,10 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     for phase in phases:
         unmet = [need for need in phase.needs if need not in done]
         if unmet:
-            blocked.append({"check": phase.name, "blocked_by": ", ".join(unmet)})
+            # A phase whose need failed is skipped, not blocked: `blocked` is reserved for a
+            # judgment that could not answer (a failure with a cause); this is a phase that was
+            # never asked, and it is listed by name so the reader sees what was not proven.
+            skipped.append({"check": phase.name, "blocked_by": ", ".join(unmet)})
             continue
 
         blocked_before = len(blocked)
@@ -126,7 +130,11 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 # reported as passed.
                 assert definition is not None
                 judged, could_not_answer = judgments(definition, workspace)  # type: ignore[arg-type]
-                blocked.extend(could_not_answer)
+                # A blocked judgment is a `Failure` (`judgment.blocked`, status 500/502 by its
+                # cause, `observed` naming the judge, the exception whole in `cause`), rendered
+                # through the one shape -- under `blocked`, not `failures`, because nothing was
+                # proven either way.
+                blocked.extend(entry.as_dict() for entry in could_not_answer)
                 failures.extend(failure.as_dict() for failure in judged)
                 if judged:
                     continue
@@ -168,9 +176,10 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
         # A blocked judgment is not a failure, but it is not a clean bill either: nothing was
         # proven where it could not look.
         "ok": not failures and not blocked,
-        "stage": STAGE,
+        "stage": str(STAGE),
         "checked": [phase.name for phase in phases],
         "passed": passed,
+        "skipped": skipped,
         "blocked": blocked,
         "failures": failures,
     }
@@ -187,9 +196,10 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     body = check(str(args.target), project_root)
     if body["ok"]:
         return success(
-            STAGE,
+            str(STAGE),
             checked=body["checked"],
             passed=body["passed"],
+            skipped=body["skipped"],
             blocked=body["blocked"],
         )
     return body

@@ -177,5 +177,5 @@ def test_cascade_keeps_what_another_registered_run_still_names_and_says_who_hold
 def test_cascade_belongs_to_rm_run_only(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code, refused = _cli(capsys, tmp_path, "rm", "dataset", "whatever", "--cascade")
     assert code != 0
-    assert refused["failures"][0]["code"] == "cli.input.value_invalid"
+    assert refused["failures"][0]["code"] == "argument.value_invalid"
     assert "rm run <run-id> --cascade" in refused["retry_precondition"]

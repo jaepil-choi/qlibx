@@ -6,7 +6,7 @@
 > declaration without failures.
 
 `kind` is a required positional and there is no all-kinds form, so running the sentence returned
-`cli.usage.rejected`. Checking the stop condition means one call per kind, and learning that means
+`usage.rejected`. Checking the stop condition means one call per kind, and learning that means
 reading `vqapr list --help` -- not the skill, which is what the reader was following.
 
 The sentence now names the calls. This test is what stops it drifting from the CLI again: a kind
@@ -46,8 +46,8 @@ def test_bare_list_is_still_refused_so_the_skill_must_not_name_it(capsys) -> Non
     envelope = json.loads(capsys.readouterr().out)
 
     assert envelope["ok"] is False
-    assert envelope["stage"] == "cli.usage"
-    assert envelope["failures"][0]["code"] == "cli.usage.rejected"
+    assert envelope["stage"] == "usage"
+    assert envelope["failures"][0]["code"] == "usage.rejected"
 
 
 def test_every_command_the_stop_condition_names_is_a_real_kind() -> None:
@@ -76,6 +76,6 @@ def test_the_skill_says_why_there_is_no_all_kinds_call() -> None:
     block = " ".join(_stop_condition_block().split())
 
     assert "there is no all-kinds form" in block
-    assert "cli.usage.rejected" in block, (
+    assert "usage.rejected" in block, (
         "name the code the reader will see, so a refusal reads as expected rather than as a defect"
     )

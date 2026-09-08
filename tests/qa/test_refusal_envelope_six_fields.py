@@ -1,21 +1,23 @@
-"""Every CLI refusal carries all six fields an agent is told to read.
+"""Every CLI refusal carries every field an agent is told to read.
 
 **This docstring described a live defect that is now fixed, and said so in the present tense.** It
 read: *"`InputError.as_dict()` renders exactly four fields per failure entry [...] and never
 `source`, `fix`, or `explain`"*, and it cited the type at `src/vqapr/cli/inputs.py`. Both statements
-are false against the current tree — `inputs.py` renders all six with a `fix` fallback, and record
-`112` moved the module to `src/vqapr/inputs.py` when the refusal vocabulary went below the CLI. An
-architecture review of VB002 caught the prose still arguing for a defect the assertions below no
-longer find.
+are false against the current tree — `inputs.py` renders every field with a `fix` fallback, and
+record `112` moved the module to `src/vqapr/inputs.py` when the refusal vocabulary went below the
+CLI. An architecture review of VB002 caught the prose still arguing for a defect the assertions
+below no longer find.
 
-What the file checks now, all of it holding:
+Record `171` rebuilt the entry: `explain` is gone, and `status` (who must act) and `cause` (what
+actually happened, whole) are on every entry. What the file checks now, all of it holding:
 
-* every `InputError`-shaped refusal renders `code`, `source`, `requirement`, `observed`, `fix` and
-  `explain`, with `fix` distinct from `requirement` rather than restating it;
+* every `InputError`-shaped refusal renders `code`, `status`, `source`, `requirement`, `observed`,
+  `fix`, `cause`, `examples` and `example_total`, with `fix` distinct from `requirement` rather than
+  restating it, and `cause.where` naming the line that refused;
 * `VqaprError`-shaped package refusals do the same, which they always did;
 * `check`'s own wrapper does not regress the contract it re-wraps into; and
-* a `cli.usage` refusal from the argument parser carries the six as well, which record `114` ruled
-  it must — see `test_a_usage_rejection_carries_the_six_fields_too` for why that reversed an
+* a `usage` refusal from the argument parser carries them as well, which record `114` ruled
+  it must — see `test_a_usage_rejection_carries_the_fields_too` for why that reversed an
   earlier decision.
 """
 
@@ -39,13 +41,26 @@ def _cli(
     return code, json.loads(out.splitlines()[-1])
 
 
+_FIELDS = (
+    "code", "status", "source", "requirement", "observed", "fix", "cause", "examples",
+    "example_total",
+)
+"""The nine keys of one failure entry, in `Failure.as_dict` order (record `171`)."""
+
+
 def _six_field_gaps(entry: dict[str, Any]) -> list[str]:
-    """Which of the six advertised fields are missing or empty on one failure entry."""
+    """Which of the advertised fields are missing or empty on one failure entry.
+
+    `cause.where` is required on every entry: a refusal the framework raised deliberately still
+    names the line that decided it.
+    """
     missing: list[str] = []
-    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
-        required = field in ("code", "requirement", "fix", "explain")
+    for field in _FIELDS:
+        required = field in ("code", "status", "requirement", "fix", "cause")
         if field not in entry or (required and not entry[field]):
             missing.append(field)
+    if "cause" in entry and entry["cause"] and not entry["cause"].get("where"):
+        missing.append("cause.where")
     return missing
 
 
@@ -61,7 +76,7 @@ def test_new_missing_component_id_refusal_carries_all_six_fields(
     code, payload = _cli(capsys, tmp_path, "new", "strategy")
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.keys_missing"
+    assert entry["code"] == "argument.keys_missing"
     gaps = _six_field_gaps(entry)
     assert gaps == [], (
         f"expected exactly source/fix/explain missing (pin the known gap), got: {gaps}. "
@@ -77,7 +92,7 @@ def test_new_dataset_already_exists_refusal_carries_all_six_fields(
     code, payload = _cli(capsys, tmp_path, "new", "run", "--out", str(existing))
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.file_exists"
+    assert entry["code"] == "argument.file_exists"
     assert _six_field_gaps(entry) == [], (
         "a CLI-level refusal must carry the same six fields a package refusal does; the envelope "
         "cannot be conditional on which layer happened to refuse"
@@ -90,7 +105,7 @@ def test_register_missing_file_refusal_carries_all_six_fields(
     code, payload = _cli(capsys, tmp_path, "register", str(tmp_path / "nope.yaml"))
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.file_missing"
+    assert entry["code"] == "argument.file_missing"
     assert _six_field_gaps(entry) == [], (
         "a CLI-level refusal must carry the same six fields a package refusal does; the envelope "
         "cannot be conditional on which layer happened to refuse"
@@ -105,7 +120,7 @@ def test_register_non_mapping_yaml_refusal_carries_all_six_fields(
     code, payload = _cli(capsys, tmp_path, "register", str(bad))
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.not_a_mapping"
+    assert entry["code"] == "argument.not_a_mapping"
     assert _six_field_gaps(entry) == [], (
         "a CLI-level refusal must carry the same six fields a package refusal does; the envelope "
         "cannot be conditional on which layer happened to refuse"
@@ -120,7 +135,7 @@ def test_run_given_a_yaml_path_refusal_carries_all_six_fields(
     entry = payload["failures"][0]
     # Since record `148` a YAML path is refused by name before it is opened: a datamodel is a
     # registered run, so the refusal is about the argument, not about a missing file.
-    assert entry["code"] == "cli.input.value_invalid"
+    assert entry["code"] == "argument.value_invalid"
     assert _six_field_gaps(entry) == [], (
         "a CLI-level refusal must carry the same six fields a package refusal does; the envelope "
         "cannot be conditional on which layer happened to refuse"
@@ -133,7 +148,7 @@ def test_show_unknown_run_refusal_carries_all_six_fields(
     code, payload = _cli(capsys, tmp_path, "show", "run", "no-such-run-id")
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.value_invalid"
+    assert entry["code"] == "argument.value_invalid"
     assert _six_field_gaps(entry) == [], (
         "a CLI-level refusal must carry the same six fields a package refusal does; the envelope "
         "cannot be conditional on which layer happened to refuse"
@@ -152,7 +167,7 @@ def test_check_wraps_the_same_input_error_type_into_the_full_six_fields(
     code, payload = _cli(capsys, tmp_path, "check", str(tmp_path / "nope.yaml"))
     assert code == 1
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.input.value_invalid"  # record 148: a path is refused by name
+    assert entry["code"] == "argument.value_invalid"  # record 148: a path is refused by name
     gaps = _six_field_gaps(entry)
     assert gaps == [], f"check's own InputError wrapper regressed the six-field contract: {gaps}"
     assert entry["fix"].strip() != entry["requirement"].strip()
@@ -214,13 +229,13 @@ datasets:
     code, payload = _cli(capsys, tmp_path, "register", str(conflicting))
     assert code == 1, payload
     entry = payload["failures"][0]
-    assert entry["code"] == "workspace.dataset.register.conflict"
+    assert entry["code"] == "dataset.registered"
     gaps = _six_field_gaps(entry)
     assert gaps == [], f"a real package refusal is missing fields: {gaps}"
     assert entry["fix"].strip() != entry["requirement"].strip()
 
 
-def test_a_usage_rejection_carries_the_six_fields_too(
+def test_a_usage_rejection_carries_the_fields_too(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`docs/issues/030`, second half, settled by record `114` — and this test used to assert the
@@ -238,18 +253,19 @@ def test_a_usage_rejection_carries_the_six_fields_too(
     the most common entry point is not an exception, it is the guarantee not holding. The three
     keys cost nothing to add and `fix` is genuinely actionable.
 
-    `source` and `explain` are `null`, not absent: argparse rejected the command line, so there is
-    no file to point at and no package concept to explain. `SKILL.md` already permitted a null
-    location and now names this case.
+    `source` is an object of nulls, not absent: argparse rejected the command line, so there is
+    no file to point at. `SKILL.md` already permitted a null location and now names this case.
+    Since record `171` the entry is a real `Failure`: status 400 at stage `usage`, and `cause`
+    names the line that refused even though nothing was raised.
     """
     code, payload = _cli(capsys, tmp_path, "list", "nonsense-kind")
     assert code == 1
-    assert payload["stage"] == "cli.usage"
+    assert payload["stage"] == "usage"
 
     entry = payload["failures"][0]
-    assert entry["code"] == "cli.usage.rejected"
-    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
-        assert field in entry, f"the six-field guarantee is missing {field!r} on a usage refusal"
+    assert entry["code"] == "usage.rejected"
+    for field in _FIELDS:
+        assert field in entry, f"the guarantee is missing {field!r} on a usage refusal"
 
     assert entry["fix"], "the field SKILL.md tells a reader to read first must not be empty"
     assert "--help" in entry["fix"], "the fix must name an action, not restate the problem"
@@ -261,8 +277,7 @@ def test_a_usage_rejection_carries_the_six_fields_too(
         "a rejected command line has no location, but it must say so in the shape every other "
         "refusal uses"
     )
-    assert entry["explain"] is None, "and no package concept to explain"
-
-    # `family` stays None, which is a different question and unchanged: FailureFamily is a closed
-    # set of PACKAGE stages, and this failure reached none of them.
-    assert payload["family"] is None
+    assert entry["status"] == 400, "the command line is the submission, and it is what must change"
+    assert entry["cause"]["where"], "the line that refused is evidence too"
+    assert entry["cause"]["traceback"] is None, "nothing was raised, so there is no traceback"
+    assert "family" not in payload and "explain" not in entry, "record 171 absorbed both"

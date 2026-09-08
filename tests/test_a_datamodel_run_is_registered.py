@@ -193,7 +193,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
             _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
         )
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.reference"
+    assert failure["code"] == "run.reference_invalid"
     assert names in failure["requirement"], failure["requirement"]
 
 
@@ -234,6 +234,6 @@ def test_a_document_declaring_the_wrong_kind_or_half_a_kind_is_refused(
     with pytest.raises(VqaprError) as refused:
         apply(document, workspace.project_root, base=workspace.project_root)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert failure["source"]["key_path"] == "runs.bad"
     assert said in failure["observed"], failure["observed"]

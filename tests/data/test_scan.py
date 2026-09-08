@@ -8,7 +8,7 @@ import pytest
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
+from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 
 
 def test_describe_normalises_types_and_keeps_tz_distinct(hive_parquet: Path) -> None:
@@ -88,7 +88,7 @@ def test_missing_path_is_machine_readable(tmp_path: Path) -> None:
     err = caught.value
     assert err.mutation is False
     assert err.retry_precondition
-    assert [f.code for f in err.failures] == ["source.scan.path_missing"]
+    assert [f.code for f in err.failures] == ["source.path_missing"]
     assert err.as_dict()["failures"][0]["observed"] == str(spec.path)
 
 
@@ -97,7 +97,14 @@ def test_unreadable_source_is_machine_readable(tmp_path: Path) -> None:
     junk.write_text("definitely not parquet", encoding="utf-8")
     with pytest.raises(VqaprError) as caught:
         scan.describe(SourceSpec.of("junk", junk))
-    assert [f.code for f in caught.value.failures] == ["source.scan.unreadable"]
+    assert caught.value.stage is Stage.READ
+    failure = caught.value.failures[0]
+    assert [f.code for f in caught.value.failures] == ["source.unreadable"]
+    assert failure.status is Status.UNAVAILABLE
+    # The duckdb exception rides on the failure whole, not as a first line of its message.
+    assert failure.cause is not None
+    assert failure.cause.type is not None
+    assert failure.cause.traceback and "Traceback" in failure.cause.traceback
 
 
 @pytest.mark.real_data

@@ -231,6 +231,8 @@ def test_public_exports_are_fixed() -> None:
         "SimulationFailure",
         "SimulationResult",
         "SourceSpec",
+        "Stage",
+        "Status",
         "StockInstrument",
         "StrategyEntry",
         "StrategyModel",
@@ -318,8 +320,8 @@ def test_schema_failure_does_not_create_a_workspace(tmp_path: Path, hive_parquet
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.schema"
-    assert payload["failures"][0]["code"] == "dataset.register.schema.field_missing"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "dataset.field_missing"
     assert not (tmp_path / ".vqapr").exists()
 
 
@@ -332,10 +334,10 @@ def test_key_failure_does_not_create_a_workspace(tmp_path: Path, dup_parquet: Pa
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.key"
+    assert payload["stage"] == "register"
     assert {failure["code"] for failure in payload["failures"]} == {
-        "dataset.register.key.duplicate",
-        "dataset.register.key.null",
+        "dataset.key_duplicate",
+        "dataset.key_null",
     }
     assert not (tmp_path / ".vqapr").exists()
 
@@ -350,8 +352,8 @@ def test_source_id_mismatch_fails_before_opening_or_mutating(tmp_path: Path) -> 
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.schema"
-    assert payload["failures"][0]["code"] == "dataset.register.schema.source_mismatch"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "dataset.source_mismatch"
     assert not missing.exists()
     assert not (tmp_path / ".vqapr").exists()
 
@@ -365,7 +367,7 @@ def test_source_open_failure_does_not_create_a_workspace(tmp_path: Path) -> None
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "source.scan.path_missing"
+    assert payload["failures"][0]["code"] == "source.path_missing"
     assert not (tmp_path / ".vqapr").exists()
 
 
@@ -523,5 +525,5 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
         register_execution_input(tmp_path, registration)
 
     assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "execution_input.register.price.invalid"
+    assert caught.value.failures[0].code == "execution_input.price_invalid"
     assert not (tmp_path / ".vqapr").exists()

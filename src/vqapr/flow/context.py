@@ -27,13 +27,7 @@ from vqapr.authoring import AccountHistoryInput, Constraint, StrategyModel
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.errors import (
-    ExplainTopic,
-    Failure,
-    FailureFamily,
-    FailureSource,
-    VqaprError,
-)
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.values import MarkBatch
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
@@ -41,7 +35,6 @@ from vqapr.evidence.artifacts import (
     MonitoringEvidence,
     RetryPrecondition,
     SimulationFailure,
-    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
@@ -366,18 +359,17 @@ def _require_constraint_identity(
     )
     observed = f"loaded {loaded_ids!r}, FrozenRun declared {declared_ids!r}"
     raise VqaprError(
-        stage="run.assembly",
-        family=FailureFamily.DATA,
+        stage=Stage.RUN,
         failures=[
             Failure.bounded(
-                code="run.assembly.constraint_identity",
+                code="constraint.identity_mismatch",
+                status=Status.CONFLICT,
                 requirement=requirement,
                 observed=observed,
                 fix=(
                     "register each Constraint under the id its own constraint_id returns, then "
                     "re-run; vqapr check reports this before a run is spent"
                 ),
-                explain=ExplainTopic.COMPONENT_CONTRACT,
             )
         ],
         mutation=False,
@@ -500,7 +492,6 @@ class FlowContext:
         stage: SimulationStage,
         cutoff: datetime,
         *,
-        family: SimulationFailureFamily,
         owner: object,
     ) -> Iterator[None]:
         try:
@@ -512,7 +503,6 @@ class FlowContext:
                 stage=stage,
                 cutoff=cutoff,
                 owner=owner,
-                family=family,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
@@ -523,7 +513,6 @@ class FlowContext:
         stage: SimulationStage,
         cutoff: datetime,
         owner: object,
-        family: SimulationFailureFamily,
         cause: Exception,
         kind: SimulationFailureKind,
     ) -> SimulationFailure:
@@ -533,7 +522,6 @@ class FlowContext:
         component_id = _component_id_of(self.layer)
         failed_requirement: object = owner
         if isinstance(cause, VqaprError):
-            family = SimulationFailureFamily(cause.family.value)
             failed_requirement = cause.failures[0] if len(cause.failures) == 1 else cause.failures
         failure_type = (
             FailedAfterCommit
@@ -541,7 +529,6 @@ class FlowContext:
             else SimulationFailure
         )
         return failure_type(
-            family=family,
             stage=stage,
             clock=cutoff,
             failed_requirement=failed_requirement,
@@ -571,7 +558,6 @@ class FlowContext:
         stage: SimulationStage,
         cutoff: datetime,
         owner: object,
-        family: SimulationFailureFamily,
         kind: SimulationFailureKind,
     ) -> Iterator[None]:
         try:
@@ -586,7 +572,6 @@ class FlowContext:
                 stage=stage,
                 cutoff=cutoff,
                 owner=owner,
-                family=family,
                 cause=error,
                 kind=kind,
             ) from error

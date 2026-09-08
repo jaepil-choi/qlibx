@@ -221,4 +221,4 @@ def test_list_components_can_be_asked_who_reads_a_dataset_in_one_process(
 
     code, refused = _cli(capsys, tmp_path, "list", "runs", "--reads", "price_daily")
     assert code != 0
-    assert refused["failures"][0]["code"] == "cli.input.value_invalid"
+    assert refused["failures"][0]["code"] == "argument.value_invalid"

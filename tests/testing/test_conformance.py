@@ -79,7 +79,7 @@ def test_a_stale_callback_signature_is_caught_though_it_constructs(tmp_path: Pat
 
     assert not diagnosis.ok
     failure = diagnosis.failures[0]
-    assert failure.code == f"{STAGE}.signature_invalid"
+    assert failure.code == "component.signature_invalid"
     assert "monitor() must accept 4 positional arguments" in failure.requirement
 
 
@@ -142,7 +142,7 @@ def test_every_problem_is_reported_at_once(tmp_path: Path) -> None:
 
     codes = [failure.code for failure in diagnosis.failures]
     assert len(codes) == 2, codes
-    assert set(codes) == {f"{STAGE}.signature_invalid"}
+    assert set(codes) == {"component.signature_invalid"}
 
 
 def test_a_load_failure_rides_through_with_its_own_verdict(tmp_path: Path) -> None:
@@ -151,7 +151,7 @@ def test_a_load_failure_rides_through_with_its_own_verdict(tmp_path: Path) -> No
 
     assert not diagnosis.ok
     # The typed load verdict is preserved verbatim rather than flattened into a generic message.
-    assert diagnosis.failures[0].code.startswith("component.load.")
+    assert diagnosis.failures[0].code == "component.wrong_type"
 
 
 def test_the_shipped_profiles_are_the_first_two_implementations_to_pass(tmp_path: Path) -> None:
@@ -200,7 +200,7 @@ def test_registration_calls_this_suite_rather_than_its_own_checks(tmp_path: Path
 
     error = failure.value
     assert getattr(error, "stage", None) == STAGE, "registration must report the conformance stage"
-    assert error.failures[0].code == f"{STAGE}.signature_invalid"
+    assert error.failures[0].code == "component.signature_invalid"
 
 
 def test_the_suite_takes_a_component_ref_and_nothing_else() -> None:

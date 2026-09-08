@@ -38,7 +38,7 @@ from vqapr.flow.record import (
     table_ids,
     unfinished_member_refs,
 )
-from vqapr.inputs import InputError
+from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 KINDS = ("run", "strategy", "datamodel", "model", "dataset")
@@ -131,7 +131,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     except VqaprError:
         known = sorted(str(item.component_id) for item in space.components)
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show model requires the id of a registered component",
             observed=f"{component_id!r}; registered: {', '.join(known) or '(none)'}",
             retry="run `vqapr list components` to see what this workspace holds",
@@ -174,7 +174,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             )
         )
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement=f"show model describes a component of kind {shown}",
             observed=f"{component_id!r} is registered as {cli_kind(kind)}",
             retry=(
@@ -223,7 +223,7 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
     item = registered.get(dataset_id)
     if item is None:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show dataset requires the id of a registered dataset",
             observed=f"{dataset_id!r}; registered: {', '.join(sorted(registered)) or '(none)'}",
             retry="run `vqapr list datasets` to see what this workspace holds",
@@ -275,7 +275,7 @@ def resolve_member(
     run_id, slash, rest = identifier.partition("/")
     if not slash or not rest:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement=f"show {kind} takes `<run-id>/<{kind}-id>@<fp8>`",
             observed=repr(identifier),
             retry=f"run `vqapr list {plural} --run <run-id>` to see the records, then show one",
@@ -292,7 +292,7 @@ def resolve_member(
     if len(matching) == 1:
         return run_id, matching[0]
     raise InputError(
-        "cli.input.value_invalid",
+        VALUE_INVALID,
         requirement=f"show {kind} requires a {kind} record this store holds",
         observed=(
             f"{identifier!r}; "
@@ -314,7 +314,7 @@ def _rows(
     known_tables = table_ids(root, run_id, strategy_ref)
     if table not in known_tables:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="--table names one of the tables this record holds",
             observed=f"{table!r}; recorded: {', '.join(known_tables) or '(none)'}",
             retry=(
@@ -339,7 +339,7 @@ def _rows(
                 rows.append(row)
     except ValueError as damaged:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement=f"every line of {table!r} must be one JSON row",
             observed=str(damaged),
             retry=f"restore the file, or run again to write a fresh record; `vqapr show {label}` "
@@ -383,7 +383,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         record = read_datamodel_record(root, run_id, datamodel_ref)
         if getattr(args, "table", None) is not None:
             raise InputError(
-                "cli.input.value_invalid",
+                VALUE_INVALID,
                 requirement="a datamodel's rows are the dataset it registered, not a table",
                 observed=f"{args.identifier!r} wrote dataset {record.get('dataset_id')!r}",
                 retry=f"vqapr show dataset {record.get('dataset_id')}",
@@ -396,7 +396,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     known = run_ids(root)
     if args.identifier not in known:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show run requires the id of a run this store holds a record for",
             observed=f"{args.identifier!r}; known: {', '.join(known) or '(none)'}",
             retry=(
@@ -409,7 +409,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # live with its strategies now.
         if "strategies" in record:
             raise InputError(
-                "cli.input.value_invalid",
+                VALUE_INVALID,
                 requirement="a run's tables belong to its strategies",
                 observed=(
                     f"run {args.identifier!r} recorded "

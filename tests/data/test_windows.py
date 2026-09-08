@@ -12,7 +12,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import Stage, VqaprError
 from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
 
@@ -117,5 +117,5 @@ def test_window_rejects_an_undeclared_requirement(
     with pytest.raises(VqaprError) as caught:
         window.observations(undeclared)
 
-    assert caught.value.stage == "model_window.requirement"
+    assert caught.value.stage is Stage.RUN
     assert caught.value.mutation is False

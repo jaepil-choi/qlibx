@@ -76,7 +76,7 @@ def test_selected_price_does_not_fall_back_to_another_valid_price(tmp_path: Path
 
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.register.price.invalid"
+        "execution_input.price_invalid"
     ]
     assert diagnosis.failures[0].example_total == 1
     assert "close" in diagnosis.failures[0].requirement
@@ -97,7 +97,7 @@ def test_duplicate_execution_identity_is_rejected(tmp_path: Path) -> None:
 
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.register.key.duplicate"
+        "execution_input.key_duplicate"
     ]
 
 

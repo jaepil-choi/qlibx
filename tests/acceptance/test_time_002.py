@@ -39,7 +39,6 @@ from vqapr.evidence.artifacts import (
     FeedbackEvidence,
     MarkEvidence,
     SimulationFailure,
-    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
 )
@@ -748,7 +747,6 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         ).run()
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_WINDOW
     assert failure.failed_requirement == frozen.strategies[0].requirements
     assert failure.mutation is False
@@ -783,7 +781,6 @@ def test_intent_target_outside_frozen_universe_is_rejected(tmp_path: Path) -> No
         ).run()
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.INTENT
     assert failure.stage is SimulationStage.CALLBACK_INTENT
     # The decision went in; a stamped intent came out and is what the failure names. Identity
     # cannot be compared across that boundary any more, so compare the economics that crossed it.
@@ -812,7 +809,6 @@ def test_constraint_projection_failure_retains_constraint_owner() -> None:
         ).run()
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.INTENT
     assert failure.stage is SimulationStage.CALLBACK_INTENT
     assert failure.failed_requirement is constraint
     assert failure.mutation is False
@@ -837,7 +833,6 @@ def test_callback_publication_failure_is_not_classified_as_intent() -> None:
         ).run()
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.PUBLICATION
     assert failure.stage is SimulationStage.CALLBACK_PUBLICATION
     assert failure.mutation is False
     assert state.current.lifecycle_trace == ()
@@ -938,7 +933,6 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
         flow._callback.dispatch(frozen.strategies[0].agenda.occurrences[0])
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.INTENT
     assert failure.stage is SimulationStage.CALLBACK_INTENT
     assert failure.failed_requirement is frozen.execution_input
     assert failure.mutation is False
@@ -1024,7 +1018,7 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
     diagnosis = validate_execution_input(registration)
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.register.key.duplicate"
+        "execution_input.key_duplicate"
     ]
 
 
@@ -1070,7 +1064,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
             constraints=(DifferentConstraint(),),
         )
     assert [failure.code for failure in caught.value.failures] == [
-        "run.assembly.constraint_identity"
+        "constraint.identity_mismatch"
     ]
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
@@ -1270,7 +1264,6 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
         _flow(frozen, _PayloadFaultStrategy(), state).run()
 
     failure = raised.value
-    assert failure.family is SimulationFailureFamily.DATA
     assert failure.stage is SimulationStage.CALLBACK_STATE
     assert failure.failed_requirement is frozen.strategies[0].config
     assert failure.kind is SimulationFailureKind.PRE_COMMIT
@@ -1370,47 +1363,22 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
 
 @pytest.mark.uc("UC-TIME-002")
 @pytest.mark.parametrize(
-    ("boundary", "family", "stage", "after_commit", "root_version"),
+    ("boundary", "stage", "after_commit", "root_version"),
     (
-        ("data", SimulationFailureFamily.DATA, SimulationStage.DUE_SNAPSHOT, False, 1),
-        ("order", SimulationFailureFamily.ORDER, SimulationStage.DUE_ORDER_PLANNING, False, 1),
-        (
-            "exchange",
-            SimulationFailureFamily.EXCHANGE,
-            SimulationStage.DUE_EXCHANGE_EXECUTION,
-            False,
-            1,
-        ),
-        (
-            "account",
-            SimulationFailureFamily.ACCOUNT,
-            SimulationStage.DUE_ACCOUNT_PREPARATION,
-            False,
-            1,
-        ),
-        (
-            "valuation",
-            SimulationFailureFamily.VALUATION,
-            SimulationStage.DUE_VALUATION_SELECTION,
-            True,
-            2,
-        ),
+        ("data", SimulationStage.DUE_SNAPSHOT, False, 1),
+        ("order", SimulationStage.DUE_ORDER_PLANNING, False, 1),
+        ("exchange", SimulationStage.DUE_EXCHANGE_EXECUTION, False, 1),
+        ("account", SimulationStage.DUE_ACCOUNT_PREPARATION, False, 1),
+        ("valuation", SimulationStage.DUE_VALUATION_SELECTION, True, 2),
         # Four publications precede the feedback since record `148`: the callback, the commit,
         # the mark, and the monitoring that judges the marked book right after it.
-        (
-            "publication",
-            SimulationFailureFamily.PUBLICATION,
-            SimulationStage.DUE_FEEDBACK_PUBLICATION,
-            True,
-            4,
-        ),
+        ("publication", SimulationStage.DUE_FEEDBACK_PUBLICATION, True, 4),
     ),
 )
 def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     boundary: str,
-    family: SimulationFailureFamily,
     stage: SimulationStage,
     after_commit: bool,
     root_version: int,
@@ -1457,7 +1425,6 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         flow.run()
 
     failure = raised.value
-    assert failure.family is family
     assert failure.stage is stage
     assert failure.kind is (
         SimulationFailureKind.FAILED_AFTER_COMMIT

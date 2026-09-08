@@ -79,7 +79,14 @@ def _assert_failure_names_its_strategy(failure: dict) -> None:
     """The payload alone says which strategy, which file and which line (`071`)."""
     assert failure["component_id"] == "never-ready"
     (entry,) = failure["failures"]
-    assert entry["code"] == "simulation.callback.intent.ValueError"
+    assert entry["code"] == "strategy.callback.intent"
+    # 502, not 500: the innermost frame of the traceback is the author's file, so the author's
+    # code crashed and the framework is only the gateway that ran it (record `171`).
+    assert entry["status"] == 502, entry
+    assert entry["cause"]["type"] == "ValueError"
+    assert entry["cause"]["origin"] == "user"
+    assert entry["cause"]["traceback"].startswith("Traceback"), entry["cause"]
+    assert "never_ready.py" in entry["cause"]["traceback"]
     assert entry["observed"].startswith("the signal is not ready: "), entry["observed"]
     assert entry["source"]["key_path"] == "strategies.never-ready"
     assert entry["source"]["file"].endswith("never_ready.py"), entry["source"]

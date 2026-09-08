@@ -73,7 +73,7 @@ def test_a_damaged_workspace_refuses_rather_than_reading_as_no_roster(
     with pytest.raises(VqaprError) as refused:
         registered_roster(tmp_path)
 
-    assert refused.value.failures[0].code.startswith("workspace.open"), (
+    assert refused.value.failures[0].code in {"workspace.invalid", "workspace.unreadable"}, (
         "the typed refusal must reach the caller instead of becoming `no roster`"
     )
 

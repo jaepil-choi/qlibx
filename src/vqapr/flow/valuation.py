@@ -21,7 +21,6 @@ from vqapr.domain.agendas import OperationOccurrence, OperationRole
 from vqapr.domain.values import MarkBatch
 from vqapr.evidence.artifacts import (
     MonitoringEvidence,
-    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
@@ -119,7 +118,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_SNAPSHOT,
             cutoff=pending.target.target_at,
             owner=execution_input,
-            family=SimulationFailureFamily.DATA,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             snapshot = exact_execution_snapshot(
@@ -134,7 +132,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
-            family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             selected_marks = _marks_from_execution_snapshot(
@@ -147,7 +144,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
-            family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             mark = self._context.valuation_service.mark(before, selected_marks)
@@ -165,7 +161,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             prepared_account = self._context.account.prepare_valuation(
@@ -182,7 +177,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             prepared_root = self._context.state.prepare_valuation_only(
@@ -201,7 +195,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             self._context.account.commit_valuation(prepared_account)
@@ -209,7 +202,6 @@ class ValuationPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             self._context.state.publish_valuation_only(prepared_root)
@@ -308,7 +300,6 @@ class ValuationPhase:
             stage=SimulationStage.MONITORING,
             cutoff=cutoff,
             owner=self._context.layer.agenda,
-            family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             return self._monitor(occurrence, cutoff)

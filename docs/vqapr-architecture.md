@@ -2726,148 +2726,107 @@ ABC인 이유는 그 반대다 — 사용자가 구현하는 계약이다(§10.2
 
 #### 전체
 
+측정한 트리다(2026-09-08, 기록 `188`). 줄 수는 그 파일이 얼마나 큰 일을 하는지에 대한 유일한
+객관적 신호이므로 함께 적는다 — 800줄을 넘는 파일은 다음 분할 후보이지 결함이 아니다.
+
 ```text
 src/vqapr/
 ├── domain/          누구에게도 의존하지 않고 모두가 의존하는 어휘
-│   ├── identifiers.py     InstrumentId·DatasetId·RunId·IntentId·OrderBatchId·ExchangeId·ProducerId·TableId
-│   ├── references.py      ArtifactRef·ModelStateRef — 저장된 것을 가리키는 값(대상+버전+schema identity)
-│   ├── enums.py           Side · InstrumentKind
-│   ├── instruments.py     Stock/Etf discriminated union. exchange_id 없음, 거래 가능 여부 없음
-│   ├── timestamps.py      TzAware 검증 · at_local · shift_calendar. **감싸는 클래스 없음**
-│   ├── rows.py            Scalar · Rows — compute 반환·recorder 입력·publish 표현이 같은 타입
-│   └── errors.py          Status(HTTP 번호) · Stage · Cause · Failure · VqaprError(stage·mutation·retry·correlation·failures)
+│   ├── identifiers.py   90   typed id 생성자. NewType + 검증 문
+│   ├── values.py       372   Side · Mark · MarkBatch · ModelMemory · tz-aware 검증
+│   ├── shapes.py       367   데이터가 취하는 모양: Grain · CrossSection · Series · Panel · Observation
+│   ├── instruments.py  496   Stock/Etf/Index/Factor · InstrumentRoster
+│   ├── agendas.py      228   OperationAgenda · OperationOccurrence. recurrence 해석 없음
+│   └── errors.py       535   Status(HTTP 번호) · Stage · Failure · VqaprError
 │
-├── runtime/         frozen finite agenda merge와 고정 event 순서
-│   ├── agendas.py             OperationAgenda value/validation/identity. recurrence 해석 없음
-│   └── events.py              closed operation/due-execution roles · fixed priority (§3.2)
+├── authoring.py       1232   저자가 구현하는 넷(Component · DataModel · StrategyModel · Constraint)과
+│                             그들이 주고받는 값(DatasetInput · Hold · Rebalance · ConstraintBounds …)
+├── authoring_lookback.py 95  scaffold가 emit하는 lookback 선언
+├── authoring_records.py 170  TableSpec + InvocationRecorder — 저자가 기록하겠다고 선언하는 것
+├── calls.py            251   Call 모양: 저자가 콜백에서 받는 bounded view
 │
 ├── data/            그때 무엇을 읽을 수 있는가
-│   ├── sources.py         SourceSpec · FieldPartition — 물리 배치
-│   ├── datasets.py        DatasetRegistration — 의미. role을 이름에 새기지 않는다
-│   ├── lookback.py        RowsLookback · CalendarLookback. **미래 방향 타입의 부재가 계약**
-│   ├── requirements.py    DataRequirement · CoverageRequirement
-│   ├── resolution.py      requirement → 물리 질의. lookback을 질의로 밀어 넣는다
-│   ├── scan.py            SourceSpec을 여는 유일한 곳. 창도 점도 아닌 **스캔** (§4.1)
-│   ├── store.py           ObservationStore 포트
-│   ├── windows.py         ModelWindow · ObservationBatch(Rows+coverage) · AccessRecord
-│   └── stores/            memory.py · duckdb.py
-│
-├── models/          두 확장점의 계약
-│   ├── model.py           Model ABC — requirements·tables·memory·recorder·save/load_payload
-│   ├── memory.py          ModelMemory · normalize_memory
-│   ├── contexts.py        ModelContext / DataModelContext / StrategyModelContext(current occurrence)
-│   ├── data_model.py      DataModel — compute(ctx) -> Rows
-│   └── strategy_model.py  StrategyModel callback contract + NoDecision
+│   ├── sources.py       52   SourceSpec — 물리 배치
+│   ├── datasets.py    1074   DatasetRegistration + 등록 문의 판정 전부. execution role 포함
+│   ├── lookback.py     170   RowsLookback · InstantsLookback · CalendarLookback. **미래 방향 부재가 계약**
+│   ├── requirements.py  55   DataRequirement — 소비자가 선언한다
+│   ├── resolution.py    44   requirement → 물리 질의
+│   ├── scan.py        1471   SourceSpec을 여는 유일한 곳
+│   ├── store.py        414   ObservationStore + duckdb 구현
+│   ├── panel.py        318   Arrow 패널과 창 자르기
+│   └── windows.py      215   ModelWindow · AccessRecord
 │
 ├── transforms/      순수 leaf. 값을 값으로 (§5.6)
-│   ├── cross_section.py   tie-aware Decimal rank
-│   ├── fama_french.py     reference-market cut points · full-universe assignment
-│   └── neutralize.py      exact 노출 회귀 제거
-│
-├── portfolio/       순수 leaf. 값을 배분으로 (§5.3)
-│   ├── weighting.py       signal_weight · equal_weight · proportional_weight
-│   ├── optimize.py        제약 하 배분. 현금이 결정 변수
-│   ├── allocation.py      배분 입력 계약 — 선언된 invariant로 규정, 소비 시점 검증
-│   ├── diagnostics.py     판단 시점 진단 — gross/net·집중도·**의도 회전율**
-│   └── intents.py         PortfolioIntent · from_weights · 생성 시 검증 (§5.4)
-│
-├── constraints/     선언 하나, 소비자 둘 (§5.7)
-│   ├── constraint.py      Constraint 프로토콜 — 사용자가 구현하는 계약
-│   ├── projection.py      선언 + PIT 관측 → Bounds. 누락 시 0 추정 없이 실패
-│   ├── evaluation.py      weights **또는** holdings → findings
-│   ├── monitoring.py      MonitoringPolicy + agenda reference
-│   ├── findings.py        ConstraintFinding · ConstraintReport
-│   └── builtin/           no_short.py · single_name_cap.py
-│
-├── orders/          intended → requested 경계 (닫힘)
-│   ├── planning.py        plan_orders(...) **함수**
-│   └── batches.py         OrderRequest · OrderBatch + rounding/clipping/skip 진단
+├── portfolio/       순수 leaf. 값을 배분으로 (§5.3) — budgets · weighting · optimize · intents …
+├── constraints/     선언 하나, 소비자 둘 (§5.7) — evaluation.py + builtin/
+├── orders/          intended → requested 경계 (닫힘) — planning.py는 **함수**, batches.py
 │
 ├── exchange/        확장점
-│   ├── venue.py           Exchange 프로토콜
-│   ├── listings.py        ListingRule · ExchangeRulesView
-│   ├── costs.py           CostRule + 정확히 하나 매칭 강제
-│   ├── execution_table.py ExecutionTableSpec + 집합 단위 점 조회
-│   ├── conventions.py     FillConvention. 소비자 셋(runtime agenda·venue·preflight)
-│   ├── fills.py           Fill · FillBatch · ZeroDealtReason
-│   ├── venue.py           Exchange protocol + AcademicExchange
-│   └── venues/            krx.py   ← 이름에 cadence가 없다
+│   ├── venue.py        224   Exchange ABC + ExecutionCall + AcademicExchange
+│   ├── listings.py     608   TradeRule · ExchangeRulesView · TradeTerms
+│   ├── costs.py         96   CostRule
+│   ├── conventions.py  301   FillConvention · ExactExecutionTarget
+│   ├── execution_table.py 548 ExecutionTableSpec + 집합 단위 점 조회
+│   ├── fills.py        140   Fill · FillBatch · ZeroDealtReason
+│   └── venues/krx.py   461   KRX 프로파일
 │
 ├── account/         commit authority (닫힘)
-│   ├── account.py         Account + commit/mark + JournalEntry + AccountMode
-│   ├── snapshot.py        AccountSnapshot · AccountMark · AccountState
-│   └── history.py         고정 기록 집합 + AccountHistoryInput 선언에 묶인 projection (§7.3)
-│
-├── valuation/       (닫힘)
-│   ├── configuration.py   ValuationConfig + agenda reference
-│   ├── marking.py         체결 스냅샷 가격 → MarkBatch
-│   └── marks.py           Mark · MarkBatch
+│   ├── account.py      356   Account + commit/mark + JournalEntry
+│   ├── snapshot.py     172   AccountSnapshot(+trusted 문) · AccountMark · AccountState
+│   ├── marking.py      145   ValuationService — 보유마다 어느 마크를 고르는가 (기록 `188`에 이 층으로)
+│   └── history.py      114   고정 기록 집합 + 선언에 묶인 projection (§7.3)
 │
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
-│   ├── run.py             RunDefinition · RunResult(limitations 포함)
-│   ├── preflight.py       §12 검사 전부
-│   ├── simulation.py      루프: occurrence를 하나씩 어느 phase로 보낼지 정한다 (기록 147)
-│   ├── context.py         phase들이 공유하는 상태(FlowContext)와 실패 봉투, 값 클래스, 패키지 표
-│   ├── callback.py        callback phase — 전략의 decide → 도장 찍힌 intent 수락
-│   ├── execution.py       execution phase — intent → 주문 → 체결 → 계좌 commit (척추 호출 자리)
-│   ├── valuation.py       valuation phase — mark → 계좌, 그리고 monitoring 판정
-│   ├── views.py           requirement → bounded ModelWindow
-│   ├── model_state.py     ModelStateStore 포트 · ModelStateRef 발행
-│   ├── materialize.py     파생 dataset 발행 authority — DataModel 결과·run 배분·run record가 같은 문을 쓴다. **available_at 부여**
-│   └── stamping.py        recorder 봉투 5개
+│   ├── loop.py         142   **EventLoop** — 두 kind가 함께 구현하는 척추 (기록 `182`)
+│   ├── artifacts.py    366   SimulationFailure 봉투 + 단계별 evidence 값
+│   ├── run_state.py    766   RunStateRepository. 두 kind와 declaration·freeze·CLI가 함께 쓴다
+│   ├── roster.py       180   등록된 roster 읽기
+│   ├── freeze.py       364   엔진 값 → record payload (freeze_* · contract_report)
+│   ├── orchestration.py 751  run 하나 = 멤버 여럿, kind 무관
+│   ├── declaration/          run이 무엇을 선언하고 무엇이 얼려지는가
+│   │   ├── run.py      663   RunDefinition · RunExecution · RunFill · StrategyEntry
+│   │   ├── preflight.py 841  §12 검사 전부. 실행 dataset과 run의 fill을 여기서 묶는다
+│   │   ├── frozen.py   429   FrozenRun · FrozenStrategy · FrozenAgenda + identity
+│   │   └── judgments.py 650  check가 내리는 판정
+│   ├── strategy/             kind 하나: 계좌를 가진 전략
+│   │   ├── loop.py     283   StrategyEventLoop
+│   │   ├── callback.py 768   decide → 도장 찍힌 intent
+│   │   ├── execution.py 349  intent → 주문 → 체결 → 계좌 commit
+│   │   ├── valuation.py 406  mark → 계좌, 그리고 monitoring
+│   │   └── context.py  608   phase들이 공유하는 상태와 실패 봉투
+│   └── datamodel/            kind 하나: 계좌를 보지 않고 dataset을 쓴다
+│       ├── loop.py      95   DataModelEventLoop · DataModelResult
+│       ├── compute.py  107   ComputeHandler · DataModelTrace
+│       └── output.py   515   available_at 부여 · look-ahead 거부 · 출력 dataset 발행
 │
-├── evidence/        영수증 (닫힘)
-│   ├── tables.py          TableSpec + 예약 컬럼
-│   ├── recorder.py        Recorder — write-only
-│   ├── publication.py     staging → chunk flush → atomic visible
-│   ├── artifacts.py       봉투 + typed 직렬화 + 경계 validation
-│   ├── lineage.py         AccessRecord → dependency graph
-│   └── catalog.py         §9.6 reuse 판정
+├── record/          run이 남긴 것 (기록 `188`에 flow 밖으로). **flow를 import하지 않는다**
+│   ├── schema.py       429   무엇이 record인가 — 상수·모델·arrow 인코딩·경로
+│   ├── reader.py       655   무엇이 있고 어디까지 갔는가, 그리고 행을 되읽기
+│   └── writer.py       620   id를 claim하고 쓴다 (lock · buffer · parquet)
 │
+├── report/          저장된 record → 수치와 문서
 ├── analysis/        저장된 것을 읽고 계산한다. **새 portfolio return을 만들지 않는다**
-│   ├── performance.py     저장된 mark → NAV·수익률·drawdown
-│   ├── activity.py        저장된 fill → **실현 회전율**·비용 분해
-│   ├── signal.py          저장된 signal + 실현값 → IC·RankIC·hit rate·decay
-│   ├── ledger.py          intended/requested/dealt/committed/marked 5열 (§9.4)
-│   ├── diagnostics.py     zero-dealt 사유·clipping·skip·constraint finding 집계
-│   └── renderers.py       값 → table / machine-readable. **plotting 의존성 없음**
-│
-├── extension/       네 확장점의 정문 (§10.2)
-│   ├── component.py       ComponentKind · ComponentRef(path+config+fingerprint)
-│   ├── loading.py         ref → 인스턴스. partial registration 방지
-│   ├── fingerprint.py     source 해시 + drift 거부
-│   ├── registration.py    submit — load → conformance → fingerprint → 기록
-│   ├── scaffold.py        템플릿 설치
-│   └── templates/         datamodel · strategy_model · exchange · constraint
-│
-├── agent/           agent 표면 (§10.4)
-│   ├── targets.py         Codex · Claude Code · custom root (PRD §11.2)
-│   ├── onboarding.py      preview / apply / update / remove
-│   ├── descriptors.py     error code·schema·계약을 패키지에서 **생성**
-│   ├── skill/             설치되는 SKILL.md + references
-│   └── sample/            PRD §11.4 sample journey
-│
-├── testing/         내장과 확장을 구분할 분기점이 없다 (§10.3)
-│   ├── conformance/       runner · datamodel · strategy_model · exchange · constraint
-│   ├── agendas.py · datasets.py · execution_tables.py · accounts.py
-│   └── components.py · asserts.py
-│
-├── cli/             **파일 목록 = 명령어 목록**
-│   └── main · new · check · register · data · run · report · agent
-│
-├── workspace.py     한 project의 선언 집합이 사는 곳 (§10.5)
-└── public.py        CLI가 서 있는 지원 구현 표면 (§2.6)
+├── extension/       네 확장점의 정문 (§10.2) — component · loading · fingerprint · registration · scaffold
+├── agent/           agent 표면 (§10.4) — skillset · skills/ · sample/
+├── testing/         conformance — 내장과 확장을 구분할 분기점이 없다 (§10.3)
+├── cli/             **파일 목록 = 명령어 목록** — main · new · check · register · run · show · list · rm · skill
+├── declarations.py 1159   선언 문서 하나를 트랜잭션 하나로 적용한다
+├── workspace_document.py 447  workspace.yaml의 codec
+├── workspace.py    1278   한 project의 선언 집합이 사는 곳 (§10.5)
+└── public.py        310   CLI가 서 있는 지원 구현 표면 (§2.6)
 ```
 
-> `project.py` · `simulation.py` · `materialization.py` · `venues.py` · `_internal/*_bridge.py`는
-> 위 트리에 있으나 **어떤 CLI 명령도 실행하지 않는다**(측정: CLI journey 0줄). 미출하·동결이며,
-> 판정과 G008 조건은 `docs/design/agent-first-surface.md`의 "The ruling — 2026-08-28" 절에 있다.
+`tests/`는 위 패키지를 1:1로 미러하고, 층 하나로는 성립하지 않는 것들이 더 붙는다. 미러가 지켜지는지는
+기계로 볼 수 있다 — `tests/flow/strategy/`가 있는 이유는 `flow/strategy/`가 있기 때문이고, 어느 한쪽에만
+있는 디렉터리는 그 자체로 질문이다.
 
-`tests/`는 위 패키지를 1:1로 미러하고 둘이 더 붙는다.
-
-- `tests/spine/` — **여러 층을 지나야만 성립하는** 시나리오만. 단일 층에서 검증되는 UC는 그 층에 둔다.
+- `tests/acceptance/` — **여러 층을 지나야만 성립하는** 시나리오. 단일 층에서 검증되는 UC는 그 층에 둔다.
 - `tests/boundaries/` — 없어야 하는 것이 없음을 증명한다. 미래 방향 `Lookback` 부재, Model에서 체결
-  테이블로 가는 경로 부재, plotting 의존성 부재, 미지원 semantics 거부, `public.py` export 고정.
+  테이블로 가는 경로 부재, plotting 의존성 부재, 미지원 semantics 거부, `public.py` export 고정,
+  함수 지역 import 상한.
+- `tests/characterization/` — 거절 어휘(코드·status·stage)를 baseline과 대조한다. 정적 스캔과 실제
+  실행을 모두 돌려, 코드가 조용히 사라지거나 생기는 것을 막는다.
+- `tests/qa/` · `tests/showcases/` — `vqapr check`가 모으는 판정, 그리고 showcase가 실제로 돈다는 것.
 
 UC 추적은 디렉터리가 아니라 `@pytest.mark.uc("UC-…")` 마커로 한다. 그래야 테스트가 자기 층에 있어도
 §14가 기계로 검사된다.

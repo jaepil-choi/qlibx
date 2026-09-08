@@ -33,7 +33,6 @@ import duckdb
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DataModelEntry,
     DatasetRegistration,
     ExecutionInputRegistration,
@@ -43,12 +42,13 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyEntry,
-    component_ref,
     preflight_run,
-    register_component,
+    register_constraint,
     register_data_model,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
 )
 
@@ -414,17 +414,9 @@ def main() -> None:
         PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
     ).result()
 
-    strategy_ref = component_ref(
-        "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "ReversalLongShort"
-    )
-    exchange_ref = component_ref(
-        "showcase-exchange", ComponentKind.EXCHANGE, paths["exchange"], "ShowcaseExchange"
-    )
-    constraint_ref = component_ref(
-        "showcase-constraint", ComponentKind.CONSTRAINT, paths["constraint"], "SingleNameCap"
-    )
-    for reference in (strategy_ref, exchange_ref, constraint_ref):
-        register_component(PROJECT, reference)
+    register_strategy_model(PROJECT, "showcase-strategy", paths["strategy"], "ReversalLongShort")
+    register_exchange(PROJECT, "showcase-exchange", paths["exchange"], "ShowcaseExchange")
+    register_constraint(PROJECT, "showcase-constraint", paths["constraint"], "SingleNameCap")
 
 
     definition = RunDefinition(

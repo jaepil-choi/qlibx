@@ -10,7 +10,7 @@ processes, each of which freezes the registered run again and runs one strategy 
 from __future__ import annotations
 
 import multiprocessing
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -263,32 +263,23 @@ def run(
     outcomes: dict[str, StrategyOutcome] = {}
     errors: dict[str, SimulationFailure] = {}
     if jobs > 1 and len(selected) > 1:
-        if store is None:
-            raise ValueError(
-                "jobs > 1 needs a store_root: a worker's result comes back as its outcome"
-            )
-        context = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=min(jobs, len(selected)), mp_context=context) as pool:
-            futures = {
-                layer.component_id: pool.submit(
-                    run_registered_strategy,
-                    str(root_path),
-                    frozen.run_id,
-                    layer.component_id,
-                    str(store),
-                    replace_record,
-                    record_account_positions,
-                )
-                for layer in selected
-            }
-            # Every worker's outcome is collected, failed or not. A `SimulationFailure` comes
-            # back INSIDE the outcome (`run_registered_strategy`); only an exception about the
-            # store or the package itself still escapes `result()` here, as it did before.
-            for component_id, future in futures.items():
-                outcome = future.result()
-                outcomes[component_id] = outcome
-                if outcome.record is not None:
-                    records[component_id] = outcome.record
+        # Every worker's outcome is collected, failed or not. A `SimulationFailure` comes
+        # back INSIDE the outcome (`run_registered_strategy`); only an exception about the
+        # store or the package itself still escapes `result()` here, as it did before.
+        outcomes = _in_workers(
+            selected,
+            run_registered_strategy,
+            (replace_record, record_account_positions),
+            jobs=jobs,
+            store=store,
+            root_path=root_path,
+            run_id=frozen.run_id,
+        )
+        records = {
+            component_id: outcome.record
+            for component_id, outcome in outcomes.items()
+            if outcome.record is not None
+        }
         return RunResult(
             frozen.run_id,
             MappingProxyType(results),
@@ -361,25 +352,18 @@ def _run_datamodels(
     results: dict[str, SimulationResult | DataModelResult] = {}
     records: dict[str, Mapping[str, object]] = {}
     if jobs > 1 and len(layers) > 1:
-        if store is None:
-            raise ValueError(
-                "jobs > 1 needs a store_root: a worker's result comes back as its record"
-            )
-        context = multiprocessing.get_context("spawn")
-        with ProcessPoolExecutor(max_workers=min(jobs, len(layers)), mp_context=context) as pool:
-            futures = {
-                layer.component_id: pool.submit(
-                    run_registered_datamodel,
-                    str(root_path),
-                    frozen.run_id,
-                    layer.component_id,
-                    str(store),
-                    replace_record,
-                )
-                for layer in layers
-            }
-            for component_id, future in futures.items():
-                records[component_id] = future.result()
+        # A datamodel's refusal is a `VqaprError`, and unlike a `SimulationFailure` it makes the
+        # trip back from the worker as itself (`VqaprError.__reduce__`), so `result()` raises
+        # here exactly what the sequential loop below raises.
+        records = _in_workers(
+            layers,
+            run_registered_datamodel,
+            (replace_record,),
+            jobs=jobs,
+            store=store,
+            root_path=root_path,
+            run_id=frozen.run_id,
+        )
         return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
 
     for layer in layers:
@@ -392,6 +376,39 @@ def _run_datamodels(
     return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
 
 
+def _in_workers[Returned](
+    layers: Sequence[FrozenStrategy] | Sequence[FrozenDataModel],
+    worker: Callable[..., Returned],
+    arguments: tuple[object, ...],
+    *,
+    jobs: int,
+    store: Path | None,
+    root_path: Path,
+    run_id: str,
+) -> dict[str, Returned]:
+    """One member per worker, in `jobs` spawned processes; what each returns, by component id.
+
+    The one pool behind `--jobs` for both kinds of run. The strategy branch and the datamodel
+    branch each carried their own copy of this, and the `docs/issues/073` fix -- a worker's
+    failure has to be something `concurrent.futures` can pickle -- landed in only one of them.
+    `worker` is a module-level function taking `(project_root, run_id, component_id, store_root,
+    *arguments)` as strings and bools, because it crosses a `spawn` boundary.
+    """
+    if store is None:
+        raise ValueError(
+            "jobs > 1 needs a store_root: a worker's result comes back through the record store"
+        )
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=min(jobs, len(layers)), mp_context=context) as pool:
+        futures = {
+            layer.component_id: pool.submit(
+                worker, str(root_path), run_id, layer.component_id, str(store), *arguments
+            )
+            for layer in layers
+        }
+        return {component_id: future.result() for component_id, future in futures.items()}
+
+
 def run_registered_datamodel(
     project_root: str,
     run_id: str,
@@ -399,7 +416,13 @@ def run_registered_datamodel(
     store_root: str,
     replace_record: bool,
 ) -> Mapping[str, object]:
-    """Run one datamodel of a REGISTERED run, in this process; the worker under `--jobs`."""
+    """Run one datamodel of a REGISTERED run, in this process; the worker under `--jobs`.
+
+    A refusal is raised, not returned: a datamodel's `VqaprError` pickles (`__reduce__`), so the
+    parent's `future.result()` re-raises it as itself, the same exception the sequential loop
+    raises. The strategy worker cannot do this because its `SimulationFailure` carries the owner
+    objects that were refused; that is why it returns a `StrategyOutcome` instead.
+    """
     workspace = Workspace.open(project_root)
     frozen = _preflight_run(workspace, workspace.run_definition(run_id))
     _, record = _run_datamodel(

@@ -131,6 +131,26 @@ class Failure:
                 f"examples must be bounded to {MAX_EXAMPLES}, got {len(self.examples)}"
             )
 
+    def as_dict(self) -> dict[str, object]:
+        """The one failure entry every envelope carries, in the one key order.
+
+        `VqaprError.as_dict`, `InputError`, `SimulationFailure` and `check` all emit this entry,
+        and each used to write the eight keys out by hand -- six literals that agreed only as
+        long as nobody edited one. A reader parses these by name (`SKILL.md`), so the shape is a
+        contract, and a contract has one implementation. Anything that renders a failure builds
+        a `Failure` and calls this; nothing else spells the keys.
+        """
+        return {
+            "code": self.code,
+            "source": self.source.as_dict(),
+            "requirement": self.requirement,
+            "observed": self.observed,
+            "fix": self.fix,
+            "explain": str(self.explain),
+            "examples": list(self.examples),
+            "example_total": self.example_total,
+        }
+
     @classmethod
     def bounded(
         cls,
@@ -216,6 +236,28 @@ class VqaprError(Exception):
         self.correlation_id = correlation_id or uuid.uuid4().hex
         super().__init__(self._summary())
 
+    def __reduce__(self) -> tuple[object, ...]:
+        """Rebuild through the keyword-only constructor, so the error crosses a process boundary.
+
+        The default pickling of an exception calls `cls(*args)` with the message, which this
+        constructor refuses; a `--jobs` worker's refusal then came back to the parent as
+        `TypeError: ... takes 1 positional argument` and rendered `stage: "unhandled"` with no
+        failures (`docs/issues/073`, closed for strategies by returning an outcome instead; the
+        datamodel worker raises, so its exception has to travel as itself -- record `170`).
+        """
+        return (
+            _rebuild_error,
+            (
+                type(self),
+                self.stage,
+                self.family,
+                self.failures,
+                self.mutation,
+                self.retry_precondition,
+                self.correlation_id,
+            ),
+        )
+
     def _summary(self) -> str:
         head = f"{self.family}:{self.stage} — {len(self.failures)} failure(s)"
         return head + "".join(f"\n  [{f.code}] {f.requirement}" for f in self.failures)
@@ -228,20 +270,28 @@ class VqaprError(Exception):
             "mutation": self.mutation,
             "retry_precondition": self.retry_precondition,
             "correlation_id": self.correlation_id,
-            "failures": [
-                {
-                    "code": f.code,
-                    "source": f.source.as_dict(),
-                    "requirement": f.requirement,
-                    "observed": f.observed,
-                    "fix": f.fix,
-                    "explain": str(f.explain),
-                    "examples": list(f.examples),
-                    "example_total": f.example_total,
-                }
-                for f in self.failures
-            ],
+            "failures": [f.as_dict() for f in self.failures],
         }
+
+
+def _rebuild_error(
+    cls: type[VqaprError],
+    stage: str,
+    family: FailureFamily,
+    failures: tuple[Failure, ...],
+    mutation: bool,
+    retry_precondition: str | None,
+    correlation_id: str,
+) -> VqaprError:
+    """The unpickling half of `VqaprError.__reduce__`: the same error, same correlation id."""
+    return cls(
+        stage=stage,
+        family=family,
+        failures=failures,
+        mutation=mutation,
+        retry_precondition=retry_precondition,
+        correlation_id=correlation_id,
+    )
 
 
 @dataclass(frozen=True, slots=True)

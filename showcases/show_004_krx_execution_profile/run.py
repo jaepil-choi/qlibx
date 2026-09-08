@@ -49,7 +49,6 @@ from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
@@ -60,13 +59,13 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyEntry,
-    component_ref,
     export_roster,
     preflight_run,
-    register_component,
     register_data_model,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
 )
 
@@ -400,20 +399,13 @@ def main() -> None:
     register_cli(argparse.Namespace(declaration=str(declaration)), project_root=PROJECT)
 
     exchanges = _write_exchanges(universe)
-    strategy_ref = component_ref(
-        "momentum-strategy", ComponentKind.STRATEGY_MODEL, MODELS, "MomentumLongOnly"
+    strategy_ref = register_strategy_model(
+        PROJECT, "momentum-strategy", MODELS, "MomentumLongOnly",
     )
-    academic_ref = component_ref(
-        "show004-academic",
-        ComponentKind.EXCHANGE,
-        exchanges["academic"],
-        "ShowcaseAcademicExchange",
+    academic_ref = register_exchange(
+        PROJECT, "show004-academic", exchanges["academic"], "ShowcaseAcademicExchange",
     )
-    krx_ref = component_ref(
-        "show004-krx", ComponentKind.EXCHANGE, exchanges["krx"], "ShowcaseKrxExchange"
-    )
-    for reference in (strategy_ref, academic_ref, krx_ref):
-        register_component(PROJECT, reference)
+    krx_ref = register_exchange(PROJECT, "show004-krx", exchanges["krx"], "ShowcaseKrxExchange")
 
 
     def _outcome(exchange: ComponentRef) -> dict[str, Any]:

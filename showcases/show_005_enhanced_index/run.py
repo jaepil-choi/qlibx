@@ -47,7 +47,6 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -57,12 +56,13 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     ZeroDealtReason,
-    component_ref,
     export_roster,
     preflight_run,
-    register_component,
+    register_constraint,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
     shipped_constraint_path,
 )
@@ -800,18 +800,12 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     halted_instrument = universe[0]
 
     paths = _write_components(project, universe, kinds)
-    alpha_ref = component_ref(
-        "show005-alpha", ComponentKind.STRATEGY_MODEL, paths["alpha"], "SignedAlpha"
-    )
-    academic_ref = component_ref(
-        "show005-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
-    )
-    krx_ref = component_ref(
-        "show005-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
-    )
-    index_ref = component_ref(
+    register_strategy_model(project, "show005-alpha", paths["alpha"], "SignedAlpha")
+    register_exchange(project, "show005-academic", paths["academic"], "ShowcaseAcademicExchange")
+    register_exchange(project, "show005-krx", paths["krx"], "ShowcaseKrxExchange")
+    register_strategy_model(
+        project,
         "show005-index",
-        ComponentKind.STRATEGY_MODEL,
         paths["enhanced"],
         "EnhancedIndex",
         config={
@@ -821,16 +815,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     )
     # The shipped constraints enter through the same door as any user component: a resolved path,
     # a fingerprint and a config. Nothing about them bypasses registration.
-    no_short_ref = component_ref(
+    register_constraint(
+        project,
         "no-short",
-        ComponentKind.CONSTRAINT,
         shipped_constraint_path("no_short"),
         "NoShort",
         config={"constraint_id": "no-short"},
     )
-    cap_ref = component_ref(
+    register_constraint(
+        project,
         "single-name-cap",
-        ComponentKind.CONSTRAINT,
         shipped_constraint_path("single_name_cap"),
         "SingleNameCap",
         config={
@@ -840,8 +834,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "constraint_id": "single-name-cap",
         },
     )
-    for reference in (alpha_ref, index_ref, academic_ref, krx_ref, no_short_ref, cap_ref):
-        register_component(project, reference)
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")

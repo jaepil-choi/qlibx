@@ -125,10 +125,10 @@ RUNNER = textwrap.dedent(
     from zoneinfo import ZoneInfo
 
     from vqapr.public import (
-        AccountMode, AccountSnapshot, ComponentKind, DatasetRegistration,
+        AccountMode, AccountSnapshot, DatasetRegistration,
         ExecutionInputRegistration, ExecutionTableSpec, FillConvention, FillSelector,
-        RunDefinition, SourceSpec, StrategyEntry, component_ref, preflight_run,
-        register_component, register_dataset, register_execution_input, run,
+        RunDefinition, SourceSpec, StrategyEntry, preflight_run, register_dataset,
+        register_exchange, register_execution_input, register_strategy_model, run,
     )
 
     import authored_strategies
@@ -165,16 +165,11 @@ RUNNER = textwrap.dedent(
         ),
     )
 
-    strategy_ref = component_ref(
-        "clock-strategy", ComponentKind.STRATEGY_MODEL,
-        Path(authored_strategies.__file__).resolve(), "MonthlyDecider",
-    )
-    exchange_ref = component_ref(
-        "clock-exchange", ComponentKind.EXCHANGE,
-        Path(authored_strategies.__file__).resolve(), "ClockExchange",
-    )
-    for reference in (strategy_ref, exchange_ref):
-        register_component(root, reference)
+    # Through the doors that prove conformance before they write (record 170); the hand-built
+    # `ComponentRef` these replaced was registered without it.
+    source = Path(authored_strategies.__file__).resolve()
+    register_strategy_model(root, "clock-strategy", source, "MonthlyDecider")
+    register_exchange(root, "clock-exchange", source, "ClockExchange")
 
     # By id, not by ref: a run is a registered document and the workspace resolves what it names
     # at preflight (record 139). The run declares its sessions and wall time itself (record 148):

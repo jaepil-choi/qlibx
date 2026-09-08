@@ -532,6 +532,35 @@ def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
     assert opposite[0][0] == pytest.approx(0.0)
 
 
+def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raises(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """A datamodel refused in a `--jobs` worker is refused by its own code in the parent.
+
+    The strategy pool learned this in `docs/issues/073` by returning an outcome; the datamodel
+    pool was a copy that never did, so a `VqaprError` raised in a worker failed to unpickle
+    (keyword-only constructor) and the run died as `stage: unhandled` with no failures. One pool
+    driver for both kinds and a picklable `VqaprError` close it (record `170`).
+    """
+    _prepared(
+        tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("stray", "StrayNameModel")
+    )
+    definition = _definition(
+        "factors",
+        DataModelEntry("reversal", "reversal_2d", ("score",)),
+        DataModelEntry("stray", "stray_2d", ("score",)),
+    )
+    assert register_run(tmp_path, definition) is True
+
+    with pytest.raises(VqaprError) as caught:
+        _run(tmp_path, definition, jobs=2)
+
+    assert caught.value.stage == "datamodel.output"
+    (failure,) = caught.value.failures
+    assert failure.code == "datamodel.output.instrument_unrequested"
+    assert "stray_2d" not in _dataset_ids(tmp_path)
+
+
 def test_memory_persists_across_the_sessions_of_one_run(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:

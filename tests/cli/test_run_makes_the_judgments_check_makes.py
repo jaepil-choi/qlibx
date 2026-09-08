@@ -98,6 +98,30 @@ def test_the_refusal_carries_the_six_fields_in_checks_own_codes(
     assert failure["source"]["key_path"].startswith("runs.lookahead")
 
 
+def test_an_unknown_strategy_name_is_a_bounded_refusal_not_an_unhandled_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--strategy typo` names its mistake, on a run the judgments would also refuse.
+
+    Once the judgments moved inside `preflight_run` (record `168`), the member-selection loop
+    ran first, and a typo there escaped as a bare `KeyError`: `stage: "unhandled"`, an empty
+    failure list, and the judgment refusal the run carried was never shown (record `170`).
+    """
+    _workspace_for_run(tmp_path, capsys)
+    _lookahead_run(tmp_path, capsys, "lookahead")
+
+    code, payload = _cli(
+        capsys, "--project-root", str(tmp_path), "run", "lookahead", "--strategy", "typo"
+    )
+
+    assert code != 0
+    assert payload["stage"] != "unhandled"
+    (failure,) = payload["failures"]
+    assert failure["code"] == "cli.input.value_invalid"
+    assert "typo" in failure["observed"]
+    assert "lookahead" in failure["requirement"]
+
+
 def test_run_refuses_when_a_judgment_could_not_answer(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

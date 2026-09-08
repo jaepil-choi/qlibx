@@ -62,7 +62,6 @@ def test_the_facade_and_the_module_agree_on_one_object(tmp_path: Path) -> None:
     """
     assert public.ComponentKind is component.ComponentKind
     assert public.ComponentRef is component.ComponentRef
-    assert public.fingerprint_component is fingerprint.fingerprint_component
 
 
 def test_a_component_ref_still_constructs_and_fingerprints(tmp_path: Path) -> None:

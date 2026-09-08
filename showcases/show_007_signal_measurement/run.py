@@ -55,7 +55,6 @@ import duckdb
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -67,11 +66,11 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     callback_evidence,
-    component_ref,
     preflight_run,
-    register_component,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
 )
 
@@ -555,14 +554,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     )
 
     paths = _write_components(project, universe)
-    signal_ref = component_ref(
-        "show007-signal", ComponentKind.STRATEGY_MODEL, paths["signal"], "ReversalSignalStrategy"
-    )
-    academic_ref = component_ref(
-        "show007-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
-    )
-    for reference in (signal_ref, academic_ref):
-        register_component(project, reference)
+    register_strategy_model(project, "show007-signal", paths["signal"], "ReversalSignalStrategy")
+    register_exchange(project, "show007-academic", paths["academic"], "ShowcaseAcademicExchange")
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")

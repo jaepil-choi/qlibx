@@ -59,7 +59,6 @@ from vqapr.public import (
     SHIPPED_CONSTRAINTS,
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -69,12 +68,13 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     callback_evidence,
-    component_ref,
     export_roster,
     preflight_run,
-    register_component,
+    register_constraint,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
     shipped_constraint_path,
 )
@@ -762,21 +762,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     register_cli(argparse.Namespace(declaration=str(roster_declaration)), project_root=project)
 
     paths = _write_components(project, universe)
-    reversal_ref = component_ref(
-        "show006-reversal", ComponentKind.STRATEGY_MODEL, paths["reversal"], "ReversalMember"
+    reversal_ref = register_strategy_model(
+        project, "show006-reversal", paths["reversal"], "ReversalMember",
     )
-    momentum_ref = component_ref(
-        "show006-momentum", ComponentKind.STRATEGY_MODEL, paths["momentum"], "MomentumMember"
+    momentum_ref = register_strategy_model(
+        project, "show006-momentum", paths["momentum"], "MomentumMember",
     )
-    academic_ref = component_ref(
-        "show006-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
+    academic_ref = register_exchange(
+        project, "show006-academic", paths["academic"], "ShowcaseAcademicExchange",
     )
-    krx_ref = component_ref(
-        "show006-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
-    )
-    ensemble_ref = component_ref(
+    register_exchange(project, "show006-krx", paths["krx"], "ShowcaseKrxExchange")
+    register_strategy_model(
+        project,
         "show006-ensemble",
-        ComponentKind.STRATEGY_MODEL,
         paths["ensemble"],
         "EnsembleStrategy",
         config={
@@ -784,16 +782,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "momentum_dataset_id": "momentum_allocation",
         },
     )
-    no_short_ref = component_ref(
+    register_constraint(
+        project,
         "no-short",
-        ComponentKind.CONSTRAINT,
         shipped_constraint_path("no_short"),
         "NoShort",
         config={"constraint_id": "no-short"},
     )
-    cap_ref = component_ref(
+    register_constraint(
+        project,
         "single-name-cap",
-        ComponentKind.CONSTRAINT,
         shipped_constraint_path("single_name_cap"),
         "SingleNameCap",
         config={
@@ -803,17 +801,6 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "constraint_id": "single-name-cap",
         },
     )
-    components_to_register = (
-        reversal_ref,
-        momentum_ref,
-        ensemble_ref,
-        academic_ref,
-        krx_ref,
-        no_short_ref,
-        cap_ref,
-    )
-    for reference in components_to_register:
-        register_component(project, reference)
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")

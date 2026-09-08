@@ -184,7 +184,20 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     definition: RunDefinition = workspace.run_definition(target)
     selected = tuple(getattr(args, "strategies", None) or ())
     for name in selected:
-        definition.member(name)  # KeyError names the models the run does hold
+        try:
+            definition.member(name)
+        except KeyError as unknown:
+            # Bounded here, before the judgments: a bare KeyError rendered as `stage:
+            # "unhandled"`, and once the judgments moved inside `preflight_run` (record `168`)
+            # a typo in `--strategy` reached this loop first and hid the judgment refusal a
+            # run would otherwise have named (record `170`).
+            raise InputError(
+                VALUE_INVALID,
+                requirement=f"`--strategy` names a model the run {target!r} declares",
+                observed=f"{name!r} is not one of them; the run names "
+                + ", ".join(entry.component_id for entry in definition.members),
+                retry=f"vqapr show run {target}, then name one of its models",
+            ) from unknown
     # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
     # the judgments, the freeze and the roster read all see the same document. The judgments are
     # asked inside `preflight_run`, in the order `check` asks them, so this verb and a Python
@@ -404,7 +417,7 @@ def _roster_envelope(roster: object | None) -> dict[str, object]:
             "known": False,
             "note": (
                 "no instrument roster is registered, so every fill records kind: None and "
-                "cost_by_kind() collapses to one unlabelled bucket; register one with "
+                "the report's cost by kind shows one 'unknown' bucket; register one with "
                 "`vqapr register <instruments>.yaml`"
             ),
         }

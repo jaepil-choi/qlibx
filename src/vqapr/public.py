@@ -57,7 +57,13 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
-from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch, declare_local_instant
+from vqapr.domain.values import (
+    LocalInstantDeclaration,
+    Mark,
+    MarkBatch,
+    Side,
+    declare_local_instant,
+)
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
@@ -75,10 +81,9 @@ from vqapr.exchange.listings import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.exchange.venue import AcademicExchange, Side
+from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
 
 # One door into the extension authorities: `vqapr.extension.*`, never `vqapr._internal.*`.
 # The adapters below are transitional and scheduled for deletion, and that is the reason to use
@@ -237,7 +242,6 @@ __all__ = (
     "ZeroDealtReason",
     "build_roster",
     "callback_evidence",
-    "component_ref",
     "conformance",
     "decay",
     "declare_local_instant",
@@ -263,7 +267,6 @@ __all__ = (
     "read_run_record",
     "read_strategy_record",
     "read_strategy_table",
-    "register_component",
     "register_constraint",
     "register_data_model",
     "register_dataset",
@@ -285,39 +288,6 @@ __all__ = (
 )
 
 
-
-
-def component_ref(
-    component_id: str,
-    kind: ComponentKind,
-    path: str | Path,
-    object_name: str,
-    *,
-    config: dict[str, object] | None = None,
-) -> ComponentRef:
-    """Build a source-fingerprinted component declaration for registration."""
-    fingerprint = fingerprint_component(
-        path,
-        kind=kind,
-        object_name=object_name,
-        config=config,
-    )
-    return ComponentRef.of(
-        component_id,
-        kind,
-        path,
-        object_name,
-        config=config,
-        fingerprint=fingerprint,
-    )
-
-
-
-
-def register_component(project_root: str | Path, component: ComponentRef) -> bool:
-    """Register one validated extension component reference."""
-    with Workspace.transaction(project_root) as transaction:
-        return transaction.register_component(component)
 
 
 def register_run(project_root: str | Path, definition: RunDefinition) -> bool:

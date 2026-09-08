@@ -24,7 +24,6 @@ from vqapr.domain.errors import VqaprError
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -33,11 +32,11 @@ from vqapr.public import (
     RunDefinition,
     SourceSpec,
     StrategyEntry,
-    component_ref,
     preflight_run,
-    register_component,
     register_dataset,
+    register_exchange,
     register_execution_input,
+    register_strategy_model,
     run,
 )
 
@@ -226,17 +225,10 @@ def main() -> None:
     )
     register_execution_input(PROJECT, _execution_input("krx-daily", execution_path))
 
-    strategy_ref = component_ref(
-        "showcase-strategy", ComponentKind.STRATEGY_MODEL, strategy_path, "ShowcaseStrategy"
+    register_strategy_model(PROJECT, "showcase-strategy", strategy_path, "ShowcaseStrategy")
+    register_exchange(
+        PROJECT, "showcase-exchange", ROOT / "show001_exchange.py", "ShowcaseExchange",
     )
-    exchange_ref = component_ref(
-        "showcase-exchange",
-        ComponentKind.EXCHANGE,
-        ROOT / "show001_exchange.py",
-        "ShowcaseExchange",
-    )
-    for reference in (strategy_ref, exchange_ref):
-        register_component(PROJECT, reference)
 
 
     definition = RunDefinition(

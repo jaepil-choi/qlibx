@@ -89,31 +89,15 @@ def test_the_description_says_what_and_when(name: str) -> None:
         )
 
 
-STILL_THE_WHOLE_BODY = "introduce-vqapr"
-"""The skill the split has not reached yet.
-
-It holds the pre-split body -- every rung, every status section -- until the other eight have
-been cut out of it, because deleting content before its new home exists would leave a window
-where it is in neither place. Marked `xfail(strict=True)`, so the day it is finally cut this test
-fails for *passing* and the marker has to go.
-"""
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        pytest.param(
-            n,
-            marks=pytest.mark.xfail(
-                strict=True, reason="holds the pre-split body until the other eight are cut"
-            ),
-        )
-        if n == STILL_THE_WHOLE_BODY
-        else n
-        for n in NAMES
-    ],
-)
+@pytest.mark.parametrize("name", NAMES)
 def test_the_body_is_short_enough_to_load(name: str) -> None:
+    """No exemptions.
+
+    `introduce-vqapr` was exempt with `xfail(strict=True)` while it held the pre-split body --
+    every rung and every status section -- because deleting content before its new home existed
+    would have left a window where it was in neither place. Cutting it made this test fail for
+    *passing*, which is what the strict marker was for, and the exemption came out with it.
+    """
     lines = SKILLS[name]["SKILL.md"].decode("utf-8").count("\n")
     assert lines < MAX_BODY_LINES, (
         f"{name}/SKILL.md is {lines} lines; split it into references/ (PRD §11.2)"

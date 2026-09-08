@@ -20,7 +20,7 @@ directions still round-trips through a single conversion.
 
 ```python
 # WRONG: preserves the epoch value, changes only how it displays.
-# This does NOT mean "read this wall clock as Seoul time".
+# This does **not** mean "read this wall clock as Seoul time".
 arr.cast(pa.timestamp("us", tz="Asia/Seoul"))
 
 # RIGHT: interprets the naive wall clock as being in that zone.

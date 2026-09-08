@@ -21,21 +21,27 @@ from __future__ import annotations
 
 import json
 import re
-from pathlib import Path
 
+from vqapr.agent.skillset import shipped_skills
 from vqapr.cli.list_ import KINDS
 from vqapr.cli.main import main
 
-from tests.skill_prose import shipped_prose
+SURVEYS_THE_WORKSPACE = "inspect-workspace"
+"""The skill that now owns surveying a workspace with `vqapr list`.
 
-# 산문은 하나의 파일이 아니라 출하되는 전체다 (PRD §11.2). `tests/skill_prose.py` 참조.
+`docs/issues/030`'s sentence lived under "Rung 1" in the single pre-split skill, and this helper
+sliced it out between two heading strings. PRD §11.2 made the skill a set, and the surveying half
+moved here.
+
+The anchor is now the skill rather than a pair of headings inside one. Slicing by heading text is
+what broke when the content moved -- and the guarantee was never about a section, it is that
+whatever tells a reader to survey the workspace names kinds the CLI accepts.
+"""
 
 
 def _stop_condition_block() -> str:
-    """The Rung 1 stop condition and the fenced commands beneath it."""
-    text = shipped_prose()
-    start = text.index("**Stop condition:** `register` accepted")
-    return text[start : text.index("#### Correcting a registration", start)]
+    """The body of the skill that tells a reader to survey the workspace."""
+    return shipped_skills()[SURVEYS_THE_WORKSPACE]["SKILL.md"].decode("utf-8")
 
 
 def test_bare_list_is_still_refused_so_the_skill_must_not_name_it(capsys) -> None:

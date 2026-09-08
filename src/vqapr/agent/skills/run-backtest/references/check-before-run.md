@@ -43,8 +43,25 @@ Two statuses mean the command was fine and the moment was not:
 - **503** — a resource is temporarily unavailable.
 
 **Retry the same command unchanged.** Nothing in the declaration needs to change, and changing it
-is how a transient becomes a permanent edit. A run lock releases itself 120 seconds after its last
-refresh, so a lock left by a killed process clears on its own.
+is how a transient becomes a permanent edit.
+
+### A lock inside its heartbeat window does not mean the holder is alive
+
+`vqapr run` claims each strategy's record with a lock it refreshes as it writes. So a refusal
+saying the id is *held by a lock inside its heartbeat window* means only that **the lock was
+touched in the last 120 seconds** — not that anything is still running.
+
+**The pid in that message is copied out of the lock file, never interrogated.** A run killed by
+Ctrl-C, a CI timeout or an OOM kill leaves exactly this state, and inside the window nothing can
+tell it from a run that is executing.
+
+That lock **releases itself 120 seconds after its last refresh**, and the refusal states how many
+seconds are left. Re-running the same command after that reclaims the record with no flag and no
+cleanup.
+
+**Waiting is the answer that is safe under both readings.** Once the lock has aged out,
+`vqapr rm strategy <run-id>/<strategy-id>@<fp8>` clears an abandoned record. `--force` is safe
+under neither: against a run that really is live it destroys rows that run is still writing.
 
 If the same status returns after a wait, say so and stop rather than escalating to a destructive
 verb.

@@ -6,8 +6,11 @@ A registration is an identity — one id means one declaration — and editing s
 registered is the same command twice:
 
 ```bash
-vqapr register prices.yaml     # again, with the file edited
+vqapr register prices.yaml                        # a declaration: the same file again
 ```
+
+For a **component**, run the same `vqapr register <kind> <id> <file.py>` again — the same three
+arguments, with the file edited. There is no separate update verb and no flag.
 
 It replaces the registration in place, with no flag — there is no `register --force`. The two
 `--force` flags that do exist belong elsewhere: `vqapr run --force` replaces a run *record*, and
@@ -17,9 +20,9 @@ The success payload then carries `replaced: {fingerprint: <the old one>}`, and s
 it when the id was new or the bytes unchanged. The id stays, whatever names it keeps working, and
 the next run's record carries a new `source_digest`.
 
-## That digest is a receipt, not a gate
+## That digest is a receipt rather than a gate
 
-It records what ran. Nothing re-checks it afterwards. Two runs of edited code carry two different
+It records what ran, and nothing re-checks it afterwards. Two runs of edited code carry two different
 digests, which is exactly what makes an edit visible in the record — and a run that already pinned
 the old fingerprint is unaffected, because its record testifies to what it used.
 
@@ -51,7 +54,7 @@ the run.
 
 ## When it is genuinely a different thing
 
-Give it its own id. One id never means two things.
+Then give it its own id — one id never means two things.
 
 The judgement is the same one the strategy-file rule makes: re-registering an edited file reads as
 *tuning* the same thing, and a reader of the record sees it that way. Another arm of a methodology,
@@ -62,7 +65,7 @@ a different signal, the same shape with one constant changed — those are a new
 If this is a first-run workspace with no result worth preserving:
 
 1. Keep the authored YAML and component files.
-2. Obtain the user's approval for a destructive reset.
+2. Before touching anything, obtain approval for the destructive reset from the user.
 3. Remove only the project-local `.vqapr/` workspace state.
 4. Register the corrected declarations from scratch.
 

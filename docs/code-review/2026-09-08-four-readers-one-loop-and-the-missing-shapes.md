@@ -395,10 +395,28 @@ protocol · service · manager는 패턴이다"*는 아키텍처를 처음 쓸 �
 것이지 패턴 이름을 피하라는 뜻이 아니었다. 따라서 `EventLoop`·`Handler`·`Component`는 채택 가능하고,
 §10의 그 줄은 위 원칙으로 다시 쓴다. `flow/` → `engine/` 개명은 이 판정에 딸린 작은 결정으로 남는다.
 
-**8-2. Exchange는 Component인가.** 넣으면: `ExecutionFieldRequirement` → `DatasetInput`의 point grain,
-`ExecutionCall(orders, account, snapshot, rules)` 신설, `bind_registry_to_venue` 삭제, 로더 하나.
-안 넣으면: §1 표가 3+1로 남고 `object.__setattr__` 주입은 유지. **판정 기준 제안:** 점 조회를
-`Grain.POINT`로 선언하는 것이 *"grain은 선언하지 유도하지 않는다"*(§2.2)와 맞는가.
+**8-2. Exchange는 Component인가 — RESOLVED 2026-09-08, 오너 판정.** 넷의 공통 개념은 *"이벤트에서
+시각을 받아 콜백되는 객체"*이고 Exchange도 그 하나다. Exchange가 다른 점은 한 점을 읽어서가 아니라
+(한 점 읽기는 전략도 한다) **주문을 같이 받아 체결해야 한다**는 것이다. `Grain.POINT`는 철회한다 —
+grain은 등록한 표의 한 행이 무엇인가이지 읽는 방식이 아니며, "이전까지"(`≤ ts`)와 "정확히"(`= ts`)의
+차이는 이벤트 종류가 정한다.
+
+**실행 테이블은 data다. 단, 특별하게 다룬다.** 물리(`trade_at`·instrument·`is_tradable`·후보 가격
+필드들)는 dataset 등록이 갖고, **어느 가격을 `trade_price`로 쓸지는 run이 고른다** — 같은 표로 어떤
+run은 close, 어떤 run은 open으로 체결한다. 오늘은 `trade_price`가 `FillConvention` 안에 있어 실행
+입력 등록의 일부이므로(§17.7) 가격을 바꾸면 다른 `execution_input_id`를 등록해야 한다. 판정에 따르면
+그 바인딩은 run 정의로 올라오고 `ExecutionInputRegistration`은 dataset 등록의 실행 역할로 흡수된다.
+run이 자기 체결 규약을 들면 `docs/issues/034`(바꾼 결과가 record에 안 남는다)도 그 자리에서 닫힌다.
+Model은 이 표를 보통의 PIT 데이터(`available_at ≤ ts`)로만 읽을 수 있고, 정확히-ts 읽기는 due
+이벤트를 받는 Exchange와 valuation만 한다 — §10.1의 *"Model이 체결 테이블에 닿지 못한다"*는 그
+형태로 유지된다.
+
+**같은 날 같이 닫힌 것.** 8-3은 실측이 닫았다 — 3,000종목에서 cross-section 산술은 콜백당 10 ms
+안쪽이고 run 356초 중 몇 퍼센트라 안쪽은 Decimal dict로 두고 타입만 만든다(`scratchpad/bench_xs.py`,
+issue 068). 8-4는 오너 판정 — **pydantic 기본**, 검증 없는 운반용 값만 dataclass; 검증 문(디스크·등록·
+저자 반환)과 신뢰 문(`model_construct`, 프레임워크가 만든 값)을 값 타입마다 둘 다 둔다. 8-5는 오너
+판정 — **Constraint도 기억이 필요할 수 있다**("3회 위반하면 out"), `memory`는 `Component`의 것이고
+run state가 컴포넌트마다 memory를 원자적으로 커밋한다.
 
 **8-3. Cross-section의 dtype.** `Decimal` 정확성은 optimizer·account에서 오너 판정이다. `CrossSection`
 을 `Mapping[str, Decimal]` 위의 얇은 타입으로 시작할지, Arrow decimal128로 갈지. **이 리뷰의 제안은

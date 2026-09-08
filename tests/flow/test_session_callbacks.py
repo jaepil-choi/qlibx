@@ -42,6 +42,7 @@ def _state(*, memory: object = None) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})),
         initial_model_memory=memory,
+        initial_constraint_memory={"constraint": None},
     )
 
 

@@ -231,10 +231,11 @@ def _flow(
     )
 
 
-def _state(row_sink=None) -> RunStateRepository:
+def _state(row_sink=None, rules: tuple[Constraint, ...] = RULES) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
         row_sink=row_sink,
+        initial_constraint_memory={rule.constraint_id: rule.memory for rule in rules},
     )
 
 
@@ -302,7 +303,9 @@ def test_a_run_that_declared_no_constraint_writes_no_monitoring_table(tmp_path: 
     writer = RunRecordWriter(tmp_path, "monitored")
     writer.open()
 
-    result = _flow(tmp_path, _state(row_sink=writer.append), _sessions(2), rules=()).run()
+    result = _flow(
+        tmp_path, _state(row_sink=writer.append, rules=()), _sessions(2), rules=()
+    ).run()
     writer.release()
 
     assert TABLE not in table_ids(tmp_path, "monitored")

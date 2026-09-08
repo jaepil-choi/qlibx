@@ -161,6 +161,13 @@ class SimulationFlow(OccurrenceFlow):
             raise ValueError("state AccountState must match FrozenRun initial account snapshot")
         if frozen_run.initial_account_mode != account.mode:
             raise ValueError("Account mode must match FrozenRun initial account mode")
+        carried = set(state.current.constraint_state_refs)
+        if carried != {constraint.constraint_id for constraint in constraints}:
+            raise ValueError(
+                "state must carry the initial memory of exactly the loaded constraints "
+                f"(RunStateRepository initial_constraint_memory): carrying {sorted(carried)!r}, "
+                f"loaded {sorted(constraint.constraint_id for constraint in constraints)!r}"
+            )
 
         # All phase dependencies exist before the first phase is constructed. The loop owns
         # its agenda and progress hook; the context owns this strategy's runtime and bookkeeping.
@@ -214,7 +221,7 @@ class SimulationFlow(OccurrenceFlow):
             cutoff,
             owner=self._context.layer.config,
         ):
-            self._callback.load_visible_strategy_state()
+            self._callback.load_visible_state()
 
     def _dispatch_static(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         if occurrence.role is OperationRole.STRATEGY_CALLBACK:

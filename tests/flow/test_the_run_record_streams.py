@@ -125,6 +125,7 @@ def _state(row_sink=None) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})),
         row_sink=row_sink,
+        initial_constraint_memory={"constraint": None},
     )
 
 

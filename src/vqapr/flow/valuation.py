@@ -312,6 +312,9 @@ class ValuationPhase:
         window = self._context.constraint_window_at(cutoff)
         if not isinstance(window, ModelWindow):
             raise TypeError("constraint_window_at must return a ModelWindow")
+        # Restored before, committed after, with the findings (record `181`): what `project`
+        # and `monitor` leave in a constraint's memory is published in the monitoring root.
+        self._context.restore_constraint_memory(self._context.visible_constraint_memory())
         projected = project_constraints(self._context.constraints, window)
         # Monitoring judges the account the run actually committed, so it reads the committed
         # mark rather than valuing the book a second time.
@@ -339,11 +342,17 @@ class ValuationPhase:
             root_version=self._context.state.current.version,
         )
         if report.findings:
-            self._record_findings(occurrence, report, cutoff)
+            self._record_findings(
+                occurrence, report, cutoff, self._context.candidate_constraint_memory()
+            )
         return MonitoringResult(valuation, report, evidence)
 
     def _record_findings(
-        self, occurrence: OperationOccurrence, report: ConstraintReport, cutoff: datetime
+        self,
+        occurrence: OperationOccurrence,
+        report: ConstraintReport,
+        cutoff: datetime,
+        constraint_memory: Mapping[str, object],
     ) -> None:
         """Write what monitoring measured into the package's own table, and publish it.
 
@@ -384,5 +393,7 @@ class ValuationPhase:
                 },
             )
         self._context.state.publish_monitoring(
-            self._context.state.prepare_monitoring(recorder=recorder)
+            self._context.state.prepare_monitoring(
+                recorder=recorder, constraint_memory=constraint_memory
+            )
         )

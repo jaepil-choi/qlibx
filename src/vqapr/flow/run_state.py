@@ -104,6 +104,10 @@ class AcceptedRunState:
     feedback: tuple[object, ...] = ()
     finalization: object = None
     model_state_commit_count: int = 0
+    # Every Component carries memory (record `181`), and a Constraint's is committed here beside
+    # the Strategy's: one ref per constraint id, into the same `_model_states` map, proved the
+    # same way. `current_model_state_ref` stays the Strategy's own; it is the one with a payload.
+    constraint_state_refs: Mapping[str, ModelStateRef] = MappingProxyType({})
     # Refs a previous root already proved. A ModelStateRef is only ever minted by
     # prepare_model_state, so re-deriving it for an already-proved ref re-proves nothing; it just
     # re-serialises and re-hashes the entire accumulated history on every root. Defaulting to
@@ -122,6 +126,16 @@ class AcceptedRunState:
             and self.current_model_state_ref not in self._model_states
         ):
             raise ValueError("current_model_state_ref must be visible in this root")
+        if not isinstance(self.constraint_state_refs, Mapping):
+            raise TypeError("constraint_state_refs must be a mapping of constraint id to ref")
+        for constraint_id, ref in self.constraint_state_refs.items():
+            if not isinstance(constraint_id, str) or not constraint_id:
+                raise ValueError("constraint_state_refs keys must be non-empty constraint ids")
+            if ref not in self._model_states:
+                raise ValueError(f"constraint state for {constraint_id!r} must be visible here")
+        object.__setattr__(
+            self, "constraint_state_refs", MappingProxyType(dict(self.constraint_state_refs))
+        )
         # Key views compare as sets without building two of them. The visible refs grow by one
         # per callback and are never pruned, so anything that allocates per root here is a term
         # that grows with run length.
@@ -186,6 +200,45 @@ class AcceptedRunState:
             return bytes(self._payloads[ref])
         except KeyError as exc:
             raise KeyError(f"unknown visible ModelStateRef: {ref.digest}") from exc
+
+    def constraint_memory(self) -> dict[str, ModelMemory]:
+        """Every constraint's visible memory, by constraint id: what a callback restores."""
+        return {
+            constraint_id: normalize_memory(self._model_states[ref])
+            for constraint_id, ref in self.constraint_state_refs.items()
+        }
+
+
+def _constraint_states(
+    root: AcceptedRunState,
+    constraint_memory: Mapping[str, object] | None,
+    states: dict[ModelStateRef, ModelMemory],
+    payloads: dict[ModelStateRef, bytes],
+) -> tuple[dict[str, ModelStateRef], frozenset[ModelStateRef]]:
+    """Detach what each constraint's callback left, into the maps the next root will carry.
+
+    `None` means the occurrence did not run the constraints, so their refs are carried over
+    unchanged. A mapping must name exactly the constraints the root already knows: a rule that
+    appears from nowhere, or one that vanished, is an assembly error rather than a state change.
+    """
+    if constraint_memory is None:
+        return dict(root.constraint_state_refs), frozenset()
+    if not isinstance(constraint_memory, Mapping):
+        raise TypeError("constraint_memory must be a mapping of constraint id to memory")
+    if set(constraint_memory) != set(root.constraint_state_refs):
+        raise ValueError(
+            "constraint_memory must name exactly the constraints this run state carries: "
+            f"got {sorted(constraint_memory)!r}, carrying {sorted(root.constraint_state_refs)!r}"
+        )
+    refs: dict[str, ModelStateRef] = {}
+    proved: set[ModelStateRef] = set()
+    for constraint_id, memory in constraint_memory.items():
+        candidate = prepare_model_state(memory, b"")
+        states[candidate.ref] = candidate.memory
+        payloads[candidate.ref] = candidate.payload
+        refs[constraint_id] = candidate.ref
+        proved.add(candidate.ref)
+    return refs, frozenset(proved)
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,7 +343,10 @@ class RunStateRepository:
         pending_accepted_intent: object = None,
         before_swap: Callable[[PreparedRunState], None] | None = None,
         row_sink: Callable[[str, Sequence[Mapping[str, object]]], None] | None = None,
+        initial_constraint_memory: Mapping[str, object] | None = None,
     ) -> None:
+        """`initial_constraint_memory` is each loaded constraint's memory as assembled, by id;
+        the run commits what every constraint callback leaves from there (record `181`)."""
         if not isinstance(initial_payload, bytes):
             raise TypeError("initial_payload must be bytes")
         if row_sink is not None and not callable(row_sink):
@@ -299,6 +355,14 @@ class RunStateRepository:
         states = {prepared.ref: prepared.memory}
         payloads = {prepared.ref: prepared.payload}
         current_ref = prepared.ref
+        constraint_refs: dict[str, ModelStateRef] = {}
+        for constraint_id, memory in dict(initial_constraint_memory or {}).items():
+            if not isinstance(constraint_id, str) or not constraint_id:
+                raise ValueError("initial_constraint_memory keys must be constraint ids")
+            seed = prepare_model_state(memory, b"")
+            states[seed.ref] = seed.memory
+            payloads[seed.ref] = seed.payload
+            constraint_refs[constraint_id] = seed.ref
         self._root = AcceptedRunState(
             version=0,
             _model_states=states,
@@ -307,6 +371,7 @@ class RunStateRepository:
             account=initial_account,
             pending_accepted_intent=pending_accepted_intent,
             model_state_commit_count=0,
+            constraint_state_refs=constraint_refs,
         )
         self._before_swap = before_swap
         # Where accepted recorder rows go, when they go anywhere but the root. `orchestration.run`
@@ -371,8 +436,13 @@ class RunStateRepository:
         recorder: InvocationRecorder | None = None,
         pending_accepted_intent: object = _UNSET,
         expected_version: int | None = None,
+        constraint_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Validate and serialize all callback effects without changing visibility."""
+        """Validate and serialize all callback effects without changing visibility.
+
+        `constraint_memory` is what each constraint's `project` left, by id, committed in the
+        same root as the Strategy's memory; `None` carries the constraints' refs over unchanged.
+        """
         if not isinstance(lifecycle, LifecycleTrace):
             raise TypeError("lifecycle must be a LifecycleTrace")
         if not isinstance(payload, bytes):
@@ -388,6 +458,7 @@ class RunStateRepository:
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
+        constraint_refs, proved = _constraint_states(root, constraint_memory, states, payloads)
         chunks = dict(root._recorder_chunks)
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
@@ -402,8 +473,9 @@ class RunStateRepository:
             _payloads=payloads,
             # `candidate` came straight out of prepare_model_state, so its ref is proved by
             # construction; the rest were proved by the root we are extending.
-            _verified=root._verified | {candidate.ref},
+            _verified=root._verified | {candidate.ref} | proved,
             current_model_state_ref=candidate.ref,
+            constraint_state_refs=constraint_refs,
             account=root.account,
             pending_accepted_intent=(
                 root.pending_accepted_intent
@@ -476,6 +548,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=root.constraint_state_refs,
                 account=committed,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -536,6 +609,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=root.constraint_state_refs,
                 account=account.next_state,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -585,6 +659,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=root.constraint_state_refs,
                 account=account.next_state,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -604,7 +679,11 @@ class RunStateRepository:
         return self._publish_infallible(prepared)
 
     def prepare_monitoring(
-        self, *, recorder: InvocationRecorder, evidence: object = None
+        self,
+        *,
+        recorder: InvocationRecorder,
+        evidence: object = None,
+        constraint_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
         """Publish the findings monitoring made over the account one commit left.
 
@@ -616,20 +695,27 @@ class RunStateRepository:
         on the occurrence trace, the record counted it (`contract`), and the values themselves
         never reached disk: a run whose book breached a limit could say *that* it did, and not
         *by how much*.
+
+        `constraint_memory` is what each constraint's `monitor` left (record `181`): a rule that
+        counts its breaches commits the count here, with the findings it counted.
         """
         if not isinstance(recorder, InvocationRecorder):
             raise TypeError("recorder must be an InvocationRecorder")
         root = self._root
         chunks = dict(root._recorder_chunks)
         new_rows = self._stage_rows(chunks, recorder.staged_rows())
+        states = dict(root._model_states)
+        payloads = dict(root._payloads)
+        constraint_refs, proved = _constraint_states(root, constraint_memory, states, payloads)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
                 version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
+                _model_states=states,
+                _payloads=payloads,
+                _verified=root._verified | proved,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=constraint_refs,
                 account=root.account,
                 pending_accepted_intent=root.pending_accepted_intent,
                 lifecycle_trace=(
@@ -662,6 +748,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=root.constraint_state_refs,
                 account=root.account,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -697,6 +784,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                constraint_state_refs=root.constraint_state_refs,
                 account=root.account,
                 pending_accepted_intent=None,
                 lifecycle_trace=root.lifecycle_trace,

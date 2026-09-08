@@ -167,8 +167,13 @@ class _Constraint(Constraint):
 _ACCOUNT = AccountSnapshot(0, Decimal("100"), {})
 
 
-def _state(account: AccountSnapshot = _ACCOUNT) -> RunStateRepository:
-    return RunStateRepository(initial_account=AccountState(account))
+def _state(
+    account: AccountSnapshot = _ACCOUNT, constraint_ids: tuple[str, ...] = ("risk",)
+) -> RunStateRepository:
+    return RunStateRepository(
+        initial_account=AccountState(account),
+        initial_constraint_memory={constraint_id: None for constraint_id in constraint_ids},
+    )
 
 
 def _exchange() -> AcademicExchange:
@@ -434,7 +439,7 @@ def test_empty_constraint_set_needs_no_constraint_window() -> None:
     result = _flow(
         frozen,
         _Strategy((Hold(reason="unconstrained"),)),
-        _state(),
+        _state(constraint_ids=()),
         (),
         unexpected_constraint_window,
     ).run()
@@ -818,6 +823,7 @@ def test_callback_publication_failure_is_not_classified_as_intent() -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     state = RunStateRepository(
         initial_account=AccountState(_ACCOUNT),
+        initial_constraint_memory={"risk": None},
         before_swap=lambda _candidate: (_ for _ in ()).throw(
             RuntimeError("callback publication fault")
         ),
@@ -919,6 +925,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     prior = type("PriorPending", (), {"pending_id": "prior"})()
     state = RunStateRepository(
         initial_account=AccountState(_ACCOUNT),
+        initial_constraint_memory={"risk": None},
         pending_accepted_intent=prior,
     )
     frozen = _frozen((callback,), end=end, execution=registration)

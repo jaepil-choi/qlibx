@@ -6,7 +6,7 @@ authority checked, the package's own rows recorded, and the accepted intent publ
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
@@ -25,7 +25,7 @@ from vqapr.constraints.evaluation import (
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.values import normalize_memory
+from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     SimulationFailure,
@@ -105,7 +105,18 @@ class CallbackPhase:
             ):
                 self._set_callback_recorder(recorder)
             projected = ()
+            # Every Component's memory is restored before its callback and what the callback left
+            # is committed with the publication (record `181`). The constraints' goes in the same
+            # root as the Strategy's, so a rule that counts commits its count with the decision.
+            constraint_before = self._context.visible_constraint_memory()
+            constraint_candidate: dict[str, ModelMemory] | None = None
             if self._context.constraints:
+                with self._context.guard(
+                    SimulationStage.CALLBACK_STATE,
+                    occurrence.evaluation_time,
+                    owner=self._context.layer.constraints,
+                ):
+                    self._context.restore_constraint_memory(constraint_before)
                 with self._context.guard(
                     SimulationStage.CALLBACK_WINDOW,
                     occurrence.evaluation_time,
@@ -117,6 +128,12 @@ class CallbackPhase:
                     with self._callback_intent_boundary(occurrence, constraint):
                         projections.append(project_constraints((constraint,), constraint_window)[0])
                 projected = tuple(projections)
+                with self._context.guard(
+                    SimulationStage.CALLBACK_STATE,
+                    occurrence.evaluation_time,
+                    owner=self._context.layer.constraints,
+                ):
+                    constraint_candidate = self._context.candidate_constraint_memory()
             with self._callback_intent_boundary(occurrence, projected):
                 constraint_bounds = merged_constraint_bounds(projected)
             with self._callback_intent_boundary(
@@ -192,7 +209,13 @@ class CallbackPhase:
                 owner=evidence,
             ):
                 prepared = self._prepare_callback_publication(
-                    candidate, payload_candidate, lifecycle, recorder, accepted, pending_valuation
+                    candidate,
+                    payload_candidate,
+                    lifecycle,
+                    recorder,
+                    accepted,
+                    pending_valuation,
+                    constraint_memory=constraint_candidate,
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -207,18 +230,21 @@ class CallbackPhase:
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
+                self._context.restore_constraint_memory(constraint_before)
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
         return OccurrenceTrace(occurrence, result, root)
 
-    def load_visible_strategy_state(self) -> None:
-        """Load the sole visible Strategy pair before any callback mutation."""
+    def load_visible_state(self) -> None:
+        """Load every component's visible memory before any callback mutation: the Strategy's
+        pair, and each constraint's (record `181`)."""
         current_ref = self._context.state.current.current_model_state_ref
         if current_ref is None:
             raise RuntimeError("run state has no current Strategy root")
         self._context.strategy.memory = self._context.state.load_model_state(current_ref)
         self._context.strategy.load_payload(BytesIO(self._context.state.load_payload(current_ref)))
+        self._context.restore_constraint_memory(self._context.visible_constraint_memory())
 
     @contextmanager
     def _callback_intent_boundary(
@@ -275,6 +301,8 @@ class CallbackPhase:
         recorder: InvocationRecorder,
         accepted: Hold | AcceptedIntent,
         pending_valuation: PendingValuation | None = None,
+        *,
+        constraint_memory: Mapping[str, object] | None = None,
     ) -> object:
         if isinstance(accepted, Hold):
             if pending_valuation is None:
@@ -284,6 +312,7 @@ class CallbackPhase:
                     payload,
                     lifecycle=lifecycle,
                     recorder=recorder,
+                    constraint_memory=constraint_memory,
                 )
             # A Hold still carries a pending identity when an execution instant remains,
             # so the occurrence reaches the venue's prices and values the book there.
@@ -293,6 +322,7 @@ class CallbackPhase:
                 lifecycle=lifecycle,
                 recorder=recorder,
                 pending_accepted_intent=pending_valuation,
+                constraint_memory=constraint_memory,
             )
         return self._context.state.prepare_callback(
             memory,
@@ -300,6 +330,7 @@ class CallbackPhase:
             lifecycle=lifecycle,
             recorder=recorder,
             pending_accepted_intent=accepted,
+            constraint_memory=constraint_memory,
         )
 
     def _restore_callback_state(self, memory: object, payload: bytes) -> None:

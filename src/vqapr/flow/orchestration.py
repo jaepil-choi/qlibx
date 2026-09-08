@@ -607,6 +607,11 @@ def _run_strategy(
             initial_account=root,
             initial_model_memory=layer.initial_model_memory,
             initial_payload=layer.initial_payload,
+            # What each constraint holds as loaded -- its constructor's doing, from the config
+            # the fingerprint already folds -- is the memory the run commits from (record `181`).
+            initial_constraint_memory={
+                constraint.constraint_id: constraint.memory for constraint in constraints
+            },
             # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
             # A hard kill preserves only spilled rows. Without a store, roots retain rows.
             row_sink=None if writer is None else writer.append,

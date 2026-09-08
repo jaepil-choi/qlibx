@@ -28,7 +28,7 @@ from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
-from vqapr.domain.values import MarkBatch
+from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     FailureObservation,
@@ -475,6 +475,26 @@ class FlowContext:
             yield
         finally:
             self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
+
+    # Constraint memory (record `181`). Every Component carries memory; a constraint's is restored
+    # from the root before `project` and before `monitor`, and what the callback left is committed
+    # with that callback's publication. One implementation here, because two phases do it.
+
+    def visible_constraint_memory(self) -> dict[str, ModelMemory]:
+        """What the current root holds for every constraint, by id."""
+        return self.state.current.constraint_memory()
+
+    def restore_constraint_memory(self, memory: Mapping[str, ModelMemory]) -> None:
+        """Put the root's memory back on each loaded constraint instance."""
+        for constraint in self.constraints:
+            constraint.memory = memory[constraint.constraint_id]
+
+    def candidate_constraint_memory(self) -> dict[str, ModelMemory]:
+        """What every constraint's callback left, detached for the root that will commit it."""
+        return {
+            constraint.constraint_id: normalize_memory(constraint.memory)
+            for constraint in self.constraints
+        }
 
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.

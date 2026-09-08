@@ -2,8 +2,8 @@
 
 **This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
 executes runs is not a facade. Record `139` made it a run of several strategies: the run layer is
-frozen once, and each strategy runs in its own `SimulationFlow` with its own `Account` and its own
-record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
+frozen once, and each strategy runs in its own `StrategyEventLoop` with its own `Account` and its
+own record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
 processes, each of which freezes the registered run again and runs one strategy of it.
 """
 
@@ -40,7 +40,7 @@ from vqapr.extension.loading import (
     load_exchange,
     load_strategy_model,
 )
-from vqapr.flow.datamodel import DataModelFlow, DataModelOutput, DataModelResult
+from vqapr.flow.datamodel import DataModelEventLoop, DataModelOutput, DataModelResult
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.judgments import require_judged
 from vqapr.flow.preflight import preflight_run as _preflight_run
@@ -56,7 +56,7 @@ from vqapr.flow.record import (
 from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
 from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationFlow, SimulationResult
+from vqapr.flow.simulation import SimulationResult, StrategyEventLoop
 from vqapr.workspace import Workspace
 
 
@@ -468,7 +468,7 @@ def _run_datamodel(
             opened_writer.open(replace=replace_record)
             writer = opened_writer
         output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
-        flow = DataModelFlow(
+        flow = DataModelEventLoop(
             frozen,
             layer,
             model,
@@ -621,7 +621,7 @@ def _run_strategy(
         initial_ref = state.root.current_model_state_ref
         if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
             raise RuntimeError("initial Strategy payload does not match frozen run authority")
-        flow = SimulationFlow(
+        flow = StrategyEventLoop(
             frozen,
             strategy,
             state,

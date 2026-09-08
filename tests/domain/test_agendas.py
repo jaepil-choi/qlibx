@@ -7,7 +7,7 @@ import pytest
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
 from vqapr.domain.identifiers import agenda_id, occurrence_id
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.loop import DueExecutionEnvelope, OperationEnvelope
+from vqapr.flow.loop import DueEvent, OccurrenceEvent
 
 
 def _local(
@@ -118,7 +118,7 @@ def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
 
 def test_pending_due_execution_sorts_before_same_time_static_operation() -> None:
     occurrence = _occurrence("callback")
-    operation = OperationEnvelope(occurrence)
-    due = DueExecutionEnvelope(occurrence.evaluation_time, "pending-1")
+    operation = OccurrenceEvent(occurrence)
+    due = DueEvent(occurrence.evaluation_time, "pending-1")
 
     assert sorted((operation, due), key=lambda item: item.sort_key()) == [due, operation]

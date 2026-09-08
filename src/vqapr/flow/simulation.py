@@ -1,10 +1,12 @@
-"""Frequency-agnostic deterministic dispatcher for one frozen simulation run.
+"""The strategy run's event loop: one frozen strategy, its callbacks, and the due items they mint.
 
-Record `147` (deletion campaign Step 6): this module is the loop. One occurrence at a time it
-decides which phase an occurrence goes to and hands it over; the callback phase
-(`flow/callback.py`), the execution phase (`flow/execution.py`) and the valuation phase
-(`flow/valuation.py`) are where the work is, and `flow/context.py` is what they share. The names
-this module re-exports are the ones callers and tests imported from it before the split.
+Record `147` (deletion campaign Step 6) split the loop from the work: the callback handler
+(`flow/callback.py`), the execution handler (`flow/execution.py`) and the valuation handler
+(`flow/valuation.py`) are where the work is, and `flow/context.py` is what they share. Record
+`182` made the loop itself `EventLoop` (`flow/loop.py`): this class supplies the schedule, the
+one pending due event, and `handle`, which routes a scheduled event to the callback handler and
+a due event to the execution or valuation handler. The names this module re-exports are the ones
+callers and tests imported from it before the split.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from vqapr.evidence.artifacts import (
     SimulationStage,
 )
 from vqapr.exchange.venue import Exchange
-from vqapr.flow.callback import CallbackPhase
+from vqapr.flow.callback import CallbackHandler
 from vqapr.flow.context import (
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
@@ -44,15 +46,15 @@ from vqapr.flow.context import (
 
 # Re-exported under the names tests imported from this module before the split (record `147`).
 from vqapr.flow.context import _shadows_package_table as _shadows_package_table
-from vqapr.flow.execution import ExecutionPhase
+from vqapr.flow.execution import ExecutionHandler
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
-from vqapr.flow.loop import DueExecutionEnvelope, OccurrenceFlow
+from vqapr.flow.loop import DueEvent, EventLoop, OccurrenceEvent
 from vqapr.flow.marking import ValuationService
 from vqapr.flow.run_state import (
     RunFinalization,
     RunStateRepository,
 )
-from vqapr.flow.valuation import ValuationPhase
+from vqapr.flow.valuation import ValuationHandler
 from vqapr.flow.valuation import (
     _marks_from_execution_snapshot as _marks_from_execution_snapshot,
 )
@@ -67,8 +69,8 @@ __all__ = [
     "MonitoringResult",
     "OccurrenceTrace",
     "PendingValuation",
-    "SimulationFlow",
     "SimulationResult",
+    "StrategyEventLoop",
     "ValuationResult",
     "callback_evidence",
 ]
@@ -83,12 +85,14 @@ class _InstantOccurrence:
         self.evaluation_time = evaluation_time
 
 
-class SimulationFlow(OccurrenceFlow):
+class StrategyEventLoop(
+    EventLoop[OccurrenceEvent | DueEvent, OccurrenceTrace | DueExecutionTrace, SimulationResult]
+):
     """Dispatch frozen occurrences and one latest accepted pending intent.
 
     The Flow owns timestamp stamping, exact execution, account mutation, and marking. The walk
-    itself is `OccurrenceFlow`'s, shared with a datamodel run (record `148`); what this adds is
-    the three phases an occurrence and its due item dispatch to.
+    itself is `EventLoop`'s, shared with a datamodel run (record `148`); what this adds is
+    the three handlers a scheduled event and a due event are routed to.
     """
 
     def __init__(
@@ -169,11 +173,11 @@ class SimulationFlow(OccurrenceFlow):
                 f"loaded {sorted(constraint.constraint_id for constraint in constraints)!r}"
             )
 
-        # All phase dependencies exist before the first phase is constructed. The loop owns
-        # its agenda and progress hook; the context owns this strategy's runtime and bookkeeping.
-        self._static_occurrences = frozen_run.dispatch_order(layer)
-        self._start_cutoff = cutoff
-        self._on_progress = on_progress
+        # All handler dependencies exist before the first handler is constructed. The loop owns
+        # its schedule and progress hook; the context owns this strategy's runtime and bookkeeping.
+        super().__init__(
+            schedule=frozen_run.dispatch_order(layer), start_cutoff=cutoff, on_progress=on_progress
+        )
         self._context = FlowContext(
             frozen_run=frozen_run,
             layer=layer,
@@ -198,9 +202,9 @@ class SimulationFlow(OccurrenceFlow):
             record_account_positions=record_account_positions,
             account_history_declaration=declared_history,
         )
-        self._valuation = ValuationPhase(self._context)
-        self._callback = CallbackPhase(self._context)
-        self._execution = ExecutionPhase(self._context, self._valuation)
+        self._valuation = ValuationHandler(self._context)
+        self._callback = CallbackHandler(self._context)
+        self._execution = ExecutionHandler(self._context, self._valuation)
         self._execution.bind_registry_to_venue()
         account.bind(initial)
 
@@ -208,14 +212,13 @@ class SimulationFlow(OccurrenceFlow):
         """Synchronously process the static merge and all due items in its horizon."""
         started = time.perf_counter()
         result = super().run()
-        assert isinstance(result, SimulationResult)
         # The phases the context accumulated, plus the whole: what the record reports as
         # `timing` (`docs/issues/068`). `total` covers the loop itself; the panel build and the
         # record freeze happen outside it and are the caller's to time.
         timing = {**self._context.timing, "total": time.perf_counter() - started}
         return replace(result, timing=timing)
 
-    def _start(self, cutoff: datetime) -> None:
+    def start(self, cutoff: datetime) -> None:
         with self._context.guard(
             SimulationStage.START,
             cutoff,
@@ -223,19 +226,22 @@ class SimulationFlow(OccurrenceFlow):
         ):
             self._callback.load_visible_state()
 
-    def _dispatch_static(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
+    def handle(self, event: OccurrenceEvent | DueEvent) -> OccurrenceTrace | DueExecutionTrace:
+        if isinstance(event, DueEvent):
+            return self._handle_due(event)
+        occurrence = event.occurrence
         if occurrence.role is OperationRole.STRATEGY_CALLBACK:
-            # `callback` is the whole static side: the window built for the model and the
+            # `callback` is the whole scheduled side: the window built for the model and the
             # model's own `decide` (`docs/issues/068`: a user learns their strategy is 5% of
             # the wall clock from the record, not from cProfile).
             with self._context.timed("callback"):
                 return self._callback.dispatch(occurrence)
         # Record `148`: valuation happens at the execution instant and monitoring right after
-        # each commit, inside the due path. A static occurrence of any other role is a
-        # malformed agenda, not a phase to dispatch to.
+        # each commit, inside the due path. A scheduled occurrence of any other role is a
+        # malformed agenda, not a handler to route to.
         raise ValueError(f"unsupported operation role: {occurrence.role!r}")
 
-    def _dispatch_due(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
+    def _handle_due(self, due: DueEvent) -> DueExecutionTrace:
         with (
             self._context.timed("due"),
             self._context.guard(
@@ -246,7 +252,7 @@ class SimulationFlow(OccurrenceFlow):
         ):
             return self._dispatch_pending(due)
 
-    def _finish(self, traces: tuple[object, ...]) -> SimulationResult:
+    def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:
             raise RuntimeError("simulation finalized with a pending accepted intent")
         if self._context.frozen_run.end is None:
@@ -265,17 +271,17 @@ class SimulationFlow(OccurrenceFlow):
             owner=finalization,
         ):
             root = self._context.state.finalize(RunFinalization(finalization))
-        return SimulationResult(tuple(traces), root)  # type: ignore[arg-type]
+        return SimulationResult(tuple(traces), root)
 
-    def _pending_due(self) -> DueExecutionEnvelope | None:
+    def pending(self) -> DueEvent | None:
         pending = self._context.state.current.pending_accepted_intent
         if pending is None:
             return None
         if not isinstance(pending, (AcceptedIntent, PendingValuation)):
             raise TypeError("run state pending must be an AcceptedIntent or PendingValuation")
-        return DueExecutionEnvelope(pending.target.target_at, pending.pending_id)
+        return DueEvent(pending.target.target_at, pending.pending_id)
 
-    def _dispatch_pending(self, due: DueExecutionEnvelope) -> DueExecutionTrace:
+    def _dispatch_pending(self, due: DueEvent) -> DueExecutionTrace:
         pending = self._context.state.current.pending_accepted_intent
         if (
             not isinstance(pending, (AcceptedIntent, PendingValuation))

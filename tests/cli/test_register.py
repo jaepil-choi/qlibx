@@ -360,7 +360,7 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
 ) -> None:
     """The crash `check` could not see, moved to the door that can.
 
-    `SimulationFlow` has always required the loaded constraints to carry exactly the ids the run
+    `StrategyEventLoop` has always required the loaded constraints to carry exactly the ids the run
     froze, and enforced it with a bare `ValueError`. Nothing before it looked, so `check` returned
     `ok:true` on all five phases and `run` then died with `stage: "unhandled"` and an empty
     `failures` list -- the framework reporting itself broken when the registration was wrong.

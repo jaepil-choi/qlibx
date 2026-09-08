@@ -1,6 +1,6 @@
 """The valuation phase: mark -> account, and monitoring.
 
-Record `147`. What was `SimulationFlow._value_due`, `_dispatch_valuation`, `_dispatch_monitoring`
+Record `147`. What was `StrategyEventLoop._value_due`, `_dispatch_valuation`, `_dispatch_monitoring`
 and their helpers, moved verbatim; `_marks_from_execution_snapshot` lives here because the
 execution phase values the book from the snapshot it just filled against."""
 
@@ -91,7 +91,7 @@ def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
     return mark.marked_at
 
 
-class ValuationPhase:
+class ValuationHandler:
     """Values the book at each execution instant from the venue snapshot, commits the mark with
     the NAV it measured, and judges the committed account right after each commit (record `148`:
     valuation and monitoring have no clock of their own)."""

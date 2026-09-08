@@ -1,6 +1,6 @@
 """The value classes of a simulation, and the state its four phases share.
 
-Record `147` (deletion campaign Step 6) split `SimulationFlow` -- 2,200 lines, 55 methods -- into
+Record `147` (deletion campaign Step 6) split `StrategyEventLoop` -- 2,200 lines, 55 methods -- into
 the loop (`simulation.py`), the callback phase (`callback.py`: decide -> intent), the execution
 phase (`execution.py`: intent -> fill -> commit) and the valuation phase (`valuation.py`: mark ->
 account, and monitoring). The phases share this module: the dataclasses every phase produces or
@@ -43,7 +43,7 @@ from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
-from vqapr.flow.loop import DueExecutionEnvelope
+from vqapr.flow.loop import DueEvent
 from vqapr.flow.marking import ValuationService
 from vqapr.flow.run_state import (
     FILL_TABLE,
@@ -123,7 +123,7 @@ class OccurrenceTrace:
 
 @dataclass(frozen=True, slots=True)
 class DueExecutionTrace:
-    due: DueExecutionEnvelope
+    due: DueEvent
     result: DueExecutionResult
     state: AcceptedRunState
 
@@ -443,8 +443,8 @@ def _resolved(filename: str) -> Path:
 @dataclass(kw_only=True, slots=True)
 class FlowContext:
     """What every phase of one strategy's run shares: the frozen run, this strategy's layer, the run
-    state, the account and venue, and the failure envelope. Built by `SimulationFlow`, read by
-    `CallbackPhase`, `ExecutionPhase` and `ValuationPhase`; nothing here dispatches."""
+    state, the account and venue, and the failure envelope. Built by `StrategyEventLoop`, read by
+    `CallbackHandler`, `ExecutionHandler` and `ValuationHandler`; nothing here dispatches."""
 
     frozen_run: FrozenRun
     layer: FrozenStrategy

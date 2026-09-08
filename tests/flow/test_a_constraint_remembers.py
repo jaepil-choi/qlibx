@@ -48,7 +48,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationFlow
+from vqapr.flow.simulation import StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")
 RULE = "three-strikes"
@@ -180,7 +180,7 @@ def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionInputRe
 
 def _flow(
     root: Path, rule: ThreeStrikes, sessions: tuple[date, ...], state: RunStateRepository
-) -> SimulationFlow:
+) -> StrategyEventLoop:
     occurrences = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="remembered",
@@ -215,7 +215,7 @@ def _flow(
             consumer_id="test-consumer",
         )
 
-    return SimulationFlow(
+    return StrategyEventLoop(
         frozen,
         _Holds(),
         state,

@@ -338,7 +338,7 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
 def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     """Refuse a Constraint registered under an id it does not answer to.
 
-    `SimulationFlow` requires the loaded constraints to carry exactly the ids the FrozenRun
+    `StrategyEventLoop` requires the loaded constraints to carry exactly the ids the FrozenRun
     declared, and it enforced that with a bare `ValueError` at assembly. Nothing before it looked,
     so `check` returned `ok:true` on all five phases and `run` then died with `stage: unhandled`
     and an empty `failures` list -- the framework reporting itself broken when the registration was

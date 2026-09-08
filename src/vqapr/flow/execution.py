@@ -1,6 +1,6 @@
 """The execution phase: an accepted intent becomes orders, fills and a committed account.
 
-Record `147`. What was `SimulationFlow._execute_due`, moved verbatim: the snapshot the venue
+Record `147`. What was `StrategyEventLoop._execute_due`, moved verbatim: the snapshot the venue
 published at the target instant, `plan_orders`, the venue's `execute`, `Account.prepare_fill` and
 the commit -- the spine, called from here and not changed -- then the mark at the same instant
 through the valuation phase."""
@@ -25,14 +25,14 @@ from vqapr.flow.context import (
     DueExecutionResult,
     FlowContext,
 )
-from vqapr.flow.valuation import ValuationPhase, _marks_from_execution_snapshot
+from vqapr.flow.valuation import ValuationHandler, _marks_from_execution_snapshot
 from vqapr.orders.planning import plan_orders
 
 
-class ExecutionPhase:
+class ExecutionHandler:
     """One due execution: intent -> orders -> fills -> committed account -> marked account."""
 
-    def __init__(self, context: FlowContext, valuation: ValuationPhase) -> None:
+    def __init__(self, context: FlowContext, valuation: ValuationHandler) -> None:
         self._context = context
         self._valuation = valuation
 

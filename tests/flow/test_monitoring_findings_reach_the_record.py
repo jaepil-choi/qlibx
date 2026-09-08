@@ -54,7 +54,7 @@ from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.record import RunRecordWriter, read_typed_table, table_ids
 from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import DueExecutionTrace, SimulationFlow
+from vqapr.flow.simulation import DueExecutionTrace, StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")
 TABLE = "vqapr.monitoring"
@@ -180,7 +180,7 @@ def _flow(
     state: RunStateRepository,
     sessions: tuple[date, ...],
     rules: tuple[Constraint, ...] = RULES,
-) -> SimulationFlow:
+) -> StrategyEventLoop:
     occurrences = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="monitored",
@@ -219,7 +219,7 @@ def _flow(
             consumer_id="test-consumer",
         )
 
-    return SimulationFlow(
+    return StrategyEventLoop(
         frozen,
         _Holds(),
         state,

@@ -55,7 +55,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
+from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -248,8 +248,8 @@ def _flow(
     constraints: tuple[Constraint, ...] = (_Constraint(),),
     constraint_window_for_occurrence: object = None,
     strategy_window_for_occurrence: object = None,
-) -> SimulationFlow:
-    return SimulationFlow(
+) -> StrategyEventLoop:
+    return StrategyEventLoop(
         frozen,
         strategy,
         state,
@@ -614,7 +614,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         strategy_requirements=(requirement,),
     )
 
-    result = SimulationFlow(
+    result = StrategyEventLoop(
         frozen,
         ReadingStrategy(),
         _state(),
@@ -1056,7 +1056,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # body, so it surfaced through the CLI as `stage: "unhandled"` with an empty `failures` list --
     # the framework announcing its own breakage when a component was registered under the wrong id.
     with pytest.raises(VqaprError) as caught:
-        SimulationFlow(
+        StrategyEventLoop(
             frozen,
             _Strategy((Hold(reason="x"),)),
             _state(),

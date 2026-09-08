@@ -48,7 +48,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         "    @property\n"
         "    def constraint_id(self):\n"
         # The id the component is REGISTERED under, not a fixed string. A Constraint must answer
-        # to its own component id -- `SimulationFlow` has always required it and `load_constraint`
+        # to its own component id -- `StrategyEventLoop` has always required it and `load_constraint`
         # now refuses the mismatch -- so a helper that hardcoded `'fixture'` built components that
         # could never have run. These fixtures never assembled a Flow, which is the only reason
         # the invariant went unnoticed here.
@@ -860,7 +860,7 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
 
     `register` now refuses the mismatch outright, so this is the case that door does not cover: a
     workspace populated directly, which is what every fixture here does and what a caller using the
-    Python surface does. Preflight is the last gate before `SimulationFlow.__init__`, where the
+    Python surface does. Preflight is the last gate before `StrategyEventLoop.__init__`, where the
     same disagreement used to surface as `stage: "unhandled"` with an empty `failures` list.
 
     The check is on the loaded object, so a `constraint_id` assembled at runtime is caught too.

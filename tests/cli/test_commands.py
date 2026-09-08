@@ -826,7 +826,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
     """The reported crash, driven through the two verbs a user actually types.
 
     `check` used to return `ok:true` on all five phases and `run` then died inside
-    `SimulationFlow.__init__` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
+    `StrategyEventLoop.__init__` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
 
     `vqapr register` now refuses the mismatch outright, so the workspace is populated through the
     Python API here on purpose — that is precisely the route the acceptance criterion anticipates

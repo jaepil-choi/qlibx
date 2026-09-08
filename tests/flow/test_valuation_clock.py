@@ -43,7 +43,7 @@ from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.marking import ValuationService
 from vqapr.flow.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationFlow
+from vqapr.flow.simulation import StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -481,7 +481,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         )
 
     state = RunStateRepository(initial_account=arrived_marked)
-    result = SimulationFlow(
+    result = StrategyEventLoop(
         frozen,
         _Holds(),
         state,

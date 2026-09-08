@@ -304,18 +304,18 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     let a peer delete a live run's tables. This pins the same wiring in milliseconds: the callback
     fires once per occurrence, so a run that records no rows still proves it is alive.
     """
-    from vqapr.flow.loop import OccurrenceFlow
-    from vqapr.flow.simulation import SimulationFlow
+    from vqapr.flow.loop import EventLoop
+    from vqapr.flow.simulation import StrategyEventLoop
 
-    signature = inspect.signature(SimulationFlow.__init__)
+    signature = inspect.signature(StrategyEventLoop.__init__)
     assert "on_progress" in signature.parameters, (
         "the run loop no longer accepts a progress signal, so a long run cannot prove it is alive"
     )
 
     # The walk is the shared loop both kinds of run use (record `148`).
-    source = inspect.getsource(OccurrenceFlow.run)
+    source = inspect.getsource(EventLoop.run)
     loop = source.index("while next_static is not None")
-    branch = source.index("due = self._pending_due()", loop)
+    branch = source.index("due = self.pending()", loop)
     assert "self._on_progress()" in source[loop:branch], (
         "the progress signal must fire at the top of the occurrence loop, before the due/static "
         "branch, or a run made entirely of due executions never signals"

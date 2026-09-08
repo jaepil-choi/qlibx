@@ -1,6 +1,6 @@
 """The callback phase: the strategy decides, and its decision becomes an accepted intent.
 
-Record `147`. What was `SimulationFlow._dispatch_callback` and its helpers, moved verbatim: the
+Record `147`. What was `StrategyEventLoop._dispatch_callback` and its helpers, moved verbatim: the
 visible model state is restored, the window read, `decide` called, the intent stamped and its
 authority checked, the package's own rows recorded, and the accepted intent published."""
 
@@ -60,7 +60,7 @@ from vqapr.portfolio.intents import (
 )
 
 
-class CallbackPhase:
+class CallbackHandler:
     """One strategy callback, from the model's visible state to a published, accepted intent."""
 
     def __init__(self, context: FlowContext) -> None:
@@ -359,7 +359,7 @@ class CallbackPhase:
             )
         # `vqapr.account` carries measurements only, and this path contributes one just in the
         # case where nobody else did: every fill records the NAV it was marked at (record `148`,
-        # `ValuationPhase.measurement_recorder`), so this is the mark nothing recorded -- an
+        # `ValuationHandler.measurement_recorder`), so this is the mark nothing recorded -- an
         # opening mark, or one a caller committed outside the flow. 056 measured what dropping
         # the fallback cost under the old sparse valuation clock -- 8 of 10 measurements lost --
         # so the row survives for exactly that case.
@@ -661,7 +661,7 @@ class CallbackPhase:
     def execution_horizon(self, execution_input: object) -> ExecutionHorizon:
         """Read the run's candidate execution instants once, not once per callback.
 
-        Built lazily so constructing a SimulationFlow still opens no physical source. The lower
+        Built lazily so constructing a StrategyEventLoop still opens no physical source. The lower
         bound is the frozen run start, which no decision can precede.
         """
         if self._context.horizon is None:

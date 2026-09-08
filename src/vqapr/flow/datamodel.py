@@ -4,9 +4,9 @@ Record `148` closes `docs/issues/059`. A DataModel used to be run by `materializ
 over a list of instants from a spec file, every row of every evaluation held in memory until the
 end, one parquet and a lineage file written at once, and a `record.json` of its own kind. It is a
 run now, registered under `runs:` like a strategy run, frozen by the same preflight, walked by the
-same `OccurrenceFlow`, recorded under the same `runs/<run-id>/` directory -- with a
-`DataModelPhase` in the callback's place and no execution or valuation phase, because a datamodel
-sees no account and passes through no venue (architecture 4.4).
+same `EventLoop`, recorded under the same `runs/<run-id>/` directory -- with a
+`ComputeHandler` in the callback handler's place and no execution or valuation handler, because a
+datamodel sees no account and passes through no venue (architecture 4.4).
 
 What leaves the process: the sessions' rows, typed as they come and held in memory, land as one
 parquet file under `.vqapr/materialized/<dataset_id>/` when the last session completes
@@ -44,7 +44,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.values import Row, Rows, normalize_rows, require_tz_aware
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun
-from vqapr.flow.loop import OccurrenceFlow
+from vqapr.flow.loop import EventLoop, OccurrenceEvent
 from vqapr.workspace import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"
@@ -541,7 +541,7 @@ class DataModelResult:
     registration: DatasetRegistration | None = None
 
 
-class DataModelPhase:
+class ComputeHandler:
     """One session's compute: window, rows, stamp, chunk."""
 
     def __init__(
@@ -604,8 +604,12 @@ class DataModelPhase:
         )
 
 
-class DataModelFlow(OccurrenceFlow):
-    """Walk one datamodel's sessions: compute at each, chunk the rows, register at the end."""
+class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelResult]):
+    """Walk one datamodel's sessions: compute at each, chunk the rows, register at the end.
+
+    No due events: a datamodel mints nothing between its sessions, so `pending` keeps the
+    base's `None` and the loop is the plain sequence of scheduled occurrences.
+    """
 
     def __init__(
         self,
@@ -630,11 +634,11 @@ class DataModelFlow(OccurrenceFlow):
         cutoff = frozen_run.start or frozen_run.end
         if cutoff is None:
             raise RuntimeError("a datamodel run requires a frozen boundary")
-        self._start_cutoff = cutoff
-        self._static_occurrences = frozen_run.dispatch_order(layer)
-        self._on_progress = on_progress
+        super().__init__(
+            schedule=frozen_run.dispatch_order(layer), start_cutoff=cutoff, on_progress=on_progress
+        )
         self._output = output
-        self._phase = DataModelPhase(
+        self._phase = ComputeHandler(
             frozen_run=frozen_run,
             layer=layer,
             model=model,
@@ -642,15 +646,15 @@ class DataModelFlow(OccurrenceFlow):
             output=output,
         )
 
-    def _start(self, cutoff: datetime) -> None:
+    def start(self, cutoff: datetime) -> None:
         self._output.open()
 
-    def _dispatch_static(self, occurrence: OperationOccurrence) -> DataModelTrace:
-        return self._phase.dispatch(occurrence)
+    def handle(self, event: OccurrenceEvent) -> DataModelTrace:
+        return self._phase.dispatch(event.occurrence)
 
-    def _finish(self, traces: tuple[object, ...]) -> DataModelResult:
+    def finish(self, traces: tuple[DataModelTrace, ...]) -> DataModelResult:
         return DataModelResult(
-            occurrences=tuple(traces),  # type: ignore[arg-type]
+            occurrences=traces,
             rows=self._output.rows,
             output_path=self._output.directory,
         )
@@ -658,9 +662,9 @@ class DataModelFlow(OccurrenceFlow):
 
 __all__ = [
     "MATERIALIZED_DIRECTORY",
-    "DataModelFlow",
+    "ComputeHandler",
+    "DataModelEventLoop",
     "DataModelOutput",
-    "DataModelPhase",
     "DataModelResult",
     "DataModelTrace",
     "output_directory",

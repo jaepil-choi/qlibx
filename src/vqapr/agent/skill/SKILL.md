@@ -48,6 +48,15 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 **Goal:** a workspace where every dataset, source, component and execution input is
 registered and passes validation.
 
+**Before you author anything, see one run happen.** `vqapr new sample --out ./first-run` writes a
+complete journey the product can run as it is: a five-day reversal strategy, a venue, a small
+synthetic panel (ten names over three years of real KRX sessions, prices and names made up so it
+is not market data) and `sample.yaml`, the one declaration that registers all of it. Then
+`vqapr register ./first-run/sample.yaml`, `vqapr check sample-run`, `vqapr run sample-run`,
+`vqapr show run sample-run`. The panel is deliberately unbalanced -- one name lists late, one
+stops trading early -- so what you see is the shape a real run has. Do not draw a conclusion about
+a market from it; do copy its `sample.yaml` when you write your own declaration.
+
 1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
 2. `vqapr new strategy <id> --dataset <d>` or `vqapr new datamodel <id> --dataset <d>` --
    scaffold a runnable `.py` plus a matching `.yaml`. You can register either one: the YAML with

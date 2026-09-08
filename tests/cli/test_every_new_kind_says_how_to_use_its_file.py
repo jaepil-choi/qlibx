@@ -14,7 +14,9 @@ those four could not honestly emit it: a run SPEC was not registrable, so the en
 Since record 139 a run is a `runs:` section of a declaration document, so the one exception is
 gone: `vqapr new run` emits a declaration `vqapr register` takes, and every kind answers the
 caller's actual question -- *what do I do with this file?* -- with `declaration`. Record 148
-retired `agendas` (a run declares its own sessions and wall time), so eight kinds remain.
+retired `agendas` (a run declares its own sessions and wall time), so eight kinds remained;
+record 172 added `sample`, which writes a directory rather than a file and reports the
+declaration inside it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dataset", ()),
     ("run", ()),
     ("execution-input", ()),
+    # The filled-in form beside the blank ones (record 172): a whole journey, one declaration.
+    ("sample", ()),
 )
 
 

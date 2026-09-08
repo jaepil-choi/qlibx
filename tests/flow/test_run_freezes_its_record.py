@@ -30,18 +30,18 @@ from vqapr.public import FrozenRun, Workspace, preflight_run
 from vqapr.public import run as execute_run
 
 
-def _frozen(root: Path, sample_panel) -> FrozenRun:
-    panel = journey.install(root, panel=sample_panel)
+def _frozen(root: Path) -> FrozenRun:
+    panel = journey.install(root)
     return preflight_run(root, journey.definition(panel))
 
 
 @pytest.mark.slow
-def test_a_run_freezes_records_a_later_process_could_read(tmp_path: Path, sample_panel) -> None:
+def test_a_run_freezes_records_a_later_process_could_read(tmp_path: Path) -> None:
     """AC-R3 end to end, from a real run rather than a constructed result."""
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "store"
-    frozen = _frozen(project, sample_panel)
+    frozen = _frozen(project)
 
     outcome = execute_run(project, frozen, store_root=store)
     result = outcome.result()
@@ -73,7 +73,7 @@ def test_a_run_freezes_records_a_later_process_could_read(tmp_path: Path, sample
     assert all(row["observed_at"].utcoffset() is not None for row in account_rows)
 
 
-def test_a_store_may_keep_the_account_row_alone(tmp_path: Path, sample_panel) -> None:
+def test_a_store_may_keep_the_account_row_alone(tmp_path: Path) -> None:
     """`record_account_positions=False` -- cash and NAV per valuation, no per-instrument rows.
 
     The testbed's broad signed book wrote 2.6M position rows of which the rows actually read
@@ -82,7 +82,7 @@ def test_a_store_may_keep_the_account_row_alone(tmp_path: Path, sample_panel) ->
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "store"
-    frozen = _frozen(project, sample_panel)
+    frozen = _frozen(project)
 
     execute_run(project, frozen, store_root=store, record_account_positions=False)
 
@@ -97,7 +97,7 @@ def test_a_store_may_keep_the_account_row_alone(tmp_path: Path, sample_panel) ->
 
 
 @pytest.mark.slow
-def test_the_records_and_show_cannot_drift_apart(tmp_path: Path, sample_panel) -> None:
+def test_the_records_and_show_cannot_drift_apart(tmp_path: Path) -> None:
     """Each record and its `show` view read one field set, checked against REAL frozen records.
 
     The writers build their payloads by iterating the field sets, so a field named without a
@@ -108,7 +108,7 @@ def test_the_records_and_show_cannot_drift_apart(tmp_path: Path, sample_panel) -
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "store"
-    execute_run(project, _frozen(project, sample_panel), store_root=store)
+    execute_run(project, _frozen(project), store_root=store)
 
     run_record = read_run_record(store, journey.RUN_ID)
     assert set(run_record) - {"schema", "kind"} == set(RUN_JSON_FIELDS)
@@ -131,14 +131,12 @@ def test_the_records_and_show_cannot_drift_apart(tmp_path: Path, sample_panel) -
     assert "declared_digest" in RECORD_FIELDS
 
 
-def test_a_second_run_of_the_same_strategy_refuses_without_replace(
-    tmp_path: Path, sample_panel
-) -> None:
+def test_a_second_run_of_the_same_strategy_refuses_without_replace(tmp_path: Path) -> None:
     """One producer, one artifact: a repeated run is a retry far more often than an overwrite."""
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "store"
-    frozen = _frozen(project, sample_panel)
+    frozen = _frozen(project)
     execute_run(project, frozen, store_root=store)
 
     with pytest.raises(RunRecordExists):
@@ -147,11 +145,11 @@ def test_a_second_run_of_the_same_strategy_refuses_without_replace(
     assert len(strategy_refs(store, journey.RUN_ID)) == 1
 
 
-def test_the_registered_run_is_what_the_sample_executes(tmp_path: Path, sample_panel) -> None:
+def test_the_registered_run_is_what_the_sample_executes(tmp_path: Path) -> None:
     """`install` registers the run it will execute, so `vqapr run sample-run` is one command."""
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project, panel=sample_panel)
+    panel = journey.install(project)
 
     registered = Workspace.open(project).run_definition(journey.RUN_ID)
 

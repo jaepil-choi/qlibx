@@ -168,22 +168,6 @@ def dup_parquet(tmp_path_factory, _con) -> Path:
 
 
 @pytest.fixture(scope="session")
-def sample_panel(tmp_path_factory):
-    """The shipped sample panel, built ONCE per session from the local warehouse.
-
-    The build reads the warehouse CSV and writes two parquet files, about 36 seconds; nine tests
-    used to build it each, which was five minutes of a `test_all` doing the same thing over and
-    over (record `169`). The panel is read-only parquet, so every test registers the same files
-    into its own project through `journey.install(project, panel=sample_panel)`.
-    """
-    from tests.sample.build import WAREHOUSE, build
-
-    if not WAREHOUSE.exists():
-        pytest.skip(f"warehouse {WAREHOUSE} is not provisioned")
-    return build(tmp_path_factory.mktemp("sample-panel"))
-
-
-@pytest.fixture(scope="session")
 def dev_dataset() -> Path:
     if not DEV_DATASET.exists():
         pytest.skip(f"{DEV_DATASET} not provisioned — run scripts/prepare_dev_data.py")

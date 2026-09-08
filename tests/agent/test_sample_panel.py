@@ -14,24 +14,15 @@ from pathlib import Path
 import pyarrow.parquet as pq
 import pytest
 
-from tests.sample.build import (
-    DEAD_SESSIONS,
-    LATE_SESSIONS,
-    WIND_DOWN_SESSIONS,
-)
-from tests.sample.reversal_5d import LOOKBACK, SampleReversal5d
-
-pytestmark = pytest.mark.real_data
+from tests.sample import journey
+from vqapr.agent.sample.reversal_5d import LOOKBACK, SampleReversal5d
 
 
-
-@pytest.fixture
-def panel(sample_panel):
-    """The session's one panel (`tests/conftest.py`). The build is ~36s; the tests reading it are
-    milliseconds each. Marked `slow` at the tests rather than here, because a fixture cannot
-    deselect itself: pytest resolves markers on the test, so a fixture this expensive only costs
-    anything when a selected test asks for it."""
-    return sample_panel
+@pytest.fixture(scope="module")
+def panel(tmp_path_factory):
+    """The sample as `vqapr new sample` writes it, installed once for this module: the packaged
+    synthetic panel plus `panel.json`, which says which name lists late and which stops early."""
+    return journey.install(tmp_path_factory.mktemp("sample-panel"))
 
 
 def _rows(path: Path, instrument: str, field: str) -> list:
@@ -50,7 +41,7 @@ def test_the_panel_holds_ten_named_instruments(panel) -> None:
 def test_one_instrument_lists_after_the_window_opens(panel) -> None:
     """A late lister has no rows at the start, which is what removes it from early sessions."""
     observed = _rows(panel.observations, panel.late_listed, "available_at")
-    assert len(observed) == len(panel.sessions) - LATE_SESSIONS
+    assert len(observed) == panel.session_count - panel.panel["late_sessions"]
     assert observed[-1] == max(
         row["available_at"] for row in pq.read_table(panel.observations).to_pylist()
     )
@@ -59,7 +50,7 @@ def test_one_instrument_lists_after_the_window_opens(panel) -> None:
 @pytest.mark.slow
 def test_one_instrument_stops_before_the_window_closes(panel) -> None:
     observed = _rows(panel.observations, panel.delisted, "available_at")
-    assert len(observed) == len(panel.sessions) - DEAD_SESSIONS
+    assert len(observed) == panel.session_count - panel.panel["dead_sessions"]
 
 
 @pytest.mark.slow
@@ -67,7 +58,7 @@ def test_the_delisted_name_keeps_a_tradable_tail(panel) -> None:
     """A position is closed after the Strategy drops the name, and that fill needs a price."""
     observed = _rows(panel.observations, panel.delisted, "available_at")
     tradable = _rows(panel.execution, panel.delisted, "trade_at")
-    assert len(tradable) == len(observed) + WIND_DOWN_SESSIONS
+    assert len(tradable) == len(observed) + panel.panel["wind_down_sessions"]
     assert max(tradable) > max(observed)
 
 
@@ -95,20 +86,16 @@ def test_the_strategy_never_inspects_listing_status() -> None:
 
 
 @pytest.mark.slow
-def test_the_sample_journey_runs_end_to_end(tmp_path: Path, sample_panel) -> None:
+def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
     """The reference journey an agent copies must actually run.
 
-    `reversal_5d` is written against the authoring contract while `journey` registers it
-    through the legacy component path, so this covers the seam between them: the loader
-    adapts an authoring model rather than refusing it. Without that adaptation the
-    registration fails with `component.load.wrong_type`, and the reference an agent is
-    told to copy does not work.
+    `reversal_5d` is written against the authoring contract and registered through the
+    declaration `vqapr new sample` writes (record `172`), so this covers the seam between them:
+    the loader adapts an authoring model rather than refusing it.
     """
-    from tests.sample import journey
-
     root = tmp_path / "proj"
     root.mkdir()
-    panel = journey.install(root, panel=sample_panel)
+    panel = journey.install(root)
     result = journey.execute(root, panel)
 
     # One callback and one due item per session (record `148`): the standalone valuation
@@ -129,9 +116,7 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path, sample_panel) -> Non
 
 
 @pytest.mark.slow
-def test_the_installed_sample_is_accepted_by_the_products_own_check(
-    tmp_path: Path, sample_panel
-) -> None:
+def test_the_installed_sample_is_accepted_by_the_products_own_check(tmp_path: Path) -> None:
     """What `install` registers passes the judgments every door asks before the freeze.
 
     The 0.6.0 call-flow review (record `167`) ran the installed sample through the CLI and was
@@ -140,12 +125,11 @@ def test_the_installed_sample_is_accepted_by_the_products_own_check(
     asking. The horizon moved (record `167`) and the judgments moved into `preflight_run`
     (record `168`), so this asks the public door the journey itself uses.
     """
-    from tests.sample import journey
     from vqapr.public import Workspace, preflight_run
 
     root = tmp_path / "proj"
     root.mkdir()
-    journey.install(root, panel=sample_panel)
+    journey.install(root)
     workspace = Workspace.open(root)
     frozen = preflight_run(workspace, workspace.run_definition(journey.RUN_ID))
     assert frozen.run_id == journey.RUN_ID

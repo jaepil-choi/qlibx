@@ -108,6 +108,11 @@ datasets:
     fields:                           # every column the dataset exposes, mapping name -> column
       close: close
       volume: volume
+    field_types:                      # what each field IS, one of: TIMESTAMP_TZ, DATE, INTEGER,
+      close: DOUBLE                   #   DOUBLE, VARCHAR, BOOLEAN. Registration reads the file
+      volume: INTEGER                 #   once and refuses a field whose column disagrees. A
+                                      #   DECIMAL column is refused: cast it to DOUBLE while
+                                      #   preparing the source, so a model reads one numeric type.
     # hive_partitioned: false         # uncomment if the source is a hive-partitioned directory
 """
 

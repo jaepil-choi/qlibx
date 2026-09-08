@@ -56,10 +56,9 @@ class SampleReversal5d(StrategyModel):
         window = call.read("prices", "close")
         closes: dict[str, list[Decimal]] = {}
         for name in window.instruments:
-            # `Decimal(str(v))` rather than the raw cell: this file is copied against the
-            # reader's own dataset, and a parquet float64 column arrives as `float`, which
-            # raises on the `values[-1] / values[0] - Decimal(1)` below. The sample panel is
-            # decimal128, so the bug is invisible here and appears only after the copy.
+            # A DOUBLE field arrives as `float`, as the dataset declared it (`docs/issues/088`).
+            # The intent below is stated in Decimal, so the crossing happens here, once, and
+            # through `str`: `Decimal(0.1)` would inherit the binary expansion.
             closes[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}

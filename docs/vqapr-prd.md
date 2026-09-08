@@ -660,7 +660,15 @@ logical dataset은 physical file과 구분되는 versioned reference다. 최초 
 2. observation을 사용할 수 있게 된 시점을 담은 **`available_at` 컬럼** (tz-aware)
 3. 해당 dataset의 logical row key
 4. 등록할 data field의 선택
-5. 선언된 physical source identity
+5. **선택한 field 각각의 타입 선언** (`TIMESTAMP_TZ` · `DATE` · `INTEGER` · `DOUBLE` · `VARCHAR` · `BOOLEAN`)
+6. 선언된 physical source identity
+
+**타입은 user가 선언하고 package가 1회 대조한다** (2026-09-08 판정, `docs/issues/088`). parquet을
+만드는 쪽이 user이므로 그 컬럼이 무엇인지도 user가 말한다. 등록은 파일을 `DESCRIBE`해서 선언과 다르면
+거부하고, 같으면 그 선언이 dataset의 사실이 된다 -- consumer는 `DOUBLE` field를 `float`으로, `INTEGER`를
+`int`로 받으며 그 사이의 변환은 없다. `DECIMAL` 컬럼은 선언할 수 없고 거부된다: 데이터 평면의 숫자는
+한 종류씩이고, exact 산술은 execution 경계의 돈 쪽에 있다. 이는 `available_at`의 tz-aware 요구와 같은
+모양의 계약이다 -- 계약이 타입을 말하고, user가 준비하고, package가 판정한다.
 
 `available_at`은 **user가 준비 단계에서 계산해 넣은 컬럼**이다. package는 그 값이 어떤 가정에서 나왔는지
 묻지도, 규칙으로 받아 평가하지도, 별도로 기록하지도 않는다 — **그 판단은 전적으로 user의 것이다.**

@@ -12,12 +12,13 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
 import duckdb
+import pyarrow as pa
 
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
@@ -33,6 +34,13 @@ class ColumnType(StrEnum):
 
     `TIMESTAMP_TZ`와 `TIMESTAMP_NAIVE`를 가르는 것이 이 enum의 존재 이유다 — naive timestamp는
     저장도 되고 조회도 되지만 **조용히 틀린다.**
+
+    `DECIMAL`도 같은 이유로 따로 있다. 2026-09-08 이전에는 `DOUBLE`로 접혔고, 그래서 등록은
+    `DOUBLE`이라 적어 두고 모델은 `Decimal`을 받았다(`docs/issues/088`). 잰 타입이 선언과
+    대조되는 지금은 접을 수 없다: 대조가 볼 수 없는 차이는 대조가 아니다.
+
+    선언할 수 있는 것은 `DECLARABLE_FIELD_TYPES`뿐이다. `TIMESTAMP_NAIVE` · `DECIMAL` · `OTHER`는
+    측정에서만 나오고, 등록은 그 각각을 이름 붙여 거부한다.
     """
 
     TIMESTAMP_TZ = "TIMESTAMP_TZ"
@@ -40,9 +48,33 @@ class ColumnType(StrEnum):
     DATE = "DATE"
     INTEGER = "INTEGER"
     DOUBLE = "DOUBLE"
+    DECIMAL = "DECIMAL"
     VARCHAR = "VARCHAR"
     BOOLEAN = "BOOLEAN"
     OTHER = "OTHER"
+
+
+DECLARABLE_FIELD_TYPES = frozenset(
+    {
+        ColumnType.TIMESTAMP_TZ,
+        ColumnType.DATE,
+        ColumnType.INTEGER,
+        ColumnType.DOUBLE,
+        ColumnType.VARCHAR,
+        ColumnType.BOOLEAN,
+    }
+)
+"""What a dataset declaration may say a field is (`docs/issues/088`).
+
+The data plane carries one numeric type per kind: `INTEGER` arrives as `int`, `DOUBLE` as
+`float`. `DECIMAL` is deliberately absent -- exact arithmetic lives on the money side of the
+execution boundary (`exchange/execution_table.py` converts a price once, explicitly), and a field
+that reached a model as `Decimal` would put two numeric types into one expression, which is the
+defect `docs/implementations/051` and `088` both describe.
+"""
+DECLARABLE_FIELD_TYPE_NAMES = ", ".join(
+    member.value for member in ColumnType if member in DECLARABLE_FIELD_TYPES
+)
 
 
 _INTEGER_TYPES = frozenset(
@@ -72,11 +104,38 @@ def _normalize(duck_type: str) -> ColumnType:
         return ColumnType.DATE
     if t in _INTEGER_TYPES:
         return ColumnType.INTEGER
-    if t in _DOUBLE_TYPES or t.startswith("DECIMAL"):
+    if t in _DOUBLE_TYPES:
         return ColumnType.DOUBLE
+    if t.startswith("DECIMAL"):
+        return ColumnType.DECIMAL
     if t == "VARCHAR":
         return ColumnType.VARCHAR
     if t == "BOOLEAN":
+        return ColumnType.BOOLEAN
+    return ColumnType.OTHER
+
+
+def column_type_of_arrow(arrow_type: pa.DataType) -> ColumnType:
+    """The `ColumnType` an arrow type lands as when duckdb reads the parquet it is written to.
+
+    The producer of a materialized dataset (`flow/datamodel.py`) states its field types from the
+    schema it wrote, through this one mapping, so that what it declares is what `DESCRIBE` will
+    measure on the file (`docs/issues/088`). Kept next to `_normalize` because the two are one
+    vocabulary read from two directions.
+    """
+    if pa.types.is_timestamp(arrow_type):
+        return ColumnType.TIMESTAMP_TZ if arrow_type.tz is not None else ColumnType.TIMESTAMP_NAIVE
+    if pa.types.is_date(arrow_type):
+        return ColumnType.DATE
+    if pa.types.is_integer(arrow_type):
+        return ColumnType.INTEGER
+    if pa.types.is_floating(arrow_type):
+        return ColumnType.DOUBLE
+    if pa.types.is_decimal(arrow_type):
+        return ColumnType.DECIMAL
+    if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+        return ColumnType.VARCHAR
+    if pa.types.is_boolean(arrow_type):
         return ColumnType.BOOLEAN
     return ColumnType.OTHER
 
@@ -424,6 +483,9 @@ class ProjectionSchema:
     field_types: Mapping[str, ColumnType]
     aggregated: bool
     errors: tuple[str, ...] = ()
+    observed: Mapping[str, str] = field(default_factory=dict)
+    """duckdb's own type string per field (`DECIMAL(18,4)`, `TIMESTAMP`), for a refusal that
+    compares the declaration against it: `ColumnType` names the class, this names the type."""
 
     @property
     def ok(self) -> bool:
@@ -490,7 +552,9 @@ def describe_projection(
 
     A field is an expression, so what it is typed as -- and whether it aggregates the rows an
     instant holds -- are facts about the composed query rather than about any source column. Both
-    are read off `DESCRIBE`, which is why an author never writes a type.
+    are read off `DESCRIBE`. The type is what the author's declaration is compared against
+    (`docs/issues/088`): the author says what the field is, this says what the file makes of the
+    expression, and `datasets.check_schema` refuses when they differ.
 
     **The two shapes are mutually exclusive, and that is what lets the binder be the judge.** The
     identity columns are projected bare, so the grouped shape binds only when every field is an
@@ -519,7 +583,12 @@ def describe_projection(
                 errors.append(str(exc).splitlines()[0])
                 continue
             described = {name: _normalize(dtype) for name, dtype, *_ in rows}
-            return ProjectionSchema({name: described[name] for name in fields}, aggregated)
+            spelled = {name: str(dtype) for name, dtype, *_ in rows}
+            return ProjectionSchema(
+                {name: described[name] for name in fields},
+                aggregated,
+                observed={name: spelled[name] for name in fields},
+            )
     finally:
         con.close()
     return ProjectionSchema({}, False, errors=tuple(errors))

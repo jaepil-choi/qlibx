@@ -348,7 +348,10 @@ def main() -> None:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close", "is_supervised": "is_supervised"},
+            # The extracted slice stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here; the model already reads it as float.
+            fields={"close": "CAST(close AS DOUBLE)", "is_supervised": "is_supervised"},
+            field_types={"close": "DOUBLE", "is_supervised": "BOOLEAN"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )

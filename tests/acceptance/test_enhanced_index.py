@@ -132,7 +132,11 @@ def _window(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"benchmark_weight": "benchmark_weight"},
+        # The committed vendor slice carries DECIMAL(18,8) weights, which no dataset may declare
+        # (`docs/issues/088`): the field evaluates to the DOUBLE it declares, and `SingleNameCap`
+        # crosses to Decimal once on its side.
+        fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+        field_types={"benchmark_weight": "DOUBLE"},
     )
     source = SourceSpec.of("benchmark-source", FIXTURE / str(manifest["benchmark_path"]))
     return ModelWindow(
@@ -330,8 +334,14 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
     )
     writer.release()
     directory = (
-        tmp_path / ".vqapr" / "runs" / "run-ei" / "strategies" / "enhanced-index@00000000"
-        / "tables" / "vqapr.weight"
+        tmp_path
+        / ".vqapr"
+        / "runs"
+        / "run-ei"
+        / "strategies"
+        / "enhanced-index@00000000"
+        / "tables"
+        / "vqapr.weight"
     )
     register_dataset(
         tmp_path,
@@ -341,7 +351,8 @@ def test_criterion_1_and_6_publish_round_trip_and_point_in_time(
             instrument_field="instrument",
             available_at="event_time",
             key_fields=("event_time", "instrument"),
-            fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
+            fields={"weight": "CAST(weight AS DOUBLE)"},
+            field_types={"weight": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("run-ei-weights", directory),

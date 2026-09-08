@@ -558,14 +558,16 @@ class Workspace:
             )
 
         existing = state.datasets.get(key)
-        if existing is not None and (existing.span is None or existing.grain is None):
+        if existing is not None and (
+            existing.span is None or existing.grain is None or existing.field_types is None
+        ):
             # A quarantined registration is being repaired. It differs from its replacement
-            # only in what has been MEASURED about it -- the span it never carried, and the
-            # field types nobody had derived when it was written -- or, since record `137`, in
-            # the grain it was written before anyone could declare; the conflict check below
-            # would read either as a changed declaration and refuse the repair it advertises.
-            # Compare on the declared half, and let the measurements and the grain be the
-            # things that change.
+            # only in what has been MEASURED about it -- the span it never carried, the
+            # grouping verdict -- or in a declaration that did not exist when it was written:
+            # the grain (record `137`) and, since record `173`, the field types; the conflict
+            # check below would read any of these as a changed declaration and refuse the
+            # repair it advertises. Compare on the half that has always been declared, and let
+            # the measurements and the later declarations be the things that change.
             repaired = replace(
                 existing,
                 grain=registration.grain if existing.grain is None else existing.grain,

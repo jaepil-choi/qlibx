@@ -94,6 +94,13 @@ def install(project_root: Path, panel: SamplePanel | None = None) -> SamplePanel
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={name: name for name in ("open", "high", "low", "close", "volume")},
+            field_types={
+                "open": "DOUBLE",
+                "high": "DOUBLE",
+                "low": "DOUBLE",
+                "close": "DOUBLE",
+                "volume": "INTEGER",
+            },
         ),
         SourceSpec.of("sample-prices-source", panel.observations),
     )

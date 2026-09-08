@@ -170,6 +170,7 @@ def _register_prices(project: Path, parquet: Path) -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "volume": "volume"},
+            field_types={"close": "DOUBLE", "volume": "DOUBLE"},
         ),
         SourceSpec.of("prices", parquet),
     )

@@ -217,7 +217,8 @@ class ReversalSignalStrategy(StrategyModel):
         closes: dict[str, list[Decimal]] = {}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # A DOUBLE field arrives as a float; cross to Decimal once, through str.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < 2:
             return Hold(reason="a cross-sectional signal needs at least two names with full history")
@@ -404,14 +405,17 @@ def _register_run_table(
     dataset_id: str,
     table: str,
     fields: dict[str, str],
+    field_types: dict[str, str],
 ) -> _Registered:
     """Register one table a member run recorded, as the dataset the next run reads.
 
     A run with a store streams every table it writes as a parquet directory under its own record,
     `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
     any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
-    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
-    `CAST` in the registration; `DECIMAL(38, 12)` is exact for a weight on the `1e-12` grid.
+    decision instant it was written at. A record stores a `Decimal` as decimal-marked text, so a
+    numeric field reads back as VARCHAR unless the registration `CAST`s it -- and the only numeric
+    type a field may be declared as is DOUBLE (issue 088). Nothing here reads these registrations
+    numerically; the assertions below cross back with `Decimal(str(...))` from the raw parquet.
     """
     ref = str(run_result.records[component_id]["strategy_ref"])
     directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
@@ -428,6 +432,7 @@ def _register_run_table(
             grain="instrument_instant",
             key_fields=("event_time", "instrument"),
             fields=fields,
+            field_types=field_types,
         ),
         SourceSpec.of(source_id, directory),
     )
@@ -534,7 +539,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
+            # The committed fixture stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here, and cross back with Decimal(str(...)) on read.
+            fields={"close": "CAST(close AS DOUBLE)"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
@@ -592,6 +600,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "signal_before_weighting": "signal_before_weighting",
             "neutralized_signal": "neutralized_signal",
         },
+        # Both are appended as `str(...)` by the strategy, so the record holds text.
+        field_types={"signal_before_weighting": "VARCHAR", "neutralized_signal": "VARCHAR"},
     )
     account_published = _register_run_table(
         project,
@@ -606,6 +616,14 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "quantity": "quantity",
             "price": "price",
             "account_version": "account_version",
+        },
+        # The four Decimal columns are decimal-marked text in the record (`_arrow_type`).
+        field_types={
+            "cash": "VARCHAR",
+            "nav": "VARCHAR",
+            "quantity": "VARCHAR",
+            "price": "VARCHAR",
+            "account_version": "INTEGER",
         },
     )
 

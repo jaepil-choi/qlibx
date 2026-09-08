@@ -225,7 +225,8 @@ class {class_name}(StrategyModel):
         closes: dict[str, list[Decimal]] = {{}}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # A DOUBLE field arrives as a float; cross to Decimal once, through str.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
         eligible = {{
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
@@ -352,8 +353,9 @@ class EnsembleStrategy(StrategyModel):
 
     def _panel(self, context, requirement):
         field = requirement.field_id
+        # A DOUBLE field arrives as a float; cross to Decimal once, through str.
         return {
-            str(row["instrument"]): row[field]
+            str(row["instrument"]): Decimal(str(row[field]))
             for row in context.window.observations(requirement).rows
             if row[field] is not None
         }
@@ -623,6 +625,7 @@ def _register_run_table(
     dataset_id: str,
     table: str,
     fields: dict[str, str],
+    field_types: dict[str, str],
 ) -> _Registered:
     """Register one table a member run recorded, as the dataset the next run reads.
 
@@ -630,7 +633,9 @@ def _register_run_table(
     `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
     any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
     decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
-    `CAST` in the registration; `DECIMAL(38, 12)` is exact for a weight on the `1e-12` grid.
+    `CAST` in the registration -- to DOUBLE, the one numeric type a field may be declared as
+    (issue 088). A weight on the `1e-12` grid has at most twelve significant digits, so the reader
+    gets it back exactly through `Decimal(str(...))`.
     """
     ref = str(run_result.records[component_id]["strategy_ref"])
     directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
@@ -647,6 +652,7 @@ def _register_run_table(
             grain="instrument_instant",
             key_fields=("event_time", "instrument"),
             fields=fields,
+            field_types=field_types,
         ),
         SourceSpec.of(source_id, directory),
     )
@@ -716,7 +722,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
+            # The committed fixture stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here, and cross back with Decimal(str(...)) on read.
+            fields={"close": "CAST(close AS DOUBLE)"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
@@ -729,7 +738,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"benchmark_weight": "benchmark_weight"},
+            # DECIMAL(18, 8) in the fixture; the same cast, for the same reason.
+            fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+            field_types={"benchmark_weight": "DOUBLE"},
         ),
         SourceSpec.of("krx-benchmark", benchmark_path),
     )
@@ -824,7 +835,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         component_id=str(reversal_ref.component_id),
         dataset_id="reversal_allocation",
         table="vqapr.weight",
-        fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
+        fields={"weight": "CAST(weight AS DOUBLE)"},
+        field_types={"weight": "DOUBLE"},
     )
 
     momentum_run = _member_run(
@@ -845,7 +857,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         component_id=str(momentum_ref.component_id),
         dataset_id="momentum_allocation",
         table="vqapr.weight",
-        fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
+        fields={"weight": "CAST(weight AS DOUBLE)"},
+        field_types={"weight": "DOUBLE"},
     )
 
     # The reuse half of "a run records what a later run will need to reuse it", proved on a real
@@ -860,6 +873,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         dataset_id="reversal_account",
         table="vqapr.account",
         fields={"cash": "cash", "account_version": "account_version", "run_id": "run_id"},
+        # `cash` is decimal-marked text in the record (record.py `_arrow_type`), so VARCHAR is its
+        # declared type; the comparison below reads the raw parquet and crosses back itself.
+        field_types={"cash": "VARCHAR", "account_version": "INTEGER", "run_id": "VARCHAR"},
     )
     recorded_account = _recorded_rows(
         project,
@@ -878,8 +894,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError("the published account series does not read back row for row")
     # Cash is an account-level fact, so it lives on the account-level rows; the instrument panel
     # rows alongside them carry quantity and price instead.
-    # Compared as numbers: since record `135` the run records cash as a Decimal and the published
-    # column is DECIMAL rather than text, so the round trip is exact on both sides.
+    # Compared as numbers: since record `135` the run records cash as a Decimal, stored as
+    # decimal-marked text, so `Decimal(str(...))` is exact on both sides of the round trip.
     published_cash = [
         Decimal(str(row["cash"])) for row in replayed_account if row["cash"] is not None
     ]

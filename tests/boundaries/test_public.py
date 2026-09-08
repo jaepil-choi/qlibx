@@ -87,6 +87,7 @@ def _registration(**overrides) -> DatasetRegistration:
         "key_fields": ("session_date", "instrument"),
         "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
+        "field_types": {"close": "INTEGER", "session_date": "DATE"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of("price_daily", "prices", **kwargs)
@@ -314,7 +315,11 @@ def test_schema_failure_does_not_create_a_workspace(tmp_path: Path, hive_parquet
     source = SourceSpec.of("prices", hive_parquet, hive_partitioned=True)
 
     with pytest.raises(VqaprError) as caught:
-        register_dataset(tmp_path, _registration(fields={"close": "missing"}), source)
+        register_dataset(
+            tmp_path,
+            _registration(fields={"close": "missing"}, field_types={"close": "INTEGER"}),
+            source,
+        )
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -497,7 +502,7 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
             f"""COPY (
                 SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
                        'A' AS instrument, true AS is_tradable,
-                       99.0 AS open, CAST('NaN' AS DOUBLE) AS close
+                       99.0::DOUBLE AS open, CAST('NaN' AS DOUBLE) AS close
             ) TO '{target.as_posix()}' (FORMAT PARQUET)"""
         )
     finally:

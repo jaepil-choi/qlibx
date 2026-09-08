@@ -37,7 +37,7 @@ def _prices(root: Path) -> Path:
     return _parquet(
         root,
         "prices.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
              (TIMESTAMPTZ '2024-03-06 03:00:00+09', 'A', 101.0)
            ) AS t(available_at, instrument, close)""",
@@ -53,6 +53,7 @@ def _dataset_document(observation: Path, **overrides: str) -> str:
         "key_fields": "[available_at, instrument]",
         "grain": "instrument_instant",
         "fields": "{close: close}",
+        "field_types": "{close: DOUBLE}",
     }
     fields.update(overrides)
     body = "\n".join(f"    {key}: {value}" for key, value in fields.items())
@@ -77,7 +78,7 @@ def test_a_duplicated_logical_key_is_refused_with_the_offending_group(
     duplicated = _parquet(
         tmp_path,
         "dup.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 999.0)
            ) AS t(available_at, instrument, close)""",
@@ -121,7 +122,7 @@ def test_a_naive_available_at_is_refused(
     naive = _parquet(
         tmp_path,
         "naive.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMP '2024-03-05 03:00:00', 'A', 100.0)
            ) AS t(available_at, instrument, close)""",
     )
@@ -131,6 +132,62 @@ def test_a_naive_available_at_is_refused(
 
     assert code == 1
     assert payload["failures"][0]["code"].startswith("dataset.register.schema.available_at")
+
+
+def test_a_dataset_that_omits_field_types_is_refused_naming_the_missing_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`field_types` is the author's statement since `docs/issues/088`, not a measurement.
+
+    A dataset that leaves it out is refused by the declaration model the way any missing key
+    is: the key is named, the entry's own keys are listed beside it, and nothing is written.
+    """
+    complete = _dataset_document(_prices(tmp_path))
+    without = "".join(
+        line
+        for line in complete.splitlines(keepends=True)
+        if not line.startswith("    field_types:")
+    )
+    assert without != complete, "the fixture must actually drop the key, or this proves nothing"
+    document = _write(tmp_path, "w.yaml", without)
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    (failure,) = payload["failures"]
+    assert failure["code"] == "declaration.read.key_missing"
+    assert failure["requirement"].startswith("datasets.prices must declare field_types")
+    assert failure["source"]["key_path"] == "datasets.prices"
+    assert "field_types" in failure["fix"]
+    assert "fields" in failure["observed"], "the keys the entry does declare are listed"
+    assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
+
+
+def test_a_field_typed_decimal_is_refused_at_field_types_with_the_permitted_types(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`DECIMAL` is a type a file can hold and a declaration cannot (`docs/issues/088`).
+
+    The refusal is the declaration's own -- `value_invalid`, sourced at `field_types` rather
+    than at `grain`, which is the other key that can object at the same point -- and it names
+    the types that are permitted, so the author learns to cast rather than to respell.
+    """
+    document = _write(
+        tmp_path, "w.yaml", _dataset_document(_prices(tmp_path), field_types="{close: DECIMAL}")
+    )
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "declaration.read"
+    (failure,) = payload["failures"]
+    assert failure["code"] == "declaration.read.value_invalid"
+    assert failure["source"]["key_path"] == "datasets.prices.field_types"
+    assert failure["source"]["key_path"].endswith(".field_types")
+    assert "DECIMAL" in failure["observed"]
+    assert "DOUBLE" in failure["requirement"], "the permitted types are named"
+    assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
 
 
 def test_the_first_registration_creates_the_workspace(
@@ -236,6 +293,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
             "    instrument_field: instrument\n    available_at: available_at\n"
             "    grain: instrument_instant\n"
             "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
+            "    field_types: {{close: DOUBLE}}\n"
         ),
         "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",
         "components": (

@@ -102,6 +102,7 @@ def _workspace(project: Path, prices: Path) -> Workspace:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices", prices),
     )

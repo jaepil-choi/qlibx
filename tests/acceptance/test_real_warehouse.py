@@ -230,10 +230,11 @@ def test_real_observations_stay_point_in_time(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
+        fields={"close": "CAST(close AS DOUBLE)"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(1))
     cutoff_session = _sessions(observation_path)[3]
     morning = _instant(cutoff_session, time(8, 30))
 
@@ -250,7 +251,7 @@ def test_real_observations_stay_point_in_time(
     for row in batch.rows:
         assert row["available_at"] < morning
         assert row["available_at"].astimezone(morning.tzinfo).date() < cutoff_session
-        assert isinstance(row["close"], Decimal)
+        assert isinstance(row["close"], float)
     assert batch.access.source_id == "krx-observation"
     assert len(batch.access.source_digest) == 64
 
@@ -306,10 +307,11 @@ def test_real_close_is_visible_exactly_at_the_venue_close(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
+        fields={"close": "CAST(close AS DOUBLE)"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(1))
     session = _sessions(observation_path)[3]
     cutoff = _instant(session, time(15, 30))
 

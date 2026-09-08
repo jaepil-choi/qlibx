@@ -37,7 +37,7 @@ class {class_name}(va.StrategyModel):
         window = call.read("{alias}", "{field}")
         history: dict[str, list[Decimal]] = {{}}
         for name in window.instruments:
-            # `Decimal(str(v))`, never `Decimal(v)`: a float64 0.1 is not one tenth.
+            # A DOUBLE field is a `float`; cross into Decimal once, via `str` (0.1 stays 0.1).
             history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
 
         scores = {{}}
@@ -111,10 +111,9 @@ _PANEL_HISTORY_BLOCK = """\
         window = context.read("{alias}", FIELD)
         history: dict[str, list[Decimal]] = {{}}
         for name in window.instruments:
-            # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's type,
-            # so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and arithmetic
-            # mixing the two raises. Going through `str` also avoids inheriting the binary float's
-            # expansion, so 0.1 stays 0.1.
+            # A DOUBLE field arrives as `float`, as the dataset declared it. The intent below is
+            # stated in Decimal, so cross once here and through `str`: `Decimal(0.1)` inherits
+            # the binary float's expansion, `Decimal("0.1")` is one tenth.
             history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]"""
 
 _ROWS_HISTORY_BLOCK = """\
@@ -125,10 +124,10 @@ _ROWS_HISTORY_BLOCK = """\
         for row in context.rows("{alias}"):
             value = row.values[FIELD]
             if value is not None:
-                # `Decimal(str(v))` rather than `Decimal(v)`: a value keeps its parquet column's
-                # type, so a DOUBLE column arrives as `float` and a DECIMAL one as `Decimal`, and
-                # arithmetic mixing the two raises. Going through `str` also avoids inheriting the
-                # binary float's expansion, so 0.1 stays 0.1.
+                # A DOUBLE field arrives as `float`, as the dataset declared it. The intent
+                # below is stated in Decimal, so cross once here and through `str`:
+                # `Decimal(0.1)` inherits the binary float's expansion, `Decimal("0.1")` is one
+                # tenth.
                 history.setdefault(row.instrument_id, []).append(Decimal(str(value)))"""
 
 _ROWS_LOOKBACK_NOTE = """\

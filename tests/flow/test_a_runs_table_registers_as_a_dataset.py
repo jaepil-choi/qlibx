@@ -8,7 +8,9 @@ publishing one is gone -- the four ensemble showcases stand on it.
 
 Two things the registration must say, because a record does not: `available_at` is `event_time`
 (the decision instant the row was written at), and a `Decimal` is stored as text, so a numeric
-field is `CAST`. `DECIMAL(38, 12)` is exact for a weight the optimiser placed on the `1e-12` grid.
+field is `CAST`. It is cast to `DOUBLE`, the one numeric type a dataset field may declare
+(`docs/issues/088`): the record keeps the member's `Decimal` exactly, and the dataset the next run
+reads is the data plane, which is float.
 """
 
 from __future__ import annotations
@@ -82,17 +84,19 @@ def test_a_runs_weight_table_is_read_by_the_next_run_point_in_time(tmp_path: Pat
             instrument_field="instrument",
             available_at="event_time",
             key_fields=("event_time", "instrument"),
-            fields={"weight": "CAST(weight AS DECIMAL(38, 12))"},
+            fields={"weight": "CAST(weight AS DOUBLE)"},
+            field_types={"weight": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("member-weights", directory),
     )
 
     assert registered is True
-    # The newest decision, exactly as the member made it -- a Decimal, not a float.
-    assert _read(tmp_path, T2 + timedelta(hours=1)) == {"A": Decimal("0.25"), "B": Decimal("0.75")}
+    # The newest decision, as the DOUBLE field the registration declared: a float, exact here
+    # because these weights are dyadic.
+    assert _read(tmp_path, T2 + timedelta(hours=1)) == {"A": 0.25, "B": 0.75}
     # And nothing from the second session is visible before it happened.
-    assert _read(tmp_path, T1 + timedelta(hours=1)) == {"A": Decimal("0.5"), "B": Decimal("0.5")}
+    assert _read(tmp_path, T1 + timedelta(hours=1)) == {"A": 0.5, "B": 0.5}
     assert _read(tmp_path, T1 - timedelta(hours=1)) == {}
 
 
@@ -131,7 +135,8 @@ def test_a_column_that_was_null_in_an_early_part_reads_with_its_later_type(tmp_p
             instrument_field="instrument",
             available_at="event_time",
             key_fields=("event_time", "instrument"),
-            fields={"price": "CAST(price AS DECIMAL(38, 12))"},
+            fields={"price": "CAST(price AS DOUBLE)"},
+            field_types={"price": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("member-account", directory),
@@ -145,4 +150,4 @@ def test_a_column_that_was_null_in_an_early_part_reads_with_its_later_type(tmp_p
         allowed_requirements=(requirement,),
         consumer_id="ensemble",
     )
-    assert window.panel([requirement], "price").latest() == {"A": Decimal("100")}
+    assert window.panel([requirement], "price").latest() == {"A": 100.0}

@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
@@ -41,7 +40,7 @@ SESSIONS = tuple(datetime(2024, 1, day, 6, 30, tzinfo=UTC) for day in range(1, 1
 @pytest.fixture
 def priced_workspace(tmp_path: Path) -> Workspace:
     rows = [
-        {"available_at": stamp, "instrument": name, "close": Decimal(100 + index)}
+        {"available_at": stamp, "instrument": name, "close": float(100 + index)}
         for index, stamp in enumerate(SESSIONS)
         for name in ("AAA", "BBB")
     ]
@@ -53,7 +52,7 @@ def priced_workspace(tmp_path: Path) -> Workspace:
                 [
                     ("available_at", pa.timestamp("us", tz="UTC")),
                     ("instrument", pa.string()),
-                    ("close", pa.decimal128(18, 4)),
+                    ("close", pa.float64()),
                 ]
             ),
         ),
@@ -70,6 +69,7 @@ def priced_workspace(tmp_path: Path) -> Workspace:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices-source", source),
     )
@@ -324,7 +324,7 @@ def halted_source(tmp_path: Path) -> SourceSpec:
     has, and the name vanishes from a result that used to carry its final price.
     """
     rows = [
-        {"available_at": stamp, "instrument": name, "close": Decimal(100 + index), "volume": index}
+        {"available_at": stamp, "instrument": name, "close": float(100 + index), "volume": index}
         for index, stamp in enumerate(_BOUND_SESSIONS)
         for name in ("AAA", "BBB")
     ]
@@ -332,7 +332,7 @@ def halted_source(tmp_path: Path) -> SourceSpec:
         {
             "available_at": stamp,
             "instrument": "HALTED",
-            "close": Decimal(50 + index),
+            "close": float(50 + index),
             "volume": index,
         }
         for index, stamp in enumerate(_BOUND_SESSIONS[:60])
@@ -342,7 +342,7 @@ def halted_source(tmp_path: Path) -> SourceSpec:
         {
             "available_at": stamp,
             "instrument": "LATE",
-            "close": Decimal(70 + index),
+            "close": float(70 + index),
             "volume": index,
         }
         for index, stamp in enumerate(_BOUND_SESSIONS[-5:])
@@ -354,7 +354,7 @@ def halted_source(tmp_path: Path) -> SourceSpec:
         {
             "available_at": stamp,
             "instrument": "STOPS",
-            "close": Decimal(80 + index),
+            "close": float(80 + index),
             "volume": index,
         }
         for index, stamp in enumerate(_BOUND_SESSIONS[:386])
@@ -367,7 +367,7 @@ def halted_source(tmp_path: Path) -> SourceSpec:
                 [
                     ("available_at", pa.timestamp("us", tz="UTC")),
                     ("instrument", pa.string()),
-                    ("close", pa.decimal128(18, 4)),
+                    ("close", pa.float64()),
                     ("volume", pa.int64()),
                 ]
             ),
@@ -474,7 +474,7 @@ def test_a_bounded_rows_lookback_still_carries_the_halted_name(
     halted = [row for row in bounded if str(row["instrument"]) == "HALTED"]
     assert len(halted) == 5
     assert halted[-1]["available_at"] == _BOUND_SESSIONS[59]
-    assert halted[-1]["close"] == Decimal("109.0000")
+    assert halted[-1]["close"] == 109.0
 
 
 def test_the_instant_grid_is_read_once_per_source_for_the_whole_run(

@@ -182,6 +182,7 @@ def workspace(tmp_path: Path) -> Path:
                 grain="instrument_instant",
                 key_fields=("available_at", "instrument"),
                 fields={"volume": "volume"},
+                field_types={"volume": "INTEGER"},
             ).with_span(*_SPAN),
             SourceSpec.of("prices-source", "prepared/prices"),
         )
@@ -433,6 +434,7 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
                 grain="instrument_instant",
                 key_fields=("instrument",),
                 fields={"volume": "volume"},
+                field_types={"volume": "INTEGER"},
             ).with_span(*_SPAN),
             SourceSpec.of("prices-source", "prepared/prices"),
         )
@@ -462,6 +464,7 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
                 grain="instrument_instant",
                 key_fields=("instrument",),
                 fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
             ).with_span(*_SPAN),
             SourceSpec.of("prices-source", "prepared/prices"),
         )
@@ -508,6 +511,7 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
                 grain="instrument_instant",
                 key_fields=("instrument",),
                 fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
             ).with_span(*_SPAN),
             SourceSpec.of("prices-source", "prepared/prices"),
         )
@@ -668,6 +672,7 @@ def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(
                 space.dataset("prices"),
                 dataset_id="full",
                 fields={"close": "close", "volume": "volume"},
+                field_types={"close": "DOUBLE", "volume": "INTEGER"},
             ),
             space.source("prices-source"),
         )

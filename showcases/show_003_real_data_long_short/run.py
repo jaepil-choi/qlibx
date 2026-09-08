@@ -369,7 +369,11 @@ def main() -> None:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close", "volume": "volume"},
+            # The extracted slice stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here; the model already reads it as float. Volume is
+            # a BIGINT in the same slice.
+            fields={"close": "CAST(close AS DOUBLE)", "volume": "volume"},
+            field_types={"close": "DOUBLE", "volume": "INTEGER"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )

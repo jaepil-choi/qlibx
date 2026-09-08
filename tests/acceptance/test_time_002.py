@@ -137,7 +137,7 @@ def _agenda(identifier: str, role: OperationRole, *times: datetime) -> FrozenAge
 
 
 def _requirement() -> DataRequirement:
-    return DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
+    return DataRequirement.of("prices", "close", lookback=RowsLookback(1))
 
 
 class _Constraint(Constraint):
@@ -244,7 +244,6 @@ def _flow(
     constraints: tuple[Constraint, ...] = (_Constraint(),),
     constraint_window_for_occurrence: object = None,
     strategy_window_for_occurrence: object = None,
-
 ) -> SimulationFlow:
     return SimulationFlow(
         frozen,
@@ -322,9 +321,9 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
         tmp_path / "minute.parquet",
         """
         SELECT * FROM (VALUES
-          (TIMESTAMPTZ '2024-03-05 03:59:00+00', 'A', 1.0),
-          (TIMESTAMPTZ '2024-03-05 04:00:00+00', 'A', 2.0),
-          (TIMESTAMPTZ '2024-03-05 04:01:00+00', 'A', 3.0)
+          (TIMESTAMPTZ '2024-03-05 03:59:00+00', 'A', 1.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 04:00:00+00', 'A', 2.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 04:01:00+00', 'A', 3.0::DOUBLE)
         ) AS t(available_at, instrument, close)
     """,
     )
@@ -339,11 +338,12 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("source", source),
     )
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(3))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(3))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 5, 4, tzinfo=UTC),
         instruments=("A",),
@@ -378,8 +378,8 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
         tmp_path / "pit.parquet",
         """
         SELECT * FROM (VALUES
-          (TIMESTAMPTZ '2024-03-05 04:00:00+09', 'A', 1.0),
-          (TIMESTAMPTZ '2024-03-05 04:00:00.000001+09', 'A', 2.0)
+          (TIMESTAMPTZ '2024-03-05 04:00:00+09', 'A', 1.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 04:00:00.000001+09', 'A', 2.0::DOUBLE)
         ) AS t(available_at, instrument, close)
     """,
     )
@@ -394,11 +394,12 @@ def test_pit_includes_equality_excludes_one_microsecond_later_and_callback_needs
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("source", source),
     )
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 5, 4, tzinfo=KST),
         instruments=("A",),
@@ -499,13 +500,7 @@ def test_monitoring_projects_at_the_fill_instant_and_reuses_its_projected_bounds
                 )
             ),
         ),
-        _Strategy(
-            (
-                Rebalance(
-                    target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET
-                ),
-            )
-        ),
+        _Strategy((Rebalance(target_weights={}, cash_weight=Decimal("1"), budget=_BUDGET),)),
         _state(),
         (constraint,),
     ).run()
@@ -568,7 +563,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         tmp_path / "strategy.parquet",
         """
         SELECT TIMESTAMPTZ '2024-03-05 09:00:00+09' AS available_at,
-               'A' AS instrument, 10.0 AS close
+               'A' AS instrument, 10.0::DOUBLE AS close
         """,
     )
     registration = DatasetRegistration.of(
@@ -579,11 +574,12 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("source", source_path)
     register_dataset(tmp_path / "workspace", registration, source)
     workspace = Workspace.open(tmp_path / "workspace")
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     target = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
     execution = _execution(
@@ -659,7 +655,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
 
 @pytest.mark.uc("UC-TIME-002")
 def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> None:
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     registration = DatasetRegistration.of(
         "prices",
         "missing-source",
@@ -668,6 +664,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("missing-source", tmp_path / "unread.parquet")
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
@@ -696,7 +693,7 @@ def test_no_decision_does_not_hash_an_unread_declared_source(tmp_path: Path) -> 
 
 @pytest.mark.uc("UC-TIME-002")
 def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Path) -> None:
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     registration = DatasetRegistration.of(
         "prices",
         "missing-source",
@@ -705,6 +702,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("missing-source", tmp_path / "missing.parquet")
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
@@ -880,9 +878,7 @@ def test_no_equal_or_after_end_target_is_not_accepted(tmp_path: Path) -> None:
     )
     close = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
-    assert (
-        registration.select_target(decision_time=close, end_time=close) is None
-    )
+    assert registration.select_target(decision_time=close, end_time=close) is None
     assert (
         registration.select_target(
             decision_time=datetime(2024, 3, 5, 4, tzinfo=KST),
@@ -1014,8 +1010,8 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
             tmp_path / "duplicate.parquet",
             """
         SELECT * FROM (VALUES
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 1.0),
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 1.0)
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 1.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 1.0::DOUBLE)
         ) AS t(trade_at, instrument, is_tradable, close)
     """,
         )
@@ -1467,9 +1463,7 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     assert failure.mutation is after_commit
     assert failure.retry_precondition.requires_replay_from_root is True
     stamped_pending = state.current.pending_accepted_intent
-    assert failure.pending_id == (
-        None if after_commit else str(stamped_pending.intent.intent_id)
-    )
+    assert failure.pending_id == (None if after_commit else str(stamped_pending.intent.intent_id))
     assert failure.retry_precondition.required_pending_id == failure.pending_id
     assert failure.root_version == state.current.version == root_version
     assert failure.account_version == (1 if after_commit else 0)

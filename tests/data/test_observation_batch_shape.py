@@ -23,7 +23,6 @@ drops it fails here rather than in someone's factor.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -54,6 +53,7 @@ def _window(tmp_path: Path, parquet: Path, requirement: DataRequirement) -> Mode
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "volume": "volume"},
+            field_types={"close": "DOUBLE", "volume": "DOUBLE"},
         ),
         source,
     )
@@ -90,7 +90,7 @@ def test_rows_are_ordered_by_available_at_for_either_lookback(
     The scaffold computes `values[-1] / values[0] - 1` and calls it a trailing return, which is
     true only if this holds -- stated by arithmetic, in emitted code, and by nothing else.
     """
-    requirement = DataRequirement.of('price_daily', 'close', lookback=lookback)
+    requirement = DataRequirement.of("price_daily", "close", lookback=lookback)
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     stamps = [row["available_at"] for row in batch.rows]
@@ -107,7 +107,7 @@ def test_a_row_carries_its_own_instant_its_name_and_the_declared_aliases(
     rows of one instant are the ones sharing it, and a name that stopped publishing carries an
     older stamp instead of a missing row.
     """
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(2))
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     assert sorted(batch.rows[0]) == ["available_at", "close", "instrument"], (
@@ -117,21 +117,22 @@ def test_a_row_carries_its_own_instant_its_name_and_the_declared_aliases(
     assert isinstance(batch.rows[0]["available_at"], datetime)
     assert batch.rows[0]["available_at"].tzinfo is not None
     # The reporter recorded "values arrive as float, not Decimal", measured on their own source.
-    # That is a property of the COLUMN, not of this type: duckdb hands back `float` for a DOUBLE
-    # and `Decimal` for a DECIMAL, and this fixture's literals are DECIMAL. Both are legal, which
-    # is exactly why the scaffolds write `Decimal(str(value))` and never `Decimal(value)`.
-    assert isinstance(batch.rows[0]["close"], Decimal)
-    assert Decimal(str(batch.rows[0]["close"])) == Decimal("103.0")
+    # Since `docs/issues/088` that is a property of the DECLARATION: the field is registered as
+    # DOUBLE, registration checked the file agrees, and a DOUBLE reaches a model as `float`.
+    assert isinstance(batch.rows[0]["close"], float)
+    assert batch.rows[0]["close"] == 103.0
 
 
-def test_a_value_keeps_its_own_column_type(tmp_path: Path) -> None:
-    """`float` for a DOUBLE column and `Decimal` for a DECIMAL one, in the same row.
+def test_a_decimal_column_cannot_become_a_field(tmp_path: Path) -> None:
+    """A DOUBLE column reaches a model as `float`; a DECIMAL one is refused at registration.
 
-    The docstring says a model may assume neither, so both are proven here rather than one being
-    inferred from the other. This is the difference between the reporter's note -- correct about
-    their source -- and a promise the package can make about every source.
+    This used to prove the opposite -- `float` and `Decimal` in the same row, "both are legal" --
+    and `docs/issues/088` reversed it: a model does arithmetic in one numeric type, so the type a
+    field arrives as is declared, and a column that cannot be declared cannot be a field.
     """
     import duckdb
+
+    from vqapr.domain.errors import VqaprError
 
     parquet = tmp_path / "mixed.parquet"
     connection = duckdb.connect()
@@ -146,35 +147,41 @@ def test_a_value_keeps_its_own_column_type(tmp_path: Path) -> None:
     finally:
         connection.close()
 
-    public.register_dataset(
-        tmp_path,
-        DatasetRegistration.of(
+    def registration(fields: dict[str, str]) -> DatasetRegistration:
+        return DatasetRegistration.of(
             "mixed",
             "mixed-source",
             instrument_field="instrument",
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"as_double": "as_double", "as_decimal": "as_decimal"},
-        ),
-        SourceSpec.of("mixed-source", parquet),
+            fields=fields,
+            field_types=dict.fromkeys(fields, "DOUBLE"),
+        )
+
+    with pytest.raises(VqaprError) as refused:
+        public.register_dataset(
+            tmp_path,
+            registration({"as_double": "as_double", "as_decimal": "as_decimal"}),
+            SourceSpec.of("mixed-source", parquet),
+        )
+    (failure,) = refused.value.failures
+    assert failure.code == "dataset.register.schema.field_decimal"
+    assert "DECIMAL(10,4)" in (failure.observed or "")
+
+    public.register_dataset(
+        tmp_path, registration({"as_double": "as_double"}), SourceSpec.of("mixed-source", parquet)
     )
-    requirements = tuple(
-        DataRequirement.of("mixed", field, lookback=RowsLookback(1))
-        for field in ("as_double", "as_decimal")
-    )
+    requirement = DataRequirement.of("mixed", "as_double", lookback=RowsLookback(1))
     window = ModelWindow(
         evaluation_time=EVALUATED_AT,
         instruments=("A",),
         store=DuckDbObservationStore(Workspace.open(tmp_path)),
-        allowed_requirements=requirements,
+        allowed_requirements=(requirement,),
         consumer_id="types",
     )
 
-    double, decimal = (window.observations(item).rows[0] for item in requirements)
-
-    assert isinstance(double["as_double"], float)
-    assert isinstance(decimal["as_decimal"], Decimal)
+    assert isinstance(window.observations(requirement).rows[0]["as_double"], float)
 
 
 def test_instruments_interleave_within_an_instant_rather_than_grouping(
@@ -185,7 +192,7 @@ def test_instruments_interleave_within_an_instant_rather_than_grouping(
     A model that assumes grouping -- accumulate until the name changes -- produces a well-formed
     wrong answer here rather than an error. Both names appear at every instant, in key order.
     """
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(2))
     batch = _window(tmp_path, model_price_parquet, requirement).observations(requirement)
 
     pairs = [(row["available_at"], row["instrument"]) for row in batch.rows]

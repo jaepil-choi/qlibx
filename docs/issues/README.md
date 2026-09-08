@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-05.** 이 디렉터리에 87개 파일이 있고 **86개가 닫혔다.** 닫힌 파일을 옮기지 않는
+**작성 2026-09-02 · 갱신 2026-09-08.** 이 디렉터리에 88개 파일이 있고 **87개가 닫혔다.** 닫힌 파일을 옮기지 않는
 이유는 `src/`의 docstring 103곳과 `docs/`의 154곳이 이 번호들을 **결정의 근거**로 인용하기
 때문이다 — 경로를 바꾸면 그 인용이 전부 끊긴다. 대신 이 파일이 색인이다.
 
@@ -21,6 +21,7 @@
 |---|---|---|---|
 | `023` | 하나의 digest가 그 아래에서 바뀔 수 있는 파일을 기술한다 | **절반 열림.** docs 절반은 `fix/023-narrow-the-provenance-promise`가 닫았다. 코드 절반(`show run`의 `matches`/`differs` 읽기)은 HELD — gate가 되면 `009`의 결정을 뒤집는다 | 명사 3 (Run record) |
 | ~~`027`~~ | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **닫힘 2026-09-05 — record `160`.** `register`가 `spoken`으로 PIT 개념마다 한 문장을 말한다(dataset의 `available_at`, execution input의 `trade_at`과 fill 규약, run의 `at`·`timezone`); 없으면 아무 말도 안 한다 | 닫힘 |
+| ~~`088`~~ | `DOUBLE`로 등록된 field가 모델에 `Decimal`로 도착한다 — 아무도 그것이 무엇인지 선언하지 않았다 | **닫힘 2026-09-08 — record `173`.** 오너 판정: user가 `field_types`를 선언하고 등록이 `DESCRIBE`와 1회 대조해 불일치를 이름으로 거부한다(`049`의 "author는 타입을 쓰지 않는다"와 `079`의 A안 기각을 번복). `DECIMAL`은 잴 수는 있어도 선언할 수 없어 등록에서 `field_decimal`, DataModel 출력은 첫 세션에서 `field_type`으로 거부. 샘플 panel은 float64. 열린 것: DataModel `value_fields`의 선언 타입 | 닫힘 |
 | ~~`087`~~ | 끝난 run이 occurrence마다 parquet 파일 하나를 남긴다 — 표 하나가 8 KB짜리 607개 | **닫힘 2026-09-07 — record `164`.** writer가 행을 Arrow로 메모리에 들고 run이 끝날 때(정상·예외·인터럽트) 표당 `all.parquet` 하나를 쓴다; 256 MB spill 밸브; hard kill은 spill분만 남는다(오너가 record 135의 약속 축소를 수용). 매 loop 물리 IO 0. 샘플 journey 7.8→5.4 s, 파일 1,465→3 | 닫힘 |
 
 ### 실환경 세션이 낸 아홉 (2026-09-04, `0.4.1` wheel) — 전부 열려 있다

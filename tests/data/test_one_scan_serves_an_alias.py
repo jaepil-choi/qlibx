@@ -45,6 +45,7 @@ def _workspace(tmp_path: Path, parquet: Path) -> Workspace:
             # Three declared fields on one dataset -- the `ff_factors` shape. The third is an
             # expression, which is what a field is since `docs/issues/049`.
             fields={"close": "close", "volume": "volume", "double_close": "close * 2"},
+            field_types={"close": "DOUBLE", "volume": "DOUBLE", "double_close": "DOUBLE"},
         ),
         SourceSpec.of("prices", parquet),
     )

@@ -108,6 +108,7 @@ def _setup(
             grain="instrument_instant",
             key_fields=("session_date", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices-source", model_price_parquet),
     )

@@ -147,6 +147,7 @@ RUNNER = textwrap.dedent(
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("clock-observation", price_path),
     )
@@ -239,14 +240,17 @@ def clock_run(tmp_path_factory) -> tuple[list[dict], dict]:
     )
     prices = tmp_path / "prices.parquet"
     connection = duckdb.connect()
+    # `CAST(... AS DOUBLE)` on both tables: a bare `72000.0` is DECIMAL(6,1) to duckdb, and a
+    # price column is the DOUBLE a real parquet holds (`docs/issues/088`).
     connection.execute(
-        f"""COPY (SELECT * FROM (VALUES
+        f"""COPY (SELECT instrument, trade_at, is_tradable, CAST(close AS DOUBLE) AS close
+        FROM (VALUES
         {rows}
         ) AS t(instrument, trade_at, is_tradable, close))
         TO '{execution.as_posix()}' (FORMAT PARQUET)"""
     )
     connection.execute(
-        f"""COPY (SELECT * FROM (VALUES
+        f"""COPY (SELECT instrument, available_at, CAST(close AS DOUBLE) AS close FROM (VALUES
         {observed}
         ) AS t(instrument, available_at, close))
         TO '{prices.as_posix()}' (FORMAT PARQUET)"""

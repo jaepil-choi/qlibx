@@ -33,6 +33,7 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
         "key_fields": ("session_date", "instrument"),
         "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
+        "field_types": {"close": "INTEGER", "session_date": "DATE"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of(raw_id, "prices", **kwargs).with_span(*_SPAN)
@@ -78,7 +79,9 @@ def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
 
 def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
     first = _registration()
-    second = _registration("price_adjusted", fields={"close": "adjusted_close"})
+    second = _registration(
+        "price_adjusted", fields={"close": "adjusted_close"}, field_types={"close": "INTEGER"}
+    )
     workspace = Workspace.create(tmp_path)
 
     with Workspace.transaction(workspace) as t:
@@ -113,7 +116,9 @@ def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> No
     before = workspace.path.read_bytes()
 
     with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
-        t.register_dataset(_registration(fields={"open": "open"}), _source())
+        t.register_dataset(
+            _registration(fields={"open": "open"}, field_types={"open": "INTEGER"}), _source()
+        )
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
@@ -538,11 +543,64 @@ def test_repairing_a_quarantined_registration_may_not_change_its_declaration(
     _make_legacy(workspace, 1)
 
     with pytest.raises(VqaprError) as refused, Workspace.transaction(tmp_path) as t:
-        t.register_dataset(
-            _registration("alpha", key_fields=("instrument",)), _source()
-        )
+        t.register_dataset(_registration("alpha", key_fields=("instrument",)), _source())
 
     assert refused.value.failures[0].code == "workspace.dataset.register.conflict"
+
+
+def _make_undeclared(workspace: Workspace, count: int) -> None:
+    """Rewrite the first `count` registrations into the shape they had before `field_types`.
+
+    The `field_types:` key and its indented entries are removed and nothing else: a document
+    written before `docs/issues/088`, not a corrupt one.
+    """
+    kept: list[str] = []
+    dropping = False
+    stripped = 0
+    for line in workspace.path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "field_types:" and stripped < count:
+            dropping = True
+            stripped += 1
+            continue
+        if dropping:
+            if len(line) - len(line.lstrip()) > 4:
+                continue
+            dropping = False
+        kept.append(line)
+    assert stripped == count, "the fixture did not strip the field_types it meant to"
+    workspace.path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def test_a_registration_without_field_types_is_quarantined_not_a_deadlock(tmp_path: Path) -> None:
+    """`docs/issues/088`: the same quarantine as a missing span, for the key it introduced.
+
+    An entry that predates `field_types` still opens and lists (or nothing could report it),
+    every read on it is refused by name until its author declares the types, and registering it
+    again with them is the repair -- through the same `register` the refusal advertises.
+    """
+    from vqapr.data.datasets import require_declared
+
+    workspace = Workspace.create(tmp_path)
+    for name in ("alpha", "gamma"):
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
+    _make_undeclared(workspace, 1)
+
+    reopened = Workspace.open(tmp_path)
+    assert sorted(str(item.dataset_id) for item in reopened.datasets) == ["alpha", "gamma"]
+    assert reopened.dataset("alpha").field_types is None
+    assert reopened.dataset("gamma") == _registration("gamma")
+
+    with pytest.raises(VqaprError) as refused:
+        require_declared(reopened.dataset("alpha"))
+    failure = refused.value.failures[0]
+    assert failure.code == "dataset.register.schema.undeclared"
+    assert "alpha" in (failure.observed or "")
+    assert "field_types:" in failure.fix, "the refusal must name the key that repairs it"
+
+    with Workspace.transaction(tmp_path) as t:
+        assert t.register_dataset(_registration("alpha"), _source()) is True
+    assert Workspace.open(tmp_path).dataset("alpha") == _registration("alpha")
 
 
 def test_reading_a_span_does_not_touch_the_source(
@@ -587,6 +645,7 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
         grain="rows",
         key_fields=("session_date", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "INTEGER"},
     )
 
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:

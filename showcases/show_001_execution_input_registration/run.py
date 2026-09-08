@@ -99,8 +99,11 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
           WHERE EXTRACT(hour FROM trade_at) = 15
         ) TO '{canonical_target}' (FORMAT PARQUET)""")
         # The observation dataset the strategy declares. Its instants are session closes, so
-        # the 04:00 callback on day N sees day N-1's close and nothing later.
-        con.execute(f"""COPY (SELECT * FROM (VALUES
+        # the 04:00 callback on day N sees day N-1's close and nothing later. The close is a
+        # DOUBLE on purpose: a bare `100.0` literal is DECIMAL to duckdb, and a DECIMAL column
+        # cannot be declared as a dataset field (issue 088).
+        con.execute(f"""COPY (SELECT available_at, instrument, CAST(close AS DOUBLE) AS close
+        FROM (VALUES
           (TIMESTAMPTZ '2024-03-04 15:30:00+09', 'A', 99.0),
           (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
           (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
@@ -220,6 +223,7 @@ def main() -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("showcase-observation", observation_path),
     )

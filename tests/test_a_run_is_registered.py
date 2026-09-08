@@ -140,6 +140,7 @@ def test_a_run_may_take_its_sessions_from_a_registered_dataset_instead(
         available_at="available_at",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
         grain="instrument_instant",
     ).with_span(datetime(2024, 3, 5, tzinfo=KST), datetime(2024, 3, 7, tzinfo=KST))
     with Workspace.transaction(workspace) as t:

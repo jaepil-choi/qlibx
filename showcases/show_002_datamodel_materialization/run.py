@@ -42,9 +42,11 @@ def _write_input() -> Path:
     target = OUTPUTS / "price_daily.parquet"
     con = duckdb.connect()
     try:
+        # The close is a DOUBLE on purpose: a bare `100.0` literal is DECIMAL to duckdb, and a
+        # DECIMAL column cannot be declared as a dataset field (issue 088).
         con.execute(
             f"""COPY (
-                SELECT * FROM (VALUES
+                SELECT available_at, instrument, CAST(close AS DOUBLE) AS close FROM (VALUES
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B',  50.0),
                   (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
@@ -271,6 +273,7 @@ def main() -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("show002-prices", input_path),
     )

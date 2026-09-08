@@ -169,7 +169,11 @@ def _schema_failures(
                     source=FailureSource(file=str(spec.source.path), key_path=field),
                 )
             )
-    numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE}
+    # DECIMAL is admitted here and refused on a dataset (`docs/issues/088`): an execution price
+    # never reaches a model, it is read once at the boundary and converted explicitly
+    # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the
+    # venue table carries.
+    numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE, scan.ColumnType.DECIMAL}
     for semantic, field in spec.price_fields.items():
         observed = columns.get(field)
         if observed not in numeric:

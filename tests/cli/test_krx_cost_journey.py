@@ -65,7 +65,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
             for name, close in ((STOCK, stock), (ETF, etf))
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT session_date, available_at, instrument, close::DOUBLE AS close
+            FROM (VALUES
 {observed}
             ) AS t(session_date, available_at, instrument, close))
             TO '{observation.as_posix()}' (FORMAT PARQUET)"""
@@ -76,7 +77,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
             for name, close in ((STOCK, stock), (ETF, etf))
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close
+            FROM (VALUES
 {traded}
             ) AS t(trade_at, instrument, is_tradable, close))
             TO '{execution.as_posix()}' (FORMAT PARQUET)"""
@@ -126,6 +128,7 @@ datasets:
     grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
+    field_types: {{close: DOUBLE}}
 
 execution_inputs:
   venue-daily:

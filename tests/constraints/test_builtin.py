@@ -71,7 +71,8 @@ def _benchmark_window(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"benchmark_weight": "benchmark_weight"},
+        fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+        field_types={"benchmark_weight": "DOUBLE"},
     )
     source = SourceSpec.of("benchmark-source", FIXTURE / str(manifest["benchmark_path"]))
     session = datetime.fromisoformat(str(manifest["last_session"])).date()
@@ -232,7 +233,8 @@ def test_single_name_cap_refuses_an_invariant_violating_benchmark(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"benchmark_weight": "benchmark_weight"},
+        fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+        field_types={"benchmark_weight": "DOUBLE"},
     )
     session = datetime.fromisoformat(str(manifest["last_session"])).date()
     window = ModelWindow(
@@ -477,7 +479,8 @@ def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_projection(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"benchmark_weight": "benchmark_weight"},
+        fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+        field_types={"benchmark_weight": "DOUBLE"},
     )
     session = datetime.fromisoformat(str(manifest["last_session"])).date()
     window = ModelWindow(

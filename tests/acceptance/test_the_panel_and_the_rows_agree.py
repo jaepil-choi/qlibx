@@ -79,7 +79,7 @@ class ReversalOnRows(va.DataModel):
 def _balanced_parquet(root: Path) -> Path:
     out = root / "prices.parquet"
     rows = ", ".join(
-        f"(TIMESTAMPTZ '2024-03-{day:02d} 15:30:00+09', '{name}', {base + day * step}.0)"
+        f"(TIMESTAMPTZ '2024-03-{day:02d} 15:30:00+09', '{name}', {base + day * step}.0::DOUBLE)"
         for day in range(1, 9)
         for name, base, step in (("A", 100, 1), ("B", 50, 2), ("C", 80, 3))
     )
@@ -100,6 +100,7 @@ def _register(root: Path, parquet: Path, dataset_id: str, grain: str) -> None:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain=grain,
         ),
         SourceSpec.of(f"{dataset_id}-source", parquet),

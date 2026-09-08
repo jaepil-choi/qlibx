@@ -125,17 +125,20 @@ registered components, one file and one id each.
 - **`rows(alias)` on `grain: rows`** (the vendor's long table) returns a **tuple of
   `Observation`s**, one per (instant, instrument), each carrying `instrument_id`, its own
   `available_at` and `values`; names interleave within an instant.
-- Each verb refuses the other grain by name. A value keeps its parquet column's type -- `float`
-  from a DOUBLE column, `Decimal` from a DECIMAL one -- so write `Decimal(str(value))` and never
-  `Decimal(value)`.
-- **What `compute()` returns is typed by its first session.** The output dataset's schema is
-  whatever pyarrow infers from the first non-empty session's rows, and every later session must
-  fit it; nothing is declared and nothing is cast. A `Decimal`'s precision and scale are part of
-  that type, and a ratio computed by ordinary division lands on a different scale from one session
-  to the next -- so **return `float` for a continuous quantity**, and where you genuinely need
-  `Decimal` (money, an exact ratio) quantize it to one scale yourself in `compute`. The refusal
-  (`datamodel.output.schema_mismatch`) quotes pyarrow and the established schema and does not
-  guess further; the data and its types are yours.
+- Each verb refuses the other grain by name. **A value arrives as the type the dataset
+  declared** in `field_types`: a `DOUBLE` field is a `float`, an `INTEGER` an `int`, a
+  `VARCHAR` a `str`, a `TIMESTAMP_TZ` an aware `datetime`. Registration compared that
+  declaration with the file once, and a DECIMAL column was refused there, so `Decimal` never
+  arrives from a dataset. Where you want exact arithmetic on a price, cross once with
+  `Decimal(str(value))` -- never `Decimal(value)`, which inherits a float's binary expansion.
+- **What `compute()` returns is typed by its first session, and must be a declarable type.**
+  The output dataset's `field_types` are read off the first non-empty session's rows and
+  registered as the declaration; every later session must fit that schema, and nothing is cast.
+  Return `float` for a continuous quantity and `int` for a count. A `Decimal` value field is
+  refused at the first session (`datamodel.output.field_type`), because a dataset carries one
+  numeric type per field and DECIMAL is not one a dataset may declare. A later session whose
+  rows do not fit the first session's schema is refused with `datamodel.output.schema_mismatch`,
+  which quotes pyarrow and the established schema and does not guess further.
 
 **Choose the lookback member deliberately; they are a pair.** `RowsLookback(rows=N)` gives each name
 its **own** last N observations, so on an unbalanced panel the batch's calendar span is set by the
@@ -489,15 +492,18 @@ datasets:
     grain: instrument_instant
     key_fields: [event_time, instrument]
     fields:
-      weight: "CAST(weight AS DECIMAL(38, 12))"   # a record stores Decimals as text
+      weight: "CAST(weight AS DOUBLE)"   # a record stores Decimals as text
+    field_types:
+      weight: DOUBLE
 ```
 
 `vqapr list strategies --run <run-id>` gives the `<strategy-id>@<fp8>`; `available_at` is
 `event_time` for every package table (a valuation writes `observed_at` and `event_time` at the
 same instant). A `Decimal` column is stored as text with `vqapr.type: decimal` metadata, so a
-numeric field is `CAST` in the registration -- `DECIMAL(38, 12)` is exact for a weight, which the
-optimiser placed on the `1e-12` grid. The run's own `run.json` carries the sha256 of every source it
-read, which is the provenance a later reader wants.
+numeric field is `CAST` in the registration -- to `DOUBLE`, the one non-integer numeric type a
+dataset may declare; a weight on the optimiser's `1e-12` grid is at most twelve significant
+digits and a float64 carries fifteen. The run's own `run.json` carries the sha256 of every source
+it read, which is the provenance a later reader wants.
 
 **Tweaks are records, not directories.** A strategy's record is named by its registered
 fingerprint, which folds the file bytes and the config: edit the strategy and re-register it under
@@ -757,7 +763,9 @@ editing a correct template is faster than repairing a wrong one.
 
 The declaration is well-formed but the parquet behind it does not satisfy what registration
 requires: a declared column is absent, the logical key is not unique or contains nulls,
-`available_at` is not timezone-aware, or the dataset carries no dated row at all.
+`available_at` is not timezone-aware, a field's column is not the type `field_types` declares
+for it (`field_type_mismatch` quotes both; a DECIMAL column is `field_decimal` and is cast to
+DOUBLE while preparing), or the dataset carries no dated row at all.
 
 These are all fixed while *preparing* the source, not while registering it. vqapr deliberately
 does not convert a naive timestamp for you: only you know which instant a value means, and a

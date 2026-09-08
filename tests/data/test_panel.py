@@ -11,7 +11,6 @@ by construction, so "expose column arrays" is exposing the panel.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -46,6 +45,7 @@ def _workspace(root: Path, parquet: Path, grain: str = "instrument_instant") -> 
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close", "volume": "volume"},
+            field_types={"close": "DOUBLE", "volume": "DOUBLE"},
             grain=grain,
         ),
         SourceSpec.of("prices", parquet),
@@ -66,10 +66,14 @@ def scans(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     return issued
 
 
-ALIAS = DatasetInput(dataset_id="price_daily", fields=("close", "volume"), lookback=RowsLookback(rows=2))
+ALIAS = DatasetInput(
+    dataset_id="price_daily", fields=("close", "volume"), lookback=RowsLookback(rows=2)
+)
 
 
-def _context(store: DuckDbObservationStore, day: int, consumer: str = "reversal") -> DataModelContext:
+def _context(
+    store: DuckDbObservationStore, day: int, consumer: str = "reversal"
+) -> DataModelContext:
     window = ModelWindow(
         evaluation_time=_at(day),
         instruments=("A", "B"),
@@ -227,8 +231,8 @@ def test_a_dataset_with_no_instrument_axis_is_a_one_column_panel(tmp_path: Path)
     parquet = tmp_path / "rate.parquet"
     duckdb.connect().execute(
         "COPY (SELECT * FROM (VALUES "
-        "(TIMESTAMPTZ '2024-03-05 15:30:00+09', 0.031), "
-        "(TIMESTAMPTZ '2024-03-06 15:30:00+09', 0.032)) AS t(available_at, rf)) "
+        "(TIMESTAMPTZ '2024-03-05 15:30:00+09', 0.031::DOUBLE), "
+        "(TIMESTAMPTZ '2024-03-06 15:30:00+09', 0.032::DOUBLE)) AS t(available_at, rf)) "
         f"TO '{parquet.as_posix()}' (FORMAT PARQUET)"
     )
     register_dataset(
@@ -239,6 +243,7 @@ def test_a_dataset_with_no_instrument_axis_is_a_one_column_panel(tmp_path: Path)
             available_at="available_at",
             key_fields=("available_at",),
             fields={"rf": "rf"},
+            field_types={"rf": "DOUBLE"},
             grain="instant",
         ),
         SourceSpec.of("rate-source", parquet),
@@ -255,7 +260,7 @@ def test_a_dataset_with_no_instrument_axis_is_a_one_column_panel(tmp_path: Path)
     read = DataModelContext(window=window, reads={"rate": alias}).read("rate", "rf")
 
     assert read.instruments == ()
-    assert read.values == {NO_INSTRUMENT: (Decimal("0.032"),)} or read.values == {NO_INSTRUMENT: (0.032,)}
+    assert read.values == {NO_INSTRUMENT: (0.032,)}
     assert read.latest()[NO_INSTRUMENT] == read.series()[-1]
     assert dict(read.current()) == dict(read.latest()), "one column, one entry (072)"
 
@@ -288,4 +293,3 @@ def test_current_is_the_cross_section_and_latest_carries_forward(
     )
     before = DataModelContext(window=empty, reads={"prices": ALIAS}).read("prices", "close")
     assert len(before) == 0 and dict(before.current()) == {} and dict(before.latest()) == {}
-

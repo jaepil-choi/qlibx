@@ -341,7 +341,7 @@ class FrozenRun:
                 # Detaching copies the MEASUREMENTS too, not just the declaration. `aggregated`
                 # decides which query the read path composes, so a copy that dropped it would
                 # read a grouped registration row-wise -- the same rows, silently ungrouped, with
-                # no error anywhere. `span` and `field_types` are carried for the same reason
+                # no error anywhere. `span` is carried for the same reason
                 # this copy exists at all: a frozen run must describe what was registered.
                 # By keyword: `grain` joined the registration between `fields` and `span`
                 # (record `137`), and a positional rebuild put the span into it.

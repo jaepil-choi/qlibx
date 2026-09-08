@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Constraint, StrategyModel
-from vqapr.data.datasets import lookback_fits_grain, require_grain
+from vqapr.data.datasets import lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationAgenda, OperationRole
@@ -128,7 +128,7 @@ def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSp
     if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
     registration = workspace.dataset(str(requirement.dataset_id))
-    require_grain(registration)
+    require_declared(registration)
     mismatch = lookback_fits_grain(requirement.lookback, registration.grain)
     if mismatch is not None:
         raise TypeError(f"dataset {str(requirement.dataset_id)!r}: {mismatch}")

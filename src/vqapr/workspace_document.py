@@ -35,7 +35,7 @@ from pydantic import (
 )
 
 from vqapr.data.datasets import DatasetRegistration, Grain
-from vqapr.data.scan import ColumnType, ProjectionSchema
+from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id, execution_input_id, source_id
 from vqapr.exchange.conventions import FillConvention, FillSelector
@@ -51,21 +51,25 @@ class Document(BaseModel):
 
 
 class DatasetCodec(Document):
-    """`datasets.<dataset_id>` on disk: five declared keys, then whatever has been measured.
+    """`datasets.<dataset_id>` on disk: the declared keys, then whatever has been measured.
 
     A *codec*, not a domain twin (one-shape Step 5 judgment, Step 6 rename): `DatasetRegistration`
     is the one shape, and this is the on-disk spelling of its measured fields and the quarantine
-    of an entry written before `span` existed -- things a registration cannot carry as rules.
+    of an entry written before a key existed -- things a registration cannot carry as rules.
 
-    Two measurements on two independent axes, four admissible shapes. `span` is added by the
-    release that made it mandatory; `field_types` + `aggregated` were added when a field became
-    an expression (`docs/issues/049`). Neither is a declaration, so neither can be invented for an
-    entry that predates it: an entry without `span` decodes into a QUARANTINED registration --
-    enumerable, removable, re-registrable, refused on read -- rather than into a refusal that
-    would take `list` and `register` offline together (the deadlock `test_workspace.py` pins).
-    `grain` is optional on read for the same reason (`DatasetRegistration.undeclared`).
+    Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
+    `field_types`. Measured: `aggregated`, `span`; `produced_by` is stamped by a datamodel run.
+    `field_types` was a measurement from `docs/issues/049` until 2026-09-08 and is a declaration
+    since (`docs/issues/088`); an entry written under the old shape carries the value duckdb
+    measured, which is what the author would have declared, so it decodes as declared.
 
-    Absent measurements are written back absent, so a document upgrades one entry at a time.
+    A measurement cannot be invented for an entry that predates it: an entry without `span`
+    decodes into a QUARANTINED registration -- enumerable, removable, re-registrable, refused on
+    read -- rather than into a refusal that would take `list` and `register` offline together (the
+    deadlock `test_workspace.py` pins). `grain` and `field_types` are optional on read for the
+    same reason (`DatasetRegistration.undeclared`).
+
+    Absent keys are written back absent, so a document upgrades one entry at a time.
     """
 
     source: str
@@ -80,11 +84,7 @@ class DatasetCodec(Document):
     produced_by: str | None = None
 
     @model_validator(mode="after")
-    def _measurements_travel_together(self) -> DatasetCodec:
-        if (self.field_types is None) != (self.aggregated is None):
-            raise ValueError(
-                "field_types and aggregated are one measurement; declare both or neither"
-            )
+    def _types_cover_fields(self) -> DatasetCodec:
         if self.field_types is not None and set(self.field_types) != set(self.fields):
             raise ValueError("field_types must type every declared field")
         return self
@@ -109,14 +109,24 @@ class DatasetCodec(Document):
             fields=self.fields,
         )
         registration = (
-            DatasetRegistration.undeclared(dataset_id, self.source, **declared)
-            if self.grain is None
-            else DatasetRegistration.of(dataset_id, self.source, grain=self.grain, **declared)
-        )
-        if self.field_types is not None:
-            registration = registration.with_schema(
-                ProjectionSchema(self.field_types, bool(self.aggregated))
+            DatasetRegistration.undeclared(
+                dataset_id,
+                self.source,
+                field_types=self.field_types,
+                grain=self.grain,
+                **declared,
             )
+            if self.grain is None or self.field_types is None
+            else DatasetRegistration.of(
+                dataset_id,
+                self.source,
+                field_types=self.field_types,
+                grain=self.grain,
+                **declared,
+            )
+        )
+        if self.aggregated is not None:
+            registration = registration.with_aggregation(self.aggregated)
         if self.span is not None:
             registration = registration.with_span(*self.span)
         if self.produced_by is not None:
@@ -135,7 +145,7 @@ class DatasetCodec(Document):
             field_types=(
                 None if registration.field_types is None else dict(registration.field_types)
             ),
-            aggregated=None if registration.field_types is None else registration.aggregated,
+            aggregated=registration.aggregated,
             span=registration.span,
             produced_by=registration.produced_by,
         )
@@ -244,6 +254,11 @@ class DatasetDeclaration(Document):
     available_at: str
     key_fields: list[str]
     fields: dict[str, str]
+    field_types: dict[str, str]
+    """Every field's declared type, one of `scan.DECLARABLE_FIELD_TYPES`; registration compares
+    it with what the file evaluates to, once (`docs/issues/088`). A string here so that
+    `DatasetRegistration.of` refuses an unknown or non-declarable name with the permitted list,
+    rather than pydantic refusing it with the enum's every member, DECIMAL included."""
     grain: Grain | None = None
     """Optional on the model only so that `declarations._require_grain_key` can refuse its
     absence with the sentence that says what changed (design §7-3), before the model is asked."""

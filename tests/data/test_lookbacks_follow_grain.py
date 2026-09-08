@@ -42,7 +42,9 @@ def sparse_parquet(tmp_path_factory) -> Path:
         f"(TIMESTAMPTZ '2024-03-{day:02d} 15:30:00+09', 'B', {50 + day}.0)" for day in range(1, 4)
     )
     duckdb.connect().execute(
-        f"COPY (SELECT * FROM (VALUES {rows}) AS t(available_at, instrument, close)) "
+        # A decimal literal is a DECIMAL to duckdb; the dataset declares DOUBLE, so write one.
+        f"COPY (SELECT available_at, instrument, close::DOUBLE AS close "
+        f"FROM (VALUES {rows}) AS t(available_at, instrument, close)) "
         f"TO '{out.as_posix()}' (FORMAT PARQUET)"
     )
     return out
@@ -58,6 +60,7 @@ def _workspace(root: Path, parquet: Path, grain: str) -> Workspace:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain=grain,
         ),
         SourceSpec.of("src", parquet),
@@ -154,7 +157,8 @@ def vendor_grain_parquet(tmp_path_factory) -> Path:
         for index, code in enumerate("xyz")
     )
     duckdb.connect().execute(
-        f"COPY (SELECT * FROM (VALUES {rows}) AS t(available_at, instrument, code, close)) "
+        f"COPY (SELECT available_at, instrument, code, close::DOUBLE AS close "
+        f"FROM (VALUES {rows}) AS t(available_at, instrument, code, close)) "
         f"TO '{out.as_posix()}' (FORMAT PARQUET)"
     )
     return out
@@ -177,6 +181,7 @@ def test_an_instants_lookback_counts_instants_not_rows_on_a_vendor_grain_table(
             available_at="available_at",
             key_fields=("available_at", "instrument", "code"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="rows",
         ),
         SourceSpec.of("src", vendor_grain_parquet),

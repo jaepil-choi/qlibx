@@ -23,9 +23,14 @@ from zoneinfo import ZoneInfo
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-PRICE_TYPE = pa.decimal128(18, 4)
-"""Prices stay exact. The row normalizer preserves the source scalar type, so writing floats here
-would hand the Strategy floats and make its arithmetic inexact."""
+PRICE_TYPE = pa.float64()
+"""A price is a DOUBLE, as a dataset declares it (`docs/issues/088`).
+
+This was `decimal128(18, 4)` until 2026-09-08, on the reasoning that prices should stay exact.
+What it did instead was hand every model `Decimal` from a field registered as DOUBLE, hide the
+float-vs-Decimal defect of `docs/implementations/051` from 691 tests, and make the sample the
+one parquet a user would never produce. Exact arithmetic lives on the money side of the execution
+boundary; the data plane is float."""
 
 WAREHOUSE = Path("data/DW/fng_stock_daily_prices.csv")
 INSTRUMENT_MASTER = Path("data/DW/DW_FNG_FGSC종목_20200101-20260430.csv")
@@ -144,8 +149,10 @@ def build(
             if code not in selected or not WINDOW_START <= session <= WINDOW_END:
                 continue
             factor = Decimal(row[_COLUMNS["adjust"]] or "1")
+            # Adjusted in Decimal so the warehouse's own digits multiply exactly, then written
+            # as the DOUBLE the dataset declares.
             rows[code][session] = {
-                field: (Decimal(row[_COLUMNS[field]] or "0") * factor)
+                field: float(Decimal(row[_COLUMNS[field]] or "0") * factor)
                 for field in ("open", "high", "low", "close")
             } | {"volume": int(row[_COLUMNS["volume"]] or 0)}
 

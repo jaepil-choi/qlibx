@@ -21,9 +21,10 @@ from typing import Any
 
 import duckdb
 import pytest
+import yaml
 
 from vqapr.cli.main import main
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.datasets import DatasetRegistration, require_declared
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.public import register_dataset as pub_register_dataset
@@ -70,8 +71,10 @@ def two_stale_workspace(tmp_path: Path) -> tuple[Path, Path]:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0, DATE '2024-01-02', 10.0),
-                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0, DATE '2024-01-03', 11.0)
+                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0::DOUBLE, DATE '2024-01-02',
+                 10.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0::DOUBLE, DATE '2024-01-03',
+                 11.0::DOUBLE)
               ) AS t(available_at, instrument, close, session_date, open))
               TO '{(prices_dir / "d.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -87,6 +90,7 @@ def two_stale_workspace(tmp_path: Path) -> tuple[Path, Path]:
             grain="instrument_instant",
             key_fields=("session_date", "instrument"),
             fields={"close": "close", "session_date": "session_date"},
+            field_types={"close": "DOUBLE", "session_date": "DATE"},
         )
 
     for name in ("alpha", "beta", "gamma"):
@@ -156,6 +160,7 @@ datasets:
     grain: instrument_instant
     key_fields: [session_date, instrument]
     fields: {{close: close, session_date: session_date}}
+    field_types: {{close: DOUBLE, session_date: DATE}}
 """,
         encoding="utf-8",
     )
@@ -183,6 +188,52 @@ datasets:
     )
 
 
+def test_an_entry_without_field_types_is_quarantined_and_repaired_the_same_way(
+    two_stale_workspace: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The third missing key (`docs/issues/088`): decodes, lists, refuses reads, re-registers.
+
+    `field_types` was a measurement until 2026-09-08 and is a declaration since; an entry that
+    lacks it is exactly as quarantined as one that lacks `grain`, and the same command repairs it.
+    """
+    root, prices_dir = two_stale_workspace
+    document_path = Workspace.open(root).path
+    document = yaml.safe_load(document_path.read_text(encoding="utf-8"))
+    del document["datasets"]["gamma"]["field_types"]
+    document_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    reopened = Workspace.open(root)
+    registration = reopened.dataset("gamma")
+    assert registration.field_types is None, "decoded as undeclared, never derived from the file"
+    with pytest.raises(VqaprError) as refused:
+        require_declared(registration)
+    assert [f.code for f in refused.value.failures] == ["dataset.register.schema.undeclared"]
+    assert "field_types" in refused.value.failures[0].fix
+
+    declaration = root / "repair-gamma.yaml"
+    declaration.write_text(
+        f"""
+datasets:
+  gamma:
+    source_id: prices
+    path: {prices_dir.as_posix()}
+    instrument_field: instrument
+    available_at: available_at
+    grain: instrument_instant
+    key_fields: [session_date, instrument]
+    fields: {{close: close, session_date: session_date}}
+    field_types: {{close: DOUBLE, session_date: DATE}}
+""",
+        encoding="utf-8",
+    )
+    code, payload = _cli(capsys, root, "register", str(declaration))
+    assert code == 0, payload
+
+    repaired = Workspace.open(root).dataset("gamma")
+    assert repaired.field_types is not None
+    require_declared(repaired)
+
+
 def test_repairing_a_quarantined_registration_cannot_smuggle_a_declaration_change(
     two_stale_workspace: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -201,6 +252,7 @@ datasets:
     grain: instrument_instant
     key_fields: [session_date, instrument]
     fields: {{close: open, session_date: session_date}}
+    field_types: {{close: DOUBLE, session_date: DATE}}
 """,
         encoding="utf-8",
     )

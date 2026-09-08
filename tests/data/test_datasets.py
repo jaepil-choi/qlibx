@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 
 from vqapr.data import scan
@@ -26,6 +28,8 @@ def _registration(**overrides) -> DatasetRegistration:
         "key_fields": ("session_date", "instrument"),
         "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
+        # `conftest._ROWS` writes `close` as an integer literal, so the file holds an INTEGER.
+        "field_types": {"close": "INTEGER", "session_date": "DATE"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of("price_daily", "s", **kwargs)
@@ -42,7 +46,12 @@ def test_every_schema_problem_arrives_together(hive_parquet: Path) -> None:
     """agent는 왕복 한 번에 고칠 것을 전부 받아야 한다."""
     spec = SourceSpec.of("s", hive_parquet, hive_partitioned=True)
     diagnosis, _, _measured = validate(
-        _registration(available_at="session_date", fields={"close": "nope"}), spec
+        _registration(
+            available_at="session_date",
+            fields={"close": "nope"},
+            field_types={"close": "INTEGER"},
+        ),
+        spec,
     )
     codes = sorted(f.code for f in diagnosis.failures)
     assert codes == [
@@ -54,7 +63,9 @@ def test_every_schema_problem_arrives_together(hive_parquet: Path) -> None:
 def test_a_failed_schema_skips_the_full_scan(hive_parquet: Path) -> None:
     """없는 컬럼 때문에 전체를 스캔할 이유가 없다."""
     spec = SourceSpec.of("s", hive_parquet, hive_partitioned=True)
-    diagnosis, timing, _measured = validate(_registration(fields={"close": "nope"}), spec)
+    diagnosis, timing, _measured = validate(
+        _registration(fields={"close": "nope"}, field_types={"close": "INTEGER"}), spec
+    )
     assert not diagnosis.ok
     assert diagnosis.stage == SCHEMA_STAGE
     assert timing.key_was_skipped is True
@@ -106,12 +117,117 @@ def test_declaration_refuses_an_empty_key() -> None:
 
 def test_declaration_refuses_exposing_nothing() -> None:
     with pytest.raises(ValueError, match="at least one value"):
-        _registration(fields={})
+        _registration(fields={}, field_types={})
 
 
 def test_framework_names_may_not_contain_whitespace() -> None:
     with pytest.raises(ValueError, match="whitespace"):
-        _registration(fields={"close price": "close"})
+        _registration(fields={"close price": "close"}, field_types={"close price": "INTEGER"})
+
+
+# --- 타입은 선언이고, 등록이 한 번 대조한다 (088) -----------------------------------------
+
+
+def test_a_declaration_must_type_every_field_and_nothing_else() -> None:
+    """`field_types`는 `fields`의 키를 정확히 덮는다: 빠져도, 남아도, 없어도 거절이다."""
+    with pytest.raises(ValueError, match="field_types") as absent:
+        _registration(field_types=None)
+    assert "absent" in str(absent.value)
+    with pytest.raises(ValueError, match="field_types") as untyped:
+        _registration(field_types={"close": "INTEGER"})
+    assert "session_date" in str(untyped.value)
+    with pytest.raises(ValueError, match="field_types") as surplus:
+        _registration(field_types={"close": "INTEGER", "session_date": "DATE", "open": "DOUBLE"})
+    assert "open" in str(surplus.value)
+
+
+def test_a_decimal_cannot_be_declared() -> None:
+    """잴 수는 있어도 선언할 수는 없는 타입. 거절은 허용 목록을 댄다."""
+    with pytest.raises(ValueError, match="field_types") as refused:
+        _registration(field_types={"close": "DECIMAL", "session_date": "DATE"})
+    message = str(refused.value)
+    assert "DECIMAL" in message and "DOUBLE" in message and "INTEGER" in message
+
+
+def test_a_declared_type_is_spelled_case_insensitively_or_as_the_enum() -> None:
+    assert _registration(field_types={"close": "integer", "session_date": "date"}).field_types == {
+        "close": scan.ColumnType.INTEGER,
+        "session_date": scan.ColumnType.DATE,
+    }
+    assert _registration(
+        field_types={"close": scan.ColumnType.INTEGER, "session_date": scan.ColumnType.DATE}
+    ).field_types == {"close": scan.ColumnType.INTEGER, "session_date": scan.ColumnType.DATE}
+
+
+def _typed_parquet(path: Path, close_type: pa.DataType) -> Path:
+    """Two rows of one name, with `close` in the arrow type the test names."""
+    import pyarrow.parquet as pq
+
+    table = pa.table(
+        {
+            "available_at": pa.array(
+                [datetime(2024, 1, 2, 6, 30, tzinfo=UTC), datetime(2024, 1, 3, 6, 30, tzinfo=UTC)],
+                pa.timestamp("us", tz="UTC"),
+            ),
+            "instrument": pa.array(["A", "A"], pa.string()),
+            "close": pa.array([Decimal("100.5"), Decimal("101.5")], close_type)
+            if pa.types.is_decimal(close_type)
+            else pa.array([100.5, 101.5], close_type),
+        }
+    )
+    pq.write_table(table, path)
+    return path
+
+
+def _typed(close_type: str) -> DatasetRegistration:
+    return _registration(
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close"},
+        field_types={"close": close_type},
+    )
+
+
+def test_a_decimal_column_is_refused_whatever_it_is_declared_as(tmp_path: Path) -> None:
+    """`decimal128(18,4)` declared DOUBLE: 접히지 않고, 파일의 타입 그대로 거절한다.
+
+    2026-09-08 이전에는 DECIMAL이 DOUBLE로 접혀 등록은 통과하고 모델은 `Decimal`을 받았다.
+    거절의 `observed`가 duckdb의 철자(`DECIMAL(18,4)`)를 들고 오므로 author는 어느 컬럼을
+    어떻게 캐스팅할지 바로 안다.
+    """
+    spec = SourceSpec.of("s", _typed_parquet(tmp_path / "decimal.parquet", pa.decimal128(18, 4)))
+
+    diagnosis, timing, _measured = validate(_typed("DOUBLE"), spec)
+
+    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_decimal"]
+    assert "DECIMAL(18,4)" in (diagnosis.failures[0].observed or "")
+    assert "DOUBLE" in diagnosis.failures[0].fix
+    assert timing.key_was_skipped is True
+
+
+def test_a_declaration_that_disagrees_with_the_file_is_refused_naming_both(
+    tmp_path: Path,
+) -> None:
+    """float64 declared INTEGER: 어느 쪽이 틀렸는지는 author가 정하므로 둘 다 인용한다."""
+    spec = SourceSpec.of("s", _typed_parquet(tmp_path / "double.parquet", pa.float64()))
+
+    diagnosis, timing, _measured = validate(_typed("INTEGER"), spec)
+
+    (failure,) = diagnosis.failures
+    assert failure.code == f"{SCHEMA_STAGE}.field_type_mismatch"
+    assert "INTEGER" in failure.requirement
+    assert "DOUBLE" in (failure.observed or "")
+    assert "field_types.close: DOUBLE" in failure.fix
+    assert timing.key_was_skipped is True
+
+
+def test_a_declaration_that_matches_the_file_carries_the_declared_types(tmp_path: Path) -> None:
+    """통과한 등록의 `field_types`는 잰 값이 아니라 선언 그대로다."""
+    spec = SourceSpec.of("s", _typed_parquet(tmp_path / "double.parquet", pa.float64()))
+
+    diagnosis, _timing, measured = validate(_typed("DOUBLE"), spec)
+
+    assert diagnosis.ok, [f.code for f in diagnosis.failures]
+    assert measured.field_types == {"close": scan.ColumnType.DOUBLE}
 
 
 def test_source_id_mismatch_fails_before_opening_the_source(tmp_path: Path) -> None:
@@ -135,6 +251,7 @@ def test_dev_dataset_registration_is_valid(dev_dataset: Path) -> None:
             grain="rows",
             key_fields=("거래일자", "종목약코드"),
             fields={"close": "종가", "session_date": "거래일자"},
+            field_types={"close": "INTEGER", "session_date": "DATE"},
         ),
         spec,
     )
@@ -154,6 +271,7 @@ def test_dev_dataset_rejects_a_weak_key(dev_dataset: Path) -> None:
             grain="rows",
             key_fields=("종목약코드",),
             fields={"close": "종가"},
+            field_types={"close": "INTEGER"},
         ),
         spec,
     )
@@ -240,8 +358,23 @@ def test_a_span_must_be_ordered() -> None:
 # 그 맞바꿈이 일어나지 않았다는 증거다.
 
 
+_UNPREPARED_TYPES = {
+    "close": "DOUBLE",
+    "volume": "DOUBLE",
+    "session_date": "DATE",
+    # What their author would declare; each is refused by the measured type's own name.
+    "stamped_at": "TIMESTAMP_TZ",
+    "payload": "VARCHAR",
+}
+"""The declared type per `unprepared_parquet` column, keyed by the column a field exposes."""
+
+
 def _exposing(**fields: str) -> DatasetRegistration:
-    return _registration(key_fields=("session_date", "instrument"), fields=dict(fields))
+    return _registration(
+        key_fields=("session_date", "instrument"),
+        fields=dict(fields),
+        field_types={name: _UNPREPARED_TYPES[column] for name, column in fields.items()},
+    )
 
 
 def test_a_nan_column_is_refused_at_registration(unprepared_parquet: Path) -> None:

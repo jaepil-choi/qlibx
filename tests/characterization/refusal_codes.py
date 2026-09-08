@@ -439,7 +439,7 @@ def _write_parquet(path: Path, rows_sql: str) -> Path:
 
 
 def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
-    from vqapr.data.datasets import DatasetRegistration, validate
+    from vqapr.data.datasets import DatasetRegistration, Grain, require_declared, validate
     from vqapr.data.sources import SourceSpec
     from vqapr.domain.errors import VqaprError
 
@@ -447,7 +447,8 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
 
     naive = _write_parquet(
         tmp_path / "naive.parquet",
-        "SELECT TIMESTAMP '2024-03-05 03:00:00' AS available_at, 'A' AS instrument, 100.0 AS close",
+        "SELECT TIMESTAMP '2024-03-05 03:00:00' AS available_at, 'A' AS instrument, "
+        "100.0::DOUBLE AS close",
     )
     registration = DatasetRegistration.of(
         "price_daily",
@@ -457,6 +458,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "missing_col": "does_not_exist"},
+        field_types={"close": "DOUBLE", "missing_col": "DOUBLE"},
     )
     diagnosis, _, _measured = validate(registration, SourceSpec.of("s", naive))
     codes.extend(failure.code for failure in diagnosis.failures)
@@ -464,9 +466,9 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
     dup = _write_parquet(
         tmp_path / "dup.parquet",
         """SELECT * FROM (VALUES
-             (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
-             (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 999.0),
-             (TIMESTAMPTZ '2024-03-06 03:00:00+09', NULL, 1.0)
+             (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0::DOUBLE),
+             (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 999.0::DOUBLE),
+             (TIMESTAMPTZ '2024-03-06 03:00:00+09', NULL, 1.0::DOUBLE)
            ) AS t(available_at, instrument, close)""",
     )
     clean_registration = DatasetRegistration.of(
@@ -477,17 +479,59 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     )
     diagnosis, _, _measured = validate(clean_registration, SourceSpec.of("s", dup))
     codes.extend(failure.code for failure in diagnosis.failures)
+
+    # `docs/issues/088`: a declared type is compared with what the file evaluates to. A
+    # DECIMAL column is refused whatever it is declared as (duckdb types a bare `100.0`
+    # literal as DECIMAL(4,1)), and an INTEGER column declared DOUBLE is a mismatch.
+    decimal_close = _write_parquet(
+        tmp_path / "decimal.parquet",
+        "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, 'A' AS instrument, "
+        "100.0 AS close",
+    )
+    diagnosis, _, _measured = validate(clean_registration, SourceSpec.of("s", decimal_close))
+    codes.extend(failure.code for failure in diagnosis.failures)
+    integer_close = _write_parquet(
+        tmp_path / "integer.parquet",
+        "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, 'A' AS instrument, "
+        "100 AS close",
+    )
+    diagnosis, _, _measured = validate(clean_registration, SourceSpec.of("s", integer_close))
+    codes.extend(failure.code for failure in diagnosis.failures)
+
+    # An entry written before `field_types` was declared decodes as quarantined, and a read
+    # on it is refused by name until it is registered again with the types.
+    try:
+        require_declared(
+            DatasetRegistration.undeclared(
+                "price_daily",
+                "s",
+                instrument_field="instrument",
+                available_at="available_at",
+                key_fields=("available_at", "instrument"),
+                fields={"close": "close"},
+                field_types=None,
+                grain=Grain.INSTRUMENT_INSTANT,
+            )
+        )
+    except VqaprError as error:
+        codes.extend(failure.code for failure in error.failures)
 
     # `grain` is required since record `137`; without it `of` raises before `validate` runs and
     # the whole scenario -- including the two diagnoses above -- was being dropped silently by
     # `collect_runtime`'s per-scenario guard.
     mismatched = DatasetRegistration.of(
-        "price_daily", "other-source", instrument_field="instrument",
-        available_at="available_at", grain="rows", key_fields=("instrument",),
+        "price_daily",
+        "other-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        grain="rows",
+        key_fields=("instrument",),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     )
     diagnosis, _, _measured = validate(mismatched, SourceSpec.of("s", dup))
     codes.extend(failure.code for failure in diagnosis.failures)
@@ -542,9 +586,9 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
     dup_null = _write_parquet(
         tmp_path / "dup-null.parquet",
         """SELECT * FROM (VALUES
-             (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0, 100.0),
-             (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0, 100.0),
-             (TIMESTAMPTZ '2024-03-06 15:30:00+09', NULL, true, 1.0, 1.0)
+             (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0::DOUBLE, 100.0::DOUBLE),
+             (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0::DOUBLE, 100.0::DOUBLE),
+             (TIMESTAMPTZ '2024-03-06 15:30:00+09', NULL, true, 1.0::DOUBLE, 1.0::DOUBLE)
            ) AS t(trade_at, instrument, is_tradable, open, close)""",
     )
     diagnosis = validate_execution_input(_registration(dup_null))
@@ -553,7 +597,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
     bad_price = _write_parquet(
         tmp_path / "bad-price.parquet",
         """SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at, 'A' AS instrument,
-                  true AS is_tradable, 99.0 AS open, 0.0 AS close""",
+                  true AS is_tradable, 99.0::DOUBLE AS open, 0.0::DOUBLE AS close""",
     )
     diagnosis = validate_execution_input(_registration(bad_price))
     codes.extend(failure.code for failure in diagnosis.failures)
@@ -697,13 +741,18 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     prices = _write_parquet(
         tmp_path / "prices.parquet",
         "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, "
-        "'A' AS instrument, 1.0 AS close",
+        "'A' AS instrument, 1.0::DOUBLE AS close",
     )
     registration = _with_span(
         DatasetRegistration.of(
-            "prices", "s", instrument_field="instrument", available_at="available_at",
+            "prices",
+            "s",
+            instrument_field="instrument",
+            available_at="available_at",
             grain="instrument_instant",
-            key_fields=("available_at", "instrument"), fields={"close": "close"},
+            key_fields=("available_at", "instrument"),
+            fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         )
     )
     with Workspace.transaction(workspace) as t:
@@ -712,13 +761,18 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     other = _write_parquet(
         tmp_path / "other.parquet",
         "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, "
-        "'B' AS instrument, 2.0 AS close",
+        "'B' AS instrument, 2.0::DOUBLE AS close",
     )
     conflicting = _with_span(
         DatasetRegistration.of(
-            "prices", "s", instrument_field="instrument", available_at="available_at",
+            "prices",
+            "s",
+            instrument_field="instrument",
+            available_at="available_at",
             grain="rows",
-            key_fields=("instrument",), fields={"close": "close"},
+            key_fields=("instrument",),
+            fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         )
     )
     try:
@@ -800,15 +854,20 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
     prices = _write_parquet(
         tmp_path / "prices.parquet",
         "SELECT TIMESTAMPTZ '2024-03-05 03:00:00+09' AS available_at, "
-        "'A' AS instrument, 1.0 AS close",
+        "'A' AS instrument, 1.0::DOUBLE AS close",
     )
     with Workspace.transaction(workspace) as t:
         t.register_dataset(
             _with_span(
                 DatasetRegistration.of(
-                    "prices", "s", instrument_field="instrument", available_at="available_at",
+                    "prices",
+                    "s",
+                    instrument_field="instrument",
+                    available_at="available_at",
                     grain="instrument_instant",
-                    key_fields=("available_at", "instrument"), fields={"close": "close"},
+                    key_fields=("available_at", "instrument"),
+                    fields={"close": "close"},
+                    field_types={"close": "DOUBLE"},
                 )
             ),
             SourceSpec.of("s", prices),
@@ -820,10 +879,46 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
         allowed_requirements=(),
         consumer_id="test-consumer",
     )
-    undeclared = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
+    undeclared = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     codes: list[str] = []
     try:
         window.observations(undeclared)
+    except VqaprError as error:
+        codes.extend(failure.code for failure in error.failures)
+    return codes
+
+
+def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
+    """A datamodel's first non-empty session states the output's field types.
+
+    `docs/issues/088`: a value field pyarrow types as decimal is one no dataset can declare, so
+    the output refuses it at the first append rather than after every session has run. The
+    layer is stood in for by the two attributes the output reads from it -- constructing a
+    `FrozenDataModel` needs a fingerprinted component and a frozen agenda, none of which
+    bears on the refusal.
+    """
+    from datetime import UTC, datetime
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from vqapr.domain.errors import VqaprError
+    from vqapr.flow.datamodel import DataModelOutput
+
+    codes: list[str] = []
+    output = DataModelOutput(
+        tmp_path, SimpleNamespace(dataset_id="scores", value_fields=("score",))
+    )
+    output.open()
+    try:
+        output.append(
+            [
+                {
+                    "available_at": datetime(2024, 3, 5, 12, tzinfo=UTC),
+                    "instrument": "A",
+                    "score": Decimal("1.5"),
+                }
+            ]
+        )
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
     return codes
@@ -836,6 +931,7 @@ _RUNTIME_SCENARIOS = (
     _runtime_declaration_read,
     _runtime_workspace,
     _runtime_model_window,
+    _runtime_datamodel_output,
 )
 
 

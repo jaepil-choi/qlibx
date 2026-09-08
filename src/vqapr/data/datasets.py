@@ -107,7 +107,7 @@ class DatasetRegistration:
     grain: Grain | None = None
     """Declared, never derived. `None` only for a registration decoded from a document written
     before grain existed: it opens, it lists, it can be removed or re-registered, and every
-    read on it is refused (`require_grain`) until it is registered again with one.
+    read on it is refused (`require_declared`) until it is registered again with one.
     """
     span: tuple[datetime, datetime] | None = None
     produced_by: str | None = None
@@ -130,13 +130,15 @@ class DatasetRegistration:
     """
 
     field_types: Mapping[str, ColumnType] | None = None
-    """field id → 그 표현식이 내는 타입. **선언이 아니라 유도값**이다.
+    """field id → author가 선언한 타입. **선언이고, 등록이 1회 대조한다** (`docs/issues/088`).
 
-    author는 타입을 쓰지 않는다 (`docs/issues/049`). field가 표현식이 된 순간 타입은 원천 컬럼이
-    아니라 합성된 쿼리의 성질이므로, `DESCRIBE`가 답하는 것이 유일하게 정직한 답이다. span과
-    같은 이유로 저장해 둔다: 한 번 재고 나면 이후의 모든 조회가 파일을 열지 않는다.
+    2026-09-08 이전에는 유도값이었다(`049`: "author는 타입을 쓰지 않는다"). 그 판정은 뒤집혔다:
+    parquet을 만드는 쪽이 author이므로 타입도 author가 말하고, `check_schema`가 `DESCRIBE`와
+    대조해 다르면 거부한다. 파일과 어긋날 수 있는 "두 번째 사실"은 대조 1회로 사실 하나가 된다.
+    값은 `scan.DECLARABLE_FIELD_TYPES` 안이어야 한다 -- `DECIMAL`은 잴 수는 있어도 선언할 수 없다.
 
-    `None`은 아직 유도하지 않았다는 뜻이며, ruling 이전 shape로 쓰인 문서를 읽을 때만 나온다.
+    `None`은 선언 이전 shape로 쓰인 문서를 읽을 때만 나오며, 그 등록은 grain 없는 등록과 같은
+    격리 상태다: 열리고, 나열되고, 지워지고, 다시 등록되지만 읽히지는 않는다(`require_declared`).
     """
 
     aggregated: bool = False
@@ -160,6 +162,7 @@ class DatasetRegistration:
         available_at: str,
         key_fields: Sequence[str],
         fields: Mapping[str, str],
+        field_types: Mapping[str, ColumnType | str],
         grain: Grain | str | None = None,
     ) -> DatasetRegistration:
         declared_grain = parse_grain(grain, dataset_id=raw_dataset_id)
@@ -192,6 +195,7 @@ class DatasetRegistration:
             available_at=available_at,
             key_fields=tuple(key_fields),
             fields=dict(fields),
+            field_types=parse_field_types(field_types, fields=fields, dataset_id=raw_dataset_id),
             grain=declared_grain,
         )
 
@@ -205,12 +209,16 @@ class DatasetRegistration:
         available_at: str,
         key_fields: Sequence[str],
         fields: Mapping[str, str],
+        field_types: Mapping[str, ColumnType] | None = None,
+        grain: Grain | None = None,
     ) -> DatasetRegistration:
-        """A registration read back from a document written before `grain` existed.
+        """A registration read back from a document written before `grain` or `field_types` was
+        declared.
 
         Named, not defaulted: the only caller is the workspace codec, and the object it builds is
-        unusable for reads until the dataset is registered again with a grain. It is not `rows`,
-        because deciding that silently is the one path the design forbids (§7-3).
+        unusable for reads until the dataset is registered again with what it lacks. Neither is
+        defaulted -- not `rows`, not a type derived from the file -- because deciding either
+        silently is the one path the design forbids (§7-3, `docs/issues/088`).
         """
         declared = cls.of(
             raw_dataset_id,
@@ -219,9 +227,13 @@ class DatasetRegistration:
             available_at=available_at,
             key_fields=key_fields,
             fields=fields,
-            grain=Grain.ROWS,
+            # Placeholders so `of` can run its shape checks; both are removed on the next line.
+            field_types=(
+                dict.fromkeys(fields, ColumnType.VARCHAR) if field_types is None else field_types
+            ),
+            grain=Grain.ROWS if grain is None else grain,
         )
-        return replace(declared, grain=None)
+        return replace(declared, grain=grain, field_types=field_types)
 
     def key_axis(self) -> tuple[str, ...]:
         """The columns registration proves unique, decided by the grain (design §2.2)."""
@@ -231,11 +243,12 @@ class DatasetRegistration:
             return (self.available_at,)
         return self.key_fields
 
-    def with_schema(self, schema: scan.ProjectionSchema) -> DatasetRegistration:
-        """유도된 field 타입과 grouping 판정을 붙인 사본. 유도하는 쪽은 `validate`다."""
-        if not schema.ok:
-            raise ValueError("a projection that did not bind carries no schema to attach")
-        return replace(self, field_types=dict(schema.field_types), aggregated=schema.aggregated)
+    def with_aggregation(self, aggregated: bool) -> DatasetRegistration:
+        """duckdb가 판정한 grouping을 붙인 사본. 판정하는 쪽은 `validate`다.
+
+        field 타입은 여기 오지 않는다: 그것은 선언이고, `check_schema`가 잰 것과 대조했을 뿐이다.
+        """
+        return replace(self, aggregated=bool(aggregated))
 
     def with_producer(self, run_id: str) -> DatasetRegistration:
         """The same registration, naming the run that wrote it."""
@@ -290,6 +303,54 @@ class DatasetRegistration:
         return roles
 
 
+def parse_field_types(
+    value: object, *, fields: Mapping[str, str], dataset_id: str
+) -> dict[str, ColumnType]:
+    """The declared type of every field, or a refusal that names what is missing or not permitted.
+
+    One type per declared field, no more and no fewer: a field with no type is a field the file
+    could hold as anything, and a type for a field that does not exist is a declaration about
+    nothing. Values are matched case-insensitively against `ColumnType` and must be in
+    `scan.DECLARABLE_FIELD_TYPES` (`docs/issues/088`).
+    """
+    if not isinstance(value, Mapping):
+        observed = "absent" if value is None else type(value).__name__
+        raise ValueError(
+            f"dataset {dataset_id!r} must declare field_types, a mapping of every field to one "
+            f"of: {scan.DECLARABLE_FIELD_TYPE_NAMES} ({observed})"
+        )
+    missing = sorted(set(fields) - set(value))
+    extra = sorted(set(value) - set(fields))
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append(f"fields without a type: {', '.join(missing)}")
+        if extra:
+            parts.append(f"types for fields not declared: {', '.join(extra)}")
+        raise ValueError(
+            f"dataset {dataset_id!r}: field_types must type every field in `fields` and nothing "
+            f"else -- {'; '.join(parts)}"
+        )
+    parsed: dict[str, ColumnType] = {}
+    for name in fields:
+        declared = value[name]
+        column_type: ColumnType | None = None
+        if isinstance(declared, ColumnType):
+            column_type = declared
+        elif isinstance(declared, str):
+            try:
+                column_type = ColumnType(declared.strip().upper())
+            except ValueError:
+                column_type = None
+        if column_type is None or column_type not in scan.DECLARABLE_FIELD_TYPES:
+            raise ValueError(
+                f"dataset {dataset_id!r}: field_types[{name!r}] must be one of "
+                f"{scan.DECLARABLE_FIELD_TYPE_NAMES}; got {declared!r}"
+            )
+        parsed[name] = column_type
+    return parsed
+
+
 def parse_grain(value: object, *, dataset_id: str) -> Grain:
     """The declared grain, or a refusal that names the three values and what changed."""
     if isinstance(value, Grain):
@@ -328,33 +389,58 @@ def lookback_fits_grain(lookback: object, grain: object) -> str | None:
     return None
 
 
-def require_grain(registration: DatasetRegistration) -> None:
-    """Refuse a read on a registration that predates `grain`, with the same three names.
+def require_declared(registration: DatasetRegistration) -> None:
+    """Refuse a read on a registration that predates `grain` or `field_types`, by name.
 
     The workspace still opens with such an entry, so `list`, `remove` and re-registration work;
     what does not work is reading it -- through a run, a materialization or `check` -- because
-    which lookback means what on it is exactly the fact its author has not yet stated.
+    which lookback means what on it, or what type each field reaches a model as, is exactly the
+    fact its author has not yet stated.
     """
-    if registration.grain is not None:
+    if registration.grain is not None and registration.field_types is not None:
         return
-    found = collector(GRAIN_STAGE, FailureFamily.DATA)
+    if registration.grain is None:
+        found = collector(GRAIN_STAGE, FailureFamily.DATA)
+        found.add(
+            Failure.bounded(
+                code=f"{GRAIN_STAGE}.undeclared",
+                requirement=(
+                    f"a dataset must declare its grain before it can be read: {GRAIN_NAMES}"
+                ),
+                observed=(
+                    f"dataset {str(registration.dataset_id)!r} was registered before grain "
+                    "existed and declares none"
+                ),
+                source=FailureSource(key_path=f"datasets.{registration.dataset_id}.grain"),
+                fix=(
+                    f"add `grain: <{GRAIN_NAMES}>` to the dataset's declaration and register it "
+                    f"again. Note: {ROWS_LOOKBACK_MEANING}"
+                ),
+                explain=ExplainTopic.DECLARATION_SHAPE,
+            )
+        )
+        found.done(retry="declare the dataset's grain and register it again").raise_if_failed()
+    found = collector(SCHEMA_STAGE, FailureFamily.DATA)
     found.add(
         Failure.bounded(
-            code=f"{GRAIN_STAGE}.undeclared",
-            requirement=f"a dataset must declare its grain before it can be read: {GRAIN_NAMES}",
-            observed=(
-                f"dataset {str(registration.dataset_id)!r} was registered before grain existed "
-                "and declares none"
+            code=f"{SCHEMA_STAGE}.undeclared",
+            requirement=(
+                "a dataset must declare the type of every field before it can be read: "
+                f"{scan.DECLARABLE_FIELD_TYPE_NAMES}"
             ),
-            source=FailureSource(key_path=f"datasets.{registration.dataset_id}.grain"),
+            observed=(
+                f"dataset {str(registration.dataset_id)!r} was registered before field_types "
+                "was declared and declares none"
+            ),
+            source=FailureSource(key_path=f"datasets.{registration.dataset_id}.field_types"),
             fix=(
-                f"add `grain: <{GRAIN_NAMES}>` to the dataset's declaration and register it "
-                f"again. Note: {ROWS_LOOKBACK_MEANING}"
+                "add `field_types:` mapping every field to its type to the dataset's declaration "
+                "and register it again"
             ),
             explain=ExplainTopic.DECLARATION_SHAPE,
         )
     )
-    found.done(retry="declare the dataset's grain and register it again").raise_if_failed()
+    found.done(retry="declare the dataset's field types and register it again").raise_if_failed()
 
 
 def check_schema(
@@ -369,13 +455,15 @@ def check_schema(
     더 적는 것은 진단을 늘리는 게 아니라 흐리는 것이다.
 
     노출되는 **field의 타입까지** 여기서 본다. 읽기 경로가 셀마다 타입을 되묻던 시절에는 그
-    질문이 조회 시각에 답해졌지만, 이제 답하는 자리는 여기다 (`044`). 그리고 field가 표현식이
-    된 뒤로 그 타입은 원천 컬럼의 성질이 아니라 **합성된 projection의 성질**이므로, 물어볼
-    상대는 스키마가 아니라 `DESCRIBE`다 (`049`). 논거는 그대로다 -- 한 컬럼이 naive
-    timestamp이거나 scalar가 아니면, 그것은 그 컬럼의 **모든** 행에 대해 참이다.
+    질문이 조회 시각에 답해졌지만, 이제 답하는 자리는 여기다 (`044`). field가 표현식이 된
+    뒤로 그 타입은 원천 컬럼의 성질이 아니라 **합성된 projection의 성질**이므로, 잴 때 물어볼
+    상대는 스키마가 아니라 `DESCRIBE`다 (`049`). 그리고 잰 것은 **author의 선언과 대조된다**
+    (`088`): naive timestamp · scalar 아님 · DECIMAL은 각자 이름으로, 그 밖의 불일치는
+    `field_type_mismatch`로 거부한다. 논거는 그대로다 -- 한 컬럼에 대해 참이면 그 컬럼의
+    **모든** 행에 대해 참이다.
 
-    두 번째 반환값은 **유도된 projection 스키마**다. 무엇이든 실패했다면 붙일 것이 없으므로
-    `None`이다.
+    두 번째 반환값은 **잰 projection 스키마**다(grouping 판정이 여기서 나온다). 무엇이든
+    실패했다면 붙일 것이 없으므로 `None`이다.
     """
     found = collector(SCHEMA_STAGE, FailureFamily.DATA)
     observed = ", ".join(sorted(columns)) or "(no columns)"
@@ -488,9 +576,34 @@ def check_schema(
         return found.done(retry=_RETRY), None
 
     typed_ok = True
+    declared_types = registration.field_types or {}
     for name, exposed in projection.field_types.items():
         expression = registration.fields[name]
-        if exposed is ColumnType.TIMESTAMP_NAIVE:
+        spelled = projection.observed.get(name, str(exposed))
+        if exposed is ColumnType.DECIMAL:
+            typed_ok = False
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_decimal",
+                    requirement=(
+                        f"field {name!r} evaluates {expression!r}, which must not be a DECIMAL. "
+                        f"A model does arithmetic in one numeric type, and a DECIMAL column "
+                        f"reaches it as `Decimal` while a DOUBLE one reaches it as `float`; "
+                        f"exact arithmetic belongs on the money side of the execution boundary, "
+                        f"not in the data. Declarable types: {scan.DECLARABLE_FIELD_TYPE_NAMES}"
+                    ),
+                    observed=spelled,
+                    source=FailureSource(
+                        key_path=f"datasets.{registration.dataset_id}.fields.{name}",
+                    ),
+                    fix=(
+                        f"cast {name!r} to DOUBLE (or INTEGER) while preparing the source, then "
+                        f"register again"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+        elif exposed is ColumnType.TIMESTAMP_NAIVE:
             typed_ok = False
             found.add(
                 Failure.bounded(
@@ -530,6 +643,31 @@ def check_schema(
                     fix=(
                         f"flatten what {name!r} reads into scalar columns while preparing the "
                         f"source, or stop exposing it as a field"
+                    ),
+                    explain=ExplainTopic.DATASET_PREPARATION,
+                )
+            )
+        elif name in declared_types and exposed is not declared_types[name]:
+            # The declaration and the file disagree, and neither is inferred: the author wrote
+            # both (`docs/issues/088`). Which one is wrong is theirs to decide, so the refusal
+            # quotes both and names both fixes.
+            typed_ok = False
+            declared = declared_types[name]
+            found.add(
+                Failure.bounded(
+                    code=f"{SCHEMA_STAGE}.field_type_mismatch",
+                    requirement=(
+                        f"field {name!r} is declared {declared.value}, so {expression!r} must "
+                        f"evaluate to a {declared.value} on the source"
+                    ),
+                    observed=f"{spelled} (class {exposed.value})",
+                    source=FailureSource(
+                        file=str(spec.path),
+                        key_path=f"datasets.{registration.dataset_id}.field_types.{name}",
+                    ),
+                    fix=(
+                        f"cast {name!r} to {declared.value} while preparing the source, or "
+                        f"declare field_types.{name}: {exposed.value} if the file is right"
                     ),
                     explain=ExplainTopic.DATASET_PREPARATION,
                 )
@@ -782,7 +920,7 @@ def validate(
     if not schema.ok:
         return schema, ValidationTiming(schema_seconds, None), registration
     assert projection is not None
-    described = registration.with_schema(projection)
+    described = registration.with_aggregation(projection.aggregated)
 
     key_started = time.perf_counter()
     # The DESCRIBED registration: whether the projection is grouped is what decides if the

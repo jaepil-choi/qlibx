@@ -1,5 +1,13 @@
 # 079 — a datamodel's output schema is whatever the first session inferred, and the refusal names the wrong thing
 
+> **Partly reversed 2026-09-08 by `088` (record `173`).** The ground the ruling below stood on
+> -- "the framework does not take a declared schema" -- no longer holds for datasets: an author
+> declares `field_types` and registration verifies it once. What survives of this file: the
+> `schema_mismatch` refusal still quotes pyarrow and names no cause (that rule stands, `077`),
+> and `value_fields` is still a list of names -- whether it gains declared types is left open in
+> `088`. What is gone: "an author who needs `Decimal` fixes the scale in `compute`" -- a
+> `Decimal` value field is now refused at the first session (`datamodel.output.field_type`).
+
 **Status:** **CLOSED 2026-09-05 -- record `156`.** `type_drift` is gone; the refusal is
 `datamodel.output.schema_mismatch`, quotes pyarrow and the schema the first session
 established, and its `fix` names `float` or a quantized `Decimal`. The skill says what

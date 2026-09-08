@@ -124,6 +124,7 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices", model_price_parquet),
     )

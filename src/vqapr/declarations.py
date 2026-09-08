@@ -28,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from vqapr.account.account import AccountMode
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
+from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
 from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
@@ -614,17 +615,32 @@ def _dataset(
             available_at=model.available_at,
             key_fields=tuple(model.key_fields),
             fields=dict(model.fields),
+            field_types=dict(model.field_types),
             grain=model.grain,
         )
     except ValueError as error:
+        # Two keys can object here, and each has its own sentence: `field_types` names a field
+        # or a type, `grain` names the other keys it disagrees with.
+        about_types = "field_types" in str(error)
         found = collector(DECLARE_STAGE, FailureFamily.DATA)
         found.add(
             Failure.bounded(
                 f"{DECLARE_STAGE}.value_invalid",
-                requirement=f"{name} must declare a grain its other keys agree with",
+                requirement=(
+                    f"{name}.field_types must give every field in {name}.fields one of "
+                    f"{DECLARABLE_FIELD_TYPE_NAMES}, and nothing else"
+                    if about_types
+                    else f"{name} must declare a grain its other keys agree with"
+                ),
                 observed=str(error),
-                source=_at(f"{name}.grain"),
-                fix=f"set {name}.grain to one of {GRAIN_NAMES} and make the other keys match it",
+                source=_at(f"{name}.field_types" if about_types else f"{name}.grain"),
+                fix=(
+                    f"type every key of {name}.fields in {name}.field_types with a declarable "
+                    "type; a DECIMAL column is cast to DOUBLE while preparing the source"
+                    if about_types
+                    else f"set {name}.grain to one of {GRAIN_NAMES} and make the other keys "
+                    "match it"
+                ),
                 explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )

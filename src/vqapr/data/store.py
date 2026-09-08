@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import Grain, lookback_fits_grain, require_grain
+from vqapr.data.datasets import Grain, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
@@ -88,12 +88,13 @@ class ObservationBatch:
       value; an `InstantsLookback` also nulls it on rows outside that field's own last-N instants
       (see `InstantsLookback`).
 
-    **A value keeps the parquet column's own type.** A `DOUBLE` column arrives as `float` and a
-    `DECIMAL` column as `Decimal`; nothing here converts between them, because a conversion either
-    way would be this package deciding how precise somebody else's measurement is. So a model must
-    not assume either: `Decimal(str(value))` is correct for both and is what the scaffolds emit,
-    while `Decimal(value)` on a float inherits the binary expansion and mixing the two in one
-    arithmetic expression raises.
+    **A value arrives as the Python type of the field's declared `ColumnType`.** `DOUBLE` is
+    `float`, `INTEGER` is `int`, `VARCHAR` is `str`, `BOOLEAN` is `bool`, `TIMESTAMP_TZ` is an
+    aware `datetime`, `DATE` a `date`. Nothing here converts: the declaration was compared with
+    the file once, at registration (`docs/issues/088`), and a DECIMAL column was refused there, so
+    `Decimal` never arrives from a dataset. A model that wants exact arithmetic on a price crosses
+    once, through `Decimal(str(value))` -- `Decimal(value)` on a float inherits the binary
+    expansion -- which is what the scaffolds emit.
 
     **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
     It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
@@ -205,7 +206,7 @@ class DuckDbObservationStore:
                 f"{field!r} is not one of the alias's declared fields: {', '.join(fields)}"
             )
         registration = self.__catalog.dataset(str(first.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         if registration.grain is Grain.ROWS:
             raise TypeError(
                 f"dataset {str(first.dataset_id)!r} declares grain: rows, which has no panel; "
@@ -279,7 +280,7 @@ class DuckDbObservationStore:
 
     def grain(self, requirement: DataRequirement):
         registration = self.__catalog.dataset(str(requirement.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         return registration.grain
 
     def _digest(self, path: Path) -> str:
@@ -320,7 +321,7 @@ class DuckDbObservationStore:
         if len(set(declared_fields)) != len(declared_fields):
             raise ValueError("a read must not name one field twice")
         registration = self.__catalog.dataset(str(first.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)

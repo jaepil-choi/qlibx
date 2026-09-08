@@ -56,6 +56,7 @@ def workspace(tmp_path: Path) -> Path:
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     ).with_span(*_SPAN)
     with Workspace.transaction(space) as t:
         t.register_dataset(registration, SourceSpec.of("prices-source", "prepared/prices"))

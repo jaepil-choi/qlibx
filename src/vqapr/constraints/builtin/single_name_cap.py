@@ -111,11 +111,14 @@ class SingleNameCap(Constraint):
         # `latest()` is exactly the cross-section a one-row lookback means.
         latest: dict[str, Decimal] = {}
         for instrument, weight in call.read(BENCHMARK_ALIAS, self._weight_field).latest().items():
-            if not isinstance(weight, Decimal):
+            # A DOUBLE field arrives as `float`, as its dataset declared (`docs/issues/088`);
+            # the bound is stated in Decimal, so cross once here, through `str`.
+            if isinstance(weight, bool) or not isinstance(weight, int | float | Decimal):
                 raise TypeError(
-                    f"{self._constraint_id}: benchmark weight for {instrument!r} must be a Decimal"
+                    f"{self._constraint_id}: benchmark weight for {instrument!r} must be a "
+                    f"number; got {type(weight).__name__}"
                 )
-            latest[instrument] = weight
+            latest[instrument] = weight if isinstance(weight, Decimal) else Decimal(str(weight))
 
         # Validate before producing any bound so an invariant-violating benchmark cannot reach
         # optimize(); the coverage-scoped contract accepts a proper subset of the index.

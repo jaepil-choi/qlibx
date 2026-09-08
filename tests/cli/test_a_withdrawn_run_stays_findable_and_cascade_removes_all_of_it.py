@@ -41,7 +41,7 @@ def _prices(root: Path) -> Path:
     con = duckdb.connect()
     try:
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
               (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
               (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', 105.0)
@@ -83,6 +83,8 @@ def _declaration(root: Path, *runs: tuple[str, str]) -> Path:
     key_fields: [available_at, instrument]
     fields:
       close: close
+    field_types:
+      close: DOUBLE
 components:
   ratio:
     kind: datamodel

@@ -30,6 +30,12 @@ import pyarrow.parquet as pq
 from vqapr.authoring import DataModel
 from vqapr.calls import DataModelContext
 from vqapr.data.datasets import DatasetRegistration, Grain, validate
+from vqapr.data.scan import (
+    DECLARABLE_FIELD_TYPE_NAMES,
+    DECLARABLE_FIELD_TYPES,
+    ColumnType,
+    column_type_of_arrow,
+)
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import AccessRecord
 from vqapr.data.windows import ModelWindow
@@ -302,6 +308,7 @@ class DataModelOutput:
         self._run_id = run_id
         self._directory = output_directory(project_root, layer.dataset_id)
         self._schema: pa.Schema | None = None
+        self._field_types: dict[str, ColumnType] = {}
         self._parts = 0
         self._sessions = 0
         self._rows = 0
@@ -316,6 +323,38 @@ class DataModelOutput:
     @property
     def rows(self) -> int:
         return self._rows
+
+    def _declarable(self, schema: pa.Schema) -> dict[str, ColumnType]:
+        """The field types this output will declare, read off what the first session wrote.
+
+        The producer states the types, as any author does (`docs/issues/088`), and states them
+        from the schema it is about to write so that registration's DESCRIBE agrees by
+        construction. A type that no declaration may carry -- a `Decimal` value field above all
+        -- is refused here, at the first session, rather than after every session has run.
+        """
+        declared: dict[str, ColumnType] = {}
+        offending: list[str] = []
+        for name in self._layer.value_fields:
+            column_type = column_type_of_arrow(schema.field(name).type)
+            if column_type not in DECLARABLE_FIELD_TYPES:
+                offending.append(f"{name}: {schema.field(name).type} ({column_type.value})")
+            declared[name] = column_type
+        if offending:
+            raise refusal(
+                OUTPUT_STAGE,
+                f"{OUTPUT_STAGE}.field_type",
+                "every value field must be a type a dataset can declare: "
+                f"{DECLARABLE_FIELD_TYPE_NAMES}",
+                "; ".join(offending),
+                fix=(
+                    "return float for a continuous quantity and int for a count. A Decimal "
+                    "reaches a model as `Decimal` while a float reaches it as `float`, and a "
+                    "dataset carries one numeric type per field"
+                ),
+                explain=ExplainTopic.COMPONENT_CONTRACT,
+                retry="fix DataModel.compute output, then retry",
+            )
+        return declared
 
     def open(self) -> None:
         """Claim the output directory, clearing what a dead run left there.
@@ -370,6 +409,7 @@ class DataModelOutput:
                 retry="fix DataModel.compute output, then retry",
             ) from error
         if self._schema is None:
+            self._field_types = self._declarable(table.schema)
             self._schema = table.schema
         self._buffered.append(table)
         self._buffered_bytes += table.nbytes
@@ -449,6 +489,8 @@ class DataModelOutput:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={field: field for field in self._layer.value_fields},
+            # Stated by the producer from what it wrote (`_declarable`), as the grain below is.
+            field_types=self._field_types,
             # Stated by the producer, not derived: one row per instrument per session is what
             # `validated_output` admits, so what lands IS that grain.
             grain=Grain.INSTRUMENT_INSTANT,

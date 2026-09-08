@@ -263,7 +263,7 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
             [
                 {
                     "instrument": "_ACCOUNT",
-                    "cash": Decimal("1000") + index,
+                    "cash": 1000.0 + index,
                     "account_version": index,
                     "event_time": cutoff + timedelta(days=index),
                 }
@@ -271,8 +271,14 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
         )
     writer.release()
     directory = (
-        tmp_path / ".vqapr" / "runs" / "member-1" / "strategies" / "reversal@00000000"
-        / "tables" / "vqapr.account"
+        tmp_path
+        / ".vqapr"
+        / "runs"
+        / "member-1"
+        / "strategies"
+        / "reversal@00000000"
+        / "tables"
+        / "vqapr.account"
     )
 
     registered = register_dataset(
@@ -284,6 +290,7 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
             available_at="event_time",
             key_fields=("event_time", "instrument"),
             fields={"cash": "cash", "account_version": "account_version"},
+            field_types={"cash": "DOUBLE", "account_version": "INTEGER"},
             grain="instrument_instant",
         ),
         SourceSpec.of("member-1-account", directory),
@@ -300,8 +307,8 @@ def test_criterion_11_the_recorded_surface_is_sufficient_for_member_weighting(
     finally:
         con.close()
 
-    series = [Decimal(str(row[0])) for row in rows]
-    assert series == [Decimal("1000"), Decimal("1001"), Decimal("1002")]
+    series = [row[0] for row in rows]
+    assert series == [1000.0, 1001.0, 1002.0]
     assert [row[1] for row in rows] == [0, 1, 2], "the record's own versions, in order"
 
     # A moving return over that series is the whole input member weighting needs.

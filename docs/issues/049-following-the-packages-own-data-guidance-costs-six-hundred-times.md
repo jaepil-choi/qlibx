@@ -1,5 +1,11 @@
 # 049 — A model that follows the package's own data guidance runs 614x slower than the identical model on a reshaped source, and the package offers nothing that closes the gap
 
+> **One clause reversed 2026-09-08 by `088` (record `173`).** This file ruled that a field is an
+> expression and that "an author never writes a type; `DESCRIBE` is the only honest answer".
+> The first half stands. The second is reversed: the author declares `field_types`, and
+> `DESCRIBE` is what the declaration is compared against, once, at registration. The reason the
+> measured value could not be trusted on its own is `088`: it folded `DECIMAL` into `DOUBLE`.
+
 **Status: CLOSED 2026-09-03 -- the measurement this file exists for is taken, on this tree, by
 a harness that lives in this repo: `experiments/exp_049_the_measurement/`.** Same reduction, three
 registrations of two files, 1,600 instruments x 4 evaluations, anti-join read before the timing:

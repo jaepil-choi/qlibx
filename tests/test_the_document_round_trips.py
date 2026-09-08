@@ -24,7 +24,7 @@ from vqapr.workspace import Workspace
 def _parquet(path: Path) -> Path:
     duckdb.connect().execute(
         "COPY (SELECT TIMESTAMPTZ '2024-03-04 15:30:00+09' AS available_at, 'A' AS instrument, "
-        f"1.0 AS close) TO '{path.as_posix()}' (FORMAT PARQUET)"
+        f"1.0::DOUBLE AS close) TO '{path.as_posix()}' (FORMAT PARQUET)"
     )
     return path
 
@@ -40,6 +40,7 @@ def _populate(root: Path) -> Workspace:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("prices-source", prices),
@@ -53,6 +54,7 @@ def _populate(root: Path) -> Workspace:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("hive-source", prices, hive_partitioned=True),

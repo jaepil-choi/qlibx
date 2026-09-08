@@ -57,8 +57,8 @@ def _prices_dataset(root: Path) -> None:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0),
-                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0)
+                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0::DOUBLE)
               ) AS t(available_at, instrument, close))
               TO '{(prices_dir / "d.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -74,6 +74,7 @@ def _prices_dataset(root: Path) -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices-src", prices_dir),
     )
@@ -139,8 +140,8 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 15:30:00+09', 'A', true, 100.0),
-                (TIMESTAMPTZ '2024-01-03 15:30:00+09', 'A', true, 101.0)
+                (TIMESTAMPTZ '2024-01-02 15:30:00+09', 'A', true, 100.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+09', 'A', true, 101.0::DOUBLE)
               ) AS t(trade_at, instrument, is_tradable, close))
               TO '{(exec_dir / "e.parquet").as_posix()}' (FORMAT PARQUET)"""
         )

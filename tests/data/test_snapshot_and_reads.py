@@ -15,7 +15,6 @@ if it were one moment mixes dates silently, which is how a benchmark once summed
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 
 import pyarrow as pa
@@ -42,10 +41,10 @@ LEFT_AFTER = 2
 def workspace(tmp_path: Path) -> Workspace:
     rows: list[dict[str, object]] = []
     for index, stamp in enumerate(SESSIONS):
-        rows.append({"available_at": stamp, "instrument": "LIVE", "weight": Decimal("0.6")})
+        rows.append({"available_at": stamp, "instrument": "LIVE", "weight": 0.6})
         if index < LEFT_AFTER:
             # Its last published weight stays positive -- that is what makes the trap quiet.
-            rows.append({"available_at": stamp, "instrument": "GONE", "weight": Decimal("0.4")})
+            rows.append({"available_at": stamp, "instrument": "GONE", "weight": 0.4})
     source = tmp_path / "benchmark.parquet"
     pq.write_table(
         pa.Table.from_pylist(
@@ -54,7 +53,7 @@ def workspace(tmp_path: Path) -> Workspace:
                 [
                     ("available_at", pa.timestamp("us", tz="UTC")),
                     ("instrument", pa.string()),
-                    ("weight", pa.decimal128(18, 4)),
+                    ("weight", pa.float64()),
                 ]
             ),
         ),
@@ -71,6 +70,7 @@ def workspace(tmp_path: Path) -> Workspace:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"weight": "weight"},
+            field_types={"weight": "DOUBLE"},
         ),
         SourceSpec.of("benchmark-source", source),
     )
@@ -126,6 +126,7 @@ def test_a_lookback_window_carries_rows_from_different_dates(workspace: Workspac
             grain="rows",
             key_fields=("available_at", "instrument"),
             fields={"weight": "weight"},
+            field_types={"weight": "DOUBLE"},
         ),
         workspace.source("benchmark-source"),
     )
@@ -137,7 +138,7 @@ def test_a_lookback_window_carries_rows_from_different_dates(workspace: Workspac
     dates = {str(row["instrument"]): row["available_at"] for row in batch.rows}
     assert dates["GONE"] == SESSIONS[LEFT_AFTER - 1]
     assert dates["LIVE"] == SESSIONS[-1]
-    assert sum(row["weight"] for row in batch.rows) == Decimal("1.0000")
+    assert sum(row["weight"] for row in batch.rows) == pytest.approx(1.0)
 
 
 def test_a_snapshot_is_one_moment_and_drops_what_stopped_publishing(
@@ -149,7 +150,7 @@ def test_a_snapshot_is_one_moment_and_drops_what_stopped_publishing(
     batch = _window(workspace, requirement, SESSIONS[-1]).snapshot(requirement)
 
     assert [str(row["instrument"]) for row in batch.rows] == ["LIVE"]
-    assert sum(row["weight"] for row in batch.rows) == Decimal("0.6000")
+    assert sum(row["weight"] for row in batch.rows) == pytest.approx(0.6)
 
 
 def test_a_snapshot_keeps_every_name_that_published_at_the_same_moment(

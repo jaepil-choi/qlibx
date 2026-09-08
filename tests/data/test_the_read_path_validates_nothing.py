@@ -78,6 +78,7 @@ def registered(tmp_path: Path) -> tuple[Workspace, Path]:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices-source", source),
     )
@@ -85,7 +86,7 @@ def registered(tmp_path: Path) -> tuple[Workspace, Path]:
 
 
 def _read(space: Workspace) -> tuple[dict[str, object], ...]:
-    requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))
+    requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=SESSIONS[-1],
         instruments=INSTRUMENTS,

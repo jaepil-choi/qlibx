@@ -171,7 +171,7 @@ def test_register_conflict_refusal_a_real_vqaprerror_carries_all_six_fields(
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0)
+                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0::DOUBLE)
               ) AS t(available_at, instrument, close))
               TO '{(prices_dir / "d.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -190,6 +190,7 @@ datasets:
     grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
+    field_types: {{close: DOUBLE}}
 """,
         encoding="utf-8",
     )
@@ -208,6 +209,7 @@ datasets:
     grain: rows
     key_fields: [instrument]
     fields: {{close: close, open: close}}
+    field_types: {{close: DOUBLE, open: DOUBLE}}
 """,
         encoding="utf-8",
     )

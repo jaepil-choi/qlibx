@@ -53,7 +53,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
     con = duckdb.connect()
     try:
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT session_date, available_at, instrument, close::DOUBLE AS close
+            FROM (VALUES
               (DATE '2024-03-05', TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
               (DATE '2024-03-06', TIMESTAMPTZ '2024-03-06 03:00:00+09', 'A', 101.0),
               (DATE '2024-03-07', TIMESTAMPTZ '2024-03-07 03:00:00+09', 'A', 104.0)
@@ -61,7 +62,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
             TO '{observation.as_posix()}' (FORMAT PARQUET)"""
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close
+            FROM (VALUES
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 100.0),
               (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 103.0),
               (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', true, 105.0)
@@ -102,6 +104,7 @@ datasets:
     grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
+    field_types: {{close: DOUBLE}}
 
 execution_inputs:
   venue-daily:

@@ -44,6 +44,12 @@ commands:
   # findings stood while no declared command ran the check. A configured gate nobody invokes is
   # not a gate, so it is declared here and the tree is clean as of record 105.
   lint: uv run ruff check src/
+  # Release-only gate. The skills a release ships must have their content hashes recorded in
+  # `_shipped.json` BEFORE the build, or the next release tells untouched installs they were
+  # edited (PRD 11.3). Not part of `test`: between releases the tree ships content that has not
+  # been handed out, and this check is meant to fail then.
+  # Run `uv run python scripts/record_shipped_skills.py` (no flag) to make it pass.
+  release_check: uv run python scripts/record_shipped_skills.py --check
   # Cross-module dead-code pass; ruff is file-local and cannot answer "is this called
   # anywhere". Configuration and the reasoning are in pyproject's `[tool.vulture]`.
   # Not a gate: a report is a candidate, not a verdict, and only a human knows whether a

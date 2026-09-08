@@ -83,20 +83,28 @@ def _walk(ref: Any, prefix: str = "") -> Iterator[tuple[str, bytes]]:
             yield f"{prefix}{item.name}", item.read_bytes()
 
 
-def shipped_skills() -> dict[str, dict[str, bytes]]:
-    """이 package가 출하하는 skill 전부. `{skill 이름: {상대 경로: 내용}}`.
+def skills_in(root: Any) -> dict[str, dict[str, bytes]]:
+    """어떤 뿌리 아래의 skill 전부. `{skill 이름: {상대 경로: 내용}}`.
 
-    `skills/` 최상위의 각 directory 하나가 skill 하나다. `__file__`을 걷지 않고 resource로 읽는
-    이유는 zipimport나 비전개 설치에서 path 형태가 예외를 던지기 때문이다 -- 그러면 판정이
-    한 줄 봉투 대신 traceback이 된다.
+    뿌리 하나가 `Traversable`이든 `Path`이든 같은 답을 내야 한다: 설치된 package는 전자로 읽히고
+    릴리스 도구는 후자로 리포의 원본을 읽는다. 두 자리가 각자 훑으면 제외 목록이 갈라지고,
+    그러면 릴리스가 기록한 목록과 판정이 보는 목록이 달라진다.
     """
-    root = resources.files(SKILLS_PACKAGE)
     skills: dict[str, dict[str, bytes]] = {}
     for item in sorted(root.iterdir(), key=lambda i: i.name):
         if item.name in _NOT_A_SKILL or not item.is_dir():
             continue
         skills[item.name] = dict(_walk(item))
     return skills
+
+
+def shipped_skills() -> dict[str, dict[str, bytes]]:
+    """이 package가 출하하는 skill 전부.
+
+    `__file__`을 걷지 않고 resource로 읽는 이유는 zipimport나 비전개 설치에서 path 형태가 예외를
+    던지기 때문이다 -- 그러면 판정이 한 줄 봉투 대신 traceback이 된다.
+    """
+    return skills_in(resources.files(SKILLS_PACKAGE))
 
 
 def released_hashes() -> dict[str, dict[str, str]]:

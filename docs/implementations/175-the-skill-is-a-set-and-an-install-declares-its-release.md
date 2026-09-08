@@ -1,4 +1,4 @@
-# 174 — The skill is a set, and an installed copy declares which release it came from
+# 175 — The skill is a set, and an installed copy declares which release it came from
 
 **Closes:** PRD §11.2 (skill set, byte-identical targets), §11.3 (`UC-ONBOARD-002`). **Branch:**
 `develop`, on top of record `173`. **Owner decisions, 2026-09-08:** split the one skill into nine;
@@ -6,6 +6,12 @@ write byte-identical copies to both targets instead of a pointer; key the releas
 rather than by release; `install --force` for edited files only; warn on stderr rather than adding
 an envelope key. This record is the mechanism (1/2); the release-history generator and its gate
 follow (2/2).
+
+**Numbered 175, not 174.** A parallel session took 174 for
+`174-the-datamodel-scaffold-returns-the-double-it-declares.md` and landed it first, so this one
+moved rather than the other. The 1/2 commit message says "record 174" and is left as it stands:
+other commits are already on top of it, and rewriting shared history under someone else's work in
+progress costs more than a wrong number in one commit subject.
 
 ## Why
 
@@ -98,10 +104,40 @@ The nine skills do not exist yet. This record moved the existing 1,011-line body
 content is the following milestones' work, and doing it here would have mixed a mechanism whose
 correctness is testable with prose whose correctness is a judgment.
 
-`_shipped.json` is not written yet, so every table lookup misses and any copy that differs from
-what is shipped reads as `modified`. That is the correct answer today — nothing has been released
-from this tree — and it means the `outdated` path is exercised only by the unit tests, which
-supply their own table.
+`_shipped.json` is not in the working tree, and that is deliberate rather than unfinished — see
+"The release writes the history" below.
+
+## The release writes the history (2/2)
+
+**`scripts/record_shipped_skills.py`** — reads what `agent/skills/` ships, and adds any content
+hash the table does not already hold under the version `pyproject.toml` declares. `--check` reports
+the same set and exits 1 instead of writing; that is the gate.
+
+It **adds and never removes**. A file dropped from the skill set keeps its past hashes, because
+whoever still holds that file received it from us, and deleting the entry would accuse them of
+editing it. The table answers "what have we ever shipped", not "what do we ship now".
+
+`skillset.skills_in(root)` was factored out so the script and the runtime enumerate skills the same
+way — the script reads the repository with `Path`, the runtime reads the installed package with
+`importlib.resources`, and a second traversal would let the exclusion lists drift apart until the
+release recorded a different set than the verdict inspects.
+
+**The table is not committed between releases.** Recording content before it ships would put bytes
+in the history that no release handed out, and the refusal's sentence — *differs from every release
+vqapr has shipped* — would stop being true. So `--check` fails in the working tree on purpose;
+`tests/agent/test_the_release_records_what_it_ships.py` asserts that failure, because a green check
+here would mean the script was not looking.
+
+**Wiring, so a script nobody runs is not mistaken for a gate.** `.agent/project.yaml` declares
+`release_check`, with the reason it is not part of `test` written beside it. The `package-release`
+skill gained step 4: *run every release-only gate the project manifest declares, and commit
+whatever it writes* — phrased generically, because the skill is not vqapr's and the manifest is
+where a project says what its gates are.
+
+The script's `--help` text is ASCII while its reasoning stays Korean in the module docstring:
+argparse writes help through the inherited console encoding, and cp949 could not encode the
+docstring. The test caught it as a `UnicodeDecodeError` in a subprocess reader thread; the fix is
+at the source rather than an environment variable around it.
 
 ## Trade-offs
 
@@ -119,8 +155,15 @@ differs from every release vqapr has shipped* — is true of both.
 
 ## Validation
 
-- `uv run pytest tests/ -q` — 1,481 passed, 24 deselected.
+- `uv run pytest tests/ -q` — 1,481 passed, 24 deselected (1/2); re-run after 2/2.
 - `uv run ruff check src/` — clean.
+- `uv run python scripts/record_shipped_skills.py --check` — exits 1 and names the unrecorded
+  file, as the working tree requires; running it without `--check` records and a re-check passes.
+  Verified both directions, then the generated table was removed again for the reason above.
+- `tests/agent/test_the_release_records_what_it_ships.py` — new, 5 tests. That the gate fails while
+  content is unrecorded, that its message names the real fixing command (`docs/issues/025`'s rule),
+  that no shipped file is exempt from the check, the record-then-judge round trip that turns
+  yesterday's bytes into `outdated`, and that history is additive.
 - `tests/agent/test_an_installed_skill_declares_where_it_came_from.py` — new, 10 tests. The five
   states, the `outdated`/`modified` split with a synthetic release table, `WRITABLE_WITHOUT_FORCE`,
   the worst-file rollup, and that a hash known for one skill does not vouch for another skill's

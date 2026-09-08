@@ -11,7 +11,7 @@
 | | |
 |---|---|
 | `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
-| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료. 0.5.0 릴리스 2026-09-07; 0.6.0 릴리스 2026-09-07**(records 163·164·165: report API, write-once 기록, kill test; stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.6.0.html`, full suite 1443 passed, show_003 exit 0, 태그 `v0.6.0`)(stamp `pyproject`·`uv.lock`·showcase ×8·README ×2, stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.5.0.html`, show_003 수동 exit 0, 태그 `v0.5.0`). 남은 이슈는 `023`(HELD) 하나 |
+| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료. 0.5.0 릴리스 2026-09-07; 0.6.0 릴리스 2026-09-07; 0.7.0 릴리스 2026-09-08 (breaking: records 170-173 — status/stage/cause 봉투, field_types 필수, public 문 정리, `vqapr new sample`; 노트 `docs/releases/0.7.0.md`; test_all 1492 passed, show_003 exit 0, 시나리오 stepper 0.7.0판)**(records 163·164·165: report API, write-once 기록, kill test; stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.6.0.html`, full suite 1443 passed, show_003 exit 0, 태그 `v0.6.0`)(stamp `pyproject`·`uv.lock`·showcase ×8·README ×2, stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.5.0.html`, show_003 수동 exit 0, 태그 `v0.5.0`). 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
 | record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |

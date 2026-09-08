@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from vqapr.domain.errors import Stage, Status, VqaprError
-from vqapr.flow.declaration.run import RunDefinition
 from vqapr.project.refusals import _workspace_error
+from vqapr.project.run import RunDefinition
 from vqapr.project.state import _State
 
 

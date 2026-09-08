@@ -99,14 +99,9 @@ OPEN: dict[tuple[str, str], str] = {
         "M5c: register_component's persisting half moves to project/; extension keeps "
         "prepare_component and stops opening a Workspace transaction"
     ),
-    ("project", "flow.declaration"): (
-        "M5b: flow/declaration/run.py moves to project/ -- a RunDefinition is a registered "
-        "declaration, and five modules of the project layer read one"
-    ),
     # Closed by M6 -- the substrate the phases read moves out of the assembly layer.
     ("flow.strategy", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
     ("flow.datamodel", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
-    ("flow.declaration", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
 }
 """Violations measured at `develop @ 7c804ddc`, each with the milestone that closes it.
 

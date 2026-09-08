@@ -5,7 +5,7 @@ import math
 import pytest
 
 from vqapr.domain.values import normalize_memory
-from vqapr.flow.run_state import prepare_model_state
+from vqapr.domain.model_state import prepare_model_state
 
 
 def test_prepared_memory_and_payload_are_detached_and_identity_bound() -> None:

@@ -1149,7 +1149,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
 
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.flow.declaration.run import RunDefinition, StrategyEntry
+    from vqapr.project.run import RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(

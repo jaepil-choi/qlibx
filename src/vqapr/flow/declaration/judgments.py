@@ -43,7 +43,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # adapters misses a caller (`docs/issues/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.declaration.preflight import derived_agenda
-from vqapr.flow.declaration.run import RunDefinition
+from vqapr.project.run import RunDefinition
 
 # `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
 # ABOVE this layer; a module under `flow/` importing it reaches back up through the thing it is

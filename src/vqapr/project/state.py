@@ -14,7 +14,7 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import ComponentId, DatasetId, SourceId
 from vqapr.extension.component import ComponentRef
-from vqapr.flow.declaration.run import RunDefinition
+from vqapr.project.run import RunDefinition
 
 
 class _State(NamedTuple):

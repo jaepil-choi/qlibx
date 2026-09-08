@@ -102,14 +102,6 @@ from vqapr.extension.registration import (
 from vqapr.flow.artifacts import SimulationFailure
 from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.declaration.run import (
-    ConstraintSet,
-    DataModelEntry,
-    RunDefinition,
-    RunExecution,
-    RunFill,
-    StrategyEntry,
-)
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
@@ -139,6 +131,14 @@ from vqapr.portfolio.weighting import (
     signal_weight,
 )
 from vqapr.project.registration import register_dataset as register_dataset
+from vqapr.project.run import (
+    ConstraintSet,
+    DataModelEntry,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 from vqapr.project.store import Workspace
 from vqapr.record import (
     RunRecordMissing,

@@ -37,10 +37,10 @@ from vqapr.account.account import AccountMode
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
+from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run_state import prepare_model_state
 
 FINGERPRINT_PREFIX = 8
 """How much of a component fingerprint names a strategy record's directory: `<id>@<fp8>`.

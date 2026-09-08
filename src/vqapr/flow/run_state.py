@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +17,7 @@ from vqapr.account.account import (
 from vqapr.authoring.records import InvocationRecorder, RecorderManifest
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
+from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 
 
@@ -31,38 +30,6 @@ class LifecycleKind(StrEnum):
     FEEDBACK_PUBLISHED = "FEEDBACK_PUBLISHED"
 
 
-# ---- detached model state (folded in from flow/model_state.py, one-shape Step 6) ----
-
-@dataclass(frozen=True, slots=True)
-class PreparedModelState:
-    """A detached state candidate with no visibility until its root is published."""
-
-    ref: ModelStateRef
-    memory: ModelMemory
-    payload: bytes
-
-
-def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
-    """Detach one exact memory/payload envelope without making it visible."""
-    normalized = normalize_memory(memory)
-    memory_bytes = json.dumps(
-        normalized,
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    envelope = (
-        len(memory_bytes).to_bytes(8, "big")
-        + memory_bytes
-        + len(payload).to_bytes(8, "big")
-        + payload
-    )
-    return PreparedModelState(
-        ref=ModelStateRef(hashlib.sha256(envelope).hexdigest()),
-        memory=normalized,
-        payload=bytes(payload),
-    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -29,7 +29,7 @@ from vqapr.project.registration import apply
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")

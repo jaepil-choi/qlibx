@@ -43,12 +43,12 @@ from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
-from vqapr.flow.declaration.run import RunDefinition
 from vqapr.project.document import (
     ComponentDeclaration,
     DatasetDeclaration,
     InstrumentsDeclaration,
 )
+from vqapr.project.run import RunDefinition
 from vqapr.project.store import Transaction, Workspace
 
 _COMPONENT_KINDS = {

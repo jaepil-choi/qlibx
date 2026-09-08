@@ -8,7 +8,7 @@ from tests.flow.datamodel.test_a_datamodel_is_a_run import _definition, _prepare
 from tests.flow.declaration.test_preflight import _setup
 from vqapr.flow import orchestration as runtime
 from vqapr.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
-from vqapr.flow.declaration.run import DataModelEntry
+from vqapr.project.run import DataModelEntry
 
 
 @pytest.fixture(params=["strategy", "datamodel"])

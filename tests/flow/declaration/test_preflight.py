@@ -21,8 +21,8 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
-from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.flow.run_state import prepare_model_state
+from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.domain.model_state import prepare_model_state
 from vqapr.public import register_dataset
 from vqapr.project.store import Workspace
 

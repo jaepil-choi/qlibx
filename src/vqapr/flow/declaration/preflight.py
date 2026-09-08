@@ -33,7 +33,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.declaration.run import (
+from vqapr.project.run import (
     ConstraintSet,
     DataModelEntry,
     RunDefinition,

@@ -29,7 +29,6 @@ from vqapr.domain.identifiers import (
 )
 from vqapr.domain.values import require_tz_aware
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.declaration.run import RunDefinition
 from vqapr.project.document import read_workspace, write_workspace
 from vqapr.project.merge import (
     _merge_component as merge_component,
@@ -50,6 +49,7 @@ from vqapr.project.references import (
     _references_in as references_in,
 )
 from vqapr.project.refusals import _workspace_error
+from vqapr.project.run import RunDefinition
 from vqapr.project.state import _State
 
 WORKSPACE_DIRECTORY = ".vqapr"

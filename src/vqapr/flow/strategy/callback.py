@@ -28,6 +28,7 @@ from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import ModelStateRef
+from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.execution_table import ExecutionTable
@@ -41,7 +42,6 @@ from vqapr.flow.run_state import (
     LifecycleKind,
     LifecycleTrace,
     PreparedRunState,
-    prepare_model_state,
 )
 from vqapr.flow.strategy.context import (
     _ACCOUNT_IDENTITY,

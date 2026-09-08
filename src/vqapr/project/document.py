@@ -39,7 +39,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id
 from vqapr.domain.shapes import Grain
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.declaration.run import RunDefinition
+from vqapr.project.run import RunDefinition
 
 
 class Document(BaseModel):

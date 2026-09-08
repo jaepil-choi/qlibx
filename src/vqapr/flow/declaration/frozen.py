@@ -25,7 +25,7 @@ from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.declaration.run import (
+from vqapr.project.run import (
     FINGERPRINT_PREFIX,
     ConstraintSet,
     StrategyConfig,

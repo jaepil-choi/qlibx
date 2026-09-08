@@ -46,7 +46,7 @@ from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.artifacts import SimulationFailure
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
+from vqapr.project.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
 

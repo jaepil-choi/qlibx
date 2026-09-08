@@ -124,7 +124,7 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
         + "    end: '2024-01-03T00:00:00+09:00'\n"
         + "    valuation: {agenda_id: daily-valuation}\n"
         + "    exchange: null\n"
-        + "    execution_input: null\n"
+        + "    execution: null\n"
         + "    initial_account: null\n"
         + "    strategies: {alpha: {}}\n",
         encoding="utf-8",

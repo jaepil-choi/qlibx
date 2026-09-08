@@ -2,7 +2,7 @@
 
 Chain proved here, using only ``vqapr.public``::
 
-    data/DW CSV -> parquet slice -> register_dataset / register_execution_input
+    data/DW CSV -> parquet slice -> register_dataset (observations and the venue table)
       -> DataModel -> materialize reversal_score (derived dataset)
       -> StrategyModel reads the derived dataset -> signed long/short intent
       -> AcademicExchange fills -> Account commit -> mark -> monitoring -> finalize
@@ -35,11 +35,9 @@ from vqapr.public import (
     AccountSnapshot,
     DataModelEntry,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
     SourceSpec,
     StrategyEntry,
     preflight_run,
@@ -47,7 +45,6 @@ from vqapr.public import (
     register_data_model,
     register_dataset,
     register_exchange,
-    register_execution_input,
     register_strategy_model,
     run,
 )
@@ -377,19 +374,23 @@ def main() -> None:
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
-    register_execution_input(
+    register_dataset(
         PROJECT,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     paths = _write_components()
@@ -430,7 +431,15 @@ def main() -> None:
         timezone=VENUE,
         at=time(8, 30),
         exchange="showcase-exchange",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            fill=RunFill(
+                selector="same_day",
+                at=time(15, 30),
+                timezone=VENUE,
+                trade_price="close",
+            ),
+        ),
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000000000"), {}),

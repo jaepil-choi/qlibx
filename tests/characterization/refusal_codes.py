@@ -838,19 +838,19 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
     return codes
 
 
-def _runtime_execution_input(tmp_path: Path) -> list[str]:
+def _runtime_execution_table(tmp_path: Path) -> list[str]:
     from vqapr.data.sources import SourceSpec
     from vqapr.exchange.conventions import FillConvention, FillSelector
     from vqapr.exchange.execution_table import (
-        ExecutionInputRegistration,
+        ExecutionTable,
         ExecutionTableSpec,
-        validate_execution_input,
+        validate_execution_table,
     )
 
     codes: list[str] = []
 
-    def _registration(path: Path) -> ExecutionInputRegistration:
-        return ExecutionInputRegistration.of(
+    def _registration(path: Path) -> ExecutionTable:
+        return ExecutionTable.of(
             "krx-daily",
             ExecutionTableSpec(
                 source=SourceSpec.of("krx-execution", path),
@@ -872,7 +872,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
         """SELECT TIMESTAMP '2024-03-05 15:30:00' AS trade_at, 1 AS instrument,
                   'yes' AS is_tradable, 'nope' AS open, 'nope' AS close""",
     )
-    diagnosis = validate_execution_input(_registration(bad_types))
+    diagnosis = validate_execution_table(_registration(bad_types))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     dup_null = _write_parquet(
@@ -883,7 +883,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
              (TIMESTAMPTZ '2024-03-06 15:30:00+09', NULL, true, 1.0::DOUBLE, 1.0::DOUBLE)
            ) AS t(trade_at, instrument, is_tradable, open, close)""",
     )
-    diagnosis = validate_execution_input(_registration(dup_null))
+    diagnosis = validate_execution_table(_registration(dup_null))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     bad_price = _write_parquet(
@@ -891,7 +891,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
         """SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at, 'A' AS instrument,
                   true AS is_tradable, 99.0::DOUBLE AS open, 0.0::DOUBLE AS close""",
     )
-    diagnosis = validate_execution_input(_registration(bad_price))
+    diagnosis = validate_execution_table(_registration(bad_price))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     return codes
@@ -993,7 +993,10 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
         "end": "2024-03-06T00:00:00+09:00",
         "timezone": "Asia/Seoul",
         "exchange": "venue",
-        "execution_input": "fills",
+        "execution": {
+            "dataset": "fills",
+            "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+        },
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
     }
     scenarios: list[dict] = [
@@ -1076,11 +1079,6 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     try:
         with Workspace.transaction(workspace) as t:
             t.register_dataset(registration, SourceSpec.of("s", other))
-    except VqaprError as error:
-        codes.extend(failure.code for failure in error.failures)
-
-    try:
-        workspace.execution_input("does-not-exist")
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 
@@ -1218,7 +1216,7 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
 
 _RUNTIME_SCENARIOS = (
     _runtime_dataset_schema_and_key,
-    _runtime_execution_input,
+    _runtime_execution_table,
     _runtime_conformance_and_loading,
     _runtime_declaration_read,
     _runtime_workspace,

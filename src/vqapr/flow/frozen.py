@@ -22,7 +22,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
-from vqapr.exchange.execution_table import ExecutionInputRegistration
+from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import (
     FINGERPRINT_PREFIX,
@@ -254,7 +254,7 @@ class FrozenRun:
     strategies: tuple[FrozenStrategy, ...]
     datamodels: tuple[FrozenDataModel, ...] = field(default=(), kw_only=True)
     exchange: ComponentRef | None = None
-    execution_input: ExecutionInputRegistration | None = None
+    execution: ExecutionTable | None = None
     start: datetime | None = None
     end: datetime | None = None
     initial_account_snapshot: AccountSnapshot | None = None
@@ -289,21 +289,19 @@ class FrozenRun:
             raise ValueError("a frozen run holds each model at most once")
         if self.datamodels and (
             self.exchange is not None
-            or self.execution_input is not None
+            or self.execution is not None
             or self.initial_account_snapshot is not None
         ):
-            raise ValueError("a frozen datamodel run holds no venue, execution input or account")
+            raise ValueError("a frozen datamodel run holds no venue, execution dataset or account")
         if self.exchange is not None:
             if not isinstance(self.exchange, ComponentRef):
                 raise TypeError("exchange must be a ComponentRef or None")
             if self.exchange.kind is not ComponentKind.EXCHANGE:
                 raise ValueError("exchange must identify an EXCHANGE component")
-        if (self.exchange is None) != (self.execution_input is None):
-            raise ValueError("exchange and execution_input must be frozen together")
-        if self.execution_input is not None and not isinstance(
-            self.execution_input, ExecutionInputRegistration
-        ):
-            raise TypeError("execution_input must be an ExecutionInputRegistration or None")
+        if (self.exchange is None) != (self.execution is None):
+            raise ValueError("exchange and execution must be frozen together")
+        if self.execution is not None and not isinstance(self.execution, ExecutionTable):
+            raise TypeError("execution must be an ExecutionTable or None")
         _require_period(self.start, self.end, "frozen")
         object.__setattr__(
             self,
@@ -414,23 +412,23 @@ class FrozenRun:
                     if self.exchange is not None
                     else None
                 ),
-                "execution_input": (
+                "execution": (
                     {
-                        "execution_input_id": self.execution_input.execution_input_id,
+                        "dataset_id": self.execution.dataset_id,
                         "source": (
-                            self.execution_input.table.source.source_id,
-                            str(self.execution_input.table.source.path),
-                            self.execution_input.table.source.hive_partitioned,
+                            self.execution.table.source.source_id,
+                            str(self.execution.table.source.path),
+                            self.execution.table.source.hive_partitioned,
                         ),
                         "table": (
-                            self.execution_input.table.trade_at_field,
-                            self.execution_input.table.instrument_field,
-                            self.execution_input.table.is_tradable_field,
-                            tuple(sorted(self.execution_input.table.price_fields.items())),
+                            self.execution.table.trade_at_field,
+                            self.execution.table.instrument_field,
+                            self.execution.table.is_tradable_field,
+                            tuple(sorted(self.execution.table.price_fields.items())),
                         ),
-                        "fill": self.execution_input.fill.declaration_identity,
+                        "fill": self.execution.fill.declaration_identity,
                     }
-                    if self.execution_input is not None
+                    if self.execution is not None
                     else None
                 ),
                 "start": self.start.astimezone(UTC).isoformat() if self.start is not None else None,

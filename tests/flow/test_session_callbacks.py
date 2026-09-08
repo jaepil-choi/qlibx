@@ -201,7 +201,7 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
     strategy = TimingOverrideStrategy()
     before_ref = state.current.current_model_state_ref
 
-    with pytest.raises(ValueError, match="requires frozen execution input"):
+    with pytest.raises(ValueError, match="requires frozen execution dataset"):
         _flow(strategy, state, (_occurrence(1),)).run()
 
     assert state.current.current_model_state_ref == before_ref

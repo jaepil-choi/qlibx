@@ -75,6 +75,11 @@ class CallbackHandler:
         ):
             current_ref, before, payload_before = self._visible_callback_state()
         previous_recorder = self._context.strategy.recorder
+        # Every Component's memory is restored before its callback and what the callback left
+        # is committed with the publication (record `181`). The constraints' goes in the same
+        # root as the Strategy's, so a rule that counts commits its count with the decision.
+        # Read before the try: a failure anywhere inside restores it.
+        component_before = self._context.visible_component_memory()
         try:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
@@ -106,10 +111,6 @@ class CallbackHandler:
             ):
                 self._set_callback_recorder(recorder)
             projected = ()
-            # Every Component's memory is restored before its callback and what the callback left
-            # is committed with the publication (record `181`). The constraints' goes in the same
-            # root as the Strategy's, so a rule that counts commits its count with the decision.
-            component_before = self._context.visible_component_memory()
             component_candidate: dict[str, ModelMemory] | None = None
             if self._context.constraints:
                 with self._context.guard(
@@ -170,7 +171,7 @@ class CallbackHandler:
                 # A Hold still reaches the execution instant, because the book is still
                 # worth something there and the venue still publishes prices for it.
                 with self._callback_intent_boundary(
-                    occurrence, self._context.frozen_run.execution_input
+                    occurrence, self._context.frozen_run.execution
                 ):
                     pending_valuation = self._accept_valuation(occurrence)
             else:
@@ -185,7 +186,7 @@ class CallbackHandler:
                 # matters most -- rounding a weight into whole shares moves it, and no fills exist
                 # yet.
                 with self._callback_intent_boundary(
-                    occurrence, self._context.frozen_run.execution_input
+                    occurrence, self._context.frozen_run.execution
                 ):
                     accepted = self._accept_intent(intent, occurrence)
             # The package's own account of this occurrence, written without the Strategy asking.
@@ -659,7 +660,7 @@ class CallbackHandler:
                 raise RuntimeError("one callback observed multiple byte digests for one source")
         return tuple(IntentSourceRef(source_id, digest) for source_id, digest in actual.items())
 
-    def execution_horizon(self, execution_input: object) -> ExecutionHorizon:
+    def execution_horizon(self, execution_table: object) -> ExecutionHorizon:
         """Read the run's candidate execution instants once, not once per callback.
 
         Built lazily so constructing a StrategyEventLoop still opens no physical source. The lower
@@ -672,7 +673,7 @@ class CallbackHandler:
             start = frozen.start
             if start is None:
                 raise ValueError("an execution horizon requires a frozen run start")
-            self._context.horizon = execution_input.build_horizon(
+            self._context.horizon = execution_table.build_horizon(
                 start_time=start,
                 end_time=frozen.end,
                 # The run owns a scan session; the horizon is the one query that reads every
@@ -699,16 +700,16 @@ class CallbackHandler:
         if self._context.state.current.pending_accepted_intent is not None:
             return None
         frozen = self._context.frozen_run
-        execution_input = frozen.execution_input
-        if execution_input is None or frozen.end is None or frozen.start is None:
+        execution_table = frozen.execution
+        if execution_table is None or frozen.end is None or frozen.start is None:
             # A run declared without execution authority never values against venue prices. That
             # is a legitimate configuration -- a research run that only exercises callbacks -- and
             # a Hold in it stays exactly what it was.
             return None
-        target = execution_input.select_target(
+        target = execution_table.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=self._context.frozen_run.end,
-            horizon=self.execution_horizon(execution_input),
+            horizon=self.execution_horizon(execution_table),
         )
         if target is None:
             return None
@@ -735,13 +736,13 @@ class CallbackHandler:
     def _accept_intent(
         self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence
     ) -> AcceptedIntent:
-        execution_input = self._context.frozen_run.execution_input
-        if execution_input is None or self._context.frozen_run.end is None:
-            raise ValueError("an accepted intent requires frozen execution input and run end")
-        target = execution_input.select_target(
+        execution_table = self._context.frozen_run.execution
+        if execution_table is None or self._context.frozen_run.end is None:
+            raise ValueError("an accepted intent requires frozen execution dataset and run end")
+        target = execution_table.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=self._context.frozen_run.end,
-            horizon=self.execution_horizon(execution_input),
+            horizon=self.execution_horizon(execution_table),
         )
         if target is None:
             raise ValueError("no exact execution target exists within the run horizon")
@@ -751,9 +752,9 @@ class CallbackHandler:
             decision_time=occurrence.evaluation_time,
             target=target,
         )
-        if target.execution_input_id != execution_input.execution_input_id:
+        if target.dataset_id != execution_table.dataset_id:
             raise ValueError(
-                "selected target execution input provenance does not match frozen input"
+                "selected target execution dataset does not match the frozen execution table"
             )
         return accepted
 

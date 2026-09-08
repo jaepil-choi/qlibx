@@ -48,7 +48,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.record import RunRecordWriter, read_typed_table, table_ids
@@ -143,7 +143,7 @@ def _fill_instant(session: date) -> datetime:
     return datetime.combine(session, FILL, tzinfo=KST)
 
 
-def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionInputRegistration:
+def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionTable:
     """A venue that prints A at 15:30 on every session, so a held book can be valued there."""
     path = root / "execution.parquet"
     rows = ",\n".join(
@@ -161,7 +161,7 @@ def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionInputRe
         )
     finally:
         connection.close()
-    return ExecutionInputRegistration.of(
+    return ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
             SourceSpec.of("execution-source", path),
@@ -200,7 +200,7 @@ def _flow(
             ),
         ),
         exchange=_component("exchange", ComponentKind.EXCHANGE),
-        execution_input=_execution_input(root, sessions),
+        execution=_execution_input(root, sessions),
         start=occurrences[0].evaluation_time,
         end=_fill_instant(sessions[-1]) + timedelta(hours=1),
         initial_account_snapshot=AccountSnapshot(0, Decimal(100), {"A": Decimal(1)}),

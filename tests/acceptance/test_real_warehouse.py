@@ -26,7 +26,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
     exact_execution_snapshot,
 )
@@ -259,7 +259,7 @@ def test_real_observations_stay_point_in_time(
 def test_real_execution_snapshot_selects_the_exact_close(
     observation_path: Path, execution_path: Path, instruments: tuple[str, ...]
 ) -> None:
-    registration = ExecutionInputRegistration.of(
+    registration = ExecutionTable.of(
         "krx-daily",
         ExecutionTableSpec(
             source=SourceSpec.of("krx-execution", execution_path),

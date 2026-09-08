@@ -99,7 +99,7 @@ class Stage(StrEnum):
     READ = "read"
     """Reading a declared source, roster or record file from disk."""
     REGISTER = "register"
-    """Proving and writing a declaration: dataset, execution input, component, run."""
+    """Proving and writing a declaration: dataset, execution dataset, component, run."""
     LOOKUP = "lookup"
     """Resolving a reference the workspace should hold."""
     REMOVE = "remove"

@@ -207,6 +207,15 @@ class FiniteCheck:
         return not self.non_finite
 
 
+_BARE_NAME = re.compile(r"[^\W\d]\w*", re.UNICODE)
+
+
+def _field_sql(expression: str) -> str:
+    """A declared field as SQL: a bare column name quoted, an expression parenthesised."""
+    stripped = expression.strip()
+    return _quote(stripped) if _BARE_NAME.fullmatch(stripped) else f"({stripped})"
+
+
 def _quote(field: str) -> str:
     if not isinstance(field, str) or not field.strip():
         raise ValueError("field must be a non-empty column name")
@@ -725,7 +734,7 @@ def exact_snapshot_rows(
     projections = [
         f"{trade_at} AS {_quote('trade_at')}",
         f"{instrument} AS {_quote('instrument')}",
-        *(f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
+        *(f"{_field_sql(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
     ]
     borrowed = _Borrowed(spec, session)
     try:
@@ -848,7 +857,7 @@ def positive_finite_when_true(
     identity_fields: Sequence[str],
 ) -> ConditionalPositiveCheck:
     """조건이 true인 행의 선택 numeric value가 null/NaN/inf/비양수인지 센다."""
-    value = _quote(value_field)
+    value = _field_sql(value_field)
     condition = _quote(condition_field)
     identities = tuple(identity_fields)
     if not identities:

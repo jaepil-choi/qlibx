@@ -36,7 +36,6 @@ _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("instruments", ()),
     ("dataset", ()),
     ("run", ()),
-    ("execution-input", ()),
     # The filled-in form beside the blank ones (record 172): a whole journey, one declaration.
     ("sample", ()),
 )

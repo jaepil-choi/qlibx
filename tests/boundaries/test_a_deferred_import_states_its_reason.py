@@ -26,7 +26,7 @@ import pathlib
 CEILING = 13  # record `162`: two cycles' deferrals gone; two roster deferrals merged by the fold
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 Was 18 after record `149`. Record `162` (one-shape Step 7) removed `data/store.py`'s
-`_window_types` and the two `ExecutionInputRegistration` guards in `exchange/conventions.py`:
+`_window_types` and the two `ExecutionTable` guards in `exchange/conventions.py`:
 each deferred an import that was a cycle, and the cycle is gone rather than deferred.
 Then 15 -> 13 in the same record: `domain/roster.py` and `roster_export.py` folded into
 `domain/instruments.py`, so the two deferred `build_roster`/`read_roster_table` pairs in

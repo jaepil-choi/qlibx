@@ -187,7 +187,7 @@ class _Record(BaseModel):
 
 class RunRecord(_Record):
     """`run.json`: the configuration every strategy of this run shares (record `139`) --
-    architecture §17.3.1's missing rows: the universe, the venue and the execution input with its
+    architecture §17.3.1's missing rows: the universe, the venue and the execution dataset with its
     fill convention (`docs/issues/034`), the initial account declaration, the datasets and their
     source digests (A7), and which strategies the run names."""
 
@@ -196,7 +196,7 @@ class RunRecord(_Record):
     instruments: list[str]
     period: dict[str, Any]
     exchange: dict[str, Any] | None
-    execution_input: dict[str, Any] | None
+    execution: dict[str, Any] | None
     initial_account: dict[str, Any] | None
     datasets: list[dict[str, Any]]
     strategies: list[dict[str, Any]]
@@ -1623,7 +1623,7 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
     `source_digests` are the physical digests of the sources the run reads, keyed by source id:
     a registration keeps an id and a path, and nothing pinned the bytes behind them (A7).
     """
-    execution = frozen.execution_input
+    execution = frozen.execution
     record = RunRecord(
         run_id=frozen.run_id,
         declared_digest=str(frozen.identity),
@@ -1638,11 +1638,11 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
             }
         ),
         # `034` closes here: which convention this run filled under, in the record's own words.
-        execution_input=(
+        execution=(
             None
             if execution is None
             else {
-                "execution_input_id": str(execution.execution_input_id),
+                "dataset_id": str(execution.dataset_id),
                 "source_id": str(execution.table.source.source_id),
                 "trade_at_field": execution.table.trade_at_field,
                 "price_fields": dict(execution.table.price_fields),

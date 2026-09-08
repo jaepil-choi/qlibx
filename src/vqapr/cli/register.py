@@ -25,7 +25,8 @@ So the declaration is the unit. `vqapr new` emits one beside the component it sc
   key is scanned in full for nulls and duplicates. A dataset whose `(available_at, instrument)`
   repeats is refused with the offending groups as evidence, because a duplicated key silently
   changes what a lookback window contains.
-- **execution inputs** — the same schema check over the venue table, plus the fill convention.
+- **execution datasets** — a dataset with an `execution:` role gets the same schema check, plus
+  a boolean tradable flag and at least one numeric price a run could bind.
 - **components** — loaded, constructed, and put through `conformance()`: every contract method
   Flow calls must exist and accept the positional call it makes.
 - **runs** — every id a run names must already be registered, and its sessions' dataset too.

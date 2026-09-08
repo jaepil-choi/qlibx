@@ -11,15 +11,16 @@ from zoneinfo import ZoneInfo
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Constraint, StrategyModel
-from vqapr.data.datasets import lookback_fits_grain, require_declared
+from vqapr.data.datasets import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationAgenda
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
-    validate_execution_input,
+    ExecutionTable,
+    ExecutionTableSpec,
+    validate_execution_table,
 )
 from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
@@ -119,6 +120,83 @@ def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSp
             f"{requirement.field_id}"
         )
     return workspace.source(str(registration.source))
+
+
+def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> ExecutionTable:
+    """The execution dataset the run names, bound to the run's own fill (record `185`).
+
+    The dataset supplies the physical columns -- its `available_at` is the instant a row is a
+    fact about, its execution role names the tradable flag, its numeric fields are
+    the prices a run may choose from -- and the run supplies the choice: which of those fields
+    is `trade_price`, on which session instant. A run naming a dataset with no execution role,
+    or a price the dataset does not expose, is refused here by name.
+    """
+    binding = definition.execution
+    assert binding is not None
+    registration = workspace.dataset(binding.dataset)
+    require_declared(registration)
+    role = registration.execution
+    if role is None:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="execution.dataset_has_no_role",
+                    status=Status.INVALID,
+                    requirement=(
+                        "the dataset a run fills against must declare an execution role "
+                        "(`execution: {is_tradable: <field>}`)"
+                    ),
+                    observed=f"dataset {binding.dataset!r} declares none",
+                    fix=(
+                        f"register {binding.dataset!r} again with an execution role, or fill "
+                        "against a dataset that has one"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="declare the execution role on the dataset, then retry",
+        )
+    if registration.instrument_field is None:
+        raise ValueError(f"execution dataset {binding.dataset!r} must declare an instrument_field")
+    prices = execution_price_fields(registration)
+    fill = binding.convention
+    if fill.trade_price not in prices:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="execution.price_not_a_field",
+                    status=Status.INVALID,
+                    requirement=(
+                        "the run's trade_price must be a numeric field of the "
+                        "execution dataset"
+                    ),
+                    observed=(
+                        f"trade_price {fill.trade_price!r}; {binding.dataset!r} exposes "
+                        f"{', '.join(sorted(prices)) or '(no numeric field)'}"
+                    ),
+                    fix=(
+                        f"declare trade_price as one of "
+                        f"{', '.join(sorted(prices)) or 'the numeric'} fields of "
+                        f"{binding.dataset!r}"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="name a price field the execution dataset exposes, then retry",
+        )
+    return ExecutionTable(
+        registration.dataset_id,
+        ExecutionTableSpec(
+            source=workspace.source(str(registration.source)),
+            trade_at_field=registration.available_at,
+            instrument_field=registration.instrument_field,
+            is_tradable_field=registration.fields[role.is_tradable].strip(),
+            price_fields=prices,
+        ),
+        fill,
+    )
 
 
 def _freeze_sources(
@@ -303,7 +381,7 @@ def _validate_initial_account(
         )
 
 
-def _validate_execution_requirements(exchange: Exchange, execution_input: object) -> None:
+def _validate_execution_requirements(exchange: Exchange, execution_table: object) -> None:
     """Prove the venue's declared regimes have the execution prices they need.
 
     A venue computes its own regimes -- a KRX price limit is the base price times a declared rate
@@ -315,7 +393,7 @@ def _validate_execution_requirements(exchange: Exchange, execution_input: object
     requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
     if not requirements:
         return
-    declared = set(execution_input.table.price_fields)
+    declared = set(execution_table.table.price_fields)
     missing = tuple(
         requirement for requirement in requirements if requirement.price not in declared
     )
@@ -328,14 +406,14 @@ def _validate_execution_requirements(exchange: Exchange, execution_input: object
                 code="execution.requirement_missing",
                 status=Status.MISSING,
                 requirement=(
-                    "the execution input must declare every price the Exchange requires, "
+                    "the execution dataset must declare every price the Exchange requires, "
                     "or the feature that needs it must be switched off"
                 ),
                 observed=", ".join(
                     f"{item.feature} needs price {item.price!r}" for item in missing
                 ),
                 fix=(
-                    "register the missing price fields on the execution input, or construct "
+                    "register the missing price fields on the execution dataset, or construct "
                     "the Exchange with the features that need them disabled"
                 ),
             )
@@ -409,7 +487,7 @@ def _require_execution_authority(definition: RunDefinition) -> None:
 
     An observation dataset is optional: a Strategy may declare no requirement and decide nothing,
     and a run of it is still a run. **An execution price is not optional.** Every run values its
-    book and fills against the prices a venue published, so the execution input is the one
+    book and fills against the prices a venue published, so the execution dataset is the one
     registration that is mandatory from the start.
 
     It is refused here rather than in `RunDefinition`, which is a pure value object built by
@@ -419,7 +497,7 @@ def _require_execution_authority(definition: RunDefinition) -> None:
     `_validate_instrument_universe` and `_validate_initial_account` skipped entirely, so a run
     could freeze with unlisted instruments and never be told.
     """
-    if definition.exchange is not None and definition.execution_input_id is not None:
+    if definition.exchange is not None and definition.execution is not None:
         return
     raise VqaprError(
         stage=Stage.FREEZE,
@@ -428,28 +506,30 @@ def _require_execution_authority(definition: RunDefinition) -> None:
                 code="execution.missing",
                 status=Status.MISSING,
                 requirement=(
-                    "a run must declare an Exchange and an execution input; the execution price "
-                    "is required even when the Strategy reads no observation dataset"
+                    "a run must declare an Exchange and an execution dataset with its fill; the "
+                    "execution price is required even when the Strategy reads no observation "
+                    "dataset"
                 ),
                 observed=(
                     f"exchange={definition.exchange!r}, "
-                    f"execution_input_id={definition.execution_input_id!r}"
+                    f"execution={definition.execution!r}"
                 ),
                 fix=(
-                    "declare both an Exchange and an execution input on the RunDefinition "
-                    "before calling preflight_run"
+                    "declare both an Exchange and `execution: {dataset, fill}` on the "
+                    "RunDefinition before calling preflight_run"
                 ),
             )
         ],
         mutation=False,
         retry_precondition=(
-            "register an execution input and declare it with its Exchange, then retry"
+            "register the venue table as a dataset with an execution role and declare it "
+            "with its Exchange, then retry"
         ),
     )
 
 
 def _validate_execution_targets(
-    execution_input: ExecutionInputRegistration,
+    execution_table: ExecutionTable,
     strategy_agenda: FrozenAgenda,
     *,
     start: datetime,
@@ -466,14 +546,14 @@ def _validate_execution_targets(
     table once per occurrence -- both slower and vulnerable to observing different bytes while
     preflight is supposed to be proving one run.
     """
-    horizon = execution_input.build_horizon(
+    horizon = execution_table.build_horizon(
         start_time=start,
         end_time=end,
     )
     missing = tuple(
         occurrence
         for occurrence in strategy_agenda.occurrences
-        if execution_input.select_target(
+        if execution_table.select_target(
             decision_time=occurrence.evaluation_time,
             end_time=end,
             horizon=horizon,
@@ -483,7 +563,7 @@ def _validate_execution_targets(
     if not missing:
         return
 
-    selector = execution_input.fill.selector.value.lower()
+    selector = execution_table.fill.selector.value.lower()
     raise VqaprError(
         stage=Stage.FREEZE,
         failures=[
@@ -522,7 +602,7 @@ def _freeze_strategy(
     entry: StrategyEntry,
     *,
     decide: OperationAgenda,
-    execution_input: ExecutionInputRegistration,
+    execution_table: ExecutionTable,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
@@ -554,7 +634,7 @@ def _freeze_strategy(
         for requirement in constraint.requirements()
     )
     agenda = _freeze_agenda(decide, start=start, end=end)
-    _validate_execution_targets(execution_input, agenda, start=start, end=end)
+    _validate_execution_targets(execution_table, agenda, start=start, end=end)
     return FrozenStrategy(
         config=config,
         constraints=ConstraintSet(constraints),
@@ -637,7 +717,7 @@ def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRe
 def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
-    The run layer is resolved once -- venue, execution input, sessions, universe, account --
+    The run layer is resolved once -- venue, execution dataset, sessions, universe, account --
     and each strategy the run names is frozen on top of it (design §4.1). This proves
     that every callback of every strategy has somewhere to execute before any account mutates,
     and collects the union of everything the strategies and their constraints read: that union
@@ -670,9 +750,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     # them, so the universe and account checks below can no longer be skipped by omission.
     exchange = _registered_exchange(workspace, definition.exchange or "")
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
-    execution_input = workspace.execution_input(definition.execution_input_id or "")
-    validate_execution_input(execution_input).raise_if_failed()
-    _validate_execution_requirements(loaded_exchange, execution_input)
+    execution_table = bound_execution_table(workspace, definition)
+    validate_execution_table(execution_table).raise_if_failed()
+    _validate_execution_requirements(loaded_exchange, execution_table)
     _validate_instrument_universe(definition.instruments, loaded_exchange)
     _validate_initial_account(
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
@@ -680,7 +760,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
     strategies = tuple(
         _freeze_strategy(
-            workspace, entry, decide=decide, execution_input=execution_input, start=start, end=end
+            workspace, entry, decide=decide, execution_table=execution_table, start=start, end=end
         )
         for entry in definition.strategies
     )
@@ -692,7 +772,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         for requirement in (*layer.requirements, *layer.constraint_requirements):
             if requirement not in requirements:
                 requirements.append(requirement)
-    sources = _freeze_sources(workspace, tuple(requirements), execution_input.table.source)
+    sources = _freeze_sources(workspace, tuple(requirements), execution_table.table.source)
     datasets_by_id = {
         requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
         for requirement in requirements
@@ -703,7 +783,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         run_id=definition.run_id,
         strategies=strategies,
         exchange=exchange,
-        execution_input=execution_input,
+        execution=execution_table,
         start=start,
         end=end,
         initial_account_snapshot=definition.initial_account_snapshot,
@@ -716,7 +796,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
 
 def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
-    """Freeze a datamodel run: the same sessions, no venue, no execution input, no account.
+    """Freeze a datamodel run: the same sessions, no venue, no execution dataset, no account.
 
     What a strategy run proves about its venue and its account does not apply -- a datamodel
     sees neither (architecture 4.4) -- so the layer is the universe, the period and the sessions,

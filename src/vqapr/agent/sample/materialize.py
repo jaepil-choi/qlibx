@@ -2,7 +2,7 @@
 
 Copies the strategy and the exchange as source files the user can read and edit, the synthetic
 panel beside them, and one declaration document (`sample.yaml`) that registers the dataset, the
-execution input, both components and the run. Nothing is registered here: the next step is
+execution dataset, both components and the run. Nothing is registered here: the next step is
 `vqapr register DIR/sample.yaml`, the same step every user declaration takes, so the sample shows
 the real path rather than a shortcut through it.
 """
@@ -49,7 +49,7 @@ class Materialized:
     strategy_id: str
     exchange_id: str
     dataset_id: str
-    execution_input_id: str
+    execution_dataset_id: str
     panel: dict[str, Any]
 
     @property
@@ -135,25 +135,21 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                     "close": "DOUBLE",
                     "volume": "INTEGER",
                 },
-            }
-        },
-        "execution_inputs": {
+            },
+            # The venue table is a dataset too (record `185`): `trade_at` is the instant its
+            # row is a fact about, and the execution role names the tradable flag. Which price
+            # a run fills at is the run's choice, below.
             EXECUTION_ID: {
-                "table": {
-                    "source_id": f"{EXECUTION_ID}-source",
-                    "path": "execution.parquet",
-                    "trade_at_field": "trade_at",
-                    "instrument_field": "instrument",
-                    "is_tradable_field": "is_tradable",
-                    "price_fields": {"close": "close"},
-                },
-                "fill": {
-                    "selector": "same_day",
-                    "at": CLOSE,
-                    "timezone": VENUE,
-                    "trade_price": "close",
-                },
-            }
+                "source_id": f"{EXECUTION_ID}-source",
+                "path": "execution.parquet",
+                "instrument_field": "instrument",
+                "available_at": "trade_at",
+                "grain": "instrument_instant",
+                "key_fields": ["trade_at", "instrument"],
+                "fields": {"close": "close", "is_tradable": "is_tradable"},
+                "field_types": {"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                "execution": {"is_tradable": "is_tradable"},
+            },
         },
         "components": {
             STRATEGY_ID: {
@@ -177,7 +173,15 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                 "timezone": VENUE,
                 "at": CALLBACK,
                 "exchange": EXCHANGE_ID,
-                "execution_input": EXECUTION_ID,
+                "execution": {
+                    "dataset": EXECUTION_ID,
+                    "fill": {
+                        "selector": "same_day",
+                        "at": CLOSE,
+                        "timezone": VENUE,
+                        "trade_price": "close",
+                    },
+                },
                 "initial_account": {"cash": OPENING_CASH, "mode": "LONG_ONLY", "positions": {}},
                 "strategies": {STRATEGY_ID: {}},
             }
@@ -254,6 +258,6 @@ def materialize(directory: str | Path) -> Materialized:
         strategy_id=STRATEGY_ID,
         exchange_id=EXCHANGE_ID,
         dataset_id=DATASET_ID,
-        execution_input_id=EXECUTION_ID,
+        execution_dataset_id=EXECUTION_ID,
         panel=panel,
     )

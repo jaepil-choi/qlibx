@@ -44,10 +44,10 @@ from vqapr.evidence.artifacts import (
 )
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
     exact_execution_snapshot,
-    validate_execution_input,
+    validate_execution_table,
 )
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
@@ -193,7 +193,7 @@ def _frozen(
     callbacks: tuple[datetime, ...],
     *,
     end: datetime | None = None,
-    execution: ExecutionInputRegistration | None = None,
+    execution: ExecutionTable | None = None,
     account: AccountSnapshot = _ACCOUNT,
     datasets: tuple[DatasetRegistration, ...] = (),
     sources: tuple[SourceSpec, ...] = (),
@@ -227,7 +227,7 @@ def _frozen(
         run_id="test",
         strategies=(layer,),
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
-        execution_input=execution,
+        execution=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A", "B"),
@@ -287,8 +287,8 @@ def _parquet(path: Path, rows: str) -> Path:
 
 def _execution(
     path: Path, selector: FillSelector = FillSelector.SAME_DAY
-) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
+) -> ExecutionTable:
+    return ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
             SourceSpec.of("execution-source", path),
@@ -934,7 +934,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_INTENT
-    assert failure.failed_requirement is frozen.execution_input
+    assert failure.failed_requirement is frozen.execution
     assert failure.mutation is False
     assert state.current is before
     assert state.current.pending_accepted_intent is prior
@@ -1010,10 +1010,10 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
         )
     )
 
-    diagnosis = validate_execution_input(registration)
+    diagnosis = validate_execution_table(registration)
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.key_duplicate"
+        "execution_table.key_duplicate"
     ]
 
 

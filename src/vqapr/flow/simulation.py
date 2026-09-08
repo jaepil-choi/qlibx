@@ -247,7 +247,7 @@ class StrategyEventLoop(
             self._context.guard(
                 SimulationStage.DUE_SNAPSHOT,
                 due.due_time,
-                owner=self._context.frozen_run.execution_input,
+                owner=self._context.frozen_run.execution,
             ),
         ):
             return self._dispatch_pending(due)

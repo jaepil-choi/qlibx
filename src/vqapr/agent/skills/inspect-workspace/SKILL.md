@@ -45,7 +45,6 @@ with `usage.rejected`. So surveying a workspace is one call per kind:
 vqapr list datasets
 vqapr list sources
 vqapr list components
-vqapr list execution-inputs
 vqapr list instruments
 vqapr list runs
 ```

@@ -312,12 +312,12 @@ _RUN_KEYS = (
     "timezone",
     "at",
     "exchange",
-    "execution_input",
+    "execution",
     "initial_account",
 )
 """Every key a `runs:` entry declares before `vqapr run` can execute it.
 
-`RunDefinition` tolerates an absent period, venue, execution input and account because other
+`RunDefinition` tolerates an absent period, venue, execution dataset and account because other
 callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
 The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
 `sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
@@ -549,12 +549,14 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     price" while the members are scheduling words. Guessing cannot converge on a vocabulary the
     field name argues against, so the refusal has to carry the list.
     """
-    spec = tmp_path / "ei.yaml"
+    spec = tmp_path / "runs.yaml"
     spec.write_text(
-        "execution_inputs:\n  krx:\n    table:\n      source_id: s\n      path: x.parquet\n"
-        "      trade_at_field: t\n      instrument_field: i\n      is_tradable_field: ok\n"
-        "      price_fields: {close: close}\n    fill:\n      selector: next_open\n"
-        '      at: "15:30"\n      timezone: Asia/Seoul\n      trade_price: close\n',
+        "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
+        "    end: \"2024-03-06T23:00:00+09:00\"\n    sessions: [2024-03-05]\n"
+        "    timezone: Asia/Seoul\n    at: \"04:00\"\n    exchange: venue\n"
+        "    execution:\n      dataset: krx\n      fill:\n        selector: next_open\n"
+        "        at: \"15:30\"\n        timezone: Asia/Seoul\n        trade_price: close\n"
+        "    initial_account: {cash: \"1000\", mode: long_only}\n    strategies: {alpha: {}}\n",
         encoding="utf-8",
     )
 
@@ -570,50 +572,6 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     assert failure["examples"], "permitted values must ride as examples"
 
 
-def test_an_execution_input_template_covers_every_required_key(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """No scaffold existed for this kind, and it is the deepest nesting `register` accepts.
-
-    Measured: ten required keys across two nested blocks, discovered one refusal at a time.
-    """
-    import yaml
-
-    target = tmp_path / "ei.yaml"
-    code, _ = _envelope(
-        capsys, "--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)
-    )
-
-    assert code == 0
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    declared = next(iter(document["execution_inputs"].values()))
-    for key in (
-        "source_id",
-        "path",
-        "trade_at_field",
-        "instrument_field",
-        "is_tradable_field",
-        "price_fields",
-    ):
-        assert key in declared["table"], f"table does not declare {key}"
-    for key in ("selector", "at", "timezone", "trade_price"):
-        assert key in declared["fill"], f"fill does not declare {key}"
-
-
-def test_an_execution_input_template_emits_a_valid_selector(tmp_path: Path) -> None:
-    """The emitted value must be one the validator accepts, not a placeholder to guess at."""
-    import yaml
-
-    from vqapr.exchange.conventions import FillSelector
-
-    target = tmp_path / "ei.yaml"
-    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)])
-
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    declared = next(iter(document["execution_inputs"].values()))
-    assert declared["fill"]["selector"].upper() in FillSelector.__members__
-
-
 def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     """`vqapr new`'s choice list is the de-facto index of what a declaration may contain.
 
@@ -627,15 +585,15 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     `instruments` and `components` are scaffolded as Python beside their own declaration rather
     than as a YAML template, so they are the two the YAML templates need not carry.
     """
-    from vqapr.cli.new import _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE
+    from vqapr.cli.new import _DATASET_TEMPLATE, _RUN_TEMPLATE
     from vqapr.declarations import SECTIONS
 
-    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE))
+    emitted = "\n".join((_DATASET_TEMPLATE, _RUN_TEMPLATE))
 
-    assert set(SECTIONS) == {"instruments", "datasets", "execution_inputs", "components", "runs"}
+    assert set(SECTIONS) == {"instruments", "datasets", "components", "runs"}
     for section in set(SECTIONS) - {"instruments", "components"}:
         assert f"{section}:" in emitted, f"no template emits a {section} section"
-    for retired in ("agendas:", "strategy_configs:"):
+    for retired in ("agendas:", "strategy_configs:", "execution_inputs:"):
         assert retired not in emitted, f"{retired} is not a section register reads any more"
 
 
@@ -668,22 +626,18 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
 def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     tmp_path: Path,
 ) -> None:
-    """Independent templates must not put a decision and its fill at the same instant."""
+    """The run template must not put a decision and its own fill at the same instant."""
     import yaml
 
     runs = tmp_path / "runs.yaml"
-    execution = tmp_path / "execution.yaml"
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
-    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(execution)])
 
     (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
-    execution_document = yaml.safe_load(execution.read_text(encoding="utf-8"))
     decide_at = time.fromisoformat(run["at"])
-    fill = next(iter(execution_document["execution_inputs"].values()))["fill"]
-    fill_at = time.fromisoformat(fill["at"])
+    fill_at = time.fromisoformat(run["execution"]["fill"]["at"])
 
     assert decide_at < fill_at
-    assert "STRICTLY LATER" in execution.read_text(encoding="utf-8")
+    assert "STRICTLY LATER" in runs.read_text(encoding="utf-8")
 
 
 def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:

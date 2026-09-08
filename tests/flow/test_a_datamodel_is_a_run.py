@@ -73,7 +73,7 @@ class ReversalModel(va.DataModel):
 
     def compute(self, context):
         assert not hasattr(context, "account")
-        assert not hasattr(context, "execution_input")
+        assert not hasattr(context, "execution_table")
         window = context.read("prices", "close")
         by_instrument = {
             name: [float(v) for v in window.values[name] if v is not None]
@@ -471,7 +471,7 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
         {"component_id": "reversal", "record": ref, "dataset_id": "reversal_2d"}
     ]
     assert run_json["strategies"] == []
-    assert run_json["exchange"] is None and run_json["execution_input"] is None
+    assert run_json["exchange"] is None and run_json["execution"] is None
 
 
 def test_a_second_run_is_refused_before_it_computes(

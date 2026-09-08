@@ -39,12 +39,7 @@ from vqapr.domain.errors import (
     Status,
     collector,
 )
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    validate_execution_input,
-)
+from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
 from vqapr.flow.run import RunDefinition
@@ -53,7 +48,6 @@ from vqapr.workspace import Transaction, Workspace
 from vqapr.workspace_document import (
     ComponentDeclaration,
     DatasetDeclaration,
-    ExecutionInputDeclaration,
     InstrumentsDeclaration,
 )
 
@@ -72,7 +66,6 @@ _COMPONENT_KINDS = {
 SECTIONS = (
     "instruments",
     "datasets",
-    "execution_inputs",
     "components",
     "runs",
 )
@@ -129,17 +122,6 @@ def register_dataset(
     # a full read can establish, and the next reader would have to read the file again to get it.
     with Workspace.transaction(project_root) as transaction:
         return transaction.register_dataset(measured, source)
-
-def register_execution_input(
-    project_root: str | Path,
-    registration: ExecutionInputRegistration,
-) -> bool:
-    """준비된 execution parquet과 fill binding을 검증하고 project에 등록한다."""
-    diagnosis = validate_execution_input(registration)
-    diagnosis.raise_if_failed()
-    with Workspace.transaction(project_root) as transaction:
-        return transaction.register_execution_input(registration)
-
 
 def _mapping(value: object, *, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
@@ -610,6 +592,7 @@ def _dataset(
             fields=dict(model.fields),
             field_types=dict(model.field_types),
             grain=model.grain,
+            execution=None if model.execution is None else model.execution.to_domain(),
         )
     except ValueError as error:
         # Two keys can object here, and each has its own sentence: `field_types` names a field
@@ -715,35 +698,9 @@ def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
     found.done().raise_if_failed()
 
 
-def _execution_input(input_id: str, body: object, *, base: Path) -> ExecutionInputRegistration:
-    name = f"execution_inputs.{input_id}"
-    model = declared(ExecutionInputDeclaration, body, name=name)
-    table, fill = model.table, model.fill
-    return ExecutionInputRegistration.of(
-        input_id,
-        ExecutionTableSpec(
-            source=SourceSpec.of(
-                table.source_id,
-                _resolved(table.path, base),
-                hive_partitioned=table.hive_partitioned,
-            ),
-            trade_at_field=table.trade_at_field,
-            instrument_field=table.instrument_field,
-            is_tradable_field=table.is_tradable_field,
-            price_fields=dict(table.price_fields),
-        ),
-        FillConvention(
-            FillSelector[fill.selector.upper()],
-            fill.at,
-            fill.timezone,
-            fill.trade_price,
-        ),
-    )
-
 
 _DECLARED_IDS = {
     "datasets": ("dataset id", identifiers.dataset_id),
-    "execution_inputs": ("execution input id", identifiers.execution_input_id),
     "components": ("component id", identifiers.component_id),
 }
 """Sections whose KEY becomes a typed identifier, and the constructor that judges it.
@@ -909,13 +866,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         registered.setdefault("datasets", []).append(str(dataset_id))
         registered.spoken.extend(measured.spoken())
 
-    for input_id, body in section("execution_inputs").items():
-        registration = _execution_input(str(input_id), body, base=base)
-        validate_execution_input(registration).raise_if_failed()
-        transaction.register_execution_input(registration)
-        registered.setdefault("execution_inputs", []).append(str(input_id))
-        registered.spoken.extend(registration.spoken())
-
     for component_id, body in section("components").items():
         registered.setdefault("components", []).append(
             _component(str(component_id), body, project_root, transaction, base=base)
@@ -933,6 +883,16 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
             # judged here so the refusal names every member and the nearest spelling
             # (`docs/issues/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
+        execution = declared_run.get("execution")
+        if isinstance(execution, dict) and isinstance(execution.get("fill"), dict):
+            fill = execution["fill"]
+            if "selector" in fill:
+                # The same closed-set treatment as the account mode: `selector` reads as
+                # "which price" while its members are scheduling words (`docs/issues/017`),
+                # so the refusal has to carry the list rather than a one-line pydantic error.
+                _enum(
+                    FillSelector, fill["selector"], name=f"{name}.execution.fill.selector"
+                )
         try:
             definition = RunDefinition.model_validate({"run_id": str(run_id), **declared_run})
         except (ValidationError, TypeError, ValueError) as invalid:
@@ -953,7 +913,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                     status=Status.INVALID,
                     cause=invalid,
                     requirement=(
-                        "a run declares strategies (with exchange, execution_input and "
+                        "a run declares strategies (with exchange, execution and "
                         "initial_account) or datamodels, plus instruments, start, end, "
                         "sessions_from or sessions, timezone and at, each in the shape "
                         "`vqapr new run` emits"

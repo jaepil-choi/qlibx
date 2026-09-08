@@ -55,7 +55,7 @@ a file and touches no workspace.
 """
 
 _SUMMARIES: dict[str, str] = {
-    "new": "scaffold a component, or emit a dataset/execution-input/run declaration template",
+    "new": "scaffold a component, or emit a dataset/run declaration template",
     "register": "validate a declaration and add what it declares to the workspace",
     "check": "prove a registered run is ready, reporting every problem at once, without running",
     "run": "freeze a registered run, preflight it, and execute its strategies",
@@ -78,15 +78,13 @@ _DESCRIPTIONS: dict[str, str] = {
         "      writes a component .py that runs as written, plus the .yaml that registers it.\n"
         "  vqapr new dataset --out <path>\n"
         "      writes a dataset declaration template with every required key commented.\n"
-        "  vqapr new execution-input --out <path>\n"
-        "      writes the venue-table declaration a run fills against.\n"
         "  vqapr new run --out <path>\n"
         "      writes a `runs:` declaration template with every required key commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."
     ),
     "register": (
         "Validate a declaration and add what it declares to the workspace.\n\n"
-        "Datasets, sources, execution inputs, components and runs are all "
+        "Datasets, sources, components and runs are all "
         "declared in one YAML document. Sections are applied in dependency order, so a valid "
         "document "
         "cannot fail because of the order it was typed in.\n\n"

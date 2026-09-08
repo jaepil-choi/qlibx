@@ -126,9 +126,8 @@ RUNNER = textwrap.dedent(
 
     from vqapr.public import (
         AccountMode, AccountSnapshot, DatasetRegistration,
-        ExecutionInputRegistration, ExecutionTableSpec, FillConvention, FillSelector,
-        RunDefinition, SourceSpec, StrategyEntry, preflight_run, register_dataset,
-        register_exchange, register_execution_input, register_strategy_model, run,
+        RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
+        register_dataset, register_exchange, register_strategy_model, run,
     )
 
     import authored_strategies
@@ -151,19 +150,20 @@ RUNNER = textwrap.dedent(
         ),
         SourceSpec.of("clock-observation", price_path),
     )
-    register_execution_input(
+    register_dataset(
         root,
-        ExecutionInputRegistration.of(
-            "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("clock-execution", exec_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
+        DatasetRegistration.of(
+            'krx-daily',
+            'clock-execution',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("clock-execution", exec_path),
     )
 
     # Through the doors that prove conformance before they write (record 170); the hand-built
@@ -183,7 +183,10 @@ RUNNER = textwrap.dedent(
         timezone="Asia/Seoul",
         at=time(8, 0),
         exchange="clock-exchange",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset='krx-daily',
+            fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+        ),
         start=datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000000"), {}),

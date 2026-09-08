@@ -2,7 +2,7 @@
 
 **A run is configuration; a strategy is what it tries** (record `139`, design
 `docs/design/the-panel-the-surface-and-the-run.md` §4). A `RunDefinition` names its universe,
-period, venue, execution input, initial account declaration and the strategies it runs -- by
+period, venue, execution dataset and fill, initial account and the strategies it runs -- by
 id, because it is a registered document, and the workspace is what resolves an id. Preflight
 freezes the run layer once into a `FrozenRun` and each strategy into a `FrozenStrategy`; the
 run layer's identity is shared by every strategy and each strategy's identity is its own.
@@ -19,7 +19,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -38,6 +38,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
+from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run_state import prepare_model_state
 
@@ -175,7 +176,7 @@ class StrategyConfig:
 # keep in step with a `RunDefinition.__post_init__`. pydantic owns the shape (key sets, scalar
 # types, enums, dates); the rules that are this package's -- one kind of model per run, ids
 # named once, a venue declared whole, a period declared whole -- are validators on the model.
-# The YAML spelling (strategies keyed by id, `execution_input`, one `initial_account` block) is
+# The YAML spelling (strategies keyed by id, an `execution` block, one `initial_account` block) is
 # accepted by a before-validator and emitted by the serializer, so the stored bytes did not move.
 # ---------------------------------------------------------------------------------------------
 
@@ -298,6 +299,62 @@ class _InitialAccount(BaseModel):
         return {name: str(quantity) for name, quantity in sorted(positions.items())}
 
 
+class RunFill(BaseModel):
+    """`runs.<id>.execution.fill`: on which session instant, at which price, a decision fills.
+
+    The run's own fill convention (record `185`): `at` is the venue-local wall time of the fill,
+    `selector` the scheduling rule, `trade_price` one of the execution dataset's numeric fields.
+    `fold`/`offset` are the DST proof a stored declaration may carry; a declaration without them
+    resolves the wall time from the zone and refuses an ambiguous one.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+    selector: Literal["same_day", "next_eligible"] = "same_day"
+    at: time
+    timezone: str
+    trade_price: str
+    fold: int | None = None
+    offset: str | None = None
+
+    @field_validator("selector", mode="before")
+    @classmethod
+    def _lowered(cls, value: object) -> object:
+        return value.lower() if isinstance(value, str) else value
+
+    @field_validator("at")
+    @classmethod
+    def _wall_time(cls, value: time) -> time:
+        return _naive_wall_time(value)
+
+    @field_serializer("at")
+    def _at_as_text(self, value: time) -> str:
+        return value.isoformat()
+
+    def to_convention(self) -> FillConvention:
+        return FillConvention(
+            FillSelector[self.selector.upper()],
+            self.at,
+            self.timezone,
+            self.trade_price,
+            self.fold,
+            self.offset,
+        )
+
+
+class RunExecution(BaseModel):
+    """`runs.<id>.execution`: the registered execution dataset and this run's fill on it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+    dataset: Annotated[str, Field(min_length=1)]
+    fill: RunFill
+
+    @property
+    def convention(self) -> FillConvention:
+        return self.fill.to_convention()
+
+
 def _naive_wall_time(value: object) -> time:
     if not isinstance(value, time):
         raise ValueError("at must be a datetime.time")
@@ -318,7 +375,7 @@ class RunDefinition(BaseModel):
     written through `model_validate` / `model_dump(mode="json")`. The stored spelling differs
     from the field names in four places, and the before-validator and serializer below are the
     one place that difference is written: `strategies`/`datamodels` are keyed by component id on
-    disk and are tuples of entries here; `execution_input` on disk is `execution_input_id`; one
+    disk and are tuples of entries here; `execution` on disk is a `RunExecution`; one
     `initial_account` block is a snapshot and a mode; and `run_id` is the key the entry sits
     under, not a field of it.
     """
@@ -344,7 +401,9 @@ class RunDefinition(BaseModel):
     sessions: tuple[date, ...] = ()
     """Or the sessions listed literally. Exactly one of the two is declared."""
     exchange: str | None = None
-    execution_input_id: str | None = None
+    execution: RunExecution | None = None
+    """Which registered execution dataset the run fills against, and how: the session instant
+    and the price (record `185`). The table is registered once; the price is this run's."""
     start: datetime | None = None
     end: datetime | None = None
     initial_account_snapshot: AccountSnapshot | None = None
@@ -373,10 +432,11 @@ class RunDefinition(BaseModel):
                 DataModelEntry(component_id=name, **entry) if isinstance(entry, Mapping) else entry
                 for name, entry in datamodels.items()
             )
-        if "execution_input" in body:
-            if "execution_input_id" in body:
-                raise ValueError("declare execution_input once, not also as execution_input_id")
-            body["execution_input_id"] = body.pop("execution_input")
+        if "execution_table" in body or "execution_input_id" in body:
+            raise ValueError(
+                "execution_table is retired (record 185): register the venue table as a dataset "
+                "with an `execution:` role and declare `execution: {dataset, fill}` on the run"
+            )
         if "initial_account" in body:
             account = body.pop("initial_account")
             if account is not None:
@@ -409,7 +469,7 @@ class RunDefinition(BaseModel):
             "timezone": self.timezone,
             "at": None if self.at is None else self.at.isoformat(),
             "exchange": self.exchange,
-            "execution_input": self.execution_input_id,
+            "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
         }
         if self.initial_account_snapshot is not None and self.initial_account_mode is not None:
             ordered["initial_account"] = _InitialAccount(
@@ -491,7 +551,7 @@ class RunDefinition(BaseModel):
                 key
                 for key, value in (
                     ("exchange", self.exchange),
-                    ("execution_input", self.execution_input_id),
+                    ("execution", self.execution),
                     ("initial_account", self.initial_account_snapshot),
                     ("initial_account", self.initial_account_mode),
                 )
@@ -500,7 +560,7 @@ class RunDefinition(BaseModel):
             if declared:
                 raise ValueError(
                     f"a datamodel run declares no {', '.join(dict.fromkeys(declared))}: a "
-                    "datamodel run declares no exchange, execution_input or initial_account, "
+                    "datamodel run declares no exchange, execution or initial_account, "
                     "because a datamodel sees no account and passes through no venue"
                 )
         _require_timezone(self.timezone)
@@ -512,10 +572,8 @@ class RunDefinition(BaseModel):
             raise ValueError("sessions_from must be a non-empty identifier")
         if self.exchange is not None and not self.exchange:
             raise ValueError("exchange must be a non-empty identifier")
-        if self.execution_input_id is not None and not self.execution_input_id:
-            raise ValueError("execution_input_id must be a non-empty identifier")
-        if (self.exchange is None) != (self.execution_input_id is None):
-            raise ValueError("exchange and execution_input_id must be declared together")
+        if (self.exchange is None) != (self.execution is None):
+            raise ValueError("exchange and execution must be declared together")
         _require_period(self.start, self.end, "declared")
         _require_account(self.initial_account_snapshot, self.initial_account_mode, "declared")
         _require_instruments(self.instruments)
@@ -526,11 +584,20 @@ class RunDefinition(BaseModel):
     def spoken(self) -> list[str]:
         """The point-in-time meaning of this declaration, in one sentence (`docs/issues/027`)."""
         when = "" if self.at is None else f" at {self.at.isoformat()} {self.timezone}"
-        return [
+        sentences: list[str] = []
+        if self.execution is not None:
+            fill = self.execution.fill
+            sentences.append(
+                f"run {self.run_id!r} fills against dataset {self.execution.dataset!r}: "
+                f"{fill.selector} at {fill.at.isoformat()} {fill.timezone}, at its "
+                f"{fill.trade_price!r} price"
+            )
+        sentences.append(
             f"run {self.run_id!r}: every model is called{when} on each session and sees only "
-            "rows knowable before that instant; the book fills later, at the execution input's "
+            "rows knowable before that instant; the book fills later, at the execution dataset's "
             "own instant"
-        ]
+        )
+        return sentences
 
     def replace(self, **changes: Any) -> RunDefinition:
         """A copy with some fields changed, **validated again**.

@@ -19,7 +19,7 @@ is simply not activated. Apply the same prefix to every command below.
 ## A run is configuration, and it is registered
 
 Not a script and not a set of arguments. A run declares the universe, the period, the sessions it
-fires on, the venue-local wall time it fires at, the venue, the execution input, the initial
+fires on, the venue-local wall time it fires at, the venue, the execution dataset and the price it fills at, the initial
 account, and the strategies it tries — and it is registered like everything else, so a result can
 always name the declaration that produced it.
 
@@ -51,7 +51,7 @@ vqapr new run --out runs.yaml
 ```
 
 The template carries every required key with its meaning. Fill it with **registered** ids: an
-unregistered component, dataset, exchange or execution input is refused at step 3, by name.
+unregistered component, dataset or exchange is refused at step 3, by name.
 
 Sessions come from `sessions_from: <dataset>` (every session that dataset has) or an explicit
 `sessions:` list; the wall time comes from `timezone` and `at`. See

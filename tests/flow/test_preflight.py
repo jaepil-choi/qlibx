@@ -11,17 +11,17 @@ import pytest
 
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.preflight import derived_agenda, preflight_run
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.flow.run_state import prepare_model_state
 from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
@@ -131,7 +131,19 @@ def _setup(
         timezone="Asia/Seoul",
         at=at,
         exchange=None if exchange_component is None else str(exchange_component.component_id),
-        execution_input_id="execution" if with_execution else None,
+        execution=(
+            RunExecution(
+                dataset="execution",
+                fill=RunFill(
+                    selector=selector.value.lower(),
+                    at=time(15, 30),
+                    timezone="Asia/Seoul",
+                    trade_price="close",
+                ),
+            )
+            if with_execution
+            else None
+        ),
         start=datetime(2024, 3, 5, 9, tzinfo=_ZONE),
         # The execution fixture fills at 15:30. Keeping end at 10:00 made every supposedly
         # run-ready definition in this file physically impossible: an intent from either
@@ -185,27 +197,34 @@ def _execution_exchange(
             connection.execute(
                 f"""COPY (
                     SELECT * FROM (VALUES
-                        (TIMESTAMPTZ '2024-03-05 09:30:00+09', 'ABC', true, 9.0),
-                        (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'ABC', true, 10.0)
+                        (TIMESTAMPTZ '2024-03-05 09:30:00+09', 'ABC', true, 9.0::DOUBLE),
+                        (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'ABC', true, 10.0::DOUBLE)
                     ) AS t(trade_at, instrument, is_tradable, close)
                 ) TO '{execution_path.as_posix()}' (FORMAT PARQUET)"""
             )
         finally:
             connection.close()
-    execution = ExecutionInputRegistration.of(
-        "execution",
-        ExecutionTableSpec(
-            SourceSpec.of("execution-source", execution_path),
-            "trade_at",
-            "instrument",
-            "is_tradable",
-            {"close": "close"},
-        ),
-        FillConvention(selector, time(15, 30), "Asia/Seoul", "close"),
-    )
     if register_input:
+        # The venue table is a dataset with an execution role (record 185); the fill is the
+        # run's, declared by `_setup` through `RunExecution`. Validated the way the public
+        # door validates (the span is measured), then staged on the workspace object the
+        # tests hold, so the state they read is the state that was written.
+        registration = DatasetRegistration.of(
+            "execution",
+            "execution-source",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        )
+        source = SourceSpec.of("execution-source", execution_path)
+        diagnosis, _, measured = validate(registration, source)
+        diagnosis.raise_if_failed()
         with Workspace.transaction(workspace) as t:
-            t.register_execution_input(execution)
+            t.register_dataset(measured, source)
     return component
 
 
@@ -253,7 +272,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
         sources=(SourceSpec.of("prices-source", tmp_path / "changed.parquet"),),
     )
     exchange = _component(tmp_path, "exchange", ComponentKind.EXCHANGE)
-    execution = ExecutionInputRegistration.of(
+    execution = ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
             SourceSpec.of("execution-source", tmp_path / "execution.parquet"),
@@ -264,11 +283,11 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
         ),
         FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
     )
-    frozen_execution = replace(frozen, exchange=exchange, execution_input=execution)
+    frozen_execution = replace(frozen, exchange=exchange, execution=execution)
     changed_fill = replace(
         frozen_execution,
-        execution_input=ExecutionInputRegistration(
-            execution.execution_input_id,
+        execution=ExecutionTable(
+            execution.dataset_id,
             execution.table,
             FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
         ),
@@ -321,7 +340,15 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     exchange = _execution_exchange(workspace, tmp_path)
     compatible = definition.replace(
                      exchange='exchange',
-                     execution_input_id='execution',
+                     execution=RunExecution(
+                         dataset='execution',
+                         fill=RunFill(
+                             selector='same_day',
+                             at=time(15, 30),
+                             timezone='Asia/Seoul',
+                             trade_price='close',
+                         ),
+                     ),
                      initial_account_snapshot=AccountSnapshot(
                          0, Decimal('100'), {'ABC': Decimal('2')}
                      ),
@@ -516,7 +543,7 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
     """An observation dataset is optional; an execution price is not.
 
     A Strategy may declare no requirement and decide nothing, and running it is still a run. But
-    every run values its book and fills against prices a venue published, so the execution input
+    every run values its book and fills against prices a venue published, so the execution dataset
     is the one registration that is mandatory from the start.
 
     This was refused only inside `run()`, as a bare `ValueError`, *after* `preflight_run` had
@@ -533,13 +560,13 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
 
     error = failure.value
     assert error.stage is Stage.FREEZE
-    # 404: a name the run needs -- its execution input -- was never given, so the submission
+    # 404: a name the run needs -- its execution dataset -- was never given, so the submission
     # is what must change, not anything that ran.
     assert error.status is Status.MISSING
     assert error.mutation is False
     # Typed, so an agent parses a verdict instead of reading a traceback.
     assert error.as_dict()["failures"][0]["code"] == "execution.missing"
-    assert "register an execution input" in error.retry_precondition
+    assert "register the venue table as a dataset" in error.retry_precondition
 
 
 def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
@@ -556,7 +583,7 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
     unlisted = definition.replace(instruments=('NOT-LISTED',))
 
     # The execution refusal comes first, and it is the reason the universe check is reachable
-    # at all once an execution input is supplied.
+    # at all once an execution dataset is supplied.
     with pytest.raises(VqaprError, match=r"execution\.missing"):
         preflight_run(workspace, unlisted)
 
@@ -571,7 +598,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
 ) -> None:
     """The third state must not exist: regime declared, data absent, run proceeding anyway.
 
-    A KRX price limit is computed from the session base price. If the registered execution input
+    A KRX price limit is computed from the session base price. If the registered execution dataset
     does not carry one, the run would produce numbers that look limit-aware and are not. Preflight
     refuses, and names the feature to switch off rather than only the missing column.
     """

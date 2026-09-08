@@ -24,15 +24,12 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.domain.identifiers import (
     ComponentId,
     DatasetId,
-    ExecutionInputId,
     SourceId,
     component_id,
     dataset_id,
-    execution_input_id,
     source_id,
 )
 from vqapr.domain.values import require_tz_aware
-from vqapr.exchange.execution_table import ExecutionInputRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import RunDefinition
 from vqapr.workspace_document import read_workspace, write_workspace
@@ -108,14 +105,13 @@ _CONSTRUCTION_TOKEN = object()
 class _State(NamedTuple):
     """Everything `workspace.yaml` holds, as one value.
 
-    A tuple, so every `*state` unpacking and `state[4]` index in this module still works; named,
+    A tuple, so every `*state` unpacking in this module still works; named,
     so a merge can say `state.agendas` and `state._replace(agendas=...)` instead of threading
     eight positional mappings through every signature. What it encodes is unchanged.
     """
 
     datasets: dict[DatasetId, DatasetRegistration]
     sources: dict[SourceId, SourceSpec]
-    execution_inputs: dict[ExecutionInputId, ExecutionInputRegistration]
     components: dict[ComponentId, ComponentRef]
     runs: dict[str, RunDefinition]
     """Registered runs (record `139`): the reusable configuration `vqapr run <run-id>` executes."""
@@ -131,7 +127,6 @@ class Workspace:
     __slots__ = (
         "_components",
         "_datasets",
-        "_execution_inputs",
         "_runs",
         "_sources",
         "project_root",
@@ -142,7 +137,6 @@ class Workspace:
         project_root: str | Path,
         datasets: Mapping[DatasetId, DatasetRegistration] | None = None,
         sources: Mapping[SourceId, SourceSpec] | None = None,
-        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration] | None = None,
         components: Mapping[ComponentId, ComponentRef] | None = None,
         runs: Mapping[str, RunDefinition] | None = None,
         *,
@@ -155,9 +149,6 @@ class Workspace:
             key: value for key, value in (datasets or {}).items()
         }
         self._sources = dict(sources or {})
-        self._execution_inputs = {
-            key: value for key, value in (execution_inputs or {}).items()
-        }
         self._components = {
             key: value for key, value in (components or {}).items()
         }
@@ -170,7 +161,6 @@ class Workspace:
         project_root: str | Path,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
-        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
         runs: Mapping[str, RunDefinition],
     ) -> Workspace:
@@ -178,7 +168,6 @@ class Workspace:
             project_root,
             datasets,
             sources,
-            execution_inputs,
             components,
             runs,
             _token=_CONSTRUCTION_TOKEN,
@@ -191,16 +180,16 @@ class Workspace:
     @classmethod
     def create(cls, project_root: str | Path) -> Workspace:
         """새 project workspace를 만들거나 이미 있으면 그대로 연다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {})
         if candidate.path.exists():
             return cls.open(project_root)
-        candidate._write({}, {}, {}, {}, {})
+        candidate._write({}, {}, {}, {})
         return candidate
 
     @classmethod
     def open(cls, project_root: str | Path) -> Workspace:
         """기존 workspace 전체를 읽는다. 없거나 손상됐으면 일부 상태를 반환하지 않는다."""
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {})
         return cls._from_state(project_root, *candidate._read())
 
     @classmethod
@@ -222,7 +211,7 @@ class Workspace:
         """
         if isinstance(project_root, Workspace):
             return Transaction(project_root)
-        candidate = cls._from_state(project_root, {}, {}, {}, {}, {})
+        candidate = cls._from_state(project_root, {}, {}, {}, {})
         fresh = not candidate.path.exists()
         return Transaction(cls._from_state(project_root, *candidate._read_or_empty()), fresh=fresh)
 
@@ -230,7 +219,6 @@ class Workspace:
         return _State(
             self._datasets,
             self._sources,
-            self._execution_inputs,
             self._components,
             self._runs,
         )
@@ -243,7 +231,7 @@ class Workspace:
         `workspace.open.missing` exists to avoid.
         """
         if not self.path.exists():
-            return _State({}, {}, {}, {}, {})
+            return _State({}, {}, {}, {})
         return self._read()
 
     @property
@@ -255,14 +243,6 @@ class Workspace:
     def sources(self) -> tuple[SourceSpec, ...]:
         """source_id 순으로 정렬된 detached 물리 선언들."""
         return tuple(self._sources[key] for key in sorted(self._sources))
-
-    @property
-    def execution_inputs(self) -> tuple[ExecutionInputRegistration, ...]:
-        """execution_input_id 순으로 정렬된 detached Exchange 입력 선언들."""
-        return tuple(
-            self._execution_inputs[key]
-            for key in sorted(self._execution_inputs)
-        )
 
     @property
     def components(self) -> tuple[ComponentRef, ...]:
@@ -393,40 +373,8 @@ class Workspace:
                 status=Status.MISSING,
                 requirement=f"source {key!r} must be registered in this workspace",
                 observed=f"registered sources: {', '.join(sorted(self._sources)) or '(none)'}",
-                fix=f"register a dataset or execution input against source_id {key!r} first",
-                retry="register a dataset or execution input with that source, then retry",
-                cause=error,
-            ) from error
-
-    def execution_input(self, raw_execution_input_id: str) -> ExecutionInputRegistration:
-        """등록된 execution input 하나를 조회한다."""
-        try:
-            key = execution_input_id(raw_execution_input_id)
-        except ValueError as error:
-            raise _workspace_error(
-                stage=Stage.LOOKUP,
-                code="execution_input.reference_invalid",
-                status=Status.INVALID,
-                requirement="execution input lookup requires a valid execution_input_id",
-                observed=str(error),
-                fix="pass a valid execution_input_id string to Workspace.execution_input()",
-                retry="use a valid execution_input_id, then retry",
-                cause=error,
-            ) from error
-        try:
-            return self._execution_inputs[key]
-        except KeyError as error:
-            raise _workspace_error(
-                stage=Stage.LOOKUP,
-                code="execution_input.unregistered",
-                status=Status.MISSING,
-                requirement=f"execution input {key!r} must be registered in this workspace",
-                observed=(
-                    "registered execution inputs: "
-                    f"{', '.join(sorted(self._execution_inputs)) or '(none)'}"
-                ),
-                fix=f"register execution input {key!r}, or use one of the ids listed above",
-                retry="register the execution input, then retry",
+                fix=f"register a dataset against source_id {key!r} first",
+                retry="register a dataset with that source, then retry",
                 cause=error,
             ) from error
 
@@ -600,59 +548,6 @@ class Workspace:
             True,
         )
 
-    def _merge_execution_input(
-        self, state: _State, registration: ExecutionInputRegistration
-    ) -> tuple[_State, bool]:
-        key = registration.execution_input_id
-        source = registration.table.source
-        source_key = source.source_id
-        existing_source = state.sources.get(source_key)
-        if existing_source is not None and existing_source != source:
-            raise _workspace_error(
-                stage=Stage.REGISTER,
-                code="execution_input.source_conflict",
-                status=Status.CONFLICT,
-                requirement=(
-                    f"source_id {source_key!r} must keep its existing "
-                    "physical declaration"
-                ),
-                observed="a different SourceSpec is already registered",
-                fix=(
-                    f"reuse the registered SourceSpec for {source_key!r}, or register "
-                    "under a new source_id"
-                ),
-                retry="use the existing source declaration or choose a new source_id",
-            )
-        existing = state.execution_inputs.get(key)
-        if existing is not None:
-            if existing == registration and existing_source == source:
-                return state, False
-            raise _workspace_error(
-                stage=Stage.REGISTER,
-                code="execution_input.registered",
-                status=Status.CONFLICT,
-                requirement=(
-                    f"execution_input_id {key!r} must keep its existing "
-                    "declaration or use a new identity"
-                ),
-                observed="a different execution input declaration is already registered",
-                fix=(
-                    f"keep the registered declaration for {key!r} unchanged, or "
-                    "choose a new execution_input_id"
-                ),
-                retry="use the existing declaration or choose a new execution_input_id",
-            )
-        return (
-            state._replace(
-                sources={**state.sources, source_key: source},
-                execution_inputs={
-                    **state.execution_inputs,
-                    key: registration,
-                },
-            ),
-            True,
-        )
-
     def _merge_component(self, state: _State, ref: ComponentRef) -> tuple[_State, bool]:
         key = ref.component_id
         existing = state.components.get(key)
@@ -706,15 +601,27 @@ class Workspace:
             component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
             component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
-        if (
-            definition.execution_input_id is not None
-            and definition.execution_input_id not in state.execution_inputs
-        ):
-            raise self._reference_error(
-                f"run {definition.run_id!r} names execution input "
-                f"{definition.execution_input_id!r}, which must be registered",
-                fix=f"register execution input {definition.execution_input_id!r} first",
-            )
+        if definition.execution is not None:
+            venue_table = state.datasets.get(dataset_id(definition.execution.dataset))
+            if venue_table is None:
+                raise self._reference_error(
+                    f"run {definition.run_id!r} fills against dataset "
+                    f"{definition.execution.dataset!r}, which must be registered",
+                    fix=(
+                        f"register dataset {definition.execution.dataset!r} with an execution "
+                        "role first"
+                    ),
+                )
+            if venue_table.execution is None:
+                raise self._reference_error(
+                    f"run {definition.run_id!r} fills against dataset "
+                    f"{definition.execution.dataset!r}, which declares no execution role",
+                    fix=(
+                        f"register {definition.execution.dataset!r} again with "
+                        "`execution: {is_tradable: <field>}`, or fill against a dataset that "
+                        "has one"
+                    ),
+                )
         if (
             definition.sessions_from is not None
             and dataset_id(definition.sessions_from) not in state.datasets
@@ -879,7 +786,7 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {"dataset": 0, "component": 3, "run": 4}[kind]
+            position = {"dataset": 0, "component": 2, "run": 3}[kind]
             declarations = dict(state[position])
             if identity not in declarations:
                 self._replace_state(*state)
@@ -920,9 +827,7 @@ class Workspace:
         """
         return self._references_in(self._read(), kind, identity)
 
-    def _references_in(
-        self, state: tuple[object, ...], kind: str, identity: str
-    ) -> tuple[str, ...]:
+    def _references_in(self, state: _State, kind: str, identity: str) -> tuple[str, ...]:
         """The same question asked of a state already in hand.
 
         Split out so the check and the write can see ONE snapshot. When this walked its own read,
@@ -930,8 +835,10 @@ class Workspace:
         land between them -- and because `_decode` validates forward references, the result was a
         workspace `Workspace.open()` refuses rather than merely a stale answer.
         """
-        components = state[3]
-        runs: Mapping[str, RunDefinition] = state[4] if len(state) > 4 else {}
+        # By name: the tuple lost a member when `execution_inputs` retired (record 185),
+        # and a positional read here was the one place that noticed too late.
+        components = state.components
+        runs: Mapping[str, RunDefinition] = state.runs
         blockers: list[str] = []
         if kind == "component":
             for run_id, definition in runs.items():
@@ -952,6 +859,10 @@ class Workspace:
             for run_id, definition in runs.items():
                 if definition.sessions_from == identity:
                     blockers.append(f"run {run_id!r} (sessions_from)")
+                # The venue table is a dataset too (record 185): a run that fills against
+                # it holds it by name in the document.
+                if definition.execution is not None and definition.execution.dataset == identity:
+                    blockers.append(f"run {run_id!r} (execution)")
         elif kind == "run":
             # A run is the top of the document: nothing names a run, and a run's RECORDS are
             # not registrations -- `vqapr rm run` removes those separately.
@@ -1099,10 +1010,7 @@ class Workspace:
             message = str(error)
             requirement = (
                 message
-                if (
-                    "offset_sessions is no longer supported" in message
-                    or "old fill schema" in message
-                )
+                if "is retired" in message
                 else "workspace YAML must contain valid physical sources and dataset declarations"
             )
             raise _workspace_error(
@@ -1121,15 +1029,11 @@ class Workspace:
         self,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
-        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
         self._datasets = {key: value for key, value in datasets.items()}
         self._sources = dict(sources)
-        self._execution_inputs = {
-            key: value for key, value in execution_inputs.items()
-        }
         self._components = {key: value for key, value in components.items()}
         self._runs = dict(runs or {})
 
@@ -1137,7 +1041,6 @@ class Workspace:
         self,
         datasets: Mapping[DatasetId, DatasetRegistration],
         sources: Mapping[SourceId, SourceSpec],
-        execution_inputs: Mapping[ExecutionInputId, ExecutionInputRegistration],
         components: Mapping[ComponentId, ComponentRef],
         runs: Mapping[str, RunDefinition] | None = None,
     ) -> None:
@@ -1145,7 +1048,6 @@ class Workspace:
         payload = write_workspace(
             datasets,
             sources,
-            execution_inputs,
             components,
             runs or {},
         )
@@ -1257,12 +1159,6 @@ class Transaction:
     def register_dataset(self, registration: DatasetRegistration, source: SourceSpec) -> bool:
         ws = self._staging
         return self._stage(lambda state: ws._merge_dataset(state, registration, source))
-
-    def register_execution_input(self, registration: ExecutionInputRegistration) -> bool:
-        if not isinstance(registration, ExecutionInputRegistration):
-            raise TypeError("registration must be an ExecutionInputRegistration")
-        ws = self._staging
-        return self._stage(lambda state: ws._merge_execution_input(state, registration))
 
     def register_component(self, ref: ComponentRef) -> bool:
         if not isinstance(ref, ComponentRef):

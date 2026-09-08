@@ -10,7 +10,7 @@ import pytest
 from vqapr.data.sources import SourceSpec
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
     exact_execution_snapshot,
 )
@@ -25,7 +25,7 @@ def _write(path: Path, rows: str) -> Path:
     return path
 
 
-def _registration(path: Path) -> ExecutionInputRegistration:
+def _registration(path: Path) -> ExecutionTable:
     table = ExecutionTableSpec(
         source=SourceSpec.of("execution", path),
         trade_at_field="trade_at",
@@ -33,7 +33,7 @@ def _registration(path: Path) -> ExecutionInputRegistration:
         is_tradable_field="is_tradable",
         price_fields={"open": "open", "close": "close"},
     )
-    return ExecutionInputRegistration.of(
+    return ExecutionTable.of(
         "input",
         table,
         FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
@@ -82,8 +82,8 @@ def test_next_eligible_and_strict_bounds_have_no_fallback(tmp_path: Path) -> Non
             """,
         )
     )
-    registration = ExecutionInputRegistration(
-        registration.execution_input_id,
+    registration = ExecutionTable(
+        registration.dataset_id,
         registration.table,
         FillConvention(
             FillSelector.NEXT_ELIGIBLE,
@@ -111,7 +111,7 @@ def test_next_eligible_and_strict_bounds_have_no_fallback(tmp_path: Path) -> Non
 
 
 def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> None:
-    registration = ExecutionInputRegistration.of(
+    registration = ExecutionTable.of(
         "input",
         ExecutionTableSpec(
             source=SourceSpec.of(
@@ -145,7 +145,7 @@ def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> N
         wrong.select_target(
             registration.table.source,
             trade_at_field=registration.table.trade_at_field,
-            execution_input_id=registration.execution_input_id,
+            dataset_id=registration.dataset_id,
             decision_time=decision,
             end_time=end,
         )
@@ -153,8 +153,8 @@ def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> N
     proven = FillConvention(
         FillSelector.NEXT_ELIGIBLE, time(1, 30), "America/New_York", "close", 1, "-05:00"
     )
-    target = ExecutionInputRegistration(
-        registration.execution_input_id, registration.table, proven
+    target = ExecutionTable(
+        registration.dataset_id, registration.table, proven
     ).select_target(
         decision_time=decision,
         end_time=end,
@@ -165,7 +165,7 @@ def test_dst_target_requires_matching_fold_and_offset_proof(tmp_path: Path) -> N
 
 
 def test_nonexistent_dst_target_is_rejected_instead_of_skipped(tmp_path: Path) -> None:
-    registration = ExecutionInputRegistration.of(
+    registration = ExecutionTable.of(
         "input",
         ExecutionTableSpec(
             source=SourceSpec.of(

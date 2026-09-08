@@ -26,11 +26,9 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
@@ -147,25 +145,21 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         )
     finally:
         con.close()
-    with Workspace.transaction(root) as t:
-        t.register_execution_input(
-            ExecutionInputRegistration.of(
-                "my-exec",
-                ExecutionTableSpec(
-                    source=SourceSpec.of("exec-src", exec_dir),
-                    trade_at_field="trade_at",
-                    instrument_field="instrument",
-                    is_tradable_field="is_tradable",
-                    price_fields={"close": "close"},
-                ),
-                FillConvention(
-                    selector=FillSelector.NEXT_ELIGIBLE,
-                    local_time=datetime(2024, 1, 1, 15, 30).time(),
-                    timezone="Asia/Seoul",
-                    trade_price="close",
-                ),
-            )
-        )
+    pub_register_dataset(
+        root,
+        DatasetRegistration.of(
+            'my-exec',
+            'exec-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        SourceSpec.of("exec-src", exec_dir),
+    )
 
     # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
     # (record `148`), so nothing about the agenda is registered separately.
@@ -179,7 +173,10 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
                 sessions=(date(2024, 1, 2),),
                 instruments=("A",),
                 exchange="venue",
-                execution_input_id="my-exec",
+                execution=RunExecution(
+                    dataset='my-exec',
+                    fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+                ),
                 start=datetime(2024, 1, 2, tzinfo=UTC),
                 end=datetime(2024, 1, 5, tzinfo=UTC),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),

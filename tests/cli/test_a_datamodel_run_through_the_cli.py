@@ -192,7 +192,7 @@ def test_a_datamodel_run_is_registered_checked_run_listed_and_shown(
     assert {item["record"] for item in shown["datamodels"]} == {
         line["record"] for line in ran["datamodels"].values()
     }
-    assert shown["exchange"] is None and shown["execution_input"] is None
+    assert shown["exchange"] is None and shown["execution"] is None
 
     # The names are taken now: `check` says so for each output, and preflight agrees.
     code, again = _cli(capsys, *project, "check", "factors")

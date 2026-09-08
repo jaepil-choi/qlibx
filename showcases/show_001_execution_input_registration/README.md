@@ -1,4 +1,4 @@
-# VQAPR execution input registration and simulation
+# VQAPR venue dataset registration and simulation
 
 Status: current
 
@@ -27,8 +27,9 @@ Evidence includes:
   execution table carries three extra non-selected 10:00 rows the canonical trim does not,
   and the two runs' economic signatures — account version, cash, positions, lifecycle
   counts — are equal;
-- rejection of an invalid execution input (a non-finite selected price on a tradable row) by
-  `register_execution_input`, without any change to the project's persisted
+- the venue table registered as a dataset with an `execution` role (record 185), the fill
+  declared on the run; and an invalid venue table (a non-finite close) refused by
+  `register_dataset` like any other dataset, without any change to the project's persisted
   `.vqapr/workspace.yaml`.
 
 ## Dropped from the legacy showcase
@@ -54,7 +55,7 @@ Inspect:
 - `outputs/report.html` — reader-facing run and invariance evidence;
 - `outputs/trace.json` — complete run summary and comparison signatures;
 - `outputs/workspace.yaml` — persisted declarations (`.vqapr/workspace.yaml` from `PROJECT`);
-- `outputs/*.parquet` — dense, canonical, and invalid execution-input fixtures;
+- `outputs/*.parquet` — dense, canonical, and invalid venue-table fixtures;
 - `show001_models.py` — the authored `StrategyModel`, at module scope so the engine's
   loader can resolve it;
 - `show001_exchange.py` — the registered `AcademicExchange` the run fills against.

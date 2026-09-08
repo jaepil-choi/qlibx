@@ -168,7 +168,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
         "sessions_from",
         "sessions",
         "exchange",
-        "execution_input_id",
+        "execution",
         "start",
         "end",
         "initial_account_snapshot",

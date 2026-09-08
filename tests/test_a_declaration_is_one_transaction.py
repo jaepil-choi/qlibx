@@ -65,7 +65,7 @@ def _run(sessions_from: str, *, strategy: str = "alpha", at: str = "04:00") -> d
         "at": at,
         "sessions_from": sessions_from,
         "exchange": None,
-        "execution_input": None,
+        "execution": None,
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
         "strategies": {strategy: None},
     }

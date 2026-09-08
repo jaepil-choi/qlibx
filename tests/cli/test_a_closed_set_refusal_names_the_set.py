@@ -51,7 +51,10 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                 "timezone": "Asia/Seoul",
                 "at": "15:29",
                 "exchange": "venue",
-                "execution_input": "venue-daily",
+                "execution": {
+                    "dataset": "venue-daily",
+                    "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+                },
                 "initial_account": {"cash": "1000", "mode": mode, "positions": {}},
                 "strategies": {"alpha": {}},
             }

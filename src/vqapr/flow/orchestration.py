@@ -32,7 +32,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.evidence.artifacts import SimulationFailure
-from vqapr.exchange.execution_table import validate_execution_input
+from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
@@ -246,9 +246,9 @@ def run(
         raise ValueError("public run requires frozen initial account authority")
     if frozen.exchange is None:
         raise ValueError("public run requires a frozen Exchange authority")
-    if frozen.execution_input is None:
-        raise ValueError("public run requires a frozen execution input")
-    validate_execution_input(frozen.execution_input).raise_if_failed()
+    if frozen.execution is None:
+        raise ValueError("public run requires a frozen execution dataset")
+    validate_execution_table(frozen.execution).raise_if_failed()
 
     # ONE read of the roster for the whole run, through the caller's workspace when it has one.
     # It was read once per strategy, and the CLI read it a further time for its envelope

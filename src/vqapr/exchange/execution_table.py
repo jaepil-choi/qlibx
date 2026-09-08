@@ -1,7 +1,19 @@
-"""Passive exact-time execution input for target selection and venue snapshots."""
+"""The execution table a run fills against, bound to the price the run chose, and its exact reads.
+
+**The execution table is data** (owner ruling, 2026-09-08; record `185`): it is a registered
+dataset like any other, carrying an execution role -- which of its fields says whether a name
+was tradable -- and **the run picks the price**. The same table fills one run at the close and
+another at the open; nothing is registered twice. What this module holds is the frozen binding
+preflight makes of that choice (`ExecutionTable`: the dataset's physical columns, the fill
+convention with the run's `trade_price`), the checks a bound table must pass, and the exact-at
+read the venue is handed (`ExactExecutionSnapshot`). Until record `185` the table was its own
+registration (`execution_inputs:`), with the price inside it, so changing the price meant a
+second registration (architecture §17.7).
+"""
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,12 +31,15 @@ from vqapr.domain.errors import (
     Status,
     collector,
 )
-from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
+from vqapr.domain.identifiers import DatasetId, dataset_id
 from vqapr.domain.values import side_of
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillConvention
 from vqapr.exchange.listings import ExchangeRulesView
 
 _RETRY = "fix the prepared execution parquet or binding, then retry"
+
+
+_BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 
 
 def _field(value: str, *, name: str) -> str:
@@ -58,24 +73,30 @@ class ExecutionTableSpec:
 
 
 @dataclass(frozen=True, slots=True)
-class ExecutionInputRegistration:
-    """Versionable workspace declaration for one exact-time execution input."""
+class ExecutionTable:
+    """The execution dataset a run fills against, bound to the run's fill convention.
 
-    execution_input_id: ExecutionInputId
+    Built by preflight from the registered dataset (its execution role names the tradable flag;
+    its numeric fields are the candidate prices) and the run's `execution:` block (which price,
+    which session instant). Frozen into the run: two runs of one table at different prices are
+    two different frozen inputs, which is what makes them comparable (architecture §17.7).
+    """
+
+    dataset_id: DatasetId
     table: ExecutionTableSpec
     fill: FillConvention
 
     def spoken(self) -> list[str]:
-        """The point-in-time meaning of this declaration, in two sentences (`docs/issues/027`).
+        """The point-in-time meaning of this binding, in two sentences (`docs/issues/027`).
 
         One for the table's clock, one for the fill -- the fill's four fields (selector, wall
         time, zone, price) mean nothing apart, so they are one sentence rather than four.
         """
         fill = self.fill
         return [
-            f"execution input {self.execution_input_id!r}: a row is a fact about the instant in "
+            f"execution dataset {self.dataset_id!r}: a row is a fact about the instant in "
             f"{self.table.trade_at_field!r}; a decision fills at a later row, never at its own",
-            f"execution input {self.execution_input_id!r}: a decision fills on the "
+            f"execution dataset {self.dataset_id!r}: a decision fills on the "
             f"{fill.selector.value.lower()} session at {fill.local_time.isoformat()} "
             f"{fill.timezone}, "
             f"at that row's {fill.trade_price!r}",
@@ -108,7 +129,7 @@ class ExecutionInputRegistration:
         return self.fill.select_target(
             self.table.source,
             trade_at_field=self.table.trade_at_field,
-            execution_input_id=self.execution_input_id,
+            dataset_id=self.dataset_id,
             decision_time=decision_time,
             end_time=end_time,
             horizon=horizon,
@@ -121,17 +142,18 @@ class ExecutionInputRegistration:
             raise TypeError("fill must be a FillConvention")
         if self.fill.trade_price not in self.table.price_fields:
             raise ValueError(
-                f"trade_price {self.fill.trade_price!r} must be declared in table.price_fields"
+                f"trade_price {self.fill.trade_price!r} must be one of the execution dataset's "
+                f"numeric fields: {', '.join(sorted(self.table.price_fields)) or '(none)'}"
             )
 
     @classmethod
     def of(
         cls,
-        raw_execution_input_id: str,
+        raw_dataset_id: str,
         table: ExecutionTableSpec,
         fill: FillConvention,
-    ) -> ExecutionInputRegistration:
-        return cls(execution_input_id(raw_execution_input_id), table, fill)
+    ) -> ExecutionTable:
+        return cls(dataset_id(raw_dataset_id), table, fill)
 
 
 def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
@@ -147,7 +169,7 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
         if observed is not wanted:
             failures.append(
                 Failure.bounded(
-                    code="execution_input.field_type",
+                    code="execution_table.field_type",
                     status=Status.INVALID,
                     requirement=f"execution field {field!r} must be {wanted}",
                     observed="missing" if observed is None else str(observed),
@@ -163,12 +185,30 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
     # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the
     # venue table carries.
     numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE, scan.ColumnType.DECIMAL}
+    # A price may be an expression (`CAST(close AS DOUBLE)` over a DECIMAL column, as the
+    # observation side declares it); its type is the composed projection's, read off
+    # DESCRIBE the way `datasets.check_schema` reads every field (record `185`).
+    expressions = {
+        semantic: field
+        for semantic, field in spec.price_fields.items()
+        if not _BARE_COLUMN.fullmatch(field.strip())
+    }
+    projected = (
+        scan.describe_projection(
+            spec.source,
+            instrument_field=spec.instrument_field,
+            available_at_field=spec.trade_at_field,
+            fields=expressions,
+        ).field_types
+        if expressions
+        else {}
+    )
     for semantic, field in spec.price_fields.items():
-        observed = columns.get(field)
+        observed = projected.get(semantic) if semantic in expressions else columns.get(field)
         if observed not in numeric:
             failures.append(
                 Failure.bounded(
-                    code="execution_input.price_type",
+                    code="execution_table.price_type",
                     status=Status.INVALID,
                     requirement=f"execution price {semantic!r} field {field!r} must be numeric",
                     observed="missing" if observed is None else str(observed),
@@ -182,7 +222,7 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
     return tuple(failures)
 
 
-def _schema_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+def _schema_diagnosis(registration: ExecutionTable) -> Diagnosis:
     return Diagnosis(
         stage=Stage.REGISTER,
         failures=_schema_failures(registration.table),
@@ -190,7 +230,7 @@ def _schema_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     )
 
 
-def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+def _key_diagnosis(registration: ExecutionTable) -> Diagnosis:
     table = registration.table
     result = scan.key_check(table.source, (table.trade_at_field, table.instrument_field))
     found = collector(Stage.REGISTER)
@@ -198,7 +238,7 @@ def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     if result.null_groups:
         found.add(
             Failure.bounded(
-                code="execution_input.key_null",
+                code="execution_table.key_null",
                 status=Status.INVALID,
                 requirement=f"execution identity {identity} must not contain nulls",
                 observed=f"{result.null_groups} key group(s) with a null",
@@ -214,7 +254,7 @@ def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     if result.duplicate_groups:
         found.add(
             Failure.bounded(
-                code="execution_input.key_duplicate",
+                code="execution_table.key_duplicate",
                 status=Status.INVALID,
                 requirement=f"execution identity {identity} must be unique",
                 observed=f"{result.duplicate_groups} duplicated key group(s)",
@@ -230,7 +270,7 @@ def _key_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     return found.done(retry=_RETRY)
 
 
-def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
+def _price_diagnosis(registration: ExecutionTable) -> Diagnosis:
     table = registration.table
     semantic = registration.fill.trade_price
     physical = table.price_fields[semantic]
@@ -244,7 +284,7 @@ def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     if result.invalid_rows:
         found.add(
             Failure.bounded(
-                code="execution_input.price_invalid",
+                code="execution_table.price_invalid",
                 status=Status.INVALID,
                 requirement=(
                     f"selected execution price {semantic!r} field {physical!r} must be finite and "
@@ -263,10 +303,10 @@ def _price_diagnosis(registration: ExecutionInputRegistration) -> Diagnosis:
     return found.done(retry=_RETRY)
 
 
-def validate_execution_input(registration: ExecutionInputRegistration) -> Diagnosis:
-    """Validate one prepared execution parquet before workspace mutation."""
-    if not isinstance(registration, ExecutionInputRegistration):
-        raise TypeError("registration must be an ExecutionInputRegistration")
+def validate_execution_table(registration: ExecutionTable) -> Diagnosis:
+    """Validate the bound execution table before a run freezes it: schema, key, chosen price."""
+    if not isinstance(registration, ExecutionTable):
+        raise TypeError("registration must be an ExecutionTable")
     for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis):
         diagnosis = check(registration)
         if not diagnosis.ok:

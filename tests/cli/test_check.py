@@ -38,12 +38,10 @@ from vqapr.cli.check import CODES, check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import FailureSource
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.judgments import JUDGMENT_CODES
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -116,29 +114,38 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
     _register_component(root, component_id, ComponentKind.EXCHANGE, source)
 
 
-def _execution_input(root: Path, fill_at: str = "15:30") -> None:
+def _venue_dataset(root: Path) -> None:
+    """The venue table as a dataset with an execution role (record 185); the fill is the run's."""
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
     with Workspace.transaction(root) as t:
-        t.register_execution_input(
-            ExecutionInputRegistration.of(
-                "my-exec",
-                ExecutionTableSpec(
-                    source=SourceSpec.of("exec-src", exec_dir),
-                    trade_at_field="trade_at",
-                    instrument_field="instrument",
-                    is_tradable_field="is_tradable",
-                    price_fields={"close": "close"},
-                ),
-                FillConvention(
-                    selector=FillSelector.NEXT_ELIGIBLE,
-                    local_time=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-                    timezone="UTC",
-                    trade_price="close",
-                ),
-            )
+        t.register_dataset(
+            DatasetRegistration.of(
+                'my-exec',
+                'exec-src',
+                instrument_field="instrument",
+                available_at="trade_at",
+                grain="instrument_instant",
+                key_fields=("trade_at", "instrument"),
+                fields={"close": "close", "is_tradable": "is_tradable"},
+                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                execution={"is_tradable": "is_tradable"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("exec-src", exec_dir),
         )
+
+
+def _fill(fill_at: str = "15:30") -> RunExecution:
+    return RunExecution(
+        dataset="my-exec",
+        fill=RunFill(
+            selector="next_eligible",
+            at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
+            timezone="UTC",
+            trade_price="close",
+        ),
+    )
 
 
 def _definition(**overrides: object) -> RunDefinition:
@@ -151,7 +158,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "at": time(15, 30),
         "instruments": ("A",),
         "exchange": "venue",
-        "execution_input_id": "my-exec",
+        "execution": _fill(),
         "start": datetime(2023, 12, 1, tzinfo=UTC),
         "end": _SPAN[1],
         "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {"A": Decimal("-5")}),
@@ -189,7 +196,7 @@ def workspace(tmp_path: Path) -> Path:
         )
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
-    _execution_input(tmp_path)
+    _venue_dataset(tmp_path)
     with Workspace.transaction(tmp_path) as t:
         t.register_run(_definition())
     return tmp_path

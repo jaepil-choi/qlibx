@@ -25,17 +25,14 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
     SourceSpec,
     StrategyEntry,
     preflight_run,
     register_dataset,
     register_exchange,
-    register_execution_input,
     register_strategy_model,
     run,
 )
@@ -82,7 +79,8 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     observation_target = observation.as_posix()
     con = duckdb.connect()
     try:
-        con.execute(f"""COPY (SELECT * FROM (VALUES
+        con.execute(f"""COPY (SELECT trade_at, instrument, is_tradable, CAST(close AS DOUBLE) AS close
+        FROM (VALUES
           (TIMESTAMPTZ '2024-03-05 10:00:00+09', 'A', true, 98.0),
           (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 100.0),
           (TIMESTAMPTZ '2024-03-06 10:00:00+09', 'A', true, 101.0),
@@ -115,17 +113,32 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     return execution, invalid, canonical, observation
 
 
-def _execution_input(input_id: str, path: Path) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
-        input_id,
-        ExecutionTableSpec(
-            source=SourceSpec.of(f"{input_id}-source", path),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"close": "close"},
-        ),
-        FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), KST, "close"),
+def _venue_dataset(dataset_id: str) -> DatasetRegistration:
+    """The venue table as a dataset with an execution role (record 185).
+
+    `trade_at` is the instant a row is a fact about, the role names the tradable flag, and
+    the numeric fields are the prices the venue published. Which one a run fills at is the
+    run's own `execution.fill.trade_price`, so this table serves any fill without being
+    registered twice.
+    """
+    return DatasetRegistration.of(
+        dataset_id,
+        f"{dataset_id}-source",
+        instrument_field="instrument",
+        available_at="trade_at",
+        grain="instrument_instant",
+        key_fields=("trade_at", "instrument"),
+        fields={"close": "close", "is_tradable": "is_tradable"},
+        field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        execution={"is_tradable": "is_tradable"},
+    )
+
+
+def _fill(dataset_id: str) -> RunExecution:
+    """This run's fill on the venue table: the next eligible 15:30 close after a decision."""
+    return RunExecution(
+        dataset=dataset_id,
+        fill=RunFill(selector="next_eligible", at=time(15, 30), timezone=KST, trade_price="close"),
     )
 
 
@@ -188,7 +201,7 @@ def _report(trace: dict[str, Any]) -> str:
     density = html.escape(json.dumps(trace["density_invariance"], indent=2, default=str))
     invalid = html.escape(json.dumps(trace["invalid_registration"], indent=2, default=str))
     return f"""<!doctype html><meta charset="utf-8">
-<title>VQAPR execution input registration</title>
+<title>VQAPR venue dataset registration</title>
 <style>
 body{{font-family:system-ui;max-width:1100px;margin:2rem auto}}
 pre,table{{border:1px solid #ccc;padding:1rem;overflow:auto}}
@@ -203,7 +216,7 @@ source refs, account version) itself.</p>
 <h2>Execution input rows (10:00 rows are deliberately non-selected)</h2>{execution_rows}
 <h2>Run summary</h2><pre>{run_trace}</pre>
 <h2>Density invariance</h2><pre>{density}</pre>
-<h2>Invalid execution input rejection</h2><pre>{invalid}</pre>
+<h2>Invalid venue table refused at registration</h2><pre>{invalid}</pre>
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
 
 
@@ -227,7 +240,11 @@ def main() -> None:
         ),
         SourceSpec.of("showcase-observation", observation_path),
     )
-    register_execution_input(PROJECT, _execution_input("krx-daily", execution_path))
+    register_dataset(
+        PROJECT,
+        _venue_dataset("krx-daily"),
+        SourceSpec.of("krx-daily-source", execution_path),
+    )
 
     register_strategy_model(PROJECT, "showcase-strategy", strategy_path, "ShowcaseStrategy")
     register_exchange(
@@ -246,7 +263,7 @@ def main() -> None:
         timezone=KST,
         at=time(4, 0),
         exchange="showcase-exchange",
-        execution_input_id="krx-daily",
+        execution=_fill("krx-daily"),
         start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
@@ -278,19 +295,25 @@ def main() -> None:
             f"{dense_signature} != {canonical_signature}"
         )
 
-    # --- Invalid execution input is rejected without workspace mutation -----------------
+    # --- An invalid venue table is refused at registration, without workspace mutation --
+    # The venue table is a dataset (record 185), so the dataset door judges it: a NaN close
+    # is `dataset.value_not_finite`, the same refusal any dataset gets, and nothing is written.
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_invalid = workspace_path.read_bytes()
     try:
-        register_execution_input(PROJECT, _execution_input("invalid-close", invalid_path))
+        register_dataset(
+            PROJECT,
+            _venue_dataset("invalid-close"),
+            SourceSpec.of("invalid-close-source", invalid_path),
+        )
     except VqaprError as error:
         invalid = error.as_dict()
         invalid.pop("correlation_id", None)
     else:
-        raise AssertionError("invalid selected price unexpectedly registered")
+        raise AssertionError("a venue table with a non-finite close unexpectedly registered")
     after_invalid = workspace_path.read_bytes()
     if after_invalid != before_invalid:
-        raise AssertionError("invalid registration mutated the workspace")
+        raise AssertionError("a refused registration mutated the workspace")
 
     con = duckdb.connect()
     try:
@@ -326,9 +349,9 @@ def main() -> None:
             "workspace_unchanged": True,
             "checked_file": ".vqapr/workspace.yaml",
             "note": (
-                "register_execution_input validates the venue table before it writes, so a "
-                "non-finite selected price on a tradable row is refused with the workspace "
-                "byte-identical to what it was."
+                "the venue table is a dataset, so register_dataset validates it before it "
+                "writes: a non-finite close is refused as dataset.value_not_finite with the "
+                "workspace byte-identical to what it was."
             ),
             "error": invalid,
         },

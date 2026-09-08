@@ -40,9 +40,9 @@ class ExecutionHandler:
         self._valuation = valuation
 
     def execute_due(self, pending: AcceptedIntent) -> DueExecutionResult:
-        execution_input = self._context.frozen_run.execution_input
-        if execution_input is None:
-            raise RuntimeError("due execution requires frozen execution input")
+        execution_table = self._context.frozen_run.execution
+        if execution_table is None:
+            raise RuntimeError("due execution requires frozen execution dataset")
         account_state = self._context.state.current.account
         if not isinstance(account_state, AccountState):
             raise RuntimeError("due execution requires an AccountState root")
@@ -66,7 +66,7 @@ class ExecutionHandler:
             # end the run on the first delisting, which in a 3,000-name universe is the first
             # week.
             return exact_execution_snapshot(
-                execution_input.table,
+                execution_table.table,
                 target_at=pending.target.target_at,
                 target_instruments=target_instruments,
                 held_instruments=held_instruments,
@@ -78,7 +78,7 @@ class ExecutionHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_SNAPSHOT,
             cutoff=pending.target.target_at,
-            owner=execution_input,
+            owner=execution_table,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             snapshot = select_snapshot()
@@ -155,7 +155,7 @@ class ExecutionHandler:
             cutoff=pending.target.target_at,
             pending=pending,
             target=pending.target,
-            fill_convention=execution_input.fill,
+            fill_convention=execution_table.fill,
             execution_snapshot=snapshot,
             planning_nav=nav,
             planning_cash_target=pending.intent.cash_target,

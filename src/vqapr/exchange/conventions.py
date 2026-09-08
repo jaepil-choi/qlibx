@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.identifiers import ExecutionInputId
+from vqapr.domain.identifiers import DatasetId
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
 _OFFSET = re.compile(r"[+-](?:0\d|1[0-4]):[0-5]\d\Z")
@@ -30,7 +30,7 @@ class ExactExecutionTarget:
     """A deterministic selected instant and its unambiguous price binding."""
 
     identity: UUID
-    execution_input_id: ExecutionInputId
+    dataset_id: DatasetId
     target_at: datetime
     selector: FillSelector
     trade_price: str
@@ -182,7 +182,7 @@ class FillConvention:
         """Read the run's candidate instants once from an execution table's source.
 
         A convention reads a source and the field that stamps a fill; it does not know the
-        registration that pairs it with a table. `ExecutionInputRegistration.build_horizon`
+        registration that pairs it with a table. `ExecutionTable.build_horizon`
         passes its own table's binding here (one-shape Step 7, record 162: this was the
         `conventions <-> execution_table` import cycle).
 
@@ -208,16 +208,16 @@ class FillConvention:
         source: SourceSpec,
         *,
         trade_at_field: str,
-        execution_input_id: ExecutionInputId,
+        dataset_id: DatasetId,
         decision_time: datetime,
         end_time: datetime,
         horizon: ExecutionHorizon | None = None,
     ) -> ExactExecutionTarget | None:
         """Select the first strictly-later eligible execution instant in the run horizon.
 
-        `source`/`trade_at_field` are the execution table's binding and `execution_input_id` the
-        registration the target is stamped with; a registration passes its own through
-        `ExecutionInputRegistration.select_target`.
+        `source`/`trade_at_field` are the execution table's binding and `dataset_id` the
+        dataset the target is stamped with; the bound table passes its own through
+        `ExecutionTable.select_target`.
         """
 
         if not isinstance(source, SourceSpec):
@@ -271,7 +271,7 @@ class FillConvention:
                 _IDENTITY_NAMESPACE,
                 "|".join(
                     (
-                        str(execution_input_id),
+                        str(dataset_id),
                         *(
                             "" if value is None else str(value)
                             for value in self.declaration_identity
@@ -282,7 +282,7 @@ class FillConvention:
             )
             return ExactExecutionTarget(
                 identity=identity,
-                execution_input_id=execution_input_id,
+                dataset_id=dataset_id,
                 target_at=target_at,
                 selector=self.selector,
                 trade_price=self.trade_price,

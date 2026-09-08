@@ -31,7 +31,7 @@ from vqapr.authoring import (
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.evaluation import ConstraintReport
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.datasets import DatasetRegistration, ExecutionRole
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
@@ -39,7 +39,6 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import ObservationBatch
 from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
-from vqapr.declarations import register_execution_input as register_execution_input
 from vqapr.domain.agendas import (
     OperationOccurrence,
 )
@@ -70,7 +69,7 @@ from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
 )
 from vqapr.exchange.fills import ZeroDealtReason
@@ -121,7 +120,14 @@ from vqapr.flow.record import freeze_strategy_record as freeze_strategy_record
 from vqapr.flow.record import read_typed_table as read_strategy_table
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run import ConstraintSet, DataModelEntry, RunDefinition, StrategyEntry
+from vqapr.flow.run import (
+    ConstraintSet,
+    DataModelEntry,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 from vqapr.flow.simulation import SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
@@ -181,7 +187,8 @@ __all__ = (
     "ExchangeRulesView",
     "ExecutionCall",
     "ExecutionFieldRequirement",
-    "ExecutionInputRegistration",
+    "ExecutionRole",
+    "ExecutionTable",
     "ExecutionTableSpec",
     "FactorInstrument",
     "FillConvention",
@@ -222,6 +229,8 @@ __all__ = (
     "Rebalance",
     "RowsLookback",
     "RunDefinition",
+    "RunExecution",
+    "RunFill",
     "RunRecordMissing",
     "RunReport",
     "RunResult",
@@ -277,7 +286,6 @@ __all__ = (
     "register_data_model",
     "register_dataset",
     "register_exchange",
-    "register_execution_input",
     "register_run",
     "register_strategy_model",
     "rescale",

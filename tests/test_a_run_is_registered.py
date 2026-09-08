@@ -27,10 +27,9 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.sources import SourceSpec
 from vqapr.declarations import apply
 from vqapr.domain.errors import VqaprError
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -43,7 +42,7 @@ _RUN_READY: dict[str, object] = {
     "at": "15:29",
     "sessions": ["2024-03-05"],
     "exchange": None,
-    "execution_input": None,
+    "execution": None,
     "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
     "strategies": {"ou-k0": None},
 }
@@ -63,7 +62,12 @@ def _definition(**overrides: object) -> RunDefinition:
         "at": time(15, 29),
         "sessions": SESSIONS,
         "exchange": "venue",
-        "execution_input_id": "venue-daily",
+        "execution": RunExecution(
+            dataset="venue-daily",
+            fill=RunFill(
+                selector="same_day", at=time(15, 30), timezone="Asia/Seoul", trade_price="close"
+            ),
+        ),
         "start": datetime(2024, 3, 5, tzinfo=KST),
         "end": datetime(2024, 3, 8, 15, 30, tzinfo=KST),
         "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {"A": Decimal("2")}),
@@ -75,7 +79,7 @@ def _definition(**overrides: object) -> RunDefinition:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
-    """Everything a run names, registered: four components and an execution input."""
+    """Everything a run names, registered: four components and a venue dataset."""
     space = Workspace.create(tmp_path)
     for name, kind in (
         ("ou-k0", ComponentKind.STRATEGY_MODEL),
@@ -88,18 +92,21 @@ def workspace(tmp_path: Path) -> Workspace:
     execution = tmp_path / "execution.parquet"
     execution.write_bytes(b"")
     with Workspace.transaction(space) as t:
-        t.register_execution_input(
-            ExecutionInputRegistration.of(
-                "venue-daily",
-                ExecutionTableSpec(
-                    source=SourceSpec.of("venue-source", execution),
-                    trade_at_field="trade_at",
-                    instrument_field="instrument",
-                    is_tradable_field="is_tradable",
-                    price_fields={"close": "close"},
-                ),
-                FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
-            )
+        t.register_dataset(
+            DatasetRegistration.of(
+                'venue-daily',
+                'venue-source',
+                instrument_field="instrument",
+                available_at="trade_at",
+                grain="instrument_instant",
+                key_fields=("trade_at", "instrument"),
+                fields={"close": "close", "is_tradable": "is_tradable"},
+                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                execution={"is_tradable": "is_tradable"},
+            ).with_span(
+                datetime(2024, 3, 5, 15, 30, tzinfo=KST), datetime(2024, 3, 8, 15, 30, tzinfo=KST)
+            ),
+            SourceSpec.of("venue-source", execution),
         )
     return Workspace.open(tmp_path)
 
@@ -180,7 +187,20 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
         ({"strategies": (StrategyEntry("venue"),)}, "strategy 'venue'"),
         ({"strategies": (StrategyEntry("ou-k0", ("ou-ff5",)),)}, "constraint 'ou-ff5'"),
         ({"exchange": "ou-k0"}, "exchange 'ou-k0'"),
-        ({"execution_input_id": "nope"}, "execution input 'nope'"),
+        (
+            {
+                "execution": RunExecution(
+                    dataset="nope",
+                    fill=RunFill(
+                        selector="same_day",
+                        at=time(15, 30),
+                        timezone="Asia/Seoul",
+                        trade_price="close",
+                    ),
+                )
+            },
+            "dataset 'nope'",
+        ),
         ({"sessions": (), "sessions_from": "nope"}, "dataset 'nope'"),
     ],
 )
@@ -224,7 +244,15 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                 "at": "15:29",
                 "sessions": ["2024-03-05", "2024-03-06", "2024-03-07"],
                 "exchange": "venue",
-                "execution_input": "venue-daily",
+                "execution": {
+                    "dataset": "venue-daily",
+                    "fill": {
+                        "selector": "same_day",
+                        "at": "15:30",
+                        "timezone": "Asia/Seoul",
+                        "trade_price": "close",
+                    },
+                },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
                 "strategies": {"ou-k0": {"constraints": ["no-short"]}, "ou-ff5": None},
             }

@@ -339,14 +339,13 @@ def _judge_execution_ordering(
     bare `ValueError: no exact execution target exists within the run horizon` raised only once
     the simulation was already underway and earlier callbacks had mutated account state.
 
-    An execution input that does not resolve, and an agenda that cannot be derived, both raise out
+    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise out
     of here on purpose. This is the judgment `docs/issues/015` exists for, and reporting it as
     answered when it was not is the defect `docs/issues/077` filed.
     """
-    if definition.execution_input_id is None:
+    if definition.execution is None:
         return []
-    registration = workspace.execution_input(definition.execution_input_id)
-    fill_at = registration.fill.local_time
+    fill_at = definition.execution.fill.at
     found: list[Failure] = []
     occurrences = agenda().occurrences  # type: ignore[attr-defined]
     for entry in definition.strategies:

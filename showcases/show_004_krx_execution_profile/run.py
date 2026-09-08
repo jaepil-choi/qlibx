@@ -6,7 +6,7 @@ One frozen strategy, one real KRX price history, two execution profiles::
     KRX-shaped whole shares, 3bp commission both sides, 20bp sale tax on sells, long only
 
 The two runs differ **only** by the registered exchange component -- everything else (the
-materialized score, the strategy, the execution input, the agendas) is byte-identical, so
+materialized score, the strategy, the execution dataset, the agendas) is byte-identical, so
 the difference in outcome is exactly the declared venue friction.
 
 **Both venues are the shipped ones.** ``ShowcaseKrxExchange`` extends ``KrxExchange``, so the
@@ -52,11 +52,9 @@ from vqapr.public import (
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
     SourceSpec,
     StrategyEntry,
     export_roster,
@@ -64,7 +62,6 @@ from vqapr.public import (
     register_data_model,
     register_dataset,
     register_exchange,
-    register_execution_input,
     register_strategy_model,
     run,
 )
@@ -130,7 +127,7 @@ def _definition(
     """The two runs' one difference, isolated into one argument.
 
     Everything else is shared by construction rather than by copy: the same registered
-    strategy, the same sessions and wall time, the same execution input id, the same account.
+    strategy, the same sessions and wall time, the same execution dataset and fill, the same account.
     """
     return RunDefinition(
         run_id=exchange.component_id,
@@ -139,7 +136,15 @@ def _definition(
         timezone=VENUE,
         at=time(8, 30),
         exchange=exchange.component_id,
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            fill=RunFill(
+                selector="same_day",
+                at=time(15, 30),
+                timezone=VENUE,
+                trade_price="close",
+            ),
+        ),
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
@@ -355,19 +360,23 @@ def main() -> None:
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
-    register_execution_input(
+    register_dataset(
         PROJECT,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     # The materialized score registers itself as an ordinary dataset, so the strategy declares
@@ -470,7 +479,7 @@ def main() -> None:
             if krx["traded_notional"]
             else None,
             "claim": (
-                "The two runs share one frozen strategy, dataset and execution input. The NAV "
+                "The two runs share one frozen strategy, dataset and execution table. The NAV "
                 "gap therefore combines the declared KRX cost with the whole-share rounding "
                 "residual; it is not a separate signal."
             ),

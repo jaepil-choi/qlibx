@@ -46,7 +46,6 @@ KINDS = (
     "datasets",
     "sources",
     "components",
-    "execution-inputs",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
     # registered roster could not be inspected from the CLI at all.
     "instruments",
@@ -68,7 +67,6 @@ _ACCESSORS = {
     "datasets": "datasets",
     "sources": "sources",
     "components": "components",
-    "execution-inputs": "execution_inputs",
     "runs": "run_definitions",
 }
 
@@ -76,7 +74,6 @@ _IDENTITY_FIELDS = (
     "dataset_id",
     "source_id",
     "component_id",
-    "execution_input_id",
     "run_id",
 )
 
@@ -100,7 +97,9 @@ def _summarize(item: object) -> dict[str, Any]:
         summary["start"] = None if item.start is None else item.start.isoformat()
         summary["end"] = None if item.end is None else item.end.isoformat()
         summary["exchange"] = item.exchange
-        summary["execution_input_id"] = item.execution_input_id
+        summary["execution"] = (
+            None if item.execution is None else item.execution.model_dump(mode="json")
+        )
     if not summary:
         summary["repr"] = repr(item)
     return summary

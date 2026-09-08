@@ -3,7 +3,7 @@
 ## Two records, two questions
 
 **`vqapr show run <run-id>`** — the **configuration** every strategy of the run shared:
-instruments, period, venue, the execution input and its fill convention, the initial account, the
+instruments, period, venue, the execution dataset and this run's fill on it, the initial account, the
 datasets read and their source digests, and `recorded`, the strategy records the store holds as
 `<strategy-id>@<fp8>`.
 

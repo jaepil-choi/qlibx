@@ -107,9 +107,9 @@ class ValuationHandler:
         Same instant, same snapshot, same prices an order would have been filled at -- only
         without an order. The Account is not changed, so no version is consumed.
         """
-        execution_input = self._context.frozen_run.execution_input
-        if execution_input is None:
-            raise RuntimeError("due valuation requires frozen execution input")
+        execution_table = self._context.frozen_run.execution
+        if execution_table is None:
+            raise RuntimeError("due valuation requires frozen execution dataset")
         account_state = self._context.state.current.account
         if not isinstance(account_state, AccountState):
             raise RuntimeError("due valuation requires an AccountState root")
@@ -119,11 +119,11 @@ class ValuationHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_SNAPSHOT,
             cutoff=pending.target.target_at,
-            owner=execution_input,
+            owner=execution_table,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             snapshot = exact_execution_snapshot(
-                execution_input.table,
+                execution_table.table,
                 target_at=pending.target.target_at,
                 target_instruments=(),
                 held_instruments=held_instruments,

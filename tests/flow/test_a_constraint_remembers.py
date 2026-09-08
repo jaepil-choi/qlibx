@@ -43,7 +43,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.run import ConstraintSet, StrategyConfig
@@ -147,7 +147,7 @@ def _fill_instant(session: date) -> datetime:
     return datetime.combine(session, time(15, 30), tzinfo=KST)
 
 
-def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionInputRegistration:
+def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionTable:
     path = root / "execution.parquet"
     rows = ",\n".join(
         f"(TIMESTAMPTZ '{session.isoformat()} 15:30:00+09', 'A', true, {100 + n}.0)"
@@ -164,7 +164,7 @@ def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionInputRe
         )
     finally:
         connection.close()
-    return ExecutionInputRegistration.of(
+    return ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
             SourceSpec.of("execution-source", path),
@@ -196,7 +196,7 @@ def _flow(
             ),
         ),
         exchange=_component("exchange", ComponentKind.EXCHANGE),
-        execution_input=_execution_input(root, sessions),
+        execution=_execution_input(root, sessions),
         start=occurrences[0].evaluation_time,
         end=_fill_instant(sessions[-1]) + timedelta(hours=1),
         initial_account_snapshot=AccountSnapshot(0, Decimal(100), {"A": Decimal(1)}),

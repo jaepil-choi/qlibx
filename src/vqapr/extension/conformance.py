@@ -1,7 +1,8 @@
 """One verdict on whether a component honours its extension contract.
 
 Canon §10.2 says the four extension points *"enter through the same door and pass the same
-conformance"*. Registration is that door (`extension/registration.py`), and it already proves a
+conformance"*. Registration is that door (`extension/prepare.py` proves, `project/registration.py`
+writes), and it already proves a
 component **loads**: the fingerprint matches, the object constructs, it implements its contract
 type, and it declares its data requirements.
 
@@ -32,7 +33,7 @@ returned object exists.
 **Shipped, and here rather than in `testing/`.** Canon 10.3 ships this instead of keeping it in
 `tests/`, so a user can prove their own component before registering it rather than reading our
 test suite to guess the contract. That is a packaging fact, not a layering one, and for a while it
-bought a package of its own -- which put `extension/registration.py` below the suite it calls while
+bought a package of its own -- which put `extension/prepare.py` below the suite it calls while
 the suite imported `extension/loading.py` back. A cycle, at module scope, that only import order
 kept quiet. Registration is the door and conformance is what the door proves, so the two live
 together (record `193`); `vqapr.public` re-exports `conformance`, which is how a user reaches it

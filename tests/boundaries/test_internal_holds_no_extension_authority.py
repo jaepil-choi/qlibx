@@ -106,7 +106,12 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     # deleted it with the Project cluster: its only two importers were `registration_bridge` and
     # `venue_bridge`, both of which went the same way. What this asserts is that the four that
     # remain are still at their promoted paths, not that the original five all survived.
-    for name in ("component", "fingerprint", "loading", "registration"):
+    #
+    # `registration` is `prepare` since record `198`. Record `196` moved the half that writes down
+    # to `project/registration.py` -- the workspace is the project's -- and what stayed only
+    # prepares, so the old name had become false rather than merely dated. The property here is
+    # unchanged: the authority is in `extension/`, not under `_internal`.
+    for name in ("component", "fingerprint", "loading", "prepare"):
         module = pathlib.Path(f"src/vqapr/extension/{name}.py")
         assert module.is_file(), f"{name} must live at vqapr/extension/{name}.py"
 
@@ -117,7 +122,7 @@ def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
     Deliberately a floor on substance rather than an exact size: the point is that these files hold
     the implementation, and a re-export shim cannot.
     """
-    for name in ("component", "fingerprint", "loading", "registration"):
+    for name in ("component", "fingerprint", "loading", "prepare"):
         source = pathlib.Path(f"src/vqapr/extension/{name}.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         defined = [

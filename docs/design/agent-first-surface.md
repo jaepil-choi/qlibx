@@ -338,7 +338,8 @@ adapt a StrategyModel authored against `vqapr.authoring`. It goes when the two a
 become one.
 
 It was **12** until `docs/implementations/112-registration-without-the-cli.md` moved
-`cli/register.py`'s declaration parsing into `vqapr/declarations.py`. That module reaches the
+`cli/register.py`'s declaration parsing into `vqapr/declarations.py` (now
+`vqapr/project/registration.py`, record `194`). That module reaches the
 owning modules directly rather than the facade, so the verb stopped being an importer. The
 original count was confirmed by running the command below on 2026-08-28.
 

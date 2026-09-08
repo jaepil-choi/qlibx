@@ -61,12 +61,21 @@
 한 디렉터리에 substrate와 orchestration이 섞여 있다. 자식이 부모의 공용 값을 읽는 것 자체는
 정상이지만, 그 값들이 orchestration과 같은 층에 놓여 있는 것은 아니다.
 
-### 1.5 같은 일을 하는 두 패키지
+### 1.5 같은 일을 하는 두 패키지 — **오진, M8에서 철회**
 
-`analysis/{performance,signal,execution}.py`(363줄)와 `report/measure.py`(835줄)는 둘 다
-*"기록된 행을 읽어 값을 낸다"*이다. `report → analysis` 4 간선. `analysis/execution.py`의
-도크스트링이 그 이유를 이미 쓴다 — *"a function of data is testable with a list of dicts"* —
-그리고 `report/measure.py`가 같은 문장을 인용한다.
+진단은 `analysis/{performance,signal,execution}.py`(363줄)와 `report/measure.py`(835줄)가 둘 다
+*"기록된 행을 읽어 값을 낸다"*이므로 한 패키지여야 한다고 적었고, M7이 그 병합이었다.
+
+**틀렸다.** M7을 시작하기 전에 4개 간선을 확인하니 `report/measure.py`가 `analysis/`의 함수를
+**쓰고 있었다** — `fill_summary`, `drawdown as running_drawdown`, `returns as period_returns`,
+`correlation as pearson_correlation`. 중복이 아니라 **층**이다. `analysis/`는 원시 도구이고
+`report/`는 그것으로 문서를 조립한다.
+
+게다가 `analysis/`에는 독립 소비자가 있다: `cli/run.py`가 `fill_summary`를 쓰고, `public.py`가
+여섯 함수를 사용자 표면으로 내보낸다. 병합하면 순환도 레이어 위반도 고치지 못한 채
+사용자 도구를 프레임워크 문서 생성 패키지 안에 묻고 `vqapr.analysis.*`만 깨진다.
+
+**M7은 취소한다.** 이 캠페인은 측정된 결함만 고친다는 것이 그 근거다.
 
 ### 1.6 감지 장치가 없다
 
@@ -113,12 +122,14 @@ L2  exchange/                              (orders/ 흡수)
 L3  extension/  constraints/               (testing/ 흡수)
 L4  project/                               (workspace* + declarations)
 L5  flow/  record/
-L6  report/                                (analysis/ 흡수)
+L6  report/                                (analysis/ 위에서 조립)
 L7  public.py
 L8  cli/                                   (agent/ 는 leaf, 손대지 않는다)
 ```
 
-노드 22 → 15, 평면 모듈 9 → 1(`public.py`), 순환 4 → 0.
+노드 22 → 18, 평면 모듈 9 → 1(`public.py`), 순환 4 → 0.
+
+(초안은 `analysis/`를 `report/`가 흡수한다고 적었다. M7에서 철회 — §1.5.)
 
 ### 3.1 `authoring/`과 `extension/`은 합치지 않는다
 
@@ -143,10 +154,10 @@ L8  cli/                                   (agent/ 는 leaf, 손대지 않는다
 | 2 | 값을 `domain/`으로, `orders/` 소멸 | 191 |
 | 3 | `authoring/` 패키지 | 192 |
 | 4 | `extension/` 상단 정리, `testing/` 소멸 | 193 |
-| 5 | `project/` 패키지 | 194 |
-| 6 | `flow/engine/` | 195 |
-| 7 | `analysis/` → `report/` | 196 |
-| 8 | 래칫 잠금 · 문서 갱신 | 197 |
+| 5 | `project/` 패키지 (a·b·c 세 단위) | 194·195·196 |
+| 6 | `flow/engine/` | 197 |
+| 7 | ~~`analysis/` → `report/`~~ **취소** (§1.5 오진) | — |
+| 8 | 래칫 잠금 · 문서 갱신 | 198 |
 
 단계별 상세와 진행 상태는 `.agent/plans/active/layering-campaign.md`에 있다.
 
@@ -214,3 +225,40 @@ interprocedural이며 cross-module hop을 따라간다. **Step 5가 열린다.**
   (*"순환은 Python이 알려준다"*는 이미 거짓), 대체물은 이 저장소의 관행대로
   `tests/boundaries/`의 테스트다. 계약 파일이 타입 배치를 몰아가서는 안 된다는 원래 논거는
   여전히 유효하다.
+
+---
+
+## 7. 끝난 자리 (2026-09-08, `develop @ d1d637b6` 이후)
+
+| | 시작 (`4fdd46fb`) | 끝 |
+|---|---|---|
+| 패키지 간 순환 | **4** | **0** |
+| 최상위 평면 모듈 | **9** | **1** (`public.py`) |
+| 그래프 노드 | 22 | 18 (패키지 17 + `public.py`) |
+| deferred import | 12 (천장에 붙음) | 10 |
+| 레이어 위반 | 11 (`OPEN`에 선언) | **0** |
+
+소멸한 패키지: `orders/`, `testing/`. 새 패키지: `authoring/`, `project/`, `flow/engine/`.
+
+**측정으로 뒤집은 것 하나.** record 117이 `workspace.py`를 통째로 묶어둔 근거(분할 시 refusal
+code 37개 소실)는 record 171이 resolver를 패키지 전역으로 바꾸면서 만료됐다. Step 0이 코드를
+옮기기 전에 그것을 쟀고(gained 0 / lost 0, 리터럴 코드 22개 전부 유지), M5a가 실제로 쪼갠 뒤에도
+같은 결과였다.
+
+**테이블이 아니었으면 못 찾았을 것 하나.** `extension → project`(record 196)는 진단에 없었다.
+양쪽 top-level import에 deferred도 아니었고 패키지는 내내 정상적으로 import됐다. M1이
+레이어를 **적어두지** 않았다면 이 캠페인은 그것을 지나쳤을 것이다.
+
+**하지 않기로 한 것.**
+
+- **M7 병합** — §1.5의 오진. 위 참조.
+- **`data/scan.py`(1,471줄) 3분할** — 세 덩어리로 깨끗이 갈리고 refusal 8개가 전부 리터럴이라
+  안전하지만 **순환도 레이어 위반도 아니다.** 이 캠페인은 크기 문제를 레이어 문제와 분리해
+  다뤘고(`store.py` 957, `project/registration.py` 1,276도 같은 판정), 마지막에만 예외를 두면
+  그 분리가 무의미해진다. 별도 작업의 후보로 남긴다.
+- **`flow/declaration/` 개명** — 이제 선언하지 않는 세 모듈(`frozen`·`preflight`·`judgments`)을
+  담는다. 이름이 **불완전**하지 그르지는 않다. importer가 많고 검사되는 속성이 없다.
+- **`flow/roster.py` 이동** — project 층 읽기가 flow 경로에 있지만 위반하는 레이어가 없다.
+
+**한 것.** `extension/registration.py` → `extension/prepare.py`. 이것은 불완전한 이름이 아니라
+**거짓인** 이름이었다 — record 196이 쓰는 절반을 `project/`로 내린 뒤 이 파일은 등록하지 않는다.

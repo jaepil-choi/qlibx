@@ -55,9 +55,21 @@ dev = [
 # Layer boundaries are not enforced by an import-linter contract. See
 # docs/vqapr-architecture.md §10.1 — module layout is non-normative (PRD §0.1), so a tool
 # contract must not drive type placement. Every boundary that matters is enforced by the
-# absence of a path (no account() on DataModelContext, no store handle outside flow/views,
-# pure functions that take their inputs as arguments), and a misplaced type surfaces as a
-# circular import, which Python reports without a tool.
+# absence of a path (no account() on DataModelContext, no store handle outside flow/engine,
+# pure functions that take their inputs as arguments).
+#
+# This comment used to end "and a misplaced type surfaces as a circular import, which Python
+# reports without a tool". That half was false and is retired (record 198). The layering
+# campaign measured four package cycles at 0.8.0 and Python reported none of them: two were
+# deferred into function bodies, one was held open by a TYPE_CHECKING import, and one was
+# module-level in both directions and merely happened to load in a working order. A fifth --
+# extension writing to the workspace it sits below — was found only once the layers were
+# written down.
+#
+# What replaces it is not a contract file: it is tests/boundaries/test_the_layers_hold.py,
+# which declares the altitude of every package and fails on an import that reaches its own
+# layer or above. The first argument above still stands, which is why the table is a test in
+# this repository's own idiom rather than a tool's config.
 
 [tool.pytest.ini_options]
 minversion = "9.1"

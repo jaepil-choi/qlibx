@@ -9,7 +9,7 @@ What stays is the half that can refuse, which is the half that needs this packag
 the source, build the `ComponentRef`, and prove it conforms. `prepare_component` writes nothing
 and never could.
 
-This module is the extension registration authority, and `vqapr.extension.registration` is where
+This module is the extension preparation authority, and `vqapr.extension.prepare` is where
 it lives.
 
 **It was not always.** Until record `110` the implementation sat in

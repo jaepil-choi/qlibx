@@ -23,7 +23,7 @@ import pytest
 import vqapr.extension.component as component
 import vqapr.extension.fingerprint as fingerprint
 import vqapr.extension.loading as loading
-import vqapr.extension.registration as registration
+import vqapr.extension.prepare as registration
 import vqapr.public as public
 
 

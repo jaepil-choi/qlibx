@@ -1,30 +1,44 @@
-"""Static + runtime refusal-code inventory over `src/vqapr`.
+"""Static + runtime refusal-code inventory over `src/vqapr`, bucketed by `Status`.
 
-This module is the collector behind Step 0.7 of the `Failure.bounded` migration: a baseline
-captured **before** every call site is touched, so a later step's diff against it is meaningful.
+The baseline this module writes is the oracle `test_refusal_codes.py` diffs the source against:
+which refusal codes the package declares, and under which `Status` each one is raised. Record
+`171` slimmed it to exactly that -- **sets of codes per status, no file and no line per code** --
+because the earlier per-call-site shape fired on every docstring edit above a raise site and was
+regenerated past rather than read.
 
 Two independent passes, on purpose:
 
-- **Static (AST) pass** walks every `.py` file under `src/vqapr` and resolves the `code` argument
-  of every `Failure(...)` / `Failure.bounded(...)` construction. Codes are frequently composed at
-  runtime as an f-string over a stage constant (`f"{DECLARE_STAGE}.key_missing"`), sometimes
-  through one or two levels of local helper indirection (`materialize._error`, `workspace.
-  _workspace_error`, `workspace._config_lookup` forwarding into `_workspace_error`), so a plain
-  text/regex scan for string literals would silently miss most of the package's refusal
-  vocabulary. This pass constant-folds those f-strings and follows parameter forwarding across
-  calls within the same file instead of guessing.
+- **Static (AST) pass** walks every `.py` file under `src/vqapr` and resolves, for every
+  `Failure(...)` / `Failure.bounded(...)` construction, the `code` argument and the `status=`
+  keyword. Codes are sometimes composed as an f-string over a module constant
+  (`f"{SUBJECT}.key_missing"`), sometimes forwarded through a local helper (`workspace.
+  _workspace_error`, `loading._failure`), so a plain text/regex scan for string literals would
+  miss part of the vocabulary. This pass constant-folds those f-strings and follows parameter
+  forwarding across calls within the same file instead of guessing, for `code` and `status`
+  alike. A `status` that is a `Status` member (the case at almost every site) buckets the code
+  under that member's number; a `status` computed from an exception (`status_of(error)`, a
+  variable holding one) buckets it under `by_cause`, because the number is decided at runtime by
+  whose frame raised.
 - **Runtime pass** exercises refusal paths directly and records the `Failure.code` values a real
   `VqaprError`/`Diagnosis` actually produces. It is expected, and required, to reach *fewer* codes
-  than the static pass — no test suite exhaustively drives every declared refusal, and the gap
+  than the static pass -- no test suite exhaustively drives every declared refusal, and the gap
   between "declared in source" and "observed under test" is exactly what this baseline exists to
   make visible rather than hide.
 
-Neither pass may guess: an expression that cannot be resolved to one or more concrete string
-values through constant folding and same-file call-site tracing is recorded as *unresolved* —
-file, line, and the raw unparsed expression — never as a partial or wildcard code. Where a
-parameter genuinely has more than one possible value across its call sites (e.g. `_config_lookup`'s
-`stage` differs per caller, or a local ternary chooses between two literal suffixes), every
-distinct resolved code is recorded — that is enumeration of real reachable values, not a guess.
+Neither pass may guess: a `code` expression that cannot be resolved to one or more concrete
+string values through constant folding and same-file call-site tracing is recorded as
+*unresolved* -- file, line, and the raw unparsed expression -- never as a partial or wildcard code.
+Where a parameter genuinely has more than one possible value across its call sites, every distinct
+resolved code is recorded -- that is enumeration of real reachable values, not a guess.
+
+One shape is neither declared nor unresolved: a **re-render**. `InputError.as_failure` builds a
+`Failure(code=self.code, ...)` from a refusal it already holds, and `SimulationFailure` builds one
+whose code a same-file helper renders from the `SimulationStage` the object carries
+(`strategy.callback.intent`, ...). Those sites do not declare a code the folder could name; the
+first was declared where the refusal was first raised and the static pass saw it there, and the
+second is the closed `SimulationStage` set the skill documents as `strategy.<stage>`. They are
+skipped, and `_is_rerender` says exactly which shapes count. The `strategy.*` family is therefore
+absent from `static` by construction, not by omission.
 """
 
 from __future__ import annotations
@@ -40,20 +54,29 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "src" / "vqapr"
+ERRORS_MODULE = PACKAGE_ROOT / "domain" / "errors.py"
 BASELINE_PATH = Path(__file__).resolve().with_name("refusal_codes.baseline.json")
-SCHEMA = "vqapr.refusal_codes.v1"
+SCHEMA = "vqapr.refusal_codes.v2"
+
+BY_CAUSE = "by_cause"
+"""The bucket for a code whose status is decided at runtime from the exception's traceback
+(`status_of(error)`): 500 or 502, and the source cannot say which."""
 
 _MAX_RESOLUTION_DEPTH = 6
 """Recursion bound across parameter-forwarding hops. The deepest real chain in this package is
 two hops (`_config_lookup` -> `_workspace_error` -> `Failure.bounded`); this leaves headroom
 without risking runaway recursion on a future accidental cycle."""
 
+_STATUS_PREFIX = "Status."
+"""How a resolved `Status.MISSING` travels through the string-valued resolver: as the token
+`"Status.MISSING"`, which `_bucket_of` turns into the member's number."""
+
 
 @dataclass(frozen=True, slots=True)
 class StaticCode:
     code: str
-    file: str
-    line: int
+    bucket: str
+    """A `Status` number as a string (`"404"`), or `BY_CAUSE`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +90,32 @@ class UnresolvedExpression:
 class StaticInventory:
     codes: tuple[StaticCode, ...]
     unresolved: tuple[UnresolvedExpression, ...]
+
+
+def status_members() -> dict[str, int]:
+    """`Status` member name -> number, read from `domain/errors.py`'s source rather than imported.
+
+    This scanner runs while raise sites are mid-migration and the package may not import; the
+    enum's members are declared as plain `NAME = <int>` assignments, so the AST is the same
+    closed set the interpreter would see.
+    """
+    tree = ast.parse(ERRORS_MODULE.read_text(encoding="utf-8"), filename=str(ERRORS_MODULE))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "Status":
+            members: dict[str, int] = {}
+            for statement in node.body:
+                if (
+                    isinstance(statement, ast.Assign)
+                    and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Constant)
+                    and isinstance(statement.value.value, int)
+                ):
+                    members[statement.targets[0].id] = statement.value.value
+            if not members:
+                raise ValueError(f"{ERRORS_MODULE}: class Status declares no integer members")
+            return members
+    raise ValueError(f"{ERRORS_MODULE}: no class Status found")
 
 
 # --------------------------------------------------------------------------------------------
@@ -296,6 +345,14 @@ def _resolve_expr(
         return {expr.value}
     if isinstance(expr, ast.Name):
         return _resolve_name(expr.id, func, index, visited)
+    if (
+        isinstance(expr, ast.Attribute)
+        and isinstance(expr.value, ast.Name)
+        and expr.value.id == "Status"
+    ):
+        # `Status.MISSING`: the one attribute shape the resolver folds, carried as a token so a
+        # forwarded `status` parameter resolves through the same machinery as a forwarded code.
+        return {_STATUS_PREFIX + expr.attr}
     if isinstance(expr, ast.IfExp):
         body = _resolve_expr(expr.body, func, index, visited)
         orelse = _resolve_expr(expr.orelse, func, index, visited)
@@ -355,11 +412,96 @@ def _code_argument(call: ast.Call) -> ast.expr | None:
     return None
 
 
-def _scan_file(path: Path) -> tuple[list[StaticCode], list[UnresolvedExpression]]:
+def _status_argument(call: ast.Call) -> ast.expr | None:
+    """`status` is keyword-only on both constructors, so there is no positional form to find."""
+    for keyword in call.keywords:
+        if keyword.arg == "status":
+            return keyword.value
+    return None
+
+
+def _is_owned_attribute(
+    expr: ast.expr, func: ast.FunctionDef | ast.AsyncFunctionDef | None
+) -> bool:
+    """`self.code`, `self.stage.value`, `error.code`: an attribute chain rooted in `self` or in
+    one of the enclosing function's parameters -- a value the site was handed, not one it made."""
+    root = expr
+    while isinstance(root, ast.Attribute):
+        root = root.value
+    if not isinstance(root, ast.Name):
+        return False
+    if root.id == "self":
+        return True
+    return func is not None and root.id in _param_names(func)
+
+
+def _is_exception_type_name(expr: ast.expr) -> bool:
+    """`type(cause).__name__`: the exception's class name, which is whatever was raised."""
+    return (
+        isinstance(expr, ast.Attribute)
+        and expr.attr == "__name__"
+        and isinstance(expr.value, ast.Call)
+        and isinstance(expr.value.func, ast.Name)
+        and expr.value.func.id == "type"
+    )
+
+
+def _is_rerender(
+    expr: ast.expr, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _FileIndex
+) -> bool:
+    """A `code` that re-renders what the site already holds, rather than declaring a new one.
+
+    Three shapes, all exact: an attribute the site was handed (`code=self.code` in
+    `InputError.as_failure`); an f-string whose every interpolation is such an attribute or an
+    exception's type name (`f"{self.stage.value}.{type(cause).__name__}"`, the older
+    `SimulationFailure`); or a same-file helper called with nothing but those
+    (`_code_for(self.stage)`, today's `SimulationFailure`, which renders `strategy.<stage>` from a
+    `SimulationStage` the object carries). Anything with a literal interpolation source, a module
+    constant or a folded parameter is a declaration and never reaches this check, because
+    `_resolve_expr` folded it first.
+    """
+    if isinstance(expr, ast.Attribute):
+        return _is_owned_attribute(expr, func)
+    if isinstance(expr, ast.JoinedStr):
+        interpolations = [v.value for v in expr.values if isinstance(v, ast.FormattedValue)]
+        return bool(interpolations) and all(
+            _is_owned_attribute(value, func) or _is_exception_type_name(value)
+            for value in interpolations
+        )
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id in index.functions_by_name
+    ):
+        operands = [*expr.args, *(keyword.value for keyword in expr.keywords)]
+        return bool(operands) and all(
+            _is_owned_attribute(operand, func) or _is_exception_type_name(operand)
+            for operand in operands
+        )
+    return False
+
+
+def _bucket_of(token: str, members: dict[str, int]) -> str | None:
+    """The baseline bucket a resolved `status` token lands in; `None` for a name `Status` lacks."""
+    if not token.startswith(_STATUS_PREFIX):
+        return None
+    name = token[len(_STATUS_PREFIX) :]
+    number = members.get(name)
+    return None if number is None else str(number)
+
+
+def _scan_file(
+    path: Path, members: dict[str, int]
+) -> tuple[list[StaticCode], list[UnresolvedExpression]]:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     index = _FileIndex(tree)
-    relative = path.relative_to(REPO_ROOT).as_posix()
+    # A probe module outside the repo (the scanner's own tests) is reported by its full path.
+    relative = (
+        path.relative_to(REPO_ROOT).as_posix()
+        if path.is_relative_to(REPO_ROOT)
+        else path.as_posix()
+    )
 
     codes: list[StaticCode] = []
     unresolved: list[UnresolvedExpression] = []
@@ -372,17 +514,156 @@ def _scan_file(path: Path) -> tuple[list[StaticCode], list[UnresolvedExpression]
             # it is not a valid construction and would fail at runtime, not at this inventory.
             continue
         enclosing = index.enclosing_function(node)
-        resolved = _resolve_expr(argument, enclosing, index, frozenset())
-        if resolved is None:
+        if _resolve_expr(argument, enclosing, index, frozenset()) is None and _is_rerender(
+            argument, enclosing, index
+        ):
+            continue
+
+        status = _status_argument(node)
+        if status is None:
             unresolved.append(
                 UnresolvedExpression(
-                    file=relative, line=argument.lineno, expression=ast.unparse(argument)
+                    file=relative, line=argument.lineno, expression="status=<absent>"
                 )
             )
-        else:
-            for code in resolved:
-                codes.append(StaticCode(code=code, file=relative, line=argument.lineno))
+            continue
+
+        pairs = _resolve_pair(argument, status, enclosing, index, frozenset())
+        if pairs is None:
+            unresolved.append(
+                UnresolvedExpression(
+                    file=relative,
+                    line=argument.lineno,
+                    expression=f"{ast.unparse(argument)} / status={ast.unparse(status)}",
+                )
+            )
+            continue
+        for code, token in pairs:
+            bucket = BY_CAUSE if token == BY_CAUSE else _bucket_of(token, members)
+            if bucket is None:
+                unresolved.append(
+                    UnresolvedExpression(
+                        file=relative, line=status.lineno, expression=f"status={token}"
+                    )
+                )
+                continue
+            codes.append(StaticCode(code=code, bucket=bucket))
     return codes, unresolved
+
+
+_Operand = ast.expr | frozenset[str]
+"""One side of a `(code, status)` pair while it is being resolved: still an expression in the
+current function's context, or already a set of values carried down from a callee."""
+
+
+def _is_forwarded(
+    expr: _Operand, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _FileIndex
+) -> str | None:
+    """The parameter name `expr` forwards, when it is a bare parameter of `func` that nothing in
+    `func` reassigns and no module constant shadows; otherwise `None`."""
+    if not isinstance(expr, ast.Name) or func is None:
+        return None
+    name = expr.id
+    if name not in _param_names(func) or name in index.module_constants:
+        return None
+    for node in ast.walk(func):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            return None
+    return name
+
+
+def _settle(
+    expr: _Operand,
+    func: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    index: _FileIndex,
+    visited: frozenset[int],
+    *,
+    is_status: bool,
+) -> frozenset[str] | None:
+    """Resolve one operand in the current context. A status that will not fold is `BY_CAUSE`
+    (`status_of(error)`, `self.status`, a name holding one): the number is chosen at runtime by
+    whose frame raised. A code that will not fold is `None`, and the site is unresolved."""
+    if isinstance(expr, frozenset):
+        return expr
+    resolved = _resolve_expr(expr, func, index, visited)
+    if resolved is None:
+        return frozenset({BY_CAUSE}) if is_status else None
+    return frozenset(resolved)
+
+
+def _resolve_pair(
+    code: _Operand,
+    status: _Operand,
+    func: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    index: _FileIndex,
+    visited: frozenset[int],
+) -> set[tuple[str, str]] | None:
+    """Every `(code, status token)` pair one construction site can produce, resolved together.
+
+    Resolving the two arguments separately and crossing them would be wrong at exactly the sites
+    that need this pass: `_workspace_error` is called with a dozen codes under four statuses, and
+    a cross product would file every one of those codes under every one of those statuses. So when
+    either argument is a parameter forwarded into `func`, the resolver walks `func`'s call sites
+    and resolves each caller's pair in the caller's own context, keeping the pairing that caller
+    actually wrote. An argument that is not forwarded is settled in `func`'s context once and
+    carried down as a fixed set.
+    """
+    code_param = _is_forwarded(code, func, index)
+    status_param = _is_forwarded(status, func, index)
+    if code_param is None:
+        code = _settle(code, func, index, visited, is_status=False)
+        if code is None:
+            return None
+    if status_param is None:
+        status = _settle(status, func, index, visited, is_status=True)
+        assert status is not None
+
+    if code_param is None and status_param is None:
+        assert isinstance(code, frozenset) and isinstance(status, frozenset)
+        return {(c, s) for c in code for s in status}
+
+    assert func is not None
+    if id(func) in visited or len(visited) >= _MAX_RESOLUTION_DEPTH:
+        return None  # a cycle or runaway chain: resolve nothing rather than loop or guess
+    next_visited = visited | {id(func)}
+
+    pairs: set[tuple[str, str]] = set()
+    for call in index.calls_by_target.get(func.name, ()):
+        caller = index.enclosing_function(call)
+        caller_code = _operand_at_caller(call, func, code_param, code, index, next_visited)
+        caller_status = _operand_at_caller(call, func, status_param, status, index, next_visited)
+        if caller_code is None or caller_status is None:
+            return None
+        resolved = _resolve_pair(caller_code, caller_status, caller, index, next_visited)
+        if resolved is None:
+            return None
+        pairs.update(resolved)
+    return pairs or None
+
+
+def _operand_at_caller(
+    call: ast.Call,
+    func: ast.FunctionDef | ast.AsyncFunctionDef,
+    param: str | None,
+    settled: _Operand,
+    index: _FileIndex,
+    visited: frozenset[int],
+) -> _Operand | None:
+    """What one caller contributes for an operand: the argument it passed for the forwarded
+    parameter, the parameter's default (settled in the callee's context) when it passed none, or
+    the already-settled set when the operand was not forwarded at all."""
+    if param is None:
+        return settled
+    argument = _argument_for_param(call, func, param)
+    if argument is not None:
+        return argument
+    default = _param_default(func, param)
+    if default is None:
+        return None
+    resolved = _resolve_expr(default, func, index, visited)
+    return None if resolved is None else frozenset(resolved)
 
 
 def _source_files() -> Iterator[Path]:
@@ -390,17 +671,28 @@ def _source_files() -> Iterator[Path]:
 
 
 def collect_static() -> StaticInventory:
-    """Pass 1 — AST walk with interprocedural constant folding over every module under
-    `src/vqapr`."""
-    codes: list[StaticCode] = []
+    """Pass 1 -- AST walk with interprocedural constant folding over every module under
+    `src/vqapr`, each resolved code bucketed by the `Status` it is raised under."""
+    members = status_members()
+    codes: set[StaticCode] = set()
     unresolved: list[UnresolvedExpression] = []
     for path in _source_files():
-        file_codes, file_unresolved = _scan_file(path)
-        codes.extend(file_codes)
+        file_codes, file_unresolved = _scan_file(path, members)
+        codes.update(file_codes)
         unresolved.extend(file_unresolved)
-    codes.sort(key=lambda entry: (entry.code, entry.file, entry.line))
     unresolved.sort(key=lambda entry: (entry.file, entry.line))
-    return StaticInventory(codes=tuple(codes), unresolved=tuple(unresolved))
+    return StaticInventory(
+        codes=tuple(sorted(codes, key=lambda entry: (entry.bucket, entry.code))),
+        unresolved=tuple(unresolved),
+    )
+
+
+def static_by_bucket(inventory: StaticInventory) -> dict[str, list[str]]:
+    """`{"400": [...], ..., "by_cause": [...]}`: the `static` section of the baseline."""
+    buckets: dict[str, set[str]] = {}
+    for entry in inventory.codes:
+        buckets.setdefault(entry.bucket, set()).add(entry.code)
+    return {bucket: sorted(codes) for bucket, codes in sorted(buckets.items())}
 
 
 # --------------------------------------------------------------------------------------------
@@ -862,16 +1154,19 @@ def collect_runtime() -> tuple[str, ...]:
 
 
 def build_report() -> dict:
-    """Assemble the full deterministic baseline document."""
+    """Assemble the full deterministic baseline document.
+
+    `static` is keyed by bucket -- a `Status` number as a string, or `by_cause` -- and holds the
+    sorted codes raised under it. No file and no line: a code that moves between files or slides
+    within one is not a change to the refusal vocabulary, and this baseline measures nothing else.
+    """
     static = collect_static()
     runtime_codes = collect_runtime()
     static_code_set = {entry.code for entry in static.codes}
     coverage_gap = sorted(static_code_set - set(runtime_codes))
     return {
         "schema": SCHEMA,
-        "static_codes": [
-            {"code": entry.code, "file": entry.file, "line": entry.line} for entry in static.codes
-        ],
+        "static": static_by_bucket(static),
         "runtime_codes": list(runtime_codes),
         "coverage_gap": coverage_gap,
         "unresolved": [

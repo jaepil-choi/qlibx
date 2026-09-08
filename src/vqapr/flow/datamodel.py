@@ -29,7 +29,7 @@ import pyarrow.parquet as pq
 
 from vqapr.authoring import DataModel
 from vqapr.calls import DataModelContext
-from vqapr.data.datasets import DatasetRegistration, Grain, validate
+from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.scan import (
     DECLARABLE_FIELD_TYPE_NAMES,
     DECLARABLE_FIELD_TYPES,
@@ -42,7 +42,8 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
-from vqapr.domain.values import Row, Rows, normalize_rows, require_tz_aware
+from vqapr.domain.shapes import Grain, Row, Rows, normalize_rows
+from vqapr.domain.values import require_tz_aware
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.loop import EventLoop, OccurrenceEvent
 from vqapr.workspace import Workspace

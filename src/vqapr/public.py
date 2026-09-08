@@ -31,7 +31,7 @@ from vqapr.authoring import (
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.evaluation import ConstraintReport
-from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
@@ -57,6 +57,7 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.shapes import CrossSection, Grain, Series
 from vqapr.domain.values import (
     LocalInstantDeclaration,
     Mark,
@@ -166,6 +167,7 @@ __all__ = (
     "ConstraintFinding",
     "ConstraintReport",
     "ConstraintSet",
+    "CrossSection",
     "DataModel",
     "DataModelContext",
     "DataModelEntry",
@@ -222,6 +224,7 @@ __all__ = (
     "RunRecordMissing",
     "RunReport",
     "RunResult",
+    "Series",
     "Side",
     "SideCost",
     "SimulationFailure",

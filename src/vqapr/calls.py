@@ -38,10 +38,10 @@ from vqapr.authoring import (
     StrategyCall,
     requirements_for,
 )
-from vqapr.data.datasets import Grain
 from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.shapes import Grain
 
 
 def observations(

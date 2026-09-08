@@ -29,6 +29,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
+from vqapr.domain.shapes import CrossSection, Series
 
 NO_INSTRUMENT = ""
 """The one column key of a panel built from a dataset with no instrument axis (`grain: instant`).
@@ -188,8 +189,12 @@ class PanelWindow:
     def __len__(self) -> int:
         return self.stop - self.start
 
-    def series(self, instrument: str = NO_INSTRUMENT) -> tuple[object, ...]:
-        """One name's values over the window's instants, `None` where it had none."""
+    def series(self, instrument: str = NO_INSTRUMENT) -> Series[object]:
+        """One name's values over the window's instants as a `Series`, `None` where it had none."""
+        return Series(instrument, self.instants, self._cells(instrument))
+
+    def _cells(self, instrument: str) -> tuple[object, ...]:
+        """One name's cells over the window, converted once per window (`docs/issues/061`)."""
         cached = self._values.get(instrument)
         if cached is None:
             # An Arrow slice shares the panel's buffers; only this window's cells are converted.
@@ -216,7 +221,7 @@ class PanelWindow:
         """
         return _LazyColumns(self)
 
-    def current(self) -> Mapping[str, object]:
+    def current(self) -> CrossSection[object]:
         """The cross-section at the window's last instant: one value per name that has a row there.
 
         A name with no row -- or a null -- at `max_available_at` is absent, never carried forward.
@@ -229,15 +234,16 @@ class PanelWindow:
         """
         found: dict[str, object] = {}
         if self.stop <= self.start:
-            return MappingProxyType(found)
+            return CrossSection._trusted(found)
         last = self.stop - self.start - 1
         for name in self.panel.instruments or (NO_INSTRUMENT,):
             cell = self._column(name)[last]
             if cell.is_valid:
                 found[name] = cell.as_py()
-        return MappingProxyType(found)
+        # The panel's instruments are sorted at build time, so `found` is already in id order.
+        return CrossSection._trusted(found, self.panel.instants[self.stop - 1])
 
-    def latest(self) -> Mapping[str, object]:
+    def latest(self) -> CrossSection[object]:
         """The newest non-null value per name ANYWHERE in the window; a name with none is absent.
 
         A time-series read: the last value each name carried, however old. On a sparse panel this
@@ -251,7 +257,8 @@ class PanelWindow:
             present = pc.drop_null(self._column(name))
             if len(present):
                 found[name] = present[len(present) - 1].as_py()
-        return MappingProxyType(found)
+        # No single instant: each name's newest value may sit on a different row.
+        return CrossSection._trusted(found)
 
     def counts(self) -> dict[str, int]:
         """Non-null values per name inside the window: the access record's `actual_rows`."""
@@ -288,7 +295,7 @@ class _LazyColumns(Mapping[str, tuple[object, ...]]):
         return self._window.panel.instruments or (NO_INSTRUMENT,)
 
     def __getitem__(self, instrument: str) -> tuple[object, ...]:
-        return self._window.series(instrument)
+        return self._window._cells(instrument)
 
     def __iter__(self):
         return iter(self._keys())

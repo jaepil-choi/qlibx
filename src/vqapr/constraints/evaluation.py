@@ -12,6 +12,7 @@ from vqapr.authoring import Constraint, ConstraintBounds, ConstraintFinding, Eco
 from vqapr.calls import ConstraintContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.shapes import CrossSection
 from vqapr.domain.values import MarkBatch
 
 # ------------------------------------------------------------------------------------------
@@ -273,18 +274,27 @@ def merged_constraint_bounds(
         raise TypeError("projected must be a tuple of ProjectedConstraintFinding")
     if not projected:
         return ConstraintBounds(lower_weights={}, upper_weights={})
-    instruments = tuple(projected[0].bounds.lower_weights)
-    if any(set(item.bounds.lower_weights) != set(instruments) for item in projected[1:]):
-        raise ValueError("projected bounds must cover the same instruments")
-    lower = {
-        instrument: max(item.bounds.lower_weights[instrument] for item in projected)
-        for instrument in instruments
-    }
-    upper = {
-        instrument: min(item.bounds.upper_weights[instrument] for item in projected)
-        for instrument in instruments
-    }
+    first, *rest = (item.bounds for item in projected)
+    if not rest:
+        return first
+    # The intersection of boxes: lower bounds take the max, upper bounds the min, name by name.
+    # `elementwise` refuses a projection that covers different names (record `183`).
+    try:
+        lower = _section(first.lower_weights).elementwise(
+            max, *(item.lower_weights for item in rest)
+        )
+        upper = _section(first.upper_weights).elementwise(
+            min, *(item.upper_weights for item in rest)
+        )
+    except ValueError as error:
+        raise ValueError("projected bounds must cover the same instruments") from error
     return ConstraintBounds(lower_weights=lower, upper_weights=upper)
+
+
+def _section(weights: Mapping[str, Decimal]) -> CrossSection[Decimal]:
+    """The cross-section a bounds field holds; `ConstraintBounds` stores one, its annotation
+    is the `Mapping` an author may pass in."""
+    return weights if isinstance(weights, CrossSection) else CrossSection(weights)
 
 
 def evaluate_constraints(

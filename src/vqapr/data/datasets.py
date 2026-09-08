@@ -12,7 +12,6 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from enum import StrEnum
 
 from vqapr.data import scan
 from vqapr.data.lookback import InstantsLookback
@@ -27,6 +26,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
+from vqapr.domain.shapes import Grain
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 """A field expression that is nothing but a name, which is what every registration wrote before
@@ -38,28 +38,8 @@ an expression nobody here can check on its own, so it gets duckdb's message from
 untouched.
 """
 
-class Grain(StrEnum):
-    """What one row of the dataset IS, declared by the author and never derived.
-
-    `docs/design/the-panel-the-surface-and-the-run.md` §2.2. The grain decides what registration
-    checks for uniqueness, whether a panel can be built from the table, and -- with the lookback
-    types that follow it (§2.4) -- what `RowsLookback` means on it. An `aggregated` projection is
-    a *means* of reaching `instrument_instant` from a long source; it is not the grain itself, and
-    a fact derived from expressions gives the author no place to state intent. `049`'s story --
-    registered long, six hundred times slower, and nobody said why -- is what a declared grain
-    prevents.
-    """
-
-    INSTRUMENT_INSTANT = "instrument_instant"
-    """One value per field per (available_at, instrument). A panel can be built."""
-
-    INSTANT = "instant"
-    """One value per available_at; no instrument axis (`docs/issues/038`). A one-column panel."""
-
-    ROWS = "rows"
-    """The vendor's grain: long / EAV. Unique on the declared `key_fields`. No panel."""
-
-
+# `Grain` -- what one row of the dataset IS -- lives in `domain/shapes.py` since record `183`:
+# it is the fact the shapes are derived from, and it belongs beside them.
 GRAIN_NAMES = ", ".join(member.value for member in Grain)
 
 ROWS_LOOKBACK_MEANING = (

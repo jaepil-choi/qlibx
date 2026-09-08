@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import Grain, lookback_fits_grain, require_declared
+from vqapr.data.datasets import lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
@@ -23,7 +23,8 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
-from vqapr.domain.values import Rows, normalize_rows, require_tz_aware
+from vqapr.domain.shapes import Grain, Rows, normalize_rows
+from vqapr.domain.values import require_tz_aware
 
 
 class DatasetCatalog(Protocol):

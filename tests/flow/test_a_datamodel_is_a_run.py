@@ -23,7 +23,8 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.datasets import DatasetRegistration
+from vqapr.domain.shapes import Grain
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 from vqapr.flow.datamodel import DataModelResult, output_directory, output_source_id

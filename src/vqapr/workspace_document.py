@@ -34,10 +34,11 @@ from pydantic import (
     model_validator,
 )
 
-from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id, execution_input_id, source_id
+from vqapr.domain.shapes import Grain
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef

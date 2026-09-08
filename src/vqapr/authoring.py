@@ -33,7 +33,8 @@ from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHist
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.values import ModelMemory, Rows, require_tz_aware
+from vqapr.domain.shapes import CrossSection, Observation, Rows
+from vqapr.domain.values import ModelMemory, require_tz_aware
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -165,14 +166,20 @@ def _copy_values(
     return MappingProxyType(dict(sorted(normalized.items())))
 
 
-def _copy_weights(values: object, *, name: str) -> Mapping[str, Decimal]:
+def _copy_weights(values: object, *, name: str) -> CrossSection[Decimal]:
+    """A validated, read-only cross-section of `Decimal` per instrument (record `183`).
+
+    Every weight-shaped value on this surface -- a target, a bound, a position, a marked value
+    -- is one instant's instrument -> value, and that shape has a name now. It is still a
+    `Mapping`, so an author's `weights["A"]` and `weights.items()` are unchanged.
+    """
     if not isinstance(values, Mapping):
         raise TypeError(f"{name} must be a mapping")
     normalized: dict[str, Decimal] = {}
     for key, value in values.items():
         instrument_id = _identifier(key, name=f"{name} key")
         normalized[instrument_id] = _finite_decimal(value, name=f"{name}[{instrument_id!r}]")
-    return MappingProxyType(dict(sorted(normalized.items())))
+    return CrossSection._trusted(dict(sorted(normalized.items())))
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -192,47 +199,8 @@ class DatasetInput:
             raise TypeError("lookback must be a RowsLookback, CalendarLookback or InstantsLookback")
 
 
-@dataclass(frozen=True, slots=True)
-class Observation:
-    """One PIT row returned from a declared, aliased read.
-
-    Constructing one by hand validates every field: the instrument id is a non-empty identifier,
-    `available_at` is tz-aware, every value key is an identifier and every value a portable
-    scalar. A row the framework itself produced is built through `_framework_row` instead and
-    skips all of that -- `docs/issues/054` measured the per-row re-check at 70% of a `rows` read,
-    proving per value what the registration proved once (`docs/issues/035`: validation happens at
-    registration, and the read path is trusted). The distinction is who built the row, not
-    whether rows are checked: an author's `Observation(values={"a b": 1})` is still refused.
-    """
-
-    instrument_id: str
-    available_at: datetime
-    values: Mapping[str, object]
-
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "instrument_id", _identifier(self.instrument_id, name="instrument_id")
-        )
-        object.__setattr__(self, "available_at", _tz_aware(self.available_at, name="available_at"))
-        object.__setattr__(self, "values", _copy_values(self.values, name="values"))
-
-    @classmethod
-    def _framework_row(
-        cls, instrument_id: str, available_at: datetime, values: dict[str, object]
-    ) -> Observation:
-        """An observation from a row the scan returned: no validation, same immutable shape.
-
-        The field names are the alias's declared `fields`, validated when the `DatasetInput` was
-        declared; `available_at` comes from the scan's own `TIMESTAMPTZ` column, which cannot
-        hold a naive value; the values are what the parquet column holds, which `_scalar` would
-        pass through unchanged. `values` is wrapped, not copied: the caller built that dict for
-        this row and hands it over.
-        """
-        observation = object.__new__(cls)
-        object.__setattr__(observation, "instrument_id", instrument_id)
-        object.__setattr__(observation, "available_at", available_at)
-        object.__setattr__(observation, "values", MappingProxyType(values))
-        return observation
+# `Observation` -- one row of the long shape -- is `vqapr.domain.shapes.Observation` since record
+# `183`, re-exported here because it is what an author receives from `call.rows(alias)`.
 
 
 class DataCall(ABC):
@@ -465,15 +433,16 @@ class EconomicAccountView:
             )
         return self.value(instrument_id) / self.nav
 
-    def weights(self) -> Mapping[str, Decimal]:
+    def weights(self) -> CrossSection[Decimal]:
         """Every marked name's share of NAV, signed. The whole book as a weight vector."""
         if self.values is None:
             raise ValueError(
                 "this view carries no marked values; it was built at an instant the framework "
                 "had no marks to offer, and an empty book here would be an answer rather than a gap"
             )
-        return MappingProxyType(
-            {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)}
+        return CrossSection._trusted(
+            {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)},
+            self.nav_observed_at,
         )
 
 

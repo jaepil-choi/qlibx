@@ -541,7 +541,6 @@ class RunRecordLive(FileExistsError):
         self.run_id = run_id
         self.directory = directory
         self.claim = claim
-        self.holder = claim.pid
         super().__init__(
             f"run {run_id!r} holds a lock at {directory} last refreshed {claim.age:.0f}s ago "
             f"(pid {claim.pid}); a live run refreshes it continuously, and an abandoned one is "
@@ -1593,37 +1592,6 @@ def read_table(
             ) from damaged
         for batch in reader.iter_batches():
             yield from _python_rows(batch)
-
-
-def table_types(
-    root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
-) -> dict[str, str] | None:
-    """The kind each column was written as, from the parquet schema, or `None` for no table.
-
-    The same vocabulary the retired sidecar used -- `bool`, `int`, `float`, `decimal`,
-    `datetime`, `string` -- read off the first chunk that holds a value for the column.
-    """
-    parts = _parts(root, run_id, table_id, strategy_ref)
-    if not parts:
-        return None
-    types: dict[str, str] = {}
-    for path in parts:
-        for column in pq.read_schema(path):
-            if column.name in types:
-                continue
-            if column.metadata and column.metadata == _DECIMAL:
-                types[column.name] = "decimal"
-            elif pa.types.is_timestamp(column.type):
-                types[column.name] = "datetime"
-            elif pa.types.is_boolean(column.type):
-                types[column.name] = "bool"
-            elif pa.types.is_integer(column.type):
-                types[column.name] = "int"
-            elif pa.types.is_floating(column.type):
-                types[column.name] = "float"
-            elif pa.types.is_string(column.type):
-                types[column.name] = "string"
-    return types
 
 
 read_typed_table = read_table

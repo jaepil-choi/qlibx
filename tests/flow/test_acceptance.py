@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 import vqapr.flow.run_state as model_state
+from vqapr.domain.values import normalize_memory
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.flow.run_state import (
@@ -13,11 +14,27 @@ from vqapr.flow.run_state import (
     LifecycleTrace,
     RunFinalization,
     RunStateRepository,
-    capture_live_memory,
-    restore_live_memory,
 )
 
 NOW = datetime(2024, 3, 5, 4, tzinfo=UTC)
+
+
+def _accept_no_decision(
+    repository: RunStateRepository,
+    memory: object,
+    payload: bytes,
+    *,
+    recorder: InvocationRecorder | None = None,
+) -> AcceptedRunState:
+    """The composition the callback loop makes itself (`flow/callback.py`): prepare, publish."""
+    return repository.publish(
+        repository.prepare_callback(
+            memory,
+            payload,
+            lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION),
+            recorder=recorder,
+        )
+    )
 
 
 def _recorder() -> InvocationRecorder:
@@ -75,7 +92,7 @@ def test_root_rejects_a_ref_paired_with_different_payload_bytes() -> None:
 def test_visible_state_is_detached_from_candidate_and_loaded_values() -> None:
     repository = RunStateRepository()
     memory = {"values": [1]}
-    accepted = repository.accept_no_decision(memory, b"")
+    accepted = _accept_no_decision(repository, memory, b"")
     memory["values"].append(2)
 
     loaded = repository.load_model_state(accepted.current_model_state_ref)
@@ -89,7 +106,7 @@ def test_optimistic_conflict_does_not_replace_current_root() -> None:
     stale = repository.prepare_callback(
         {"count": 1}, b"", lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION)
     )
-    repository.accept_no_decision({"count": 2}, b"")
+    _accept_no_decision(repository, {"count": 2}, b"")
 
     with pytest.raises(RuntimeError, match="optimistic conflict"):
         repository.publish(stale)
@@ -102,7 +119,7 @@ def test_no_decision_publishes_state_and_rows_but_keeps_pending_intent() -> None
     pending = object()
     repository = RunStateRepository(pending_accepted_intent=pending)
 
-    accepted = repository.accept_no_decision({"count": 1}, b"", recorder=_recorder())
+    accepted = _accept_no_decision(repository, {"count": 1}, b"", recorder=_recorder())
 
     assert accepted.pending_accepted_intent is pending
     assert accepted.lifecycle_trace[-1].kind is LifecycleKind.NO_DECISION
@@ -113,7 +130,15 @@ def test_accepted_intent_publishes_state_pending_and_rows_together() -> None:
     repository = RunStateRepository()
     intent = object()
 
-    accepted = repository.accept_intent({"count": 1}, b"", intent, recorder=_recorder())
+    accepted = repository.publish(
+        repository.prepare_callback(
+            {"count": 1},
+            b"",
+            lifecycle=LifecycleTrace(LifecycleKind.ACCEPTED_INTENT),
+            recorder=_recorder(),
+            pending_accepted_intent=intent,
+        )
+    )
 
     assert accepted.current_model_state_ref is not None
     assert accepted.pending_accepted_intent is intent
@@ -125,7 +150,9 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
     repository = RunStateRepository(pending_accepted_intent="previous")
     before = repository.root
     model = type("Model", (), {"memory": {"count": 1}})()
-    baseline = capture_live_memory(model.memory)
+    # The callback loop snapshots live memory with `normalize_memory` before invoking the strategy
+    # and restores from that snapshot when publication fails (`flow/callback.py`).
+    baseline = normalize_memory(model.memory)
 
     with pytest.raises(TypeError):
         repository.prepare_callback(
@@ -152,7 +179,7 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
     old = failing.root
     with pytest.raises(RuntimeError, match="injected"):
         failing.publish(candidate)
-    restore_live_memory(model, baseline)
+    model.memory = normalize_memory(baseline)
 
     assert failing.root is old
     assert failing.root.model_state_commit_count == 0

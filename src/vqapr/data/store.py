@@ -288,22 +288,6 @@ class DuckDbObservationStore:
             cached = self.__digests[path] = physical_digest(path)
         return cached
 
-    def query(
-        self,
-        requirement: DataRequirement,
-        *,
-        evaluation_time: datetime,
-        instruments: Sequence[str],
-        consumer_id: str,
-    ):
-        """One requirement, one field: the single-field spelling of `query_many`."""
-        return self.query_many(
-            (requirement,),
-            evaluation_time=evaluation_time,
-            instruments=instruments,
-            consumer_id=consumer_id,
-        )
-
     def query_many(
         self,
         requirements: Sequence[DataRequirement],

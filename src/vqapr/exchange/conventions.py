@@ -62,24 +62,6 @@ class ExecutionHorizon:
         """Candidates strictly later than the decision, without rescanning the source."""
         return self._instants[bisect_right(self._instants, decision_time.astimezone(UTC)) :]
 
-    def at_or_before(self, instant: datetime) -> datetime | None:
-        """The latest candidate at or before `instant`, or `None` when the venue published none.
-
-        This is the valuation direction, and it is deliberately not `after`'s mirror image. An
-        intent selects the first instant **strictly later** than the decision, because a decision
-        cannot fill in a print that already happened. A valuation is the opposite question: it
-        asks what the book was worth at a moment that has already arrived, so it must bind the
-        most recent price the venue actually published at or before that moment.
-
-        `None` is a real answer rather than a failure. It means the venue published nothing at or
-        before this instant, so no value exists to report -- which is different from the value
-        being zero or unknown.
-        """
-        if instant.tzinfo is None:
-            raise ValueError("instant must be timezone-aware")
-        index = bisect_right(self._instants, instant.astimezone(UTC))
-        return self._instants[index - 1] if index else None
-
     def local_target(self, convention: FillConvention, day: date) -> datetime:
         cached = self._local_targets.get(day)
         if cached is None:

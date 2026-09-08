@@ -15,7 +15,6 @@ from vqapr.exchange.listings import (
     ListingAccess,
     TradeRule,
     TradeTerms,
-    rules_view,
 )
 from vqapr.flow.marking import ValuationService
 from vqapr.orders.planning import plan_orders
@@ -266,7 +265,7 @@ def _fractional_venue(instrument_id: str, *, step: str, commission: str) -> Exch
         SideCost(commission_rate=decimal(commission)),
         SideCost(),
     )
-    return rules_view("fractional", {instrument_id: rule})
+    return ExchangeRulesView("fractional", {instrument_id: rule})
 
 
 def test_buys_are_funded_largest_delta_first_not_in_ticker_order() -> None:
@@ -278,7 +277,7 @@ def test_buys_are_funded_largest_delta_first_not_in_ticker_order() -> None:
     """
     small, big = "A000001", "Z999999"          # the big target sorts last alphabetically
     # A commission is what makes the plan overrun its cash, so somebody has to be clipped.
-    rules = rules_view(
+    rules = ExchangeRulesView(
         "whole",
         {
             name: TradeRule(
@@ -312,7 +311,7 @@ def test_buys_are_funded_largest_delta_first_not_in_ticker_order() -> None:
 def test_buy_order_compares_money_rather_than_share_count() -> None:
     """One share of a 900,000 name and one of a 9,000 name are not the same intent."""
     cheap, dear = "AAA", "ZZZ"
-    rules = rules_view(
+    rules = ExchangeRulesView(
         "whole",
         {
             name: TradeRule(
@@ -503,7 +502,7 @@ def test_a_halted_sale_does_not_fund_a_buy() -> None:
     """
     price = decimal("10000")
     account = AccountSnapshot(0, decimal("0"), {"HALTED": decimal("100")})
-    rules = rules_view(
+    rules = ExchangeRulesView(
         "v",
         {
             name: TradeRule(
@@ -577,7 +576,7 @@ def test_a_fully_invested_batch_is_payable_under_the_accounts_own_arithmetic() -
     }
     assert sum(targets.values(), Decimal(0)) == 1, "fully invested: no cash to absorb rounding"
 
-    rules = rules_view(
+    rules = ExchangeRulesView(
         "v",
         {
             name: TradeRule(

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-import vqapr.agent.sample.journey as journey
+import tests.sample.journey as journey
 from vqapr.evidence.artifacts import SimulationFailure
 from vqapr.flow.record import strategy_refs
 from vqapr.public import (

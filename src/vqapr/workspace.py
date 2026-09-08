@@ -1259,7 +1259,7 @@ class Transaction:
     def __enter__(self) -> Transaction:
         return self
 
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+    def __exit__(self, exc_type: object, *_exc: object) -> None:
         """Commit on a clean exit; leave the workspace untouched on an exception.
 
         The one door (one-shape campaign Step 5, decision D3). A single registration reads

@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from itertools import chain
 from types import MappingProxyType
-from typing import Any
 
 from vqapr.account.account import (
     PreparedAccountFill,
@@ -242,7 +241,7 @@ def _fill_rows(
     is the only place a later reader can recover it: the charge is a dictionary lookup at fill
     time and nothing downstream re-derives it. It was computed and then dropped, so every fill in
     a run reported no category even when the project had registered one -- which made
-    `FillBatch.cost_by_kind()` collapse to a single unlabelled bucket, and made registering a
+    the report's cost by kind collapse to a single "unknown" bucket, and made registering a
     roster produce no observable difference anywhere.
 
     `None` stays legal and means the run genuinely did not know: no roster reached the venue, or
@@ -681,42 +680,6 @@ class RunStateRepository:
         """Publish already-prepared feedback without running an external hook."""
         return self._publish_infallible(prepared)
 
-    def accept_no_decision(
-        self,
-        memory: object,
-        payload: bytes,
-        *,
-        detail: object = None,
-        recorder: InvocationRecorder | None = None,
-    ) -> AcceptedRunState:
-        return self.publish(
-            self.prepare_callback(
-                memory,
-                payload,
-                lifecycle=LifecycleTrace(LifecycleKind.NO_DECISION, detail),
-                recorder=recorder,
-            )
-        )
-
-    def accept_intent(
-        self,
-        memory: object,
-        payload: bytes,
-        intent: object,
-        *,
-        detail: object = None,
-        recorder: InvocationRecorder | None = None,
-    ) -> AcceptedRunState:
-        return self.publish(
-            self.prepare_callback(
-                memory,
-                payload,
-                lifecycle=LifecycleTrace(LifecycleKind.ACCEPTED_INTENT, detail),
-                recorder=recorder,
-                pending_accepted_intent=intent,
-            )
-        )
-
     def prepare_finalization(self, finalization: RunFinalization) -> PreparedRunState:
         """Prepare a typed terminal transition after all pending work is consumed."""
         if not isinstance(finalization, RunFinalization):
@@ -747,13 +710,3 @@ class RunStateRepository:
 
     def finalize(self, finalization: RunFinalization) -> AcceptedRunState:
         return self.publish(self.prepare_finalization(finalization))
-
-
-def capture_live_memory(memory: object) -> ModelMemory:
-    """Capture a detached invocation baseline for restoration after a rejected callback."""
-    return normalize_memory(memory)
-
-
-def restore_live_memory(model: Any, memory: object) -> None:
-    """Restore a Model's mutable live memory from a detached baseline."""
-    model.memory = normalize_memory(memory)

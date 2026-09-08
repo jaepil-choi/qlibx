@@ -16,7 +16,6 @@ from vqapr.authoring import (
     Constraint,
     ConstraintBounds,
     EconomicAccountView,
-    Rebalance,
 )
 from vqapr.constraints.builtin import (
     SHIPPED_CONSTRAINTS,
@@ -37,21 +36,9 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch
 from vqapr.portfolio.allocation import AllocationViolation
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 VENUE = "Asia/Seoul"
-BUDGET = Budget(
-    PortfolioDirection.SIGNED, Decimal("-1"), Decimal("2"), Decimal("-1"), Decimal("1")
-)
-"""The signed budget `Rebalance.of` documents: positions in [-1, 1] and cash in [-1, 2].
-
-Cash upper was 1 while these tests built an `EconomicPortfolioIntent` by hand, which checked
-nothing about it. `Rebalance` does check, and a signed book's cash legitimately exceeds 1 --
-selling short raises cash. Narrowing it here would have made the short cases below inexpressible
-rather than testing them."""
-
-
 @pytest.fixture(scope="module")
 def manifest() -> dict[str, object]:
     return json.loads((FIXTURE / "fixture.json").read_text(encoding="utf-8"))
@@ -130,20 +117,6 @@ def _latest_benchmark(
 def _view(account: AccountSnapshot, marks: MarkBatch) -> EconomicAccountView:
     """The author's view of a marked account, via the one function production uses."""
     return build_account_view(account, marks, datetime(2024, 1, 2, 15, 30, tzinfo=UTC))
-
-
-def _decision(weights: dict[str, Decimal]) -> Rebalance:
-    """What a callback returns, which is what a Constraint judges.
-
-    It used to be an `EconomicPortfolioIntent` -- the stamped object, carrying a uuid, a strategy
-    id, provenance and an account version that no rule about weights reads. Record `125` stopped
-    asking a Strategy to mint those; `129` stopped handing them to a Constraint.
-    """
-    return Rebalance(
-        target_weights=dict(sorted(weights.items())),
-        cash_weight=Decimal("1") - sum(weights.values()),
-        budget=BUDGET,
-    )
 
 
 def test_both_builtins_satisfy_the_full_constraint_contract() -> None:

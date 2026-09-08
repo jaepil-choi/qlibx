@@ -983,14 +983,14 @@ def test_operation_agenda_normalizes_cross_zone_order_and_rejects_unresolved_dst
         LocalInstantDeclaration(date(2024, 3, 4), time(23), "America/New_York", 0, "-05:00"),
     )
 
-    seoul_agenda = OperationAgenda.from_occurrences(
+    seoul_agenda = OperationAgenda(
         agenda_id="seoul",
         role=OperationRole.STRATEGY_CALLBACK,
         timezone="Asia/Seoul",
         occurrences=(seoul,),
         provenance="fixture",
     )
-    new_york_agenda = OperationAgenda.from_occurrences(
+    new_york_agenda = OperationAgenda(
         agenda_id="new-york",
         role=OperationRole.STRATEGY_CALLBACK,
         timezone="America/New_York",

@@ -23,8 +23,8 @@ _._print_message  # src/vqapr/cli/main.py
 
 
 # --- Resolved from a string, invisible to a name-based pass ---------------------------
-# `agent/sample/journey.py` registers this by the literal "SampleExchange".
-SampleExchange  # src/vqapr/agent/sample/exchange.py
+# `tests/sample/journey.py` registers this by the literal "SampleExchange" (record 170 moved the sample).
+SampleExchange  # tests/sample/exchange.py
 
 
 # --- Frozen dataclass fields: written at construction, read by serialization ----------
@@ -57,9 +57,14 @@ pytestmark
 bound_every_source  # tests/flow/test_hot_path_costs.py
 
 # --- pydantic fields the model reads and drops, or a test model reads only by key ------
-# `WorkspaceDocument` admits the two sections record 144 retired so a 0.3.0 document opens;
-# nothing reads their value, by design.
+# `WorkspaceDocument` admits the four sections records 144 and 148 retired so a 0.3.0 document
+# opens; nothing reads their value, by design. (`agendas` shares its name with a live module
+# and so never shows up.)
 _.valuation_configs  # src/vqapr/workspace_document.py
 _.monitoring_policies  # src/vqapr/workspace_document.py
+_.strategy_configs  # src/vqapr/workspace_document.py
+# The run record's identity field: set by `freeze_run_record`, read back BY KEY from the dumped
+# `run.json` in `_write_run_json`, where a second run under the same id is compared against it.
+_.declared_digest  # src/vqapr/flow/record.py
 # The adapter test's throwaway model: pydantic reads its fields from a payload by key.
 _.when  # tests/test_a_validation_error_is_a_refusal.py

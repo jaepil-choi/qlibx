@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import vqapr.agent.sample.journey as journey
+import tests.sample.journey as journey
 from vqapr.public import Workspace
 
 

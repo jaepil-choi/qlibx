@@ -66,7 +66,7 @@ def test_the_exception_states_a_lock_and_its_release_rather_than_liveness(tmp_pa
         RunRecordWriter(tmp_path, "busy").open()
 
     message = str(refused.value)
-    assert refused.value.holder == os.getpid(), "the pid stays available to callers"
+    assert refused.value.claim.pid == os.getpid(), "the pid stays available to callers"
     assert refused.value.claim.age >= 0.0
     assert "last refreshed" in message
     assert "released automatically" in message

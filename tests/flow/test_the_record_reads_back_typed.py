@@ -17,6 +17,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import duckdb
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from vqapr.flow.record import (
@@ -27,7 +29,6 @@ from vqapr.flow.record import (
     read_table,
     read_typed_table,
     table_ids,
-    table_types,
 )
 from vqapr.public import read_strategy_table
 
@@ -57,12 +58,16 @@ def test_decimals_and_instants_come_back_as_what_they_were(tmp_path: Path) -> No
     assert rows[0]["nav"] == Decimal("1000.25") and isinstance(rows[0]["nav"], Decimal)
     assert rows[0]["observed_at"] == AT and rows[0]["observed_at"].utcoffset() == timedelta(hours=9)
     assert rows[1]["nav"] is None and rows[1]["observed_at"] is None
-    assert table_types(tmp_path, "typed", "vqapr.account") == {
-        "instrument": "string",
-        "nav": "decimal",
-        "observed_at": "datetime",
-        "event_time": "datetime",
-    }
+    # The type travels in the parquet itself: a Decimal is text marked decimal in the field's
+    # metadata, an instant is a zoned timestamp, and a string is a string.
+    schema = pq.read_schema(
+        writer.directory / TABLES_DIRECTORY / "vqapr.account" / COMPACT_FILENAME
+    )
+    assert pa.types.is_string(schema.field("instrument").type)
+    assert pa.types.is_string(schema.field("nav").type)
+    assert schema.field("nav").metadata == {b"vqapr.type": b"decimal"}
+    assert pa.types.is_timestamp(schema.field("observed_at").type)
+    assert pa.types.is_timestamp(schema.field("event_time").type)
     assert read_strategy_table is read_typed_table is read_table
     assert table_ids(tmp_path, "typed") == ("vqapr.account",)
 
@@ -125,7 +130,11 @@ def test_a_table_is_one_file_written_when_the_run_ends_and_a_column_keeps_its_fi
     rows = list(read_table(tmp_path, "chunks", "probe"))
     assert [row["n"] for row in rows] == [1, 2, 3]
     assert rows[0]["when"] is None and rows[1]["when"] == AT
-    assert table_types(tmp_path, "chunks", "probe") == {"n": "int", "when": "datetime"}
+    schema = pq.read_schema(directory / COMPACT_FILENAME)
+    assert pa.types.is_integer(schema.field("n").type)
+    assert pa.types.is_timestamp(schema.field("when").type), (
+        "a null-first column is typed by the first value that typed it"
+    )
 
 
 def test_a_buffer_over_the_spill_line_lands_as_parts_that_the_end_folds_into_one_file(
@@ -151,7 +160,7 @@ def test_a_buffer_over_the_spill_line_lands_as_parts_that_the_end_folds_into_one
     assert sorted(path.name for path in directory.iterdir()) == [COMPACT_FILENAME]
     rows = list(read_table(tmp_path, "spilled", "probe"))
     assert [row["n"] for row in rows] == [1, 2] and rows[1]["when"] == AT
-    assert table_types(tmp_path, "spilled", "probe") == {"n": "int", "when": "datetime"}
+    assert pa.types.is_timestamp(pq.read_schema(directory / COMPACT_FILENAME).field("when").type)
 
 
 def test_a_compact_file_beside_leftover_parts_is_read_alone(tmp_path: Path) -> None:
@@ -200,4 +209,3 @@ def test_a_table_never_written_reads_as_no_table(tmp_path: Path) -> None:
 
     assert table_ids(tmp_path, "empty") == ()
     assert list(read_table(tmp_path, "empty", "probe")) == []
-    assert table_types(tmp_path, "empty", "probe") is None

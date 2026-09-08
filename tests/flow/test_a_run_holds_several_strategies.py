@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import vqapr.agent.sample.journey as journey
+import tests.sample.journey as journey
 from vqapr.flow.record import (
     RUN_FILENAME,
     STRATEGY_FILENAME,

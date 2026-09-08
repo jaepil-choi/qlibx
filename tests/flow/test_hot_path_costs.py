@@ -103,8 +103,8 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     observation_store = DuckDbObservationStore(priced_workspace)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(2))
     for session in SESSIONS[3:]:
-        observation_store.query(
-            requirement,
+        observation_store.query_many(
+            (requirement,),
             evaluation_time=session,
             instruments=("AAA", "BBB"),
             consumer_id="test-consumer",
@@ -123,14 +123,14 @@ def test_two_stores_do_not_share_a_digest_cache(priced_workspace: Workspace) -> 
     first = DuckDbObservationStore(priced_workspace)
     second = DuckDbObservationStore(priced_workspace)
 
-    first_batch = first.query(
-        requirement,
+    first_batch = first.query_many(
+        (requirement,),
         evaluation_time=SESSIONS[-1],
         instruments=("AAA",),
         consumer_id="test-consumer",
     )
-    second_batch = second.query(
-        requirement,
+    second_batch = second.query_many(
+        (requirement,),
         evaluation_time=SESSIONS[-1],
         instruments=("AAA",),
         consumer_id="test-consumer",

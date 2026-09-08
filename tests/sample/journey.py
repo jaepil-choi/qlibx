@@ -12,13 +12,10 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.agent.sample.build import SamplePanel, build
-from vqapr.extension.fingerprint import fingerprint_component
+from tests.sample.build import SamplePanel, build
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
-    ComponentRef,
     DatasetRegistration,
     ExecutionInputRegistration,
     ExecutionTableSpec,
@@ -28,8 +25,8 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     preflight_run,
-    register_component,
     register_dataset,
+    register_exchange,
     register_execution_input,
     register_run,
     register_strategy_model,
@@ -115,21 +112,14 @@ def install(project_root: Path, panel: SamplePanel | None = None) -> SamplePanel
         ),
     )
     register_strategy_model(project_root, STRATEGY_ID, STRATEGY_SOURCE, "SampleReversal5d")
-    register_component(
+    # The same door a user's exchange goes through: fingerprint, conformance, then the write. The
+    # hand-built `ComponentRef` this replaced skipped conformance (record `170`).
+    register_exchange(
         project_root,
-        ComponentRef.of(
-            EXCHANGE_ID,
-            ComponentKind.EXCHANGE,
-            EXCHANGE_SOURCE,
-            "SampleExchange",
-            config={"instruments": list(panel.instruments)},
-            fingerprint=fingerprint_component(
-                EXCHANGE_SOURCE,
-                kind=ComponentKind.EXCHANGE,
-                object_name="SampleExchange",
-                config={"instruments": list(panel.instruments)},
-            ),
-        ),
+        EXCHANGE_ID,
+        EXCHANGE_SOURCE,
+        "SampleExchange",
+        config={"instruments": list(panel.instruments)},
     )
 
     register_run(project_root, definition(panel))

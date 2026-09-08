@@ -280,10 +280,6 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     )
     assert changed_source.identity != frozen.identity
     assert changed_fill.identity != frozen_execution.identity
-    assert (
-        frozen.physical_source_guarantee
-        == "Configuration and declaration objects are frozen; physical source bytes are not."
-    )
 
 
 def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(

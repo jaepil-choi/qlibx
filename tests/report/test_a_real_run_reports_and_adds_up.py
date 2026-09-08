@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import vqapr.agent.sample.journey as journey
+import tests.sample.journey as journey
 from vqapr.public import Workspace, preflight_run, register_run, run_report
 from vqapr.public import run as execute_run
 

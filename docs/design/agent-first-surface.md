@@ -320,8 +320,13 @@ statement for `vqapr.public`, excluding every occurrence inside a string literal
 what makes that exclusion real: template text and refusal strings are `Constant` nodes and are
 structurally invisible to it.
 
-**Verified value: 5**, as of 2026-09-01, asserted by
+**Verified value: 2**, as of 2026-09-08 (record `170`), asserted by
 `tests/boundaries/test_the_facade_is_not_reached_up_to.py`.
+
+It was **4** until record `170` moved `agent/sample/exchange.py` and `agent/sample/journey.py` to
+`tests/sample/`: no command, public name or skill path reached the sample, so it was test code
+shipped in the wheel -- the shape record `124` deleted. It was **5** as of 2026-09-01, before
+record `125` took the facade import out of `_internal/strategy_bridge.py`.
 
 It was **11** until record `124` deleted `project.py` and the five `_internal` bridges reachable
 only from it. What remains is four permanent entries — two CLI verbs and two shipped samples using

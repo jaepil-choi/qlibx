@@ -332,7 +332,7 @@ another, can be served a stale workspace.
 
 
 class WorkspaceDocument(Document):
-    """`workspace.yaml` whole: seven sections, two of them required, and two read and dropped.
+    """`workspace.yaml` whole: nine sections, two of them required, and four read and dropped.
 
     Four sections are read and dropped, so a document written by 0.3.0 opens: `valuation_configs`
     and `monitoring_policies` (record `144`, each restated an agenda's own role) and `agendas` and

@@ -7,18 +7,19 @@ resolves neither of them itself.
 
 from __future__ import annotations
 
+import inspect
 from decimal import Decimal
 from pathlib import Path
 
 import pyarrow.parquet as pq
 import pytest
 
-from vqapr.agent.sample.build import (
+from tests.sample.build import (
     DEAD_SESSIONS,
     LATE_SESSIONS,
     WIND_DOWN_SESSIONS,
 )
-from vqapr.agent.sample.reversal_5d import LOOKBACK, SampleReversal5d
+from tests.sample.reversal_5d import LOOKBACK, SampleReversal5d
 
 pytestmark = pytest.mark.real_data
 
@@ -86,8 +87,8 @@ def test_the_strategy_declares_the_lookback_it_reads(panel) -> None:
 
 def test_the_strategy_never_inspects_listing_status() -> None:
     """Tradability is an execution-time fact; a callback that asks about it is guessing."""
-    source = Path(SampleReversal5d.__module__.replace(".", "/")).with_suffix(".py")
-    text = (Path("src") / source).read_text(encoding="utf-8")
+    source = Path(inspect.getfile(SampleReversal5d))
+    text = source.read_text(encoding="utf-8")
     body = text.split("def decide", 1)[1]
     for forbidden in ("is_tradable", "listed", "delist", "halt", "max_available_at"):
         assert forbidden not in body
@@ -103,7 +104,7 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path, sample_panel) -> Non
     registration fails with `component.load.wrong_type`, and the reference an agent is
     told to copy does not work.
     """
-    from vqapr.agent.sample import journey
+    from tests.sample import journey
 
     root = tmp_path / "proj"
     root.mkdir()
@@ -139,7 +140,7 @@ def test_the_installed_sample_is_accepted_by_the_products_own_check(
     asking. The horizon moved (record `167`) and the judgments moved into `preflight_run`
     (record `168`), so this asks the public door the journey itself uses.
     """
-    from vqapr.agent.sample import journey
+    from tests.sample import journey
     from vqapr.public import Workspace, preflight_run
 
     root = tmp_path / "proj"

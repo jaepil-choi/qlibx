@@ -338,13 +338,15 @@ callback과 같은 instant이면 execution chain을 먼저 완료하므로 callb
 due execution만 agenda가 없다. callback이 intent를 만들면 그것이 `target_at`을 들고 대기하고, merge
 loop가 그 시각에 도달할 때 체결된다. 그래서 **결정과 체결은 서로 다른 occurrence이다.**
 
-**valuation은 fill commit에 종속되지 않는다.** 네 시계는 독립이고 시각 순서로만 병합된다. 흔한
-오독은 "체결이 commit된 다음이 valuation 시점"인데, 그렇게 구현되어 있다면 **거래가 없는 날에는
-valuation이 돌지 않게 되고, 그것이 정확히 `implementations/056`이 제거한 결함이다** — 거래가 있을
-때만 움직이는 NAV 시계열. 순서가 대체로 그렇게 보이는 이유는 종속이 아니라
-`_valuation_instant`가 `at_or_before`로 "그 시각 이전의 마지막 체결 instant"를 고르기 때문이다.
-(`select_target`의 strictly-later를 쓰면 16:00 valuation이 *내일* 체결에 묶여 NAV 전체가 한 칸
-밀린다.)
+**valuation은 거래가 있는 날에만 돌지 않는다.** 흔한 오독은 "체결이 commit된 다음이 valuation
+시점"인데, 그렇게 구현되어 있다면 **거래가 없는 날에는 valuation이 돌지 않게 되고, 그것이 정확히
+`implementations/056`이 제거한 결함이다** — 거래가 있을 때만 움직이는 NAV 시계열. 지금 코드는
+(기록 `148` 이후) 별도의 valuation 시계나 `at_or_before` 탐색 없이 이렇게 한다: callback이 주문을
+내지 않으면(Hold) `CallbackPhase._accept_valuation`(`flow/callback.py`)이 그 occurrence를 **주문을
+냈다면 체결됐을 instant**에 묶는다 — intent와 같은 `select_target`(결정보다 strictly-later)이다.
+그래서 매 세션 08:00 결정은 거래 여부와 무관하게 같은 날 15:30 체결 instant에서 장부를 재고, NAV
+시계열은 세션마다 한 점씩 나온다. intent가 이미 pending이면 그 체결이 장부를 재므로 Hold는 아무것도
+덧붙이지 않고, execution authority가 없는 run(callback만 돌리는 연구 run)은 venue 가격으로 재지 않는다.
 
 **정상 방향은 valuation이 결정보다 촘촘한 쪽이다.** 매일 평가하고 한 달에 한 번 거래하는 것이
 연구의 표준 형태다. 두 시계의 관계를 강제하는 코드는 없고 in-tree run은 전부 같은 날짜 튜플을

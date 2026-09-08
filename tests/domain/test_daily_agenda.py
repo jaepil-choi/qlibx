@@ -1,7 +1,7 @@
 """Building an agenda from the sessions a dataset actually has.
 
-`from_occurrences` is the constructor for an agenda whose occurrences are already known. The
-common case is not a list: it is "every session this registered dataset has, at 08:00 local".
+The constructor takes occurrences that are already known. The common case is not a list: it is
+"every session this registered dataset has, at 08:00 local".
 Turning one into the other is mechanical, and it was being written by hand at every call site --
 three copies of the same sixteen lines, each of which owned the occurrence id scheme and the DST
 constants.

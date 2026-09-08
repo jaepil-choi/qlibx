@@ -176,7 +176,7 @@ def sample_panel(tmp_path_factory):
     over (record `169`). The panel is read-only parquet, so every test registers the same files
     into its own project through `journey.install(project, panel=sample_panel)`.
     """
-    from vqapr.agent.sample.build import WAREHOUSE, build
+    from tests.sample.build import WAREHOUSE, build
 
     if not WAREHOUSE.exists():
         pytest.skip(f"warehouse {WAREHOUSE} is not provisioned")

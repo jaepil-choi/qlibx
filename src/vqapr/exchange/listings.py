@@ -558,29 +558,3 @@ def _sizing_is_uniform() -> bool:
         "notional" in category.__dict__ or "quantity_for" in category.__dict__
         for category in INSTRUMENT_TYPES.values()
     )
-
-
-def rules_view(
-    exchange_id: str,
-    listings: Mapping[str, TradeRule],
-    registry: object | None = None,
-    terms_by_kind: Mapping[object, TradeTerms] | None = None,
-) -> ExchangeRulesView:
-    """A view over one venue's listings, optionally already bound to a roster.
-
-    The roster stays optional here because construction must succeed without one: `loading.py`
-    type-checks a venue's `rules` before any registry exists to inject.
-
-    ``terms_by_kind`` is the channel for a venue whose rate depends on WHAT an instrument is. Give
-    it and the charge is resolved per fill from the project's registered roster; omit it and each
-    listing's own ``buy``/``sell`` are charged, which is right for a flat rate or a genuinely
-    per-instrument fee schedule.
-
-    An author writing a category-driven venue should reach for this rather than baking a rate into
-    each ``TradeRule``. Baking it in means holding a second copy of a fact the project owns, and
-    the two can disagree -- a fill then records the category the roster declared while the money
-    follows the venue's own idea of it (issue 013). Nothing can detect that from the outside,
-    because per-instrument rates are legitimate when they are not standing in for a category, so
-    the defence is a reachable correct channel rather than a check.
-    """
-    return ExchangeRulesView(exchange_id, listings, registry, terms_by_kind)

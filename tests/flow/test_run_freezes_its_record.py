@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-import vqapr.agent.sample.journey as journey
+import tests.sample.journey as journey
 from vqapr.cli.show import RECORD_FIELDS, STRATEGY_FIELDS, record_view
 from vqapr.flow.record import (
     RUN_JSON_FIELDS,

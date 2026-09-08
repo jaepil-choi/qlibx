@@ -75,16 +75,6 @@ def lookback_declaration(
             "lookback": LOOKBACK_DEFAULT if rows is None else rows,
             "lookback_kind": "rows",
         }
-    if rows is not None:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="--lookback and --calendar-lookback declare two different windows",
-            observed=f"--lookback {rows} and --calendar-lookback {calendar}",
-            retry=(
-                "keep --lookback for N observations per name, or --calendar-lookback for a window "
-                "of N days every name shares; drop the other"
-            ),
-        )
     if calendar <= 0:
         raise InputError(
             VALUE_INVALID,

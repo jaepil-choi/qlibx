@@ -214,24 +214,6 @@ class OperationAgenda:
         )
 
     @classmethod
-    def from_occurrences(
-        cls,
-        *,
-        agenda_id: AgendaId,
-        role: OperationRole,
-        timezone: str,
-        occurrences: Iterable[OperationOccurrence],
-        provenance: str,
-    ) -> OperationAgenda:
-        return cls(
-            agenda_id=agenda_id,
-            role=role,
-            timezone=timezone,
-            occurrences=tuple(occurrences),
-            provenance=provenance,
-        )
-
-    @classmethod
     def daily(
         cls,
         *,
@@ -244,10 +226,9 @@ class OperationAgenda:
     ) -> OperationAgenda:
         """One occurrence per session, at the same venue-local wall time.
 
-        `from_occurrences` is the constructor for an agenda whose occurrences are already known.
-        The common case is not a list -- it is "every session this registered dataset has, at
-        08:00 local", and turning one into the other is mechanical work that was being written by
-        hand at every call site.
+        The constructor takes occurrences that are already known. The common case is not a list --
+        it is "every session this registered dataset has, at 08:00 local", and turning one into
+        the other is mechanical work that was being written by hand at every call site.
 
         Three things stop being the caller's to get right:
 
@@ -266,7 +247,9 @@ class OperationAgenda:
         is made are different facts.
 
         A wall time that does not exist, or happens twice, on any session is refused rather than
-        resolved by guess. Declare those days through `from_occurrences`.
+        resolved by guess. There is no remedy inside the run declaration: a run names one `at` for
+        every session, so a venue whose clock skips or repeats that wall time on some day needs a
+        different `at`, or sessions that avoid the day.
         """
         zone = ZoneInfo(timezone)
         days: list[date] = []

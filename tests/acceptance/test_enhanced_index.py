@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -164,28 +163,6 @@ def _bounds(
     )
     window = _window(manifest, instruments, cap.requirements()[0], cutoff)
     return merged_constraint_bounds(project_constraints((NoShort(), cap), window))
-
-
-@dataclass(frozen=True)
-class _Access:
-    max_available_at: datetime | None
-
-
-@dataclass(frozen=True)
-class _SourceRef:
-    source_id: str
-
-
-@dataclass(frozen=True)
-class _Evidence:
-    run_identity: str
-    cutoff: datetime
-    strategy_accesses: tuple[_Access, ...]
-    decision: object
-    # Carried because the writer reads them for the provenance section and the state path.
-    actual_source_refs: tuple[_SourceRef, ...] = (_SourceRef("price_daily"),)
-    current_model_state_ref: object = "before"
-    committed_model_state_ref: object = "before"
 
 
 def _construct(

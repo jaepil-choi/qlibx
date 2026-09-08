@@ -482,8 +482,3 @@ class FrozenRun:
                 ],
             }
         )
-
-    @property
-    def physical_source_guarantee(self) -> str:
-        """The freeze covers declarations, not source bytes."""
-        return "Configuration and declaration objects are frozen; physical source bytes are not."

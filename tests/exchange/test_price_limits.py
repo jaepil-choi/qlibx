@@ -13,6 +13,8 @@ look limit-aware.
 
 from __future__ import annotations
 
+from vqapr.exchange.venue import ExecutionCall
+
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -71,9 +73,9 @@ def test_a_buy_at_the_upper_limit_is_typed_zero_dealt_not_a_batch_failure() -> N
     """A market fact for one session, so the rest of the rebalance still executes."""
     venue = _venue()
     account = AccountSnapshot(0, Decimal("100000000"), {})
-    fills = venue.execute(
+    fills = venue.execute(ExecutionCall.of(venue, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
-    )
+    ))
     fill = fills.fills[0]
     assert fill.dealt_quantity == 0
     assert fill.reason is ZeroDealtReason.NONTRADABLE
@@ -86,9 +88,9 @@ def test_a_sale_at_the_upper_limit_still_fills() -> None:
     venue = _venue()
     held = Decimal("100")
     account = AccountSnapshot(0, Decimal("0"), {NAME: held})
-    fills = venue.execute(
+    fills = venue.execute(ExecutionCall.of(venue, 
         _order(Decimal("-60"), Decimal("13000"), held), account, _snapshot(Decimal("13000"), BASE)
-    )
+    ))
     fill = fills.fills[0]
     assert fill.dealt_quantity == Decimal("-60")
     assert fill.reason is None
@@ -103,12 +105,12 @@ def test_switching_the_regime_off_removes_both_the_rule_and_the_requirement() ->
 
     account = AccountSnapshot(0, Decimal("100000000"), {})
     # Same order, same price, no reference available at all.
-    blocked = on.execute(
+    blocked = on.execute(ExecutionCall.of(on, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
-    ).fills[0]
-    filled = off.execute(
+    )).fills[0]
+    filled = off.execute(ExecutionCall.of(off, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), None)
-    ).fills[0]
+    )).fills[0]
 
     assert blocked.dealt_quantity == 0
     assert filled.dealt_quantity == Decimal("10"), "with limits off the order fills"

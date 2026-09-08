@@ -18,7 +18,7 @@ from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
-from vqapr.authoring import AccountHistoryInput, Constraint, StrategyModel
+from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.evidence.artifacts import (
@@ -165,12 +165,16 @@ class StrategyEventLoop(
             raise ValueError("state AccountState must match FrozenRun initial account snapshot")
         if frozen_run.initial_account_mode != account.mode:
             raise ValueError("Account mode must match FrozenRun initial account mode")
-        carried = set(state.current.constraint_state_refs)
-        if carried != {constraint.constraint_id for constraint in constraints}:
+        carried = set(state.current.component_state_refs)
+        stateful = {constraint.constraint_id for constraint in constraints}
+        if isinstance(exchange, Component):
+            stateful.add(exchange.exchange_id)
+        if carried != stateful:
             raise ValueError(
-                "state must carry the initial memory of exactly the loaded constraints "
-                f"(RunStateRepository initial_constraint_memory): carrying {sorted(carried)!r}, "
-                f"loaded {sorted(constraint.constraint_id for constraint in constraints)!r}"
+                "state must carry the initial memory of exactly the loaded components -- every "
+                "constraint, and the venue when it is a Component (RunStateRepository "
+                f"initial_component_memory): carrying {sorted(carried)!r}, loaded "
+                f"{sorted(stateful)!r}"
             )
 
         # All handler dependencies exist before the first handler is constructed. The loop owns
@@ -205,7 +209,6 @@ class StrategyEventLoop(
         self._valuation = ValuationHandler(self._context)
         self._callback = CallbackHandler(self._context)
         self._execution = ExecutionHandler(self._context, self._valuation)
-        self._execution.bind_registry_to_venue()
         account.bind(initial)
 
     def run(self) -> SimulationResult:

@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import AccountHistoryInput, Constraint, StrategyModel
+from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
@@ -483,24 +483,39 @@ class FlowContext:
         finally:
             self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
 
-    # Constraint memory (record `181`). Every Component carries memory; a constraint's is restored
-    # from the root before `project` and before `monitor`, and what the callback left is committed
-    # with that callback's publication. One implementation here, because two phases do it.
+    # Component memory (records `181`, `184`). Every Component carries memory; a constraint's is
+    # restored from the root before `project` and before `monitor`, the exchange's before
+    # `execute`, and what each callback left is committed with that callback's publication. One
+    # implementation here, because three handlers do it. The Strategy's own memory has a payload
+    # beside it and its own ref; it is not in this map.
 
-    def visible_constraint_memory(self) -> dict[str, ModelMemory]:
-        """What the current root holds for every constraint, by id."""
-        return self.state.current.constraint_memory()
+    def stateful_components(self) -> tuple[tuple[str, Component], ...]:
+        """The components whose memory this run commits beside the Strategy's, by id.
 
-    def restore_constraint_memory(self, memory: Mapping[str, ModelMemory]) -> None:
-        """Put the root's memory back on each loaded constraint instance."""
-        for constraint in self.constraints:
-            constraint.memory = memory[constraint.constraint_id]
+        Every loaded constraint, and the venue when it is a `Component` -- a test double that
+        only offers `execute` carries no memory and is left alone.
+        """
+        pairs: list[tuple[str, Component]] = [
+            (constraint.constraint_id, constraint) for constraint in self.constraints
+        ]
+        if isinstance(self.exchange, Component):
+            pairs.append((self.exchange.exchange_id, self.exchange))
+        return tuple(pairs)
 
-    def candidate_constraint_memory(self) -> dict[str, ModelMemory]:
-        """What every constraint's callback left, detached for the root that will commit it."""
+    def visible_component_memory(self) -> dict[str, ModelMemory]:
+        """What the current root holds for every stateful component, by id."""
+        return self.state.current.component_memory()
+
+    def restore_component_memory(self, memory: Mapping[str, ModelMemory]) -> None:
+        """Put the root's memory back on each loaded component instance."""
+        for component_id, component in self.stateful_components():
+            component.memory = memory[component_id]
+
+    def candidate_component_memory(self) -> dict[str, ModelMemory]:
+        """What every component's callback left, detached for the root that will commit it."""
         return {
-            constraint.constraint_id: normalize_memory(constraint.memory)
-            for constraint in self.constraints
+            component_id: normalize_memory(component.memory)
+            for component_id, component in self.stateful_components()
         }
 
     def in_agenda_zone(self, instant: datetime) -> datetime:

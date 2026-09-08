@@ -316,7 +316,7 @@ class ValuationHandler:
             raise TypeError("constraint_window_at must return a ModelWindow")
         # Restored before, committed after, with the findings (record `181`): what `project`
         # and `monitor` leave in a constraint's memory is published in the monitoring root.
-        self._context.restore_constraint_memory(self._context.visible_constraint_memory())
+        self._context.restore_component_memory(self._context.visible_component_memory())
         projected = project_constraints(self._context.constraints, window)
         # Monitoring judges the account the run actually committed, so it reads the committed
         # mark rather than valuing the book a second time.
@@ -345,7 +345,7 @@ class ValuationHandler:
         )
         if report.findings:
             self._record_findings(
-                occurrence, report, cutoff, self._context.candidate_constraint_memory()
+                occurrence, report, cutoff, self._context.candidate_component_memory()
             )
         return MonitoringResult(valuation, report, evidence)
 
@@ -354,7 +354,7 @@ class ValuationHandler:
         occurrence: OperationOccurrence,
         report: ConstraintReport,
         cutoff: datetime,
-        constraint_memory: Mapping[str, object],
+        component_memory: Mapping[str, object],
     ) -> None:
         """Write what monitoring measured into the package's own table, and publish it.
 
@@ -396,6 +396,6 @@ class ValuationHandler:
             )
         self._context.state.publish_monitoring(
             self._context.state.prepare_monitoring(
-                recorder=recorder, constraint_memory=constraint_memory
+                recorder=recorder, component_memory=component_memory
             )
         )

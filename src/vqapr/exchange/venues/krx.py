@@ -21,14 +21,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
 from vqapr.domain.values import Side, side_of
 from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
     ExactExecutionRow,
-    ExactExecutionSnapshot,
     accepted_requests,
     requested_rows,
     validate_requests,
@@ -42,7 +40,8 @@ from vqapr.exchange.listings import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.orders.batches import OrderBatch, OrderRequest
+from vqapr.exchange.venue import Exchange, ExecutionCall
+from vqapr.orders.batches import OrderRequest
 
 COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides."""
@@ -241,7 +240,7 @@ def krx_listing(instrument_id: str) -> TradeRule:
     return KRX_TERMS[InstrumentKind.STOCK].for_instrument(instrument_id)
 
 
-class KrxExchange:
+class KrxExchange(Exchange):
     """Whole-share KRX execution with declared commission and sale tax, long positions only."""
 
     exchange_id: str
@@ -309,12 +308,11 @@ class KrxExchange:
     def listings(self) -> Mapping[str, TradeRule]:
         return self._rules.listings
 
-    def execute(
-        self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
-    ) -> FillBatch:
+    def execute(self, call: ExecutionCall) -> FillBatch:
+        orders, account, snapshot = call.orders, call.account, call.snapshot
         requests = accepted_requests(orders, account, snapshot)
         rows = requested_rows(snapshot, requests)
-        rules = self._rules
+        rules = call.rules
         validate_requests(rules, requests, rows, account)
         # Sells settle before buys, and the cash they raise is carried across the batch. A desk
         # funds a rotation from the sleeve it is rotating out of; filling in instrument order

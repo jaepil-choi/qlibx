@@ -20,6 +20,8 @@ from vqapr.evidence.artifacts import (
     ValuationEvidence,
 )
 from vqapr.exchange.execution_table import exact_execution_snapshot
+from vqapr.exchange.listings import ExchangeRulesView
+from vqapr.exchange.venue import ExecutionCall
 from vqapr.flow.context import (
     CALLBACK_STAGE,
     AcceptedIntent,
@@ -122,7 +124,21 @@ class ExecutionHandler:
             owner=self._context.frozen_run.exchange,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            fills = self._context.exchange.execute(orders, before, snapshot)
+            # The venue is a Component (record `184`): its memory is restored from the root
+            # before it is called, the call carries the orders, the book, the venue rows and the
+            # rules bound to the project's roster, and what `execute` left in memory is
+            # committed with the account commit below.
+            self._context.restore_component_memory(self._context.visible_component_memory())
+            fills = self._context.exchange.execute(
+                ExecutionCall(
+                    at=pending.target.target_at,
+                    orders=orders,
+                    account=before,
+                    snapshot=snapshot,
+                    rules=self._bound_rules(),
+                )
+            )
+            component_memory = self._context.candidate_component_memory()
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
             cutoff=pending.target.target_at,
@@ -164,6 +180,7 @@ class ExecutionHandler:
                 account=prepared_fill,
                 fill=fills,
                 evidence=commit_evidence,
+                component_memory=component_memory,
                 envelope={
                     "run_id": self._context.frozen_run.identity,
                     "producer_id": str(self._context.layer.config.component.component_id),
@@ -311,41 +328,15 @@ class ExecutionHandler:
             raise RuntimeError("Account commit root does not mirror Account authority")
         return root
 
-    def bind_registry_to_venue(self) -> None:
-        """Bind the roster onto the venue itself, so every reader of its rules sees it.
+    def _bound_rules(self) -> ExchangeRulesView:
+        """The rules order planning and the venue consume, with the roster bound if a run has one.
 
-        Handing a bound view to `plan_orders` alone was not enough, and a testbed journey proved
-        it: `execute` never receives that view. It reads the venue's OWN rules -- `venue.py` off
-        the `rules` property, `krx.py` off the cached `_rules` field -- so `Fill.kind` asked an
-        unbound view and every fill in a 599-fill run recorded `None`, with a correctly registered
-        roster sitting in the workspace. Registering a roster changed nothing observable, which
-        made the whole step unfalsifiable from outside.
-
-        Binding here rather than passing it down because `execute`'s signature is not ours to
-        change: `load_exchange` refuses a subclass that overrides `execute`, so the profile's own
-        signature is the contract, and a new parameter would break every registered venue.
-
-        Set on the venue rather than on a view it built, because the two profiles hold their rules
-        differently: `AcademicExchange.rules` REBUILDS a view on every access, so a view written
-        back to it is discarded, while `KrxExchange` serves a cached `_rules` field. Giving both a
-        `_registry` to read is the one form that reaches each of them, and it leaves a subclass's
-        overridden `rules` property in charge of everything else it adds.
-
-        `object.__setattr__` because `AcademicExchange` is a frozen dataclass.
+        One view, built here and handed to both `plan_orders` and the venue's `ExecutionCall`
+        (record `184`). Until then the venue read its OWN rules inside `execute` and the roster
+        had to be planted on it with `object.__setattr__`; a testbed journey had found every fill
+        of a 599-fill run recording `kind: None` beside a correctly registered roster because the
+        bound view never reached the venue.
         """
-        if self._context.registry is None:
-            return
-        object.__setattr__(self._context.exchange, "_registry", self._context.registry)
-        cached = getattr(self._context.exchange, "_rules", None)
-        if cached is not None:
-            # KRX built its view once at construction; rebind that instance too, since its
-            # `rules` property serves the cached object rather than rebuilding.
-            object.__setattr__(
-                self._context.exchange, "_rules", cached.with_registry(self._context.registry)
-            )
-
-    def _bound_rules(self) -> object:
-        """The rules order planning consumes, with the roster bound if a run has one."""
         rules = self._context.exchange.rules
         if self._context.registry is None:
             return rules

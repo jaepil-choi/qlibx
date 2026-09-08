@@ -1,14 +1,36 @@
-"""Closed academic execution policy at the Exchange extension boundary."""
+"""The Exchange: the Component that reads the execution table at a fill instant and executes orders.
+
+An Exchange is a Component like the other three (owner ruling, 2026-09-08; record `184`): it is
+called back on an event -- the due event a callback minted -- with that event's instant, it is
+handed a bounded view of what it may read, it carries `memory` between callbacks, and it returns
+one judgment, the fills. What makes it different is not that it reads one instant (a strategy can
+read one row too) but what it is handed beside the data: **the order batch it must execute**, and
+the account those orders are sized against. That list is on `ExecutionCall`, and nowhere else.
+
+Before this the venue received three positional arguments and the framework reached into it to
+plant the project's roster (`object.__setattr__(venue, "_registry", ...)`), because `execute`'s
+signature was not the framework's to change. With a `Call` the roster rides in as `call.rules`,
+bound once by the handler, and the venue stores nothing the run handed it.
+
+The academic profile is defined here. Before changing a profile, read
+`docs/issues/002-execution-profiles-share-no-base.md`: what every profile checks about a call --
+the batch, the snapshot rows, the requests against the listings -- lives once in
+`execution_table` (`accepted_requests`, `requested_rows`, `validate_requests`); a profile owns
+only how it fills.
+"""
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
-from typing import ClassVar, Protocol
+from typing import ClassVar
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.values import side_of
+from vqapr.authoring import Component
+from vqapr.domain.values import require_tz_aware, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
     accepted_requests,
@@ -16,36 +38,88 @@ from vqapr.exchange.execution_table import (
     validate_requests,
 )
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, TradeRule
+from vqapr.exchange.listings import ExchangeRulesView, ExecutionFieldRequirement, TradeRule
 from vqapr.orders.batches import OrderBatch
 
 
-class Exchange(Protocol):
-    """The deliberately small execution extension boundary.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ExecutionCall:
+    """What an Exchange is handed at a fill instant: orders, the book, the venue rows, its rules.
 
-    Before changing a profile, read `docs/issues/002-execution-profiles-share-no-base.md`. What
-    every profile checks about a call -- the batch, the snapshot rows, the requests against the
-    listings -- lives once in `execution_table` (`accepted_requests`, `requested_rows`,
-    `validate_requests`); a profile owns only how it fills. The academic profile still does not
-    sequence a batch: sells do not fund buys and it cannot produce a partial fill, which is
-    correct for a fractional, zero-friction venue and is what `KrxExchange` adds.
+    `at` is the fill instant -- the due event's time. `snapshot` is the execution table read
+    exactly at that instant for the names the batch and the book name. `rules` is the venue's own
+    `ExchangeRulesView`, bound to the project's roster when the run registered one, so a fill's
+    category and its cost come from the project's answer rather than a venue's copy of it.
+    """
+
+    at: datetime
+    orders: OrderBatch
+    account: AccountSnapshot
+    snapshot: ExactExecutionSnapshot
+    rules: ExchangeRulesView
+
+    def __post_init__(self) -> None:
+        require_tz_aware(self.at, name="at")
+        if not isinstance(self.orders, OrderBatch):
+            raise TypeError("orders must be an OrderBatch")
+        if not isinstance(self.account, AccountSnapshot):
+            raise TypeError("account must be an AccountSnapshot")
+        if not isinstance(self.snapshot, ExactExecutionSnapshot):
+            raise TypeError("snapshot must be an ExactExecutionSnapshot")
+        if not isinstance(self.rules, ExchangeRulesView):
+            raise TypeError("rules must be an ExchangeRulesView")
+
+    @classmethod
+    def of(
+        cls,
+        venue: Exchange,
+        orders: OrderBatch,
+        account: AccountSnapshot,
+        snapshot: ExactExecutionSnapshot,
+        *,
+        registry: object | None = None,
+    ) -> ExecutionCall:
+        """The call the handler builds: the venue's rules, bound to `registry` when there is one."""
+        rules = venue.rules if registry is None else venue.rules.with_registry(registry)
+        return cls(
+            at=snapshot.target_at, orders=orders, account=account, snapshot=snapshot, rules=rules
+        )
+
+
+class Exchange(Component):
+    """The execution extension point: a Component that fills an order batch at a fill instant.
+
+    Deliberately small. A venue declares what it trades (`rules`) and, when its regime needs a
+    second price beside the trade price, which execution-table field that is
+    (`execution_requirements`); it is called with an `ExecutionCall` and returns a `FillBatch`.
+    A user subclasses one of the shipped profiles and may add listings and costs; `load_exchange`
+    refuses a subclass that replaces `execute`, because the realism claim of a profile is its
+    fill semantics.
     """
 
     exchange_id: str
 
     @property
+    @abstractmethod
     def rules(self) -> ExchangeRulesView:
         """The venue's own quantity and cost rules, read by order planning."""
-        ...
 
-    def execute(
-        self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
-    ) -> FillBatch: ...
+    def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
+        """The execution-table prices this venue needs beside the trade price. None by default."""
+        return ()
+
+    @abstractmethod
+    def execute(self, call: ExecutionCall) -> FillBatch:
+        """Fill the batch at the call's instant, from the call's rows, under the call's rules."""
 
 
-@dataclass(frozen=True, slots=True)
-class AcademicExchange:
-    """Zero-friction, full-fill execution for declared academic listings."""
+@dataclass(eq=False)
+class AcademicExchange(Exchange):
+    """Zero-friction, full-fill execution for declared academic listings.
+
+    A plain dataclass rather than a frozen one since record `184`: a Component carries `memory`
+    the engine restores and commits, and a frozen instance could not receive it.
+    """
 
     listings: Mapping[str, TradeRule]
     exchange_id: str = "academic"
@@ -59,7 +133,7 @@ class AcademicExchange:
         for instrument_id, rule in copied.items():
             if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
-        object.__setattr__(self, "listings", copied)
+        self.listings = copied
 
     terms_by_kind: ClassVar[Mapping[object, object] | None] = None
     """Per-category terms, for a subclass whose rate depends on WHAT an instrument is.
@@ -82,12 +156,13 @@ class AcademicExchange:
 
         A subclass may declare one, either by giving each listing its own `buy`/`sell` or -- when
         the rate follows the category -- by setting `terms_by_kind`. `execute` charges whatever
-        this returns, so a subclass that adds a cost band gets it applied without replacing any
-        matching behaviour.
+        the call's rules say, and the handler builds those from this view, so a subclass that adds
+        a cost band gets it applied without replacing any matching behaviour.
 
         The venue never DECLARES a roster -- there is no constructor parameter for one, so an
-        author has no channel to state a category. What it may hold is one handed to it at run
-        assembly, which `_registry` carries and this view borrows.
+        author has no channel to state a category. The roster reaches a fill through
+        `ExecutionCall.rules`, bound by the handler at run assembly (record `184`); this view is
+        unbound.
 
         Rebuilt per access rather than cached because a subclass overriding this property is how a
         cost band is added, and a cached view would freeze the base profile's answer.
@@ -95,17 +170,16 @@ class AcademicExchange:
         return ExchangeRulesView(
             self.exchange_id,
             self.listings,
-            getattr(self, "_registry", None),
+            None,
             type(self).terms_by_kind,
         )
 
-    def execute(
-        self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
-    ) -> FillBatch:
+    def execute(self, call: ExecutionCall) -> FillBatch:
         """Validate global prerequisites, then return every order in stable identity order."""
+        orders, account, snapshot = call.orders, call.account, call.snapshot
         requests = accepted_requests(orders, account, snapshot)
         rows = requested_rows(snapshot, requests)
-        rules = self.rules
+        rules = call.rules
         validate_requests(rules, requests, rows, account)
 
         fills: list[Fill] = []

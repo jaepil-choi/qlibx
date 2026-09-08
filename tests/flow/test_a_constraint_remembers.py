@@ -228,7 +228,7 @@ def _flow(
 def _state(rule: Constraint) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
-        initial_constraint_memory={rule.constraint_id: rule.memory},
+        initial_component_memory={rule.constraint_id: rule.memory},
     )
 
 
@@ -245,9 +245,9 @@ def test_what_monitor_counted_is_what_the_next_project_reads(tmp_path: Path) -> 
     # The count lives on the root, not on the instance: a fresh instance restored from what the
     # run committed reads the same number. Four judgements, four breaches.
     fresh = ThreeStrikes()
-    fresh.memory = result.final_state.constraint_memory()[RULE]
+    fresh.memory = result.final_state.component_memory()[RULE]
     assert fresh.memory == {"breaches": 4}
-    assert set(result.final_state.constraint_state_refs) == {RULE}
+    assert set(result.final_state.component_state_refs) == {RULE}
 
 
 def test_the_root_and_the_instance_carry_no_memory_a_failed_callback_left(tmp_path: Path) -> None:
@@ -265,6 +265,6 @@ def test_the_root_and_the_instance_carry_no_memory_a_failed_callback_left(tmp_pa
     with pytest.raises(SimulationFailure, match="decide fault after project"):
         flow.run()
 
-    assert state.current.constraint_memory() == {RULE: None}, "nothing was committed"
+    assert state.current.component_memory() == {RULE: None}, "nothing was committed"
     assert rule.memory is None, "the instance was restored to what the root holds"
     assert state.current.lifecycle_trace == ()

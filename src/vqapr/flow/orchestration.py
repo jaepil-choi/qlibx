@@ -20,6 +20,7 @@ from types import MappingProxyType
 from vqapr.account.account import Account
 from vqapr.account.history import retained_marks
 from vqapr.account.snapshot import AccountState
+from vqapr.authoring import Component
 from vqapr.constraints.evaluation import (
     constraint_requirements as declared_constraint_requirements,
 )
@@ -609,8 +610,15 @@ def _run_strategy(
             initial_payload=layer.initial_payload,
             # What each constraint holds as loaded -- its constructor's doing, from the config
             # the fingerprint already folds -- is the memory the run commits from (record `181`).
-            initial_constraint_memory={
-                constraint.constraint_id: constraint.memory for constraint in constraints
+            initial_component_memory={
+                **{constraint.constraint_id: constraint.memory for constraint in constraints},
+                # The venue too, when it is a Component (record `184`); a loader double that
+                # only offers `execute` carries no memory to commit.
+                **(
+                    {exchange.exchange_id: exchange.memory}
+                    if isinstance(exchange, Component)
+                    else {}
+                ),
             },
             # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
             # A hard kill preserves only spilled rows. Without a store, roots retain rows.

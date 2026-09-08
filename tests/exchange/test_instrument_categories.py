@@ -30,7 +30,7 @@ from vqapr.domain.instruments import (
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
-from vqapr.exchange.venue import AcademicExchange
+from vqapr.exchange.venue import ExecutionCall, AcademicExchange
 from vqapr.exchange.venues.krx import krx_listing
 from vqapr.orders.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -171,7 +171,7 @@ def test_a_factor_fills_fractionally_through_the_ordinary_path() -> None:
     snapshot = ExactExecutionSnapshot(
         at, (ExactExecutionRow(at, name, True, price),), (), (), ()
     )
-    fill = venue.execute(batch, account, snapshot).fills[0]
+    fill = venue.execute(ExecutionCall.of(venue, batch, account, snapshot)).fills[0]
     assert fill.dealt_quantity == quantity, "a fractional listing fills in full"
     assert fill.cost.total == Decimal("0"), "the academic venue declares no band"
     assert fill.cash_delta == -(quantity * price)

@@ -109,15 +109,15 @@ class CallbackHandler:
             # Every Component's memory is restored before its callback and what the callback left
             # is committed with the publication (record `181`). The constraints' goes in the same
             # root as the Strategy's, so a rule that counts commits its count with the decision.
-            constraint_before = self._context.visible_constraint_memory()
-            constraint_candidate: dict[str, ModelMemory] | None = None
+            component_before = self._context.visible_component_memory()
+            component_candidate: dict[str, ModelMemory] | None = None
             if self._context.constraints:
                 with self._context.guard(
                     SimulationStage.CALLBACK_STATE,
                     occurrence.evaluation_time,
                     owner=self._context.layer.constraints,
                 ):
-                    self._context.restore_constraint_memory(constraint_before)
+                    self._context.restore_component_memory(component_before)
                 with self._context.guard(
                     SimulationStage.CALLBACK_WINDOW,
                     occurrence.evaluation_time,
@@ -134,7 +134,7 @@ class CallbackHandler:
                     occurrence.evaluation_time,
                     owner=self._context.layer.constraints,
                 ):
-                    constraint_candidate = self._context.candidate_constraint_memory()
+                    component_candidate = self._context.candidate_component_memory()
             with self._callback_intent_boundary(occurrence, projected):
                 constraint_bounds = merged_constraint_bounds(projected)
             with self._callback_intent_boundary(
@@ -216,7 +216,7 @@ class CallbackHandler:
                     recorder,
                     accepted,
                     pending_valuation,
-                    constraint_memory=constraint_candidate,
+                    component_memory=component_candidate,
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -231,7 +231,7 @@ class CallbackHandler:
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
-                self._context.restore_constraint_memory(constraint_before)
+                self._context.restore_component_memory(component_before)
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
@@ -245,7 +245,7 @@ class CallbackHandler:
             raise RuntimeError("run state has no current Strategy root")
         self._context.strategy.memory = self._context.state.load_model_state(current_ref)
         self._context.strategy.load_payload(BytesIO(self._context.state.load_payload(current_ref)))
-        self._context.restore_constraint_memory(self._context.visible_constraint_memory())
+        self._context.restore_component_memory(self._context.visible_component_memory())
 
     @contextmanager
     def _callback_intent_boundary(
@@ -303,7 +303,7 @@ class CallbackHandler:
         accepted: Hold | AcceptedIntent,
         pending_valuation: PendingValuation | None = None,
         *,
-        constraint_memory: Mapping[str, object] | None = None,
+        component_memory: Mapping[str, object] | None = None,
     ) -> object:
         if isinstance(accepted, Hold):
             if pending_valuation is None:
@@ -313,7 +313,7 @@ class CallbackHandler:
                     payload,
                     lifecycle=lifecycle,
                     recorder=recorder,
-                    constraint_memory=constraint_memory,
+                    component_memory=component_memory,
                 )
             # A Hold still carries a pending identity when an execution instant remains,
             # so the occurrence reaches the venue's prices and values the book there.
@@ -323,7 +323,7 @@ class CallbackHandler:
                 lifecycle=lifecycle,
                 recorder=recorder,
                 pending_accepted_intent=pending_valuation,
-                constraint_memory=constraint_memory,
+                component_memory=component_memory,
             )
         return self._context.state.prepare_callback(
             memory,
@@ -331,7 +331,7 @@ class CallbackHandler:
             lifecycle=lifecycle,
             recorder=recorder,
             pending_accepted_intent=accepted,
-            constraint_memory=constraint_memory,
+            component_memory=component_memory,
         )
 
     def _restore_callback_state(self, memory: object, payload: bytes) -> None:

@@ -190,6 +190,7 @@ def test_public_exports_are_fixed() -> None:
         "EtfInstrument",
         "ExactExecutionTarget",
         "ExchangeRulesView",
+        "ExecutionCall",
         "ExecutionFieldRequirement",
         "ExecutionInputRegistration",
         "ExecutionTableSpec",

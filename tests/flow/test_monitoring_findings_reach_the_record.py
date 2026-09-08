@@ -233,7 +233,7 @@ def _state(row_sink=None, rules: tuple[Constraint, ...] = RULES) -> RunStateRepo
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
         row_sink=row_sink,
-        initial_constraint_memory={rule.constraint_id: rule.memory for rule in rules},
+        initial_component_memory={rule.constraint_id: rule.memory for rule in rules},
     )
 
 

@@ -82,7 +82,7 @@ from vqapr.exchange.listings import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.exchange.venue import AcademicExchange
+from vqapr.exchange.venue import AcademicExchange, ExecutionCall
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 
@@ -179,6 +179,7 @@ __all__ = (
     "EtfInstrument",
     "ExactExecutionTarget",
     "ExchangeRulesView",
+    "ExecutionCall",
     "ExecutionFieldRequirement",
     "ExecutionInputRegistration",
     "ExecutionTableSpec",

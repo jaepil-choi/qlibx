@@ -14,7 +14,7 @@ from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
-from vqapr.exchange.venue import AcademicExchange, TradeRule
+from vqapr.exchange.venue import ExecutionCall, AcademicExchange, TradeRule
 from vqapr.flow.marking import ValuationService
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
@@ -62,14 +62,14 @@ def _snapshot(*rows: ExactExecutionRow, missing: tuple[str, ...] = ()) -> ExactE
 
 
 def test_academic_full_fills_are_fractional_and_deterministic() -> None:
-    fills = _venue().execute(
+    fills = _venue().execute(ExecutionCall.of(_venue(), 
         _orders(_request("B", "-1.25"), _request("A", "2.5")),
         _account(),
         _snapshot(
             ExactExecutionRow(_AT, "B", True, Decimal("20")),
             ExactExecutionRow(_AT, "A", True, Decimal("10")),
         ),
-    )
+    ))
 
     assert fills.account_version_seen == 7
     assert [(fill.instrument_id, fill.dealt_quantity, fill.price) for fill in fills.fills] == [
@@ -79,14 +79,14 @@ def test_academic_full_fills_are_fractional_and_deterministic() -> None:
 
 
 def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> None:
-    fills = _venue().execute(
+    fills = _venue().execute(ExecutionCall.of(_venue(), 
         _orders(
             _request("A", "1", execution_price=None),
             _request("B", "1", execution_price=None),
         ),
         _account(),
         _snapshot(ExactExecutionRow(_AT, "B", False, None), missing=("A",)),
-    )
+    ))
 
     assert [(fill.instrument_id, fill.reason) for fill in fills.fills] == [
         ("A", ZeroDealtReason.ABSENT),
@@ -96,11 +96,11 @@ def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> 
 
 
 def test_absence_precedes_selected_price_validation_even_for_a_zero_delta_request() -> None:
-    fills = _venue().execute(
+    fills = _venue().execute(ExecutionCall.of(_venue(), 
         _orders(_request("A", "0", execution_price=None)),
         _account(),
         _snapshot(missing=("A",)),
-    )
+    ))
 
     assert fills.fills[0].requested_quantity == Decimal("0")
     assert fills.fills[0].dealt_quantity == Decimal("0")
@@ -109,26 +109,26 @@ def test_absence_precedes_selected_price_validation_even_for_a_zero_delta_reques
 
 def test_invalid_tradable_price_rejects_the_entire_batch() -> None:
     with pytest.raises(ValueError, match="invalid tradable price"):
-        _venue().execute(
+        _venue().execute(ExecutionCall.of(_venue(), 
             _orders(_request("A", "1"), _request("B", "1")),
             _account(),
             _snapshot(
                 ExactExecutionRow(_AT, "A", True, Decimal("10")),
                 ExactExecutionRow(_AT, "B", True, Decimal("0")),
             ),
-        )
+        ))
 
 
 def test_duplicate_present_rows_reject_the_entire_batch() -> None:
     with pytest.raises(ValueError, match="duplicate"):
-        _venue().execute(
+        _venue().execute(ExecutionCall.of(_venue(), 
             _orders(_request("A", "1")),
             _account(),
             _snapshot(
                 ExactExecutionRow(_AT, "A", True, Decimal("10")),
                 ExactExecutionRow(_AT, "A", True, Decimal("10")),
             ),
-        )
+        ))
 
 
 def test_valuation_marks_every_residual_holding_it_has_a_price_for() -> None:
@@ -242,14 +242,14 @@ def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
     """
     venue = _CostedAcademic(_venue().listings)
 
-    fills = venue.execute(
+    fills = venue.execute(ExecutionCall.of(venue, 
         _orders(_request("A", "10"), _request("B", "-10")),
         _account(positions={"B": Decimal("10")}),
         _snapshot(
             ExactExecutionRow(_AT, "A", True, Decimal("100")),
             ExactExecutionRow(_AT, "B", True, Decimal("100")),
         ),
-    )
+    ))
 
     charged = {fill.instrument_id: fill.cost for fill in fills.fills}
     # 1000 of notional each way: 3bp to buy, 3bp plus 20bp of tax to sell.
@@ -260,11 +260,11 @@ def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
 
 
 def test_an_undeclared_cost_band_still_charges_nothing() -> None:
-    fills = _venue().execute(
+    fills = _venue().execute(ExecutionCall.of(_venue(), 
         _orders(_request("A", "10")),
         _account(),
         _snapshot(ExactExecutionRow(_AT, "A", True, Decimal("100"))),
-    )
+    ))
 
     assert fills.fills[0].cost.commission == Decimal("0")
     assert fills.fills[0].cost.tax == Decimal("0")

@@ -30,6 +30,8 @@ from typing import Any
 import yaml
 
 from vqapr.account.account import AccountMode
+from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
+from vqapr.agent.sample.materialize import materialize as materialize_sample
 from vqapr.authoring_lookback import lookback_declaration
 from vqapr.cli.envelope import success
 from vqapr.extension.component import ComponentKind
@@ -268,13 +270,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "execution-input",
             "exchange",
             "run",
+            "sample",
         ),
         help=(
             "scaffold a component (datamodel/strategy/constraint) or emit a template "
             "(instruments/dataset/execution-input/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
             "that registers it. Every kind reports the file to hand `vqapr register` as "
-            "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes"
+            "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes. "
+            "`sample` writes a complete, runnable journey into the directory named by --out: "
+            "a strategy, a venue, a synthetic panel and the one declaration registering them"
         ),
     )
     parser.add_argument(
@@ -823,7 +828,36 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     )
 
 
+def _sample(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    """Materialize the sample journey: the filled-in form beside the blank ones this verb emits.
+
+    Every other kind gives a template the user completes with their own data; this one gives a
+    strategy, a venue, a synthetic panel and the declaration that registers them, so a first
+    `vqapr register` / `check` / `run` can happen before anything is authored (PRD §11.4,
+    record `172`). The same function the package's own tests install the sample through.
+    """
+    target = args.out or project_root / "sample"
+    if target.exists() and any(target.iterdir()):
+        refuse_existing(target, what="sample directory")
+    materialized = materialize_sample(target)
+    declaration = materialized.declaration
+    return success(
+        "template.new",
+        kind="sample",
+        path=str(target),
+        declaration=str(declaration),
+        run_id=SAMPLE_RUN_ID,
+        next=[
+            f"vqapr register {declaration}",
+            f"vqapr check {SAMPLE_RUN_ID}",
+            f"vqapr run {SAMPLE_RUN_ID}",
+        ],
+    )
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "sample":
+        return _sample(args, project_root)
     if args.kind == "instruments":
         return _instruments_template(args, project_root)
     if args.kind == "dataset":

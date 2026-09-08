@@ -29,6 +29,8 @@ import pytest
 from vqapr import public
 from vqapr.cli.main import _COMMANDS, _DESCRIPTIONS, _SUMMARIES, main
 
+from tests.skill_prose import installed_prose
+
 
 def _parquet(root: Path, name: str, rows: str) -> Path:
     path = root / name
@@ -165,7 +167,8 @@ def test_skill_install_is_inspectable_before_it_writes(tmp_path: Path) -> None:
     payload = json.loads(result.stdout.decode("utf-8").strip().splitlines()[-1])
 
     assert payload["ok"] is True
-    assert str(tmp_path) in payload["paths"]["agents"]
+    assert payload["written"], "a dry run that names no file it would write says nothing"
+    assert all(str(tmp_path) in path for path in payload["written"])
     assert not (tmp_path / ".agents").exists(), "a dry run wrote to disk"
 
 
@@ -180,16 +183,39 @@ def test_installing_then_removing_leaves_nothing_behind(tmp_path: Path) -> None:
         .splitlines()[-1]
     )
     assert installed["ok"] is True
-    assert (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
+    # Not a named path: PRD §11.2 made the skill a set, so the guarantee is that both targets
+    # received entrypoints and that removal takes every one of them back out.
+    for target in (".agents", ".claude"):
+        assert list((tmp_path / target / "skills").rglob("SKILL.md")), f"{target} got no skill"
 
     _run("--project-root", str(tmp_path), "skill", "remove")
 
-    assert not (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
-    assert not (tmp_path / ".claude/skills/vqapr-skill/SKILL.md").exists()
+    for target in (".agents", ".claude"):
+        assert not list((tmp_path / target).rglob("SKILL.md")), f"{target} kept a skill"
+
+
+def test_both_targets_receive_identical_bytes(tmp_path: Path) -> None:
+    """PRD §11.2: no target is a pointer to another.
+
+    The rule that replaced the thin adapter. A copy that has drifted is now detectable per target
+    (`vqapr skill list`), which is what made a second real copy safe to write.
+    """
+    (tmp_path / ".git").mkdir()
+    _run("--project-root", str(tmp_path), "skill", "install")
+
+    def tree(target: str) -> dict[str, bytes]:
+        base = tmp_path / target / "skills"
+        return {
+            path.relative_to(base).as_posix(): path.read_bytes()
+            for path in sorted(base.rglob("*"))
+            if path.is_file() and not path.name.startswith(".")
+        }
+
+    assert tree(".agents") == tree(".claude")
 
 
 def test_the_maintainer_readme_is_not_installed_as_agent_guidance(tmp_path: Path) -> None:
-    """`agent/skill/README.md` addresses whoever maintains that directory.
+    """`agent/skills/README.md` addresses whoever maintains that directory.
 
     Shipping it into the install would give an agent a second document to treat as authority, and
     that document talks about what the directory should contain rather than about using vqapr.
@@ -198,7 +224,7 @@ def test_the_maintainer_readme_is_not_installed_as_agent_guidance(tmp_path: Path
 
     _run("--project-root", str(tmp_path), "skill", "install")
 
-    installed = {path.name for path in (tmp_path / ".agents/skills/vqapr").iterdir()}
+    installed = {path.name for path in (tmp_path / ".agents" / "skills").rglob("*")}
     assert "SKILL.md" in installed
     assert "README.md" not in installed
 
@@ -418,7 +444,7 @@ def test_the_installed_skill_requires_proof_of_timezone_localization(tmp_path: P
     (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "known instant" in text
     assert "round-trip" in text
@@ -441,7 +467,7 @@ def test_the_installed_skill_points_at_the_public_library_surface(tmp_path: Path
     (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "vqapr.public" in text, "the skill still never names the library surface"
     assert "dir(public)" in text or "dir(vqapr.public)" in text, (
@@ -678,7 +704,7 @@ def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -
     """The first command and first correction must not require source or prior uv knowledge."""
     (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "uv run vqapr --help" in text
     # Rewritten twice: `fix/023-narrow-the-provenance-promise` stopped it claiming re-registering

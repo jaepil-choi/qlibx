@@ -26,12 +26,14 @@ from pathlib import Path
 from vqapr.cli.list_ import KINDS
 from vqapr.cli.main import main
 
-SKILL = Path("src/vqapr/agent/skill/SKILL.md")
+from tests.skill_prose import shipped_prose
+
+# 산문은 하나의 파일이 아니라 출하되는 전체다 (PRD §11.2). `tests/skill_prose.py` 참조.
 
 
 def _stop_condition_block() -> str:
     """The Rung 1 stop condition and the fenced commands beneath it."""
-    text = SKILL.read_text(encoding="utf-8")
+    text = shipped_prose()
     start = text.index("**Stop condition:** `register` accepted")
     return text[start : text.index("#### Correcting a registration", start)]
 

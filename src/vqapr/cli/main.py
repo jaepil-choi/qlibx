@@ -19,8 +19,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
+from vqapr.agent.skillset import upgrade_note
 from vqapr.cli import check, list_, new, register, rm, run, show, skill
-from vqapr.cli.envelope import UsageError, emit, failure
+from vqapr.cli.envelope import UsageError, emit, failure, note
 from vqapr.domain.errors import Stage
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
@@ -61,7 +62,7 @@ _SUMMARIES: dict[str, str] = {
     "list": "show what the workspace holds and what the store recorded",
     "show": "answer questions about one run or one strategy record, from what was frozen",
     "rm": "remove a run's records, or withdraw a registration nothing still names",
-    "skill": "install the agent skill into this project, or remove and inspect it",
+    "skill": "install the agent skills into this project, or remove and inspect them",
 }
 """One line per verb, shown in `vqapr --help`.
 
@@ -292,4 +293,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     # enough to act on. Absolute, so a reader comparing two commands' answers can see when
     # they were about different directories.
     payload["workspace_root"] = str(project_root.resolve())
+    _warn_if_skills_are_from_another_version(project_root, command=args.command)
     return emit(payload)
+
+
+def _warn_if_skills_are_from_another_version(project_root: Path, *, command: str) -> None:
+    """Say, on stderr, when the installed agent skills came from a different vqapr.
+
+    Not in the envelope. stdout carries one JSON document and nothing else -- an agent having a
+    single parsing path is that envelope's whole reason to exist, and a warning line is not worth
+    breaking it for. stderr reaches the same reader: a person sees it, and so does an agent whose
+    shell tool returns both streams.
+
+    On every command rather than on `skill list` alone, because a stale skill does its damage
+    while an agent reads it and runs something else (record `168`: a judgment only the CLI's own
+    verb asks is a defect). The check is one manifest read and a string compare; the full
+    per-file verdict is `vqapr skill list`.
+
+    Not on `skill` itself, where telling the caller to run the command they are already running
+    is noise, and where `list` reports all of this properly anyway.
+    """
+    if command == "skill":
+        return
+    message = upgrade_note(project_root)
+    if message is not None:
+        note(f"vqapr: {message}")

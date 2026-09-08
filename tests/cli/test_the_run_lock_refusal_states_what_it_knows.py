@@ -30,6 +30,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.run import _held_record
+
+from tests.skill_prose import shipped_prose
 from vqapr.flow.record import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
@@ -124,7 +126,7 @@ def test_the_skill_states_the_run_lock_self_healing() -> None:
     # Whitespace-normalized, because the skill is hard-wrapped and a sentence that happens to
     # break across two lines is the same sentence.
     skill = " ".join(
-        Path("src/vqapr/agent/skill/SKILL.md").read_text(encoding="utf-8").split()
+        shipped_prose().split()
     )
 
     assert "heartbeat window" in skill

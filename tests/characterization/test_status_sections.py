@@ -27,8 +27,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.skill_prose import shipped_prose
+
 REPO = Path(__file__).resolve().parents[2]
-SKILL = REPO / "src" / "vqapr" / "agent" / "skill" / "SKILL.md"
+# 산문은 하나의 파일이 아니라 출하되는 전체다 (PRD §11.2). `tests/skill_prose.py` 참조.
 ERRORS = REPO / "src" / "vqapr" / "domain" / "errors.py"
 
 _SECTION = re.compile(r"^### Recovering from:\s*(\d{3}) ([a-z]+)\s*$", re.MULTILINE)
@@ -54,9 +56,9 @@ def _status_members() -> dict[int, str]:
 
 
 def _documented_sections() -> list[tuple[int, str]]:
-    if not SKILL.is_file():
-        raise FileNotFoundError(f"the skill this enum is co-owned with is missing: {SKILL}")
-    return [(int(number), label) for number, label in _SECTION.findall(SKILL.read_text("utf-8"))]
+    text = shipped_prose()
+    assert text, "the package ships no skill prose for this enum to be co-owned with"
+    return [(int(number), label) for number, label in _SECTION.findall(text)]
 
 
 def test_every_status_resolves_to_a_skill_section() -> None:
@@ -126,7 +128,7 @@ def test_each_documented_section_says_something() -> None:
     This is the failure the directional tests above cannot see: they would pass on nine empty
     sections.
     """
-    text = SKILL.read_text(encoding="utf-8")
+    text = shipped_prose()
     empty: list[str] = []
     for match in _SECTION.finditer(text):
         rest = text[match.end() :]

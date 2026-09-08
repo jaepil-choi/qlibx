@@ -15,13 +15,26 @@ from pathlib import Path
 
 import pytest
 
-import vqapr
 from vqapr import authoring as va
+from vqapr.agent.skillset import shipped_skills
 from vqapr.cli.main import main
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.scaffold import render
 
-SKILL = Path(vqapr.__file__).parent / "agent" / "skill" / "SKILL.md"
+
+def _shipped_prose() -> str:
+    """Every markdown byte vqapr ships as skill content, as one string.
+
+    Not one file. A sentence is a promise wherever it is installed, and since PRD §11.2 made the
+    skill a set that prose lives across nine directories and their `references/`. Asserting
+    against a single `SKILL.md` would let a retired claim survive by moving one file sideways.
+    """
+    return "\n".join(
+        content.decode("utf-8")
+        for files in shipped_skills().values()
+        for path, content in sorted(files.items())
+        if path.endswith(".md")
+    )
 
 
 def _cli(capsys: pytest.CaptureFixture[str], root: Path, *argv: str) -> tuple[int, dict]:
@@ -32,7 +45,7 @@ def _cli(capsys: pytest.CaptureFixture[str], root: Path, *argv: str) -> tuple[in
 
 def test_the_hold_reason_rule_is_the_docstrings_rule() -> None:
     """`062`: prose with spaces is accepted, and the skill and the scaffold both say so."""
-    text = SKILL.read_text(encoding="utf-8")
+    text = _shipped_prose()
     assert "one token" not in text, "the skill still states the stricter rule the code dropped"
 
     assert va.Hold(reason="no name scored above zero").reason == "no name scored above zero"
@@ -50,7 +63,7 @@ def test_the_skill_does_not_promise_a_register_force_flag(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`067`: no `register --force` anywhere in the skill, and the CLI indeed has none."""
-    text = SKILL.read_text(encoding="utf-8")
+    text = _shipped_prose()
     offending = [
         line
         for line in text.splitlines()

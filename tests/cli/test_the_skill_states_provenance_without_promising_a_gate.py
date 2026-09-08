@@ -26,9 +26,20 @@ from vqapr.cli.main import main
 
 
 def _installed(tmp_path: Path) -> str:
+    """Every markdown byte actually written into the project, as one string.
+
+    Reads what landed on disk rather than what the package holds: these assertions are about the
+    promise a reader of the *installed* copy is given. Since PRD §11.2 made the skill a set, that
+    copy is nine directories, so the whole tree is read rather than one named file.
+    """
     (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
-    return (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    installed = tmp_path / ".agents" / "skills"
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(installed.rglob("*.md"))
+        if path.is_file()
+    )
 
 
 def test_the_skill_no_longer_claims_re_registration_is_refused(tmp_path: Path) -> None:

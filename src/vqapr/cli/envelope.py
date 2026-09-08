@@ -129,6 +129,25 @@ def failure(
     return payload
 
 
+def note(text: str) -> None:
+    """Write one advisory line to stderr, as UTF-8 bytes.
+
+    Beside `emit` rather than in the caller, for the same reason `emit` writes bytes: a legacy code
+    page (cp949 on a Korean Windows console) cannot encode a path that runs through a non-ASCII
+    profile name, and an advisory that raises `UnicodeEncodeError` would take the command down
+    with it -- worse than the staleness it was reporting.
+
+    stderr, never stdout. stdout carries exactly one JSON document per command, and an agent
+    having a single parsing path is that envelope's whole reason to exist.
+    """
+    stream = getattr(sys.stderr, "buffer", None)
+    if stream is None:
+        print(text, file=sys.stderr)
+        return
+    stream.write(text.encode("utf-8") + b"\n")
+    stream.flush()
+
+
 def emit(payload: dict[str, Any]) -> int:
     """Write one line of JSON and return the process exit code.
 

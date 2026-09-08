@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.cli.main import main
+
+from tests.skill_prose import installed_prose
 from vqapr.cli.new import _RUN_TEMPLATE
 from vqapr.public import ListingAccess, krx_listings
 
@@ -23,7 +25,7 @@ from vqapr.public import ListingAccess, krx_listings
 def _installed_skill(tmp_path: Path) -> str:
     (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
-    return (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    return installed_prose(tmp_path)
 
 
 def test_the_krx_profile_really_is_long_only() -> None:

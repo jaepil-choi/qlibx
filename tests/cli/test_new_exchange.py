@@ -121,12 +121,22 @@ def test_a_stale_installed_skill_is_detectable(tmp_path: Path) -> None:
 
     code, fresh = _cli(tmp_path, "skill", "list", "--into", str(tmp_path))
     assert code == 0, fresh
-    assert fresh["current"] is True, "a just-installed skill must report as current"
+    states = {name: body["state"] for name, body in fresh["targets"]["agents"]["skills"].items()}
+    assert set(states.values()) == {"current"}, f"a just-installed skill is not current: {states}"
 
-    installed = tmp_path / ".agents" / "skills" / "vqapr" / "SKILL.md"
+    installed = next((tmp_path / ".agents" / "skills").rglob("SKILL.md"))
     installed.write_text(installed.read_text(encoding="utf-8") + "\ndrifted\n", encoding="utf-8")
+    drifted_skill = installed.parent.name.removeprefix("vqapr-")
 
     code, drifted = _cli(tmp_path, "skill", "list", "--into", str(tmp_path))
+    listed = drifted["targets"]["agents"]["skills"]
 
-    assert drifted["current"] is False, "a drifted skill reported as current is the whole defect"
-    assert "install" in drifted.get("stale", ""), "the report must name the command that fixes it"
+    # `modified`, not merely "not current". The two answers that used to share one boolean want
+    # opposite handling: an older release's copy is overwritten silently, an edit is not.
+    assert listed[drifted_skill]["state"] == "modified", listed[drifted_skill]
+    assert listed[drifted_skill]["modified"] == ["SKILL.md"]
+    assert {
+        name: body["state"] for name, body in listed.items() if name != drifted_skill
+    } == {name: "current" for name in listed if name != drifted_skill}, (
+        "one edited file must not drag the other skills' verdicts with it"
+    )

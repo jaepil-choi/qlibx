@@ -46,6 +46,7 @@ build-backend = "uv_build"
 # The package's own numeric work is Decimal and duckdb.
 dev = [
     "pandas>=3,<4",
+    "pyright>=1.1.411,<2",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
     "vulture>=2.14,<3",
@@ -121,3 +122,13 @@ ignore_decorators = [
 ]
 # `model_config` is pydantic's class-level configuration attribute.
 ignore_names = ["model_config"]
+
+# Static type gate (redesign campaign 2026-09-08, step 0). `src/` only: tests and scripts are
+# not the contract. `basic` first so the count of findings is a measurement the campaign
+# drives down; `strict` is the target once the Component/EventLoop generics land.
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false

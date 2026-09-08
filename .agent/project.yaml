@@ -44,6 +44,9 @@ commands:
   # findings stood while no declared command ran the check. A configured gate nobody invokes is
   # not a gate, so it is declared here and the tree is clean as of record 105.
   lint: uv run ruff check src/
+  # Static type gate (redesign campaign 2026-09-08, step 0). Scope and mode are in
+  # pyproject `[tool.pyright]`; the finding count is the campaign's progress metric.
+  typecheck: uv run pyright
   # Release-only gate. The skills a release ships must have their content hashes recorded in
   # `_shipped.json` BEFORE the build, or the next release tells untouched installs they were
   # edited (PRD 11.3). Not part of `test`: between releases the tree ships content that has not

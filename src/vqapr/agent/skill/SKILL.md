@@ -270,7 +270,7 @@ template first.
 
 **And it wants a sixth: the instrument roster.** `vqapr new instruments` scaffolds the exporter and
 its declaration. It is not in the five because a run without one still completes -- but every fill
-then records `kind: None`, `cost_by_kind()` collapses to one unlabelled bucket, and on a costed
+then records `kind: None`, the report's cost by kind collapses to one `unknown` bucket, and on a costed
 venue every name is charged as if it were the same thing. `vqapr run` states which roster it read,
 or that it read none, and `vqapr list instruments` shows what is registered.
 
@@ -634,7 +634,7 @@ A `StrategyReport` has six sections, each a pydantic document, each `None` with 
   valuation grid and says so (`inferred`); pass it to override. Sharpe is against
   `risk_free_annual`, zero unless you give one -- the record holds no rate.
 - **`book`** — held / long / short counts and gross, net, long, short exposure, cash share, max
-  weight, top-five share and HHI, per valuation, from the marked positions.
+  weight and HHI, per valuation, from the marked positions.
 - **`attribution`** — P&L per period by name and by side (long / short), and `residual`: the part
   of the NAV change no marked name explains. Zero when every held name was marked; a non-zero
   residual is a finding, not noise. `position_hit_rate` is the share of name-periods with a

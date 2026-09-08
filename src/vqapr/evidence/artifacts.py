@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Final
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.errors import ExplainTopic, FailureSource, VqaprError
+from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import require_tz_aware
 
@@ -209,9 +209,11 @@ class SimulationFailure(RuntimeError, ValueError):
         """The agent-readable form; ``str(err)`` remains the human one.
 
         Top-level keys match ``VqaprError.as_dict()`` so a caller can serialize either failure
-        through one path instead of branching on the exception type. Only bounded scalars are
-        included: the replay coordinates collect into ``at``, while unbounded owner objects and
-        the traceback stay out and belong in a dump file.
+        through one path instead of branching on the exception type, and each failure entry IS
+        ``Failure.as_dict()``: a bare raise is given a ``Failure`` here and rendered by the one
+        implementation rather than by a second literal of the same eight keys. Only bounded
+        scalars are included: the replay coordinates collect into ``at``, while unbounded owner
+        objects and the traceback stay out and belong in a dump file.
         """
         cause = self.cause
         if isinstance(cause, VqaprError):
@@ -221,18 +223,14 @@ class SimulationFailure(RuntimeError, ValueError):
             if len(observed) > MAX_OBSERVED_CHARS:
                 observed = observed[:MAX_OBSERVED_CHARS] + "..."
             failures = [
-                {
-                    "code": f"{self.stage.value}.{type(cause).__name__}",
-                    "source": self.source.as_dict(),
-                    "requirement": _requirement_for(self.stage),
-                    "observed": observed,
-                    "fix": _fix_for(self.stage, cause),
-                    "explain": str(
-                        _EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION)
-                    ),
-                    "examples": [],
-                    "example_total": 0,
-                }
+                Failure.bounded(
+                    f"{self.stage.value}.{type(cause).__name__}",
+                    _requirement_for(self.stage),
+                    observed=observed,
+                    fix=_fix_for(self.stage, cause),
+                    explain=_EXPLAIN_BY_STAGE.get(self.stage, ExplainTopic.RUN_PRECONDITION),
+                    source=self.source,
+                ).as_dict()
             ]
         retry = self.retry_precondition
         return {

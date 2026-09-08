@@ -20,46 +20,38 @@ not hold. Those are reported as `blocked`, naming what blocked them, so the read
 "this passed" from "this never ran" from "this failed".
 
 **A registered run since record `139`.** The argument is a run id; the phases are the workspace,
-the run's registration, the judgments, and preflight. A materialization spec (`datamodel:`) is
-still a file, and is checked as one.
+the run's registration, the judgments, and preflight. There is no file to check: the
+materialization spec retired with record `148` (a datamodel is a `runs:` entry), and a path given
+here is refused by name.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
-from vqapr.domain.errors import ExplainTopic, Failure, FailureSource, VqaprError
-from vqapr.flow.judgments import judgments
+from vqapr.domain.errors import VqaprError
+from vqapr.flow.judgments import JUDGMENT_CODES, judgments
 from vqapr.flow.preflight import preflight_run as freeze_run
 from vqapr.inputs import InputError
 from vqapr.public import Workspace
 
 STAGE = "run.check"
 
-SIMULATION_CODES = (
-    "check.execution.not_after_decision",
-    "check.period.uncovered",
-    "check.lookback.uncovered",
-    "check.dataset.unregistered",
-    "check.field.absent",
-    "check.weights.mode_conflict",
-    "check.weights.venue_conflict",
-    "check.universe.absent",
-)
-"""The eight judgments this verb makes about a registered RUN.
+SIMULATION_CODES = frozenset(JUDGMENT_CODES)
+"""The judgments this verb makes about a registered RUN -- `flow/judgments.py`'s list, not a copy.
 
-Each is a question a run must answer YES to before it starts, and each is asked independently of
-the others -- and of every strategy the run names -- so a declaration with four defects reports
-four refusals rather than the first one four times.
+This was a hand-written tuple of the codes the judges raise, and it drifted: a judge was added
+there and the tuple here still counted the old number. The judges own their codes; this verb
+publishes them.
 """
 
 CODES = (
-    *SIMULATION_CODES,
+    *JUDGMENT_CODES,
     f"{STAGE}.declaration_invalid",
     f"{STAGE}.preflight_refused",
 )
@@ -67,6 +59,11 @@ CODES = (
 
 The two `run.check.*` codes name a bare `TypeError`/`ValueError` from a framework invariant, which
 has no structured body of its own and would otherwise surface as `stage: unhandled`.
+
+`run.check.judgment_blocked` (`flow/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
+raised by `require_judged` when a judgment could not answer on the run path; this verb asks the
+judgments itself and reports such an entry under `blocked`, never as a failure, so `check` cannot
+emit it.
 """
 
 
@@ -107,7 +104,6 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     workspace: Workspace | None = None
     definition: object | None = None
     phases = _PHASES
-    source = None
 
     for phase in phases:
         unmet = [need for need in phase.needs if need not in done]
@@ -131,7 +127,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 assert definition is not None
                 judged, could_not_answer = judgments(definition, workspace)  # type: ignore[arg-type]
                 blocked.extend(could_not_answer)
-                failures.extend(_render(failure, source) for failure in judged)
+                failures.extend(failure.as_dict() for failure in judged)
                 if judged:
                     continue
             elif phase.name == "preflight":
@@ -144,16 +140,20 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
         except VqaprError as error:
             # The framework already judged this and said why, in codes a reader may already have
             # handling for. Re-wrapping would replace an actionable refusal with a vaguer one.
-            failures.extend(_render(failure, source) for failure in error.failures)
+            # Every entry below is `Failure.as_dict()` -- the envelope's one failure shape, not a
+            # copy of it.
+            failures.extend(failure.as_dict() for failure in error.failures)
             continue
         except InputError as error:
-            failures.append(_from_input(error, source))
+            # An input refusal's own body, kept whole: the same code, source and fields it would
+            # carry from any other verb, rendered through the same shape.
+            failures.append(error.as_failure().as_dict())
             continue
         except Exception as error:
             # Every exception type, not a listed few: these are the cases most likely to mean a
             # phase is broken, and letting them escape renders the whole envelope as
             # `stage: "unhandled"` -- the framework broke, when the truth is the run was wrong.
-            failures.append(_render(preflight_refusal(phase.name, error, target), source))
+            failures.append(preflight_refusal(phase.name, error, target).as_dict())
             continue
 
         done.add(phase.name)
@@ -176,56 +176,10 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     }
 
 
-def _render(failure: Failure, spec: Path | None) -> dict[str, Any]:
-    """One refusal in the envelope's own shape, matching `VqaprError.as_dict` field for field.
-
-    A materialization refusal knows the id it could not resolve but not the file that named it,
-    so the file is supplied here when the refusal has none of its own. A run's refusals carry a
-    `runs.<id>` key path into the declaration document instead; the document itself is not known
-    to a registered run.
-    """
-    source = failure.source
-    if spec is not None and source.file is None:
-        source = replace(source, file=str(spec))
-    return {
-        "code": failure.code,
-        "source": source.as_dict(),
-        "requirement": failure.requirement,
-        "observed": failure.observed,
-        "fix": failure.fix,
-        "explain": str(failure.explain),
-        "examples": list(failure.examples),
-        "example_total": failure.example_total,
-    }
-
-
-def _from_input(error: InputError, spec: Path | None) -> dict[str, Any]:
-    """An input refusal's own body, kept whole and told which file it came from, when known."""
-    carried = error.source
-    source = FailureSource(
-        file=carried.file or (None if spec is None else str(spec)),
-        key_path=carried.key_path,
-        line=carried.line,
-    )
-    return {
-        "code": error.code,
-        "source": source.as_dict(),
-        "requirement": error.requirement,
-        "observed": error.observed,
-        "fix": error.fix,
-        "explain": str(ExplainTopic.DECLARATION_SHAPE),
-        "examples": list(error.examples),
-        "example_total": error.example_total,
-    }
-
-
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "target",
-        help=(
-            "the id of a registered run to check (the same id `vqapr run` takes), or the path of "
-            "a materialization spec"
-        ),
+        help="the id of a registered run to check (the same id `vqapr run` takes)",
     )
 
 

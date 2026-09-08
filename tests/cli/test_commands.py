@@ -704,7 +704,7 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     No refusal, no warning, nothing in the success envelope distinguished it from a run whose
     categories were known. On an academic venue that is harmless. On a KRX-shaped venue every name
     is charged identically while the record says the categories were never known, and
-    `cost_by_kind()` collapses to one unlabelled bucket -- the report that would expose it is the
+    the report's cost by kind collapses to one "unknown" bucket -- the report that would expose it is the
     one the gap erases.
 
     Reported on the SUCCESS path, because the run is legitimate. What was missing was not a

@@ -8,25 +8,27 @@ from decimal import Decimal
 from typing import ClassVar, Protocol
 
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.domain.values import Side, side_of
+from vqapr.domain.values import side_of
 from vqapr.exchange.execution_table import (
-    ExactExecutionRow,
     ExactExecutionSnapshot,
     accepted_requests,
     requested_rows,
+    validate_requests,
 )
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, TradeRule
-from vqapr.orders.batches import OrderBatch, OrderRequest
+from vqapr.orders.batches import OrderBatch
 
 
 class Exchange(Protocol):
     """The deliberately small execution extension boundary.
 
-    Before changing a profile, read `docs/issues/002-execution-profiles-share-no-base.md`. The two
-    shipped profiles duplicate their snapshot validation byte for byte, and neither sequences a
-    batch: sells do not fund buys, charged costs do not consume the cash the plan allocated, and
-    no profile can produce a partial fill when the money runs out mid-batch.
+    Before changing a profile, read `docs/issues/002-execution-profiles-share-no-base.md`. What
+    every profile checks about a call -- the batch, the snapshot rows, the requests against the
+    listings -- lives once in `execution_table` (`accepted_requests`, `requested_rows`,
+    `validate_requests`); a profile owns only how it fills. The academic profile still does not
+    sequence a batch: sells do not fund buys and it cannot produce a partial fill, which is
+    correct for a fractional, zero-friction venue and is what `KrxExchange` adds.
     """
 
     exchange_id: str
@@ -39,10 +41,6 @@ class Exchange(Protocol):
     def execute(
         self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
     ) -> FillBatch: ...
-
-
-def _side(quantity: Decimal) -> Side | None:
-    return side_of(quantity)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,41 +106,27 @@ class AcademicExchange:
         requests = accepted_requests(orders, account, snapshot)
         rows = requested_rows(snapshot, requests)
         rules = self.rules
-        self._validate_rules(requests, rows, account)
+        validate_requests(rules, requests, rows, account)
 
         fills: list[Fill] = []
         for request in requests:
             row = rows.get(request.instrument_id)
             if row is None:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.ABSENT,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.ABSENT
                     )
                 )
                 continue
             if request.delta_quantity == 0:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        Decimal("0"),
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NO_TRADE,
-                    )
+                    Fill.zero_dealt(request.instrument_id, Decimal("0"), ZeroDealtReason.NO_TRADE)
                 )
                 continue
             if not row.is_tradable:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NONTRADABLE,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.NONTRADABLE
                     )
                 )
             else:
@@ -165,43 +149,3 @@ class AcademicExchange:
                     )
                 )
         return FillBatch(tuple(fills), account.version)
-
-    def _validate_rules(
-        self,
-        requests: tuple[OrderRequest, ...],
-        rows: Mapping[str, ExactExecutionRow],
-        account: AccountSnapshot,
-    ) -> None:
-        for request in requests:
-            if (
-                not isinstance(request.delta_quantity, Decimal)
-                or not request.delta_quantity.is_finite()
-            ):
-                raise ValueError(f"invalid requested quantity for {request.instrument_id!r}")
-            rule = self.listings.get(request.instrument_id)
-            if rule is None:
-                raise ValueError(f"no academic listing for {request.instrument_id!r}")
-            row = rows.get(request.instrument_id)
-            if (
-                row is not None
-                and row.is_tradable
-                and (
-                    not isinstance(request.execution_price, Decimal)
-                    or not request.execution_price.is_finite()
-                    or request.execution_price <= 0
-                )
-            ):
-                raise ValueError(f"invalid selected price for {request.instrument_id!r}")
-            side = _side(request.delta_quantity)
-            if side is None:
-                continue
-            held = account.positions.get(request.instrument_id, Decimal("0"))
-            if not rule.permits_position(held, request.delta_quantity):
-                raise ValueError(
-                    f"{rule.access.value} listing does not permit this position change for "
-                    f"{request.instrument_id!r}"
-                )
-            if not rule.permits_quantity(abs(request.delta_quantity)):
-                raise ValueError(f"quantity violates listing rule for {request.instrument_id!r}")
-
-

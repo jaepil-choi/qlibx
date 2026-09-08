@@ -143,7 +143,7 @@ def test_show_unknown_run_refusal_carries_all_six_fields(
 def test_check_wraps_the_same_input_error_type_into_the_full_six_fields(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The control case: `check`'s own `_from_input` wrapper genuinely fixes the gap FOR check.
+    """The control case: `check` renders an `InputError` through `Failure.as_dict`, gap closed.
 
     This proves the fix is possible (it already exists, just not shared) and that the gap
     demonstrated above is not some inherent property of `InputError` -- it is that only one of

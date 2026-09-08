@@ -20,7 +20,9 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import ExecutionInputId, execution_input_id
+from vqapr.domain.values import side_of
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillConvention
+from vqapr.exchange.listings import ExchangeRulesView
 
 _REGISTER_SCHEMA = "execution_input.register.schema"
 _REGISTER_KEY = "execution_input.register.key"
@@ -429,6 +431,67 @@ def requested_rows(
             raise ValueError(f"invalid tradable price for {row.instrument!r}")
         rows[row.instrument] = row
     return rows
+
+
+def validate_requests(
+    rules: ExchangeRulesView,
+    requests: Sequence[Any],
+    rows: Mapping[str, ExactExecutionRow],
+    account: Any,
+) -> None:
+    """Refuse a batch whose requests the venue's own listings do not permit.
+
+    The third and last piece lifted out of both profiles (after `requested_rows` and
+    `accepted_requests`, issue `002`): the request loop that stood as
+    `AcademicExchange._validate_rules` and `KrxExchange._validate`. Same six checks -- a finite
+    quantity, a listing, a positive finite selected price on a tradable row, a side, the position
+    change, the quantity -- with the last two in opposite order and under different words. The
+    `permits_quantity` docstring records the bug that drift produced: one profile stopped checking
+    the minimum and the other did not, because the check was spelled twice.
+
+    Every question here is put to the LISTING (`TradeRule.permits_position`,
+    `TradeRule.permits_quantity`); this only walks the batch and phrases the refusal. Position is
+    checked before quantity, so an order that is both a short and off the unit is refused as the
+    short: the access class is the venue's standing declaration about the instrument, the unit
+    is a detail of this size.
+    """
+    for request in requests:
+        quantity = request.delta_quantity
+        if not isinstance(quantity, Decimal) or not quantity.is_finite():
+            raise ValueError(f"invalid requested quantity for {request.instrument_id!r}")
+        rule = rules.listing(request.instrument_id)
+        row = rows.get(request.instrument_id)
+        if (
+            row is not None
+            and row.is_tradable
+            and (
+                not isinstance(request.execution_price, Decimal)
+                or not request.execution_price.is_finite()
+                or request.execution_price <= 0
+            )
+        ):
+            raise ValueError(f"invalid selected price for {request.instrument_id!r}")
+        if side_of(quantity) is None:
+            continue
+        held = account.positions.get(request.instrument_id, Decimal("0"))
+        if not rule.permits_position(held, quantity):
+            if rule.tradable:
+                # The listing's own declaration, not a rule bolted onto a profile: selling a held
+                # position is always fine, and only a resulting short is refused.
+                raise ValueError(
+                    f"{rule.access.value} listing does not support short selling "
+                    f"{request.instrument_id!r}"
+                )
+            raise ValueError(
+                f"{rule.access.value} listing does not permit this position change for "
+                f"{request.instrument_id!r}"
+            )
+        if not rule.permits_quantity(abs(quantity)):
+            unit = "divisible" if rule.fractional_allowed else f"step {rule.quantity_step}"
+            raise ValueError(
+                f"quantity violates listing rule for {request.instrument_id!r}: {abs(quantity)} "
+                f"(minimum {rule.minimum_quantity}, {unit})"
+            )
 
 
 def accepted_requests(orders: Any, account: Any, snapshot: Any) -> tuple[Any, ...]:

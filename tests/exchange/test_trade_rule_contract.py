@@ -99,7 +99,9 @@ def test_both_profiles_refuse_the_same_undersized_order() -> None:
         0,
         (OrderRequest("A005930", Decimal("0"), Decimal("10.5"), Decimal("10.5"), price, None),),
     )
-    with pytest.raises(ValueError, match="not a whole share"):
+    # One refusal, in one set of words: the loop that phrases it is `validate_requests`, shared by
+    # both profiles, so the KRX profile no longer has its own "not a whole share" spelling.
+    with pytest.raises(ValueError, match=r"quantity violates listing rule for 'A005930': 10\.5"):
         krx.execute(fractional_order, account, _snapshot(at, "A005930", price))
 
 

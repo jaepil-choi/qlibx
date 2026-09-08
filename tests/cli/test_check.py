@@ -615,21 +615,46 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
             f"{code} is not in this verb's namespace"
         )
 
-    from vqapr.cli.check import SIMULATION_CODES
+    import inspect
+    import re
 
-    # One counted set. Record 148 closed the spec-file door: a datamodel is a `runs:` entry and
-    # its judgments (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
-    # nine `check.materialize.*` codes a spec used to settle are gone rather than merged.
-    assert len(SIMULATION_CODES) == 8, (
-        "a run settles exactly eight judgments; adding a ninth is a decision, not a detail"
+    from vqapr.cli.check import SIMULATION_CODES
+    from vqapr.flow import judgments as judgments_module
+    from vqapr.flow.judgments import JUDGMENT_BLOCKED, JUDGMENT_CODES
+
+    # One set, owned by the judges. `check` used to hold a hand-written copy of the codes
+    # `flow/judgments.py` raises and pin its length here; the copy drifted when a judge was added
+    # (`check.datamodel.output_registered`) and the pin kept certifying the stale count. Record
+    # 148 closed the spec-file door: a datamodel is a `runs:` entry and its judgments
+    # (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
+    # `check.materialize.*` codes a spec used to settle are gone rather than merged.
+    assert frozenset(JUDGMENT_CODES) == SIMULATION_CODES, (
+        "check must publish the judges' own list, not a copy of it"
     )
+    assert len(set(JUDGMENT_CODES)) == len(JUDGMENT_CODES)
     assert not any(code.startswith("check.materialize.") for code in CODES), (
         "the materialization spec's judgment set retired with the spec file (record 148)"
     )
-    assert set(CODES) == set(SIMULATION_CODES) | {
+    assert set(CODES) == set(JUDGMENT_CODES) | {
         "run.check.declaration_invalid",
         "run.check.preflight_refused",
     }, "CODES must be exactly the judgment set plus the two framework-invariant codes"
+    assert JUDGMENT_BLOCKED not in CODES, (
+        "check reports a judgment that could not answer as blocked, never as a failure, so it "
+        "cannot emit require_judged's code"
+    )
+
+    # The tuple cannot drift from the judges: every `check.` code spelled anywhere in the
+    # judgments module -- which, by construction, is the constant each judge raises through --
+    # must be a member. A tenth judge added with a literal or a constant but no line in
+    # `JUDGMENT_CODES` fails here rather than in a reader's handling.
+    spelled = set(re.findall(r'"(check\.[a-z_.]+)"', inspect.getsource(judgments_module)))
+    assert spelled, "the regex found no codes, so it proves nothing about drift"
+    published = set(JUDGMENT_CODES)
+    assert spelled == published, (
+        f"spelled in flow/judgments.py but not published: {sorted(spelled - published)}; "
+        f"published but not spelled: {sorted(published - spelled)}"
+    )
 
 
 def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(

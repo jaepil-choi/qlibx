@@ -23,11 +23,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from itertools import pairwise
-from statistics import median
 
 from vqapr.analysis.execution import fill_summary
 from vqapr.analysis.performance import drawdown as running_drawdown
 from vqapr.analysis.performance import returns as period_returns
+from vqapr.analysis.signal import correlation as pearson_correlation
 from vqapr.report.document import (
     Attribution,
     Book,
@@ -224,18 +224,16 @@ def _share(count: int, total: int) -> Decimal | None:
 
 
 def _pearson(left: Sequence[Decimal], right: Sequence[Decimal]) -> Decimal | None:
+    """`analysis.signal.correlation` with its one refusal read as `None`: a constant series has no
+    correlation with anything, and the matrix shows that as a hole rather than a zero. The
+    period returns here are finite (NAV is positive), so no-spread is the only `ValueError`
+    the shared function can raise on them."""
     if len(left) < 2:
         return None
-    mean_left = sum(left, ZERO) / len(left)
-    mean_right = sum(right, ZERO) / len(right)
-    covariance = sum(
-        ((a - mean_left) * (b - mean_right) for a, b in zip(left, right, strict=True)), ZERO
-    )
-    spread = (
-        sum(((a - mean_left) ** 2 for a in left), ZERO)
-        * sum(((b - mean_right) ** 2 for b in right), ZERO)
-    ).sqrt()
-    return None if spread == 0 else covariance / spread
+    try:
+        return pearson_correlation(left, right)
+    except ValueError:
+        return None
 
 
 def _compounded(values: Sequence[Decimal]) -> Decimal:
@@ -297,14 +295,7 @@ def performance(
     annual = Decimal(periods_per_year)
     count = len(rets)
     total = nav[-1] / nav[0] - ONE
-    if count:
-        annualized = (ONE + total) ** (annual / count) - ONE
-        mean = _mean(rets)
-        assert mean is not None
-        annualized_mean = mean * annual
-    else:
-        annualized = ZERO
-        annualized_mean = ZERO
+    annualized = (ONE + total) ** (annual / count) - ONE if count else ZERO
     deviation = _std(rets)
     volatility = None if deviation is None else deviation * annual.sqrt()
     risk_free_per_period = risk_free_annual / annual
@@ -359,7 +350,6 @@ def performance(
         periods=count,
         total_return=total,
         annualized_return=annualized,
-        annualized_mean_return=annualized_mean,
         annualized_volatility=volatility,
         sharpe=sharpe,
         sortino=sortino,
@@ -391,7 +381,7 @@ def _weights(valuation: Valuation) -> dict[str, Decimal]:
 def book(grid: Sequence[Valuation]) -> Book:
     instants, held, long, short, unmarked = [], [], [], [], []
     gross, net, long_exp, short_exp, cash = [], [], [], [], []
-    top, top5, hhi = [], [], []
+    top, hhi = [], []
     for valuation in grid:
         weights = _weights(valuation)
         magnitudes = sorted((abs(w) for w in weights.values()), reverse=True)
@@ -406,9 +396,7 @@ def book(grid: Sequence[Valuation]) -> Book:
         short_exp.append(sum((w for w in weights.values() if w < 0), ZERO))
         cash.append(valuation.cash / valuation.nav)
         top.append(magnitudes[0] if magnitudes else ZERO)
-        top5.append(sum(magnitudes[:5], ZERO))
         hhi.append(sum((m * m for m in magnitudes), ZERO))
-    count = Decimal(len(grid))
     return Book(
         instants=instants,
         held=held,
@@ -421,12 +409,7 @@ def book(grid: Sequence[Valuation]) -> Book:
         short_exposure=short_exp,
         cash_share=cash,
         max_weight=top,
-        top_five_share=top5,
         hhi=hhi,
-        mean_held=Decimal(sum(held)) / count,
-        mean_gross_exposure=sum(gross, ZERO) / count,
-        mean_net_exposure=sum(net, ZERO) / count,
-        mean_cash_share=sum(cash, ZERO) / count,
     )
 
 
@@ -520,9 +503,7 @@ def attribution(grid: Sequence[Valuation], placed: Sequence[Fill]) -> Attributio
                 if start is not None
                 else (_sign(end.quantity) if end is not None else 0)
             )
-            tally = per_name.setdefault(
-                name, {"pnl": ZERO, "long": ZERO, "short": ZERO, "held": 0, "positive": 0}
-            )
+            tally = per_name.setdefault(name, {"pnl": ZERO, "long": ZERO, "short": ZERO, "held": 0})
             tally["pnl"] += pnl  # type: ignore[operator]
             if side > 0:
                 long += pnl
@@ -534,9 +515,7 @@ def attribution(grid: Sequence[Valuation], placed: Sequence[Fill]) -> Attributio
             if start is not None or end is not None:
                 scored += 1
                 tally["held"] += 1  # type: ignore[operator]
-                if pnl > 0:
-                    positive += 1
-                    tally["positive"] += 1  # type: ignore[operator]
+                positive += pnl > 0
         instants.append(closing.at)
         totals.append(total)
         longs.append(long)
@@ -550,7 +529,6 @@ def attribution(grid: Sequence[Valuation], placed: Sequence[Fill]) -> Attributio
                 long_pnl=tally["long"],  # type: ignore[arg-type]
                 short_pnl=tally["short"],  # type: ignore[arg-type]
                 periods_held=tally["held"],  # type: ignore[arg-type]
-                periods_positive=tally["positive"],  # type: ignore[arg-type]
             )
             for name, tally in per_name.items()
         ),
@@ -565,9 +543,7 @@ def attribution(grid: Sequence[Valuation], placed: Sequence[Fill]) -> Attributio
         total_pnl=sum(totals, ZERO),
         long_pnl=sum(longs, ZERO),
         short_pnl=sum(shorts, ZERO),
-        residual_pnl=sum(residuals, ZERO),
         position_hit_rate=_share(positive, scored),
-        positions_scored=scored,
         by_instrument=by_instrument,
     )
 
@@ -605,7 +581,6 @@ def _holding(grid: Sequence[Valuation]) -> Holding:
     return Holding(
         round_trips=len(lengths),
         mean_periods=_mean([Decimal(length) for length in lengths]),
-        median_periods=None if not lengths else Decimal(median(lengths)),
         open_at_end=len(open_runs),
     )
 
@@ -831,9 +806,10 @@ def correlation(reports: Sequence[StrategyReport]) -> Correlation | None:
     instants, columns = _aligned(reports)
     if len(instants) < 3:
         return None
+    # The diagonal is not set by hand: the shared correlation is exactly 1 for a series against
+    # itself, and a constant series is `None` there as everywhere else in its row.
     values = [
-        [ONE if i == j else _pearson(columns[i], columns[j]) for j in range(len(reports))]
-        for i in range(len(reports))
+        [_pearson(columns[i], columns[j]) for j in range(len(reports))] for i in range(len(reports))
     ]
     return Correlation(
         refs=[report.strategy_ref for report in reports], periods=len(instants), values=values
@@ -853,8 +829,6 @@ def relative(report: StrategyReport, benchmark: StrategyReport) -> Relative:
         benchmark_ref=benchmark.strategy_ref,
         periods=len(instants),
         active_return=Series(instants=instants, values=list(active)),
-        annualized_active_return=annualized,
         tracking_error=tracking,
         information_ratio=_ratio(annualized, tracking),
-        cumulative_active_return=sum(active, ZERO),
     )

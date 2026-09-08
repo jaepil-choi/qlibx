@@ -155,9 +155,9 @@ def roster_report(read: RegisteredRoster | None) -> dict[str, object] | None:
     `None` is the answer that matters. A run with no roster completes with every fill recording
     `kind: None`, and before this it did so in silence: nothing in the success envelope or the
     frozen record distinguished it from a run whose categories were known. On an academic venue
-    that is harmless; on a KRX-shaped venue every name is then charged identically while
-    `cost_by_kind()` collapses to one unlabelled bucket -- the report that would expose it is the
-    one the gap erases.
+    that is harmless; on a KRX-shaped venue every name is then charged identically while the
+    report's cost by kind collapses to one "unknown" bucket -- the report that would expose it
+    is the one the gap erases.
 
     **Every field comes from the read this was handed, and nothing is read here.** The docstring
     used to claim that and it was true of the counts alone: `digest` and `tables` came from a

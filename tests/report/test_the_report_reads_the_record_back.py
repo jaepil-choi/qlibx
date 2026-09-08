@@ -37,6 +37,8 @@ RUN = "r"
 S = "s@00000001"
 T = "t@00000002"
 U = "u@00000003"
+V = "v@00000004"
+W = "w@00000005"
 
 
 def _head(at: datetime, version: int, cash: str, nav: str) -> dict[str, object]:
@@ -373,6 +375,7 @@ def test_intended_is_read_against_the_first_valuation_at_or_after_the_decision(
     nav = Decimal("998.5")
     expected = abs(Decimal(500) / nav - Decimal("0.5")) + abs(Decimal(-100) / nav + Decimal("0.1"))
     assert intent.gap == [expected, Decimal(0)]
+    assert intent.mean_gap == expected / 2, "the skill's Table 3 prints this one"
     assert intent.max_gap == expected and intent.max_gap_at == D1
     # A rose 50 -> 55 under a long weight, B fell 20 -> 18 under a short one: two hits of two.
     assert intent.weight_sign_hit_rate == Decimal(1) and intent.weights_scored == 2
@@ -443,6 +446,14 @@ def test_the_run_report_lines_the_strategies_up_and_measures_one_against_another
     assert list(report.strategies) == [S, T]
     assert [row.strategy_id for row in report.headline] == ["s", "t"]
     assert report.headline[0].breached == 2 and report.headline[1].breached is None
+    # Table 1's cost column: 2.7 of costs over the mean NAV of the four valuations, per year.
+    mean_nav = Decimal("4159.3") / 4
+    years = Decimal(3) / Decimal(252)
+    assert report.headline[0].cost_share_of_mean_nav_per_year == Decimal("2.7") / mean_nav / years
+    assert (
+        report.headline[0].cost_share_of_mean_nav_per_year
+        == report.strategies[S].trading.costs.share_of_mean_nav_per_year
+    )
     assert report.correlation is not None
     assert report.correlation.refs == [S, T] and report.correlation.periods == 3
     assert report.correlation.values[0][0] == Decimal(1)
@@ -451,10 +462,38 @@ def test_the_run_report_lines_the_strategies_up_and_measures_one_against_another
     assert relative.strategy_ref == S and relative.benchmark_ref == T
     s_returns = report.strategies[S].performance.returns.values
     t_returns = report.strategies[T].performance.returns.values
-    assert relative.active_return.values == [
-        a - b for a, b in zip(s_returns, t_returns, strict=True)
-    ]
-    assert relative.information_ratio is not None
+    active = [a - b for a, b in zip(s_returns, t_returns, strict=True)]
+    assert relative.active_return.values == active
+    # The information ratio is the annualised active mean over the tracking error; the tracking
+    # error is on the document, the annualised mean is the ratio times it (record 170).
+    mean = sum(active, Decimal(0)) / 3
+    deviation = (sum(((v - mean) ** 2 for v in active), Decimal(0)) / 2).sqrt()
+    assert relative.tracking_error == deviation * Decimal(252).sqrt()
+    assert relative.information_ratio == mean * 252 / relative.tracking_error
+
+
+def test_two_identical_return_series_correlate_at_exactly_one_off_the_diagonal(
+    store: Path,
+) -> None:
+    """`v` and `w` record the same cash-only valuations, so their period returns are identical
+    to the digit -- two of the three are 28-digit quotients (`997 / 1007 - 1`, `1013 / 997 - 1`).
+    A Pearson carried in Decimal square roots reports exactly this pair against itself as
+    0.9999999999999999999999999997 (checked before the series was chosen); the report shares
+    `analysis.signal.correlation`, which recognises the perfect case in exact rationals, and the
+    diagonal is that same computation rather than a `1` written by hand."""
+    for ref in (V, W):
+        writer = RunRecordWriter(store, RUN, ref)
+        writer.open()
+        for at, nav in ((T0, "1000"), (T1, "1007"), (T2, "997"), (T3, "1013")):
+            writer.append("vqapr.account", [_head(at, 0, nav, nav)])
+        writer.finish(_strategy_record(ref, []), kind=STRATEGY_KIND)
+        writer.release()
+
+    correlation = run_report(store, RUN).correlation
+    assert correlation is not None
+    v, w = correlation.refs.index(V), correlation.refs.index(W)
+    assert correlation.values[v][w] == Decimal(1) == correlation.values[w][v]
+    assert [correlation.values[i][i] for i in range(len(correlation.refs))] == [Decimal(1)] * 4
 
 
 def test_the_report_is_json_with_exact_decimals_and_zoned_instants(store: Path) -> None:

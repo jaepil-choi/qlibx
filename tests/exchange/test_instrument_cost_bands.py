@@ -274,7 +274,9 @@ def test_the_exempt_sleeve_funds_more_of_the_buy_it_pays_for(real_close) -> None
     committed.bind(AccountState(account))
     prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
     assert prepared.next_snapshot.cash >= 0, "planning must not reserve less than the fill charges"
-    assert fills.total_tax == Decimal("0"), "only the exempt sleeve was sold"
+    assert sum(fill.cost.tax for fill in fills.fills) == Decimal("0"), (
+        "only the exempt sleeve was sold"
+    )
 
 
 def test_a_listed_instrument_has_exactly_one_rate_per_side() -> None:
@@ -317,11 +319,13 @@ def test_a_category_with_no_terms_is_simply_not_listed() -> None:
 
 @pytest.mark.uc("UC-COST-004")
 def test_a_batch_reports_what_each_category_paid(real_close) -> None:
-    """Separating the rates is only half the job: the batch has to be able to show it.
+    """Separating the rates is only half the job: each fill has to be able to show it.
 
     An enhanced-index fund holds an ETF sleeve to track the index cheaply, and the number that
-    justifies the sleeve is what the sleeve cost. A batch reporting one total cannot produce it,
-    so a consumer would have to re-derive each fill's category from a venue it may not hold.
+    justifies the sleeve is what the sleeve cost. The split is read the way the report reads it
+    (`report/measure.py`, `trading`): from each fill's own `kind`, `commission` and `tax`, so a
+    consumer holding no venue never re-derives a category. A batch-level aggregate used to exist
+    beside this and nothing in the product read it; the per-fill columns are the contract.
     """
     at, prices = real_close
     stock, etf = sorted(prices)[:2]
@@ -339,16 +343,16 @@ def test_a_batch_reports_what_each_category_paid(real_close) -> None:
     rows = tuple(ExactExecutionRow(at, name, True, price) for name in (stock, etf))
     fills = venue.execute(batch, account, ExactExecutionSnapshot(at, rows, (), (), ()))
 
-    by_kind = fills.cost_by_kind()
+    by_kind: dict[InstrumentKind | None, tuple[Decimal, Decimal]] = {}
+    for fill in fills.fills:
+        commission, tax = by_kind.get(fill.kind, (Decimal("0"), Decimal("0")))
+        by_kind[fill.kind] = (commission + fill.cost.commission, tax + fill.cost.tax)
     notional = Decimal("60") * price
-    assert by_kind[InstrumentKind.STOCK].tax == notional * SALE_TAX_RATE
-    assert by_kind[InstrumentKind.ETF].tax == Decimal("0"), "the sleeve owes no share tax"
-    assert by_kind[InstrumentKind.STOCK].commission == notional * COMMISSION_RATE
-    assert by_kind[InstrumentKind.ETF].commission == notional * COMMISSION_RATE
-
-    # The split has to reconcile with the batch total, or it is a second set of books.
-    assert sum(c.commission for c in by_kind.values()) == fills.total_commission
-    assert sum(c.tax for c in by_kind.values()) == fills.total_tax
+    assert by_kind[InstrumentKind.STOCK] == (notional * COMMISSION_RATE, notional * SALE_TAX_RATE)
+    assert by_kind[InstrumentKind.ETF] == (notional * COMMISSION_RATE, Decimal("0")), (
+        "the sleeve owes no share tax"
+    )
+    assert set(by_kind) == {InstrumentKind.STOCK, InstrumentKind.ETF}, "no unlabelled bucket"
 
     # Each fill carries the category it was charged as, so evidence survives a roster edit.
     assert {f.instrument_id: f.kind for f in fills.fills} == {
@@ -366,7 +370,7 @@ def test_a_rosterless_run_is_refused_by_a_categorised_venue_and_served_by_a_flat
     collected the share sale tax under `None`, which is the outcome issue 011.3 named and this now
     forecloses.
 
-    `None` in `cost_by_kind()` is still the honest bucket for a venue that never needed a category.
+    `Fill.kind` of `None` is still the honest answer for a venue that never needed a category.
     """
     at = datetime(2026, 8, 22, 6, 30, tzinfo=UTC)
     price = Decimal("70000")

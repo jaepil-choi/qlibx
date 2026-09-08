@@ -16,6 +16,7 @@ import duckdb
 import pytest
 
 from vqapr.analysis.signal import (
+    correlation,
     decay,
     hit_rate,
     information_coefficient,
@@ -145,6 +146,19 @@ def test_the_square_root_branch_lands_on_an_exact_hand_computed_value() -> None:
 
     # The rank form takes the same branch and owes the same number on these orderings.
     assert rank_information_coefficient(signal, falling) == Decimal("-0.5")
+
+
+def test_the_public_correlation_is_exactly_one_for_a_series_against_itself() -> None:
+    """The report's correlation matrix calls this on plain sequences. These are the period returns
+    of the NAV path 1000, 1007, 997, 1013 -- one short value and two 28-digit quotients -- on
+    which a Pearson carried in Decimal square roots returns 0.9999999999999999999999999997 for
+    the series against itself. Exact rationals return 1, so the report's diagonal and its
+    identical-series cells need no special case."""
+    series = [Decimal("0.007"), Decimal(997) / Decimal(1007) - 1, Decimal(1013) / Decimal(997) - 1]
+    assert correlation(series, series) == Decimal(1)
+    assert correlation(series, [-value for value in series]) == Decimal(-1)
+    with pytest.raises(ValueError, match="correlation is undefined"):
+        correlation(series, [Decimal(1)] * 3)
 
 
 def test_a_flat_side_is_refused_rather_than_reported_as_zero() -> None:

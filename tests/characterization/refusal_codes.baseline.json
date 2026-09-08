@@ -121,52 +121,52 @@
     {
       "code": "check.datamodel.output_registered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 477
+      "line": 526
     },
     {
       "code": "check.dataset.unregistered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 443
+      "line": 492
     },
     {
       "code": "check.execution.not_after_decision",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 318
+      "line": 367
     },
     {
       "code": "check.field.absent",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 397
+      "line": 446
     },
     {
       "code": "check.lookback.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 421
+      "line": 470
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 234
+      "line": 283
     },
     {
       "code": "check.period.uncovered",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 245
+      "line": 294
     },
     {
       "code": "check.universe.absent",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 192
+      "line": 241
     },
     {
       "code": "check.weights.mode_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 534
+      "line": 583
     },
     {
       "code": "check.weights.venue_conflict",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 585
+      "line": 634
     },
     {
       "code": "component.conformance.load_failed",
@@ -426,27 +426,27 @@
     {
       "code": "execution_input.register.key.duplicate",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 227
+      "line": 229
     },
     {
       "code": "execution_input.register.key.null",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 211
+      "line": 213
     },
     {
       "code": "execution_input.register.price.invalid",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 257
+      "line": 259
     },
     {
       "code": "execution_input.register.schema.field_type",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 155
+      "line": 157
     },
     {
       "code": "execution_input.register.schema.price_type",
       "file": "src/vqapr/exchange/execution_table.py",
-      "line": 176
+      "line": 178
     },
     {
       "code": "model_window.requirement.undeclared",
@@ -531,7 +531,7 @@
     {
       "code": "run.check.judgment_blocked",
       "file": "src/vqapr/flow/judgments.py",
-      "line": 85
+      "line": 133
     },
     {
       "code": "run.check.preflight_refused",
@@ -709,5 +709,16 @@
       "line": 1398
     }
   ],
-  "unresolved": []
+  "unresolved": [
+    {
+      "expression": "f'{self.stage.value}.{type(cause).__name__}'",
+      "file": "src/vqapr/evidence/artifacts.py",
+      "line": 227
+    },
+    {
+      "expression": "self.code",
+      "file": "src/vqapr/inputs.py",
+      "line": 100
+    }
+  ]
 }

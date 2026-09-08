@@ -89,6 +89,19 @@ class Fill:
         if abs(self.dealt_quantity) > abs(self.requested_quantity):
             raise ValueError("dealt_quantity cannot exceed requested_quantity")
 
+    @classmethod
+    def zero_dealt(
+        cls, instrument_id: str, requested_quantity: Decimal, reason: ZeroDealtReason
+    ) -> Fill:
+        """An accepted order the venue did not execute, for the stated market or account fact.
+
+        Every profile writes this same fill -- no price, no cost, nothing dealt -- for each of the
+        `ZeroDealtReason` facts, and did so as five positional arguments repeated in two venues.
+        One constructor keeps the shape of "nothing happened" in one place, so a venue adding a
+        reason cannot spell the evidence differently from the others.
+        """
+        return cls(instrument_id, requested_quantity, Decimal("0"), None, reason)
+
     @property
     def notional(self) -> Decimal:
         """The absolute traded value before cost."""
@@ -125,30 +138,3 @@ class FillBatch:
         instruments = tuple(fill.instrument_id for fill in self.fills)
         if len(instruments) != len(set(instruments)):
             raise ValueError("a FillBatch may contain each instrument only once")
-
-    @property
-    def total_commission(self) -> Decimal:
-        return sum((fill.cost.commission for fill in self.fills), Decimal("0"))
-
-    @property
-    def total_tax(self) -> Decimal:
-        return sum((fill.cost.tax for fill in self.fills), Decimal("0"))
-
-    def cost_by_kind(self) -> dict[InstrumentKind | None, FillCost]:
-        """What each instrument category paid, which is the number the split exists to produce.
-
-        Charging an ETF sleeve at the share rate overstates cost by the full tax on every unit of
-        sleeve turnover; separating the rates is only half the job, because a batch that reports
-        one total cannot show that the exemption was applied. Categories the venue did not declare
-        collect under ``None`` rather than being dropped or guessed.
-        """
-        totals: dict[InstrumentKind | None, FillCost] = {}
-        for fill in self.fills:
-            if not fill.cost:
-                continue
-            running = totals.get(fill.kind, FillCost())
-            totals[fill.kind] = FillCost(
-                commission=running.commission + fill.cost.commission,
-                tax=running.tax + fill.cost.tax,
-            )
-        return totals

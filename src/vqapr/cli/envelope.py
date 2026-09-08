@@ -17,6 +17,7 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+from vqapr.domain.errors import FailureSource
 from vqapr.inputs import BoundedRefusal
 from vqapr.workspace import WORKSPACE_DIRECTORY
 
@@ -67,30 +68,30 @@ class UsageError(BoundedRefusal):
             "retry_precondition": None,
             "correlation_id": None,
             "failures": [
+                # The one entry in the package that is NOT rendered by `Failure.as_dict`, and
+                # the reason is `explain`: a `Failure` carries an `ExplainTopic` from the closed
+                # set `SKILL.md` and the package own together, and a rejected command line has
+                # no package concept to explain. Inventing a topic for it would be a section the
+                # skill does not have. So the keys are spelled here, in `Failure.as_dict`'s
+                # order, and `source` is the same `FailureSource` shape every other refusal
+                # emits -- an OBJECT with null members, not a bare null, so a reader doing
+                # `failure["source"]["file"]` does not hit a TypeError on this one refusal alone.
+                #
+                # `docs/issues/030`, second half, settled by record `114`: this refusal used to
+                # carry three of the six fields `SKILL.md` guarantees, on THE FIRST REFUSAL A NEW
+                # USER EVER SEES. A guarantee with an unwritten exception at the most common
+                # entry point is not a guarantee, so the answer is that `cli.usage` is INSIDE it.
+                # `fix` is real and actionable, which is the field the document tells a reader to
+                # read first; `SKILL.md` already says `source` and `explain` may be null when the
+                # failure has no location and no topic, and this is that case.
                 {
                     "code": "cli.usage.rejected",
+                    "source": FailureSource().as_dict(),
                     # argparse가 낸 문구를 그대로 싣는다. 여기서 새 문구를 만들면 package 판정과
                     # 경쟁하는 두 번째 권위가 된다.
                     "requirement": self.message,
                     "observed": self.prog,
-                    # `docs/issues/030`, second half, settled by record `114`: this refusal used to
-                    # carry three of the six fields `SKILL.md` guarantees, on THE FIRST REFUSAL A
-                    # NEW USER EVER SEES. A guarantee with an unwritten exception at the most
-                    # common entry point is not a guarantee, so the answer is that `cli.usage` is
-                    # INSIDE it -- and the three missing keys are added rather than excused.
-                    #
-                    # `fix` is real and actionable, which is the field the document tells a reader
-                    # to read first. `source` and `explain` are null because this failure has
-                    # neither: argparse rejected the command line, so there is no file to point at
-                    # and no package concept to explain. `SKILL.md` already says a `source` field
-                    # may be null when the failure has no such location; this is that case.
                     "fix": f"run `{self.prog} --help` to see the arguments this command accepts",
-                    # The OBJECT shape, not a bare null. Every other refusal emits an object,
-                    # so a reader doing `failure["source"]["file"]` would hit a TypeError on
-                    # this one refusal alone. Its three members are null because a rejected
-                    # command line has no location -- which is exactly the case SKILL.md's
-                    # "any of which may be null" paragraph already describes.
-                    "source": {"file": None, "key_path": None, "line": None},
                     "explain": None,
                     "examples": [],
                     "example_total": 0,

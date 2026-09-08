@@ -22,6 +22,7 @@ from decimal import Decimal
 from fractions import Fraction
 
 __all__ = [
+    "correlation",
     "decay",
     "hit_rate",
     "information_coefficient",
@@ -54,11 +55,19 @@ def _paired(
     return left, right
 
 
-def _correlation(left: Sequence[Decimal], right: Sequence[Decimal], name: str) -> Decimal:
-    # Sums run in exact rationals so the perfect-correlation case can be recognised as such.
-    # A correctly-rounded square root would return 0.9999999999999999999999999998 for a signal
-    # correlated with itself, and an anchor that has to be compared with a tolerance is a weaker
-    # anchor than one that is simply true.
+def correlation(
+    left: Sequence[Decimal], right: Sequence[Decimal], name: str = "correlation"
+) -> Decimal:
+    """Pearson correlation of two aligned Decimal series, exactly one where they are perfectly
+    correlated.
+
+    Sums run in exact rationals so the perfect-correlation case can be recognised as such. A
+    correctly-rounded square root would return 0.9999999999999999999999999998 for a signal
+    correlated with itself, and an anchor that has to be compared with a tolerance is a weaker
+    anchor than one that is simply true. Raises `ValueError` when either side has no spread;
+    `name` is the caller's name for the message. The report's correlation matrix
+    (`vqapr.report.measure`) uses this same function, so its diagonal is 1 without being set.
+    """
     count = len(left)
     a_values = [Fraction(value) for value in left]
     b_values = [Fraction(value) for value in right]
@@ -109,7 +118,7 @@ def information_coefficient(
     contributes nothing measurable and a zero would be an invention.
     """
     left, right = _paired(signal, realized, "information_coefficient")
-    return _correlation(left, right, "information_coefficient")
+    return correlation(left, right, "information_coefficient")
 
 
 def rank_information_coefficient(
@@ -117,7 +126,7 @@ def rank_information_coefficient(
 ) -> Decimal:
     """The same measure on orderings rather than values, so one extreme name cannot carry it."""
     left, right = _paired(signal, realized, "rank_information_coefficient")
-    return _correlation(_ranks(left), _ranks(right), "rank_information_coefficient")
+    return correlation(_ranks(left), _ranks(right), "rank_information_coefficient")
 
 
 def hit_rate(signal: Mapping[str, Decimal], realized: Mapping[str, Decimal]) -> Decimal:

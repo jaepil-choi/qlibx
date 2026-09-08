@@ -51,10 +51,58 @@ from vqapr.flow.run import RunDefinition
 # tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
 from vqapr.workspace import Workspace
 
-__all__ = ["JUDGMENT_STAGE", "judgments", "require_judged"]
+__all__ = [
+    "JUDGMENT_BLOCKED",
+    "JUDGMENT_CODES",
+    "JUDGMENT_STAGE",
+    "judgments",
+    "require_judged",
+]
 
 JUDGMENT_STAGE = "run.judgments"
 """The stage a refused judgment is reported under, by every door that asks them."""
+
+# One constant per code, and each judge below raises through its constant rather than through a
+# literal of its own. `cli/check.py` publishes the set of codes this verb can emit, and when that
+# set was a hand-written copy of the literals here it drifted: a ninth judge was added and the copy
+# still said eight. `JUDGMENT_CODES` is the only list, `check` imports it, and a test regex over
+# this module's source holds every `"check.` literal to membership in it -- so the next judge
+# added without a line here fails the suite rather than the reader.
+UNIVERSE_ABSENT = "check.universe.absent"
+PERIOD_UNCOVERED = "check.period.uncovered"
+EXECUTION_NOT_AFTER_DECISION = "check.execution.not_after_decision"
+FIELD_ABSENT = "check.field.absent"
+LOOKBACK_UNCOVERED = "check.lookback.uncovered"
+DATASET_UNREGISTERED = "check.dataset.unregistered"
+WEIGHTS_MODE_CONFLICT = "check.weights.mode_conflict"
+WEIGHTS_VENUE_CONFLICT = "check.weights.venue_conflict"
+DATAMODEL_OUTPUT_REGISTERED = "check.datamodel.output_registered"
+
+JUDGMENT_CODES = (
+    UNIVERSE_ABSENT,
+    PERIOD_UNCOVERED,
+    EXECUTION_NOT_AFTER_DECISION,
+    FIELD_ABSENT,
+    LOOKBACK_UNCOVERED,
+    DATASET_UNREGISTERED,
+    WEIGHTS_MODE_CONFLICT,
+    WEIGHTS_VENUE_CONFLICT,
+    DATAMODEL_OUTPUT_REGISTERED,
+)
+"""Every code `judgments` can emit, in the order the judges run and raise them.
+
+Each is a question a run must answer YES to before it starts, asked independently of the others
+-- and of every strategy the run names -- so a declaration with four defects reports four refusals
+rather than the first one four times. `check` renders these as failures; `run` refuses on them.
+"""
+
+JUDGMENT_BLOCKED = "run.check.judgment_blocked"
+"""`require_judged`'s own code, for a judgment that could not ANSWER on the run path.
+
+Not in `JUDGMENT_CODES`: it is not a judgment, and `check` never emits it -- `check` asks
+`judgments` itself and reports a blocked entry AS blocked, so only the doors that go through
+`require_judged` (`preflight_run`, hence `run` and the sample's `execute`) ever raise it.
+"""
 
 
 def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
@@ -82,7 +130,7 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
     for entry in blocked:
         reported.append(
             Failure.bounded(
-                "run.check.judgment_blocked",
+                JUDGMENT_BLOCKED,
                 "every judgment must be answerable before the run starts",
                 observed=(
                     f"the {entry.get('check')} judgment could not answer: {entry.get('blocked_by')}"
@@ -101,13 +149,14 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
 def judgments(
     definition: RunDefinition, workspace: Workspace
 ) -> tuple[list[Failure], list[dict[str, str]]]:
-    """The eight judgments, each answered independently of the others, for every strategy.
+    """The judgments (`JUDGMENT_CODES`), each answered independently of the others, for every
+    strategy.
 
-    Independence is the whole design: each of the five judges reads the definition and the
-    workspace and answers on its own, so a run carrying four defects produces four refusals in a
-    single call. Within two of them a later code is gated behind an earlier one -- an absent
-    dataset suppresses the field and lookback questions about it, because there is nothing to ask
-    them of -- and each such gate carries its own reason.
+    Independence is the whole design: each judge reads the definition and the workspace and
+    answers on its own, so a run carrying four defects produces four refusals in a single call.
+    Within the dataset judge a later code is gated behind an earlier one -- an absent dataset
+    suppresses the field and lookback questions about it, because there is nothing to ask them of
+    -- and each such gate carries its own reason.
 
     A judgment that could not ANSWER is recorded as blocked, carrying the exception type separately
     from its message so a framework bug reads differently from a routine decline. It is never
@@ -182,14 +231,14 @@ def _judge_universe(definition: RunDefinition, at: FailureSource) -> list[Failur
     """A run with no instruments has nothing to decide about.
 
     A `RunDefinition` refuses an empty universe at construction, so a registered run cannot reach
-    this with none; the judgment stays because `check` promises the eight questions and a reader
-    counting them should find each one asked.
+    this with none; the judgment stays because `check` publishes `JUDGMENT_CODES` as the questions
+    it asks, and a reader counting them should find each one asked.
     """
     if definition.instruments:
         return []
     return [
         Failure.bounded(
-            "check.universe.absent",
+            UNIVERSE_ABSENT,
             "a run must declare at least one instrument to decide about",
             observed=f"instruments: {definition.instruments!r}",
             fix="list the instrument ids the run trades under `instruments:` in the run",
@@ -231,7 +280,7 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
     if start is None or end is None:
         return [
             Failure.bounded(
-                "check.period.uncovered",
+                PERIOD_UNCOVERED,
                 "a run must declare both start and end so its period is bounded",
                 observed=f"start={start!r}, end={end!r}",
                 fix="declare both start and end as ISO-8601 timestamps with an explicit offset",
@@ -242,7 +291,7 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
     if start >= end:
         return [
             Failure.bounded(
-                "check.period.uncovered",
+                PERIOD_UNCOVERED,
                 "a run's end must be later than its start",
                 observed=f"start={start.isoformat()}, end={end.isoformat()}",
                 fix=f"set end later than {start.isoformat()}, or set start earlier than "
@@ -315,7 +364,7 @@ def _judge_execution_ordering(
             continue
         found.append(
             Failure.bounded(
-                "check.execution.not_after_decision",
+                EXECUTION_NOT_AFTER_DECISION,
                 "every decision must be strictly earlier than the instant it fills at",
                 observed=(
                     f"strategy {entry.component_id!r} fills at {fill_at.isoformat()}; "
@@ -394,7 +443,7 @@ def _judge_member_datasets(
         if field_id and field_id not in exposed:
             found.append(
                 Failure.bounded(
-                    "check.field.absent",
+                    FIELD_ABSENT,
                     f"dataset {dataset_id!r} must expose every field the component reads",
                     observed=(f"missing: {field_id}; exposed: {', '.join(sorted(exposed))}"),
                     examples=(field_id,),
@@ -418,7 +467,7 @@ def _judge_member_datasets(
         if rows and begins is not None and first_read is not None and begins > first_read:
             found.append(
                 Failure.bounded(
-                    "check.lookback.uncovered",
+                    LOOKBACK_UNCOVERED,
                     (
                         f"dataset {dataset_id!r} must carry history reaching back past the "
                         "first decision, or that decision reads a short window"
@@ -440,7 +489,7 @@ def _judge_member_datasets(
         close = get_close_matches(dataset_id, sorted(registered), n=1)
         found.append(
             Failure.bounded(
-                "check.dataset.unregistered",
+                DATASET_UNREGISTERED,
                 f"dataset {dataset_id!r} must be registered before a run can read it",
                 observed=(
                     f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
@@ -474,7 +523,7 @@ def _judge_outputs(
             continue
         found.append(
             Failure.bounded(
-                "check.datamodel.output_registered",
+                DATAMODEL_OUTPUT_REGISTERED,
                 "a datamodel run writes a dataset that does not exist yet",
                 observed=f"{entry.dataset_id!r} is already registered",
                 fix=(
@@ -531,7 +580,7 @@ def _judge_weights(
         if shorts:
             found.append(
                 Failure.bounded(
-                    "check.weights.mode_conflict",
+                    WEIGHTS_MODE_CONFLICT,
                     "a long-only account must not open with a short position",
                     observed=f"short: {', '.join(shorts)}",
                     examples=shorts,
@@ -582,7 +631,7 @@ def _judge_weights(
 
     found.append(
         Failure.bounded(
-            "check.weights.venue_conflict",
+            WEIGHTS_VENUE_CONFLICT,
             (
                 "a signed account must trade on listings the venue permits a short on, or it "
                 "declares a freedom the venue will not fill"

@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from vqapr.domain.errors import MAX_EXAMPLES, ExplainTopic, FailureSource
+from vqapr.domain.errors import MAX_EXAMPLES, ExplainTopic, Failure, FailureSource
 
 INPUT_STAGE = "cli.input"
 
@@ -86,6 +86,27 @@ class InputError(BoundedRefusal):
         self.example_total = len(examples)
         super().__init__(requirement)
 
+    def as_failure(self) -> Failure:
+        """This refusal as the package's own `Failure`, so it renders through the one shape.
+
+        The same fields a package refusal carries. A reader parses these by name, and a CLI-level
+        refusal that shipped four of them made the envelope conditional on which layer happened to
+        refuse -- which is precisely what a single documented shape exists to prevent. `check`
+        renders an `InputError` through this too, rather than through a second literal of its own.
+        """
+        # Already bounded in `__init__`, so the direct constructor rather than `bounded`: cutting
+        # the examples again would report `example_total` against a list cut twice.
+        return Failure(
+            code=self.code,
+            requirement=self.requirement,
+            fix=self.fix,
+            explain=self.explain,
+            source=self.source,
+            observed=self.observed,
+            examples=self.examples,
+            example_total=self.example_total,
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "stage": INPUT_STAGE,
@@ -93,22 +114,7 @@ class InputError(BoundedRefusal):
             "mutation": False,
             "retry_precondition": self.retry,
             "correlation_id": None,
-            "failures": [
-                {
-                    # The same six fields a package refusal carries. A reader parses these by
-                    # name, and a CLI-level refusal that shipped four of them made the envelope
-                    # conditional on which layer happened to refuse -- which is precisely what a
-                    # single documented shape exists to prevent.
-                    "code": self.code,
-                    "source": self.source.as_dict(),
-                    "requirement": self.requirement,
-                    "observed": self.observed,
-                    "fix": self.fix,
-                    "explain": str(self.explain),
-                    "examples": list(self.examples),
-                    "example_total": self.example_total,
-                }
-            ],
+            "failures": [self.as_failure().as_dict()],
         }
 
 

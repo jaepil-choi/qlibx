@@ -127,7 +127,7 @@ def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> Non
     prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
 
     assert prepared.next_snapshot.cash >= 0, "whole-share planning must stay inside real cash"
-    assert fills.total_tax == 0, "a pure buy programme pays no sale tax"
+    assert sum(fill.cost.tax for fill in fills.fills) == 0, "a pure buy programme pays no sale tax"
     for fill in fills.fills:
         expected = abs(fill.dealt_quantity) * fill.price * COMMISSION_RATE
         assert fill.cost.commission == expected

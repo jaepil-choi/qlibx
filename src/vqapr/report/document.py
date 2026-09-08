@@ -75,8 +75,8 @@ class Performance(_Document):
     valuation.
 
     `annualized_return` is geometric (`(1 + total) ** (periods_per_year / periods) - 1`);
-    `annualized_mean_return` is the arithmetic mean times `periods_per_year`, which is the numerator
-    convention `sharpe` uses (`(mean - rf_per_period) * ppy / annualized_volatility`). `sortino`
+    `sharpe` is arithmetic (`(mean - rf_per_period) * periods_per_year / annualized_volatility`),
+    so the two do not share a numerator and a reader should not expect them to. `sortino`
     replaces the denominator with the downside deviation (root mean square of the negative excess
     returns, over ALL periods). `calmar` is the geometric annualized return over `|max_drawdown|`.
     `risk_free_annual` is what the caller gave; the record holds no rate, so the default is zero
@@ -93,7 +93,6 @@ class Performance(_Document):
     periods: int
     total_return: Decimal
     annualized_return: Decimal
-    annualized_mean_return: Decimal
     annualized_volatility: Decimal | None
     sharpe: Decimal | None
     sortino: Decimal | None
@@ -126,12 +125,7 @@ class Book(_Document):
     short_exposure: list[Decimal]
     cash_share: list[Decimal]
     max_weight: list[Decimal]
-    top_five_share: list[Decimal]
     hhi: list[Decimal]
-    mean_held: Decimal
-    mean_gross_exposure: Decimal
-    mean_net_exposure: Decimal
-    mean_cash_share: Decimal
 
 
 class InstrumentPnl(_Document):
@@ -140,7 +134,6 @@ class InstrumentPnl(_Document):
     long_pnl: Decimal
     short_pnl: Decimal
     periods_held: int
-    periods_positive: int
 
 
 class Attribution(_Document):
@@ -166,9 +159,7 @@ class Attribution(_Document):
     total_pnl: Decimal
     long_pnl: Decimal
     short_pnl: Decimal
-    residual_pnl: Decimal
     position_hit_rate: Decimal | None
-    positions_scored: int
     by_instrument: list[InstrumentPnl]
 
 
@@ -192,7 +183,6 @@ class Holding(_Document):
 
     round_trips: int
     mean_periods: Decimal | None
-    median_periods: Decimal | None
     open_at_end: int
 
 
@@ -308,15 +298,14 @@ class Relative(_Document):
     benchmark_ref: str
     periods: int
     active_return: Series
-    annualized_active_return: Decimal
     tracking_error: Decimal | None
     information_ratio: Decimal | None
-    cumulative_active_return: Decimal
 
 
 class Correlation(_Document):
     """Pearson correlation of period returns between the run's strategies, on the valuations
-    every one of them shares. `values[i][j]` is `None` when either series is constant."""
+    every one of them shares, by `vqapr.analysis.signal.correlation` -- exactly 1 on the diagonal
+    and between identical series. `values[i][j]` is `None` when either series is constant."""
 
     refs: list[str]
     periods: int

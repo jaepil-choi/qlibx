@@ -31,6 +31,7 @@ from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
     accepted_requests,
     requested_rows,
+    validate_requests,
 )
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
@@ -313,8 +314,8 @@ class KrxExchange:
     ) -> FillBatch:
         requests = accepted_requests(orders, account, snapshot)
         rows = requested_rows(snapshot, requests)
-        self._validate(requests, rows, account)
         rules = self._rules
+        validate_requests(rules, requests, rows, account)
         # Sells settle before buys, and the cash they raise is carried across the batch. A desk
         # funds a rotation from the sleeve it is rotating out of; filling in instrument order
         # instead judges a batch unaffordable that would have executed comfortably.
@@ -334,34 +335,20 @@ class KrxExchange:
             row = rows.get(request.instrument_id)
             if row is None:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.ABSENT,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.ABSENT
                     )
                 )
                 continue
             if request.delta_quantity == 0:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        Decimal("0"),
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NO_TRADE,
-                    )
+                    Fill.zero_dealt(request.instrument_id, Decimal("0"), ZeroDealtReason.NO_TRADE)
                 )
                 continue
             if not row.is_tradable:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NONTRADABLE,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.NONTRADABLE
                     )
                 )
                 continue
@@ -374,12 +361,8 @@ class KrxExchange:
                 # Limit-up leaves no seller, limit-down no buyer. A market fact for one session,
                 # so it is typed zero-dealt evidence rather than a refusal of the batch.
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.NONTRADABLE,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.NONTRADABLE
                     )
                 )
                 continue
@@ -389,12 +372,8 @@ class KrxExchange:
             dealt, cost = self._affordable(request, row, side, purse, rules)
             if dealt == 0:
                 fills.append(
-                    Fill(
-                        request.instrument_id,
-                        request.delta_quantity,
-                        Decimal("0"),
-                        None,
-                        ZeroDealtReason.UNFUNDED,
+                    Fill.zero_dealt(
+                        request.instrument_id, request.delta_quantity, ZeroDealtReason.UNFUNDED
                     )
                 )
                 continue
@@ -455,44 +434,3 @@ class KrxExchange:
         if capped <= 0:
             return Decimal("0"), rules.charge(side, Decimal("0"), request.instrument_id)
         return capped, rules.charge(side, capped * row.price, request.instrument_id)
-
-    def _validate(
-        self,
-        requests: tuple[OrderRequest, ...],
-        rows: Mapping[str, ExactExecutionRow],
-        account: AccountSnapshot,
-    ) -> None:
-        for request in requests:
-            if (
-                not isinstance(request.delta_quantity, Decimal)
-                or not request.delta_quantity.is_finite()
-            ):
-                raise ValueError(f"invalid requested quantity for {request.instrument_id!r}")
-            rule = self._rules.listing(request.instrument_id)
-            row = rows.get(request.instrument_id)
-            if (
-                row is not None
-                and row.is_tradable
-                and (
-                    not isinstance(request.execution_price, Decimal)
-                    or not request.execution_price.is_finite()
-                    or request.execution_price <= 0
-                )
-            ):
-                raise ValueError(f"invalid selected price for {request.instrument_id!r}")
-            side = side_of(request.delta_quantity)
-            if side is None:
-                continue
-            quantity = abs(request.delta_quantity)
-            if not rule.permits_quantity(quantity):
-                raise ValueError(
-                    f"quantity {quantity} is not a whole share for {request.instrument_id!r}"
-                )
-            held = account.positions.get(request.instrument_id, Decimal("0"))
-            if not rule.permits_position(held, request.delta_quantity):
-                # The listing's own declaration, not a rule bolted onto this profile: selling a
-                # held position is always fine, and only a resulting short is refused.
-                raise ValueError(
-                    f"KRX profile does not support short selling {request.instrument_id!r}"
-                )
-

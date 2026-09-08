@@ -302,7 +302,8 @@ DEFAULT_TABLES = (
             "instrument",
             # The category this fill was charged under. Declared here because the charge is a
             # lookup at fill time and nothing downstream can re-derive it; without the column the
-            # value is computed and then dropped, and `cost_by_kind` has one unlabelled bucket.
+            # value is computed and then dropped, and the report's cost by kind has one
+            # "unknown" bucket.
             "kind",
             "account_version",
             "requested_quantity",

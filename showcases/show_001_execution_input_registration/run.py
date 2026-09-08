@@ -43,7 +43,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.7.0"
+VERIFIED_AGAINST = "vqapr-0.8.0"
 LAST_VERIFIED_AT = "2026-09-08"
 
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))

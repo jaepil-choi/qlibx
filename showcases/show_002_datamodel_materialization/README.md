@@ -37,4 +37,4 @@ Environment assumptions: repository `uv` environment, Python 3.12+, DuckDB 1.5+,
 
 Last verified at: 2026-09-03
 
-Verified against: `vqapr-0.7.0`
+Verified against: `vqapr-0.8.0`

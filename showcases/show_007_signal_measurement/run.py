@@ -84,7 +84,7 @@ LOOKBACK = 6
 ACTIVE_BUDGET = Decimal("0.02")
 """Total absolute active weight the signal is rescaled to after sizing."""
 
-VERIFIED_AGAINST = "vqapr-0.7.0"
+VERIFIED_AGAINST = "vqapr-0.8.0"
 LAST_VERIFIED_AT = "2026-09-08"
 
 

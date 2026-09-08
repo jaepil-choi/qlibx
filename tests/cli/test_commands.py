@@ -719,7 +719,7 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     import json as _json
 
     from vqapr.domain.instruments import export_roster
-    from vqapr.flow.record import read_strategy_record
+    from vqapr.record import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)
     store = tmp_path / ".vqapr"
@@ -803,7 +803,7 @@ def test_a_run_says_where_its_time_went(
     two execution snapshots were half of it. The record now says so: `total` for the loop,
     `callback` for the model's side, `due` for the fill's, and every due stage by its name.
     """
-    from vqapr.flow.record import read_strategy_record
+    from vqapr.record import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)
     code, registered_run = _register_run(tmp_path, capsys, "timed")
@@ -1086,7 +1086,7 @@ def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture
     The execution table normalises its target to UTC and the fill row used to carry that, so a
     reader lining a fill up against the NAV row written at that same instant converted by hand.
     """
-    from vqapr.flow.record import read_table
+    from vqapr.record import read_table
 
     _workspace_for_run(tmp_path, capsys)
     code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")

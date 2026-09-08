@@ -27,7 +27,7 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.record import read_table, strategy_refs
+from vqapr.record import read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")
 STOCK = "A005930"

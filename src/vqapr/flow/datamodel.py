@@ -46,6 +46,7 @@ from vqapr.domain.shapes import Grain, Row, Rows, normalize_rows
 from vqapr.domain.values import require_tz_aware
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.loop import EventLoop, OccurrenceEvent
+from vqapr.record import COMPACT_FILENAME, SPILL_BYTES
 from vqapr.workspace import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"
@@ -277,17 +278,6 @@ def output_directory(project_root: str | Path, dataset_id: str) -> Path:
 
 def output_source_id(dataset_id: str) -> str:
     return f"materialized-{dataset_id}"
-
-
-COMPACT_FILENAME = "all.parquet"
-"""The one file a finished table or dataset is: written when the run ends, after which any spill
-part beside it is stale input. Shared with `vqapr.flow.record` (`docs/issues/087`)."""
-
-SPILL_BYTES = 256 * 1024 * 1024
-"""The safety valve, for both writers: buffered Arrow bytes above this are written as one spill
-part. A run of a few million rows would otherwise hold them all; at this size a part is a few
-seconds of disk and the buffer never exceeds a quarter gigabyte. It is not a flush cadence -- a
-run below the line writes nothing until it ends -- and a hard kill loses at most this much."""
 
 
 class DataModelOutput:

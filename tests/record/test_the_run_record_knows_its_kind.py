@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.show import record_view
-from vqapr.flow.record import (
+from vqapr.record import (
     DATAMODEL_KIND,
     RUN_KIND,
     SCHEMA,

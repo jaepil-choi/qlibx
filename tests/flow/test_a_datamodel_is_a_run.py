@@ -31,14 +31,14 @@ from vqapr.flow.datamodel import DataModelResult, output_directory, output_sourc
 from vqapr.flow.judgments import judgments
 from vqapr.flow.orchestration import RunResult, run
 from vqapr.flow.preflight import preflight_run
-from vqapr.flow.record import (
-    _DATAMODEL_FIELDS,
+from vqapr.record import (
     DATAMODEL_KIND,
     datamodel_refs,
     read_datamodel_record,
     read_run_record,
     strategy_refs,
 )
+from vqapr.record.schema import _DATAMODEL_FIELDS
 from vqapr.flow.run import DataModelEntry, RunDefinition
 from vqapr.public import register_data_model, register_dataset, register_run
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace

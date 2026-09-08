@@ -18,7 +18,7 @@ import pytest
 
 import tests.sample.journey as journey
 from vqapr.flow.artifacts import SimulationFailure
-from vqapr.flow.record import strategy_refs
+from vqapr.record import strategy_refs
 from vqapr.public import (
     StrategyEntry,
     StrategyOutcome,

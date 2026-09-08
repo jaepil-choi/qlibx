@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.flow.record import (
+from vqapr.record import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
     RECORD_FILENAME,

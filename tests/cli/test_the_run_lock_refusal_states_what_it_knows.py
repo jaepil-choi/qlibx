@@ -32,14 +32,14 @@ import pytest
 from vqapr.cli.run import _held_record
 
 from tests.skill_prose import shipped_prose
-from vqapr.flow.record import (
+from vqapr.record import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
     LockClaim,
     RunRecordLive,
     RunRecordWriter,
-    _lock_claim,
 )
+from vqapr.record.reader import _lock_claim
 
 
 def test_a_fresh_lock_reports_its_age_and_a_stale_one_reports_nothing(tmp_path: Path) -> None:

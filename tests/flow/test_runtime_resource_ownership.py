@@ -7,7 +7,7 @@ import pytest
 from tests.flow.test_a_datamodel_is_a_run import _definition, _prepared
 from tests.flow.test_preflight import _setup
 from vqapr.flow import orchestration as runtime
-from vqapr.flow.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
+from vqapr.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
 from vqapr.flow.run import DataModelEntry
 
 

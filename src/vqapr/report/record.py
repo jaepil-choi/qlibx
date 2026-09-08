@@ -1,6 +1,6 @@
 """The door: a report from a record on disk.
 
-`strategy_report` opens one strategy's record and its four tables through `vqapr.flow.record`
+`strategy_report` opens one strategy's record and its four tables through `vqapr.record`
 (the same reader `vqapr show strategy --table` uses) and hands the rows to `measure`.
 `run_report` does that for every strategy of a run and adds what only the run can answer: the
 headline table, the correlation of period returns, and each strategy against a benchmark
@@ -17,7 +17,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from vqapr.flow.context import FRAMEWORK_TABLES
-from vqapr.flow.record import (
+from vqapr.record import (
     read_run_record,
     read_strategy_record,
     read_table,

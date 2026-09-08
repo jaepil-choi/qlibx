@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import tests.sample.journey as journey
-from vqapr.flow.record import (
+from vqapr.record import (
     RUN_FILENAME,
     STRATEGY_FILENAME,
     RunRecordConflict,

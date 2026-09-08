@@ -4,7 +4,7 @@ Three modules. `document` is the shape of the answer: one pydantic document per 
 (`StrategyReport`) and one per run (`RunReport`), JSON-ready through `as_record()`.
 `measure` turns the four tables every run records (`vqapr.account`, `vqapr.fill`, `vqapr.weight`,
 `vqapr.monitoring`) into those sections, as pure functions of rows. `record` is the door: it
-opens a record on disk through `vqapr.flow.record` and hands the rows to `measure`.
+opens a record on disk through `vqapr.record` and hands the rows to `measure`.
 
 PRD UC-REPORT-001 fixes the boundary: the package provides the values and a machine-readable
 renderer; it ships no visualisation. A figure is a renderer a user composes over the same values,

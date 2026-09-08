@@ -20,7 +20,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.flow.record import RunRecordWriter
+from vqapr.record import RunRecordWriter
 from vqapr.public import (
     DataRequirement,
     DatasetRegistration,

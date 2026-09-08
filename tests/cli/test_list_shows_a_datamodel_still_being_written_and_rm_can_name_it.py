@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.record import DATAMODEL_KIND, LOCK_FILENAME, RunRecordWriter
+from vqapr.record import DATAMODEL_KIND, LOCK_FILENAME, RunRecordWriter
 
 REF = "alpha-revision-010@8e6a2fe3"
 

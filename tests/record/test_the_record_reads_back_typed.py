@@ -21,7 +21,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from vqapr.flow.record import (
+from vqapr.record import (
     COMPACT_FILENAME,
     PART_SUFFIX,
     TABLES_DIRECTORY,

@@ -378,18 +378,19 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
     pointer = Workspace.open(project_root).registered_instruments()
     if pointer is None:
         return []
+    tables = pointer["tables"]
+    if not isinstance(tables, dict):
+        # `registered_instruments` refuses a pointer whose `tables` is not a JSON object.
+        raise RuntimeError("registered_instruments admitted a roster pointer without tables")
     row: dict[str, Any] = {
         "digest": str(pointer["digest"]),
-        "tables": {str(kind): str(path) for kind, path in sorted(dict(pointer["tables"]).items())},
+        "tables": {str(kind): str(path) for kind, path in sorted(tables.items())},
     }
     from vqapr.domain.instruments import build_roster, read_roster_table
 
     try:
         roster = build_roster(
-            {
-                str(kind): read_roster_table(Path(str(path)))
-                for kind, path in dict(pointer["tables"]).items()
-            }
+            {str(kind): read_roster_table(Path(str(path))) for kind, path in tables.items()}
         )
     except Exception as unreadable:
         row["unreadable"] = str(unreadable)

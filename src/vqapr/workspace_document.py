@@ -114,30 +114,31 @@ class DatasetCodec(Document):
         return body
 
     def to_domain(self, dataset_id: str) -> DatasetRegistration:
-        declared = dict(
-            instrument_field=self.instrument_field,
-            available_at=self.available_at,
-            key_fields=self.key_fields,
-            fields=self.fields,
-            execution=None if self.execution is None else self.execution.to_domain(),
-        )
-        registration = (
-            DatasetRegistration.undeclared(
+        execution = None if self.execution is None else self.execution.to_domain()
+        if self.grain is None or self.field_types is None:
+            registration = DatasetRegistration.undeclared(
                 dataset_id,
                 self.source,
+                instrument_field=self.instrument_field,
+                available_at=self.available_at,
+                key_fields=self.key_fields,
+                fields=self.fields,
                 field_types=self.field_types,
                 grain=self.grain,
-                **declared,
+                execution=execution,
             )
-            if self.grain is None or self.field_types is None
-            else DatasetRegistration.of(
+        else:
+            registration = DatasetRegistration.of(
                 dataset_id,
                 self.source,
+                instrument_field=self.instrument_field,
+                available_at=self.available_at,
+                key_fields=self.key_fields,
+                fields=self.fields,
                 field_types=self.field_types,
                 grain=self.grain,
-                **declared,
+                execution=execution,
             )
-        )
         if self.aggregated is not None:
             registration = registration.with_aggregation(self.aggregated)
         if self.span is not None:

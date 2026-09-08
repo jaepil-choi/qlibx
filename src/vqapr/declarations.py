@@ -778,11 +778,12 @@ def _component(
     return str(ref.component_id)
 
 
-class Registered(dict[str, list[str]]):
+class Registered(dict[str, list[str | dict[str, Any]]]):
     """What one declaration registered, by section -- a plain mapping to every caller that
     indexes it -- plus `spoken`, the point-in-time meaning of what was just declared, one
     sentence per PIT-bearing concept (`docs/issues/027`). Rendered by `vqapr register` as
-    `spoken`, beside `registered`."""
+    `spoken`, beside `registered`. Every section lists ids; `instruments` lists the roster's
+    per-category receipt instead."""
 
     spoken: list[str]
 
@@ -797,7 +798,7 @@ def apply(
     *,
     base: Path,
     declaration: Path | None = None,
-) -> dict[str, list[str]]:
+) -> Registered:
     """Apply every section the document declares, in dependency order.
 
     Returns what was registered per section, so the reply states facts rather than a count.
@@ -819,7 +820,7 @@ def apply(
         _declaration_path.reset(token)
 
 
-def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[str, list[str]]:
+def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Registered:
     unknown = sorted(set(document) - set(SECTIONS))
     if unknown:
         # One refusal per unknown section, each pointing at its own key and each saying what to

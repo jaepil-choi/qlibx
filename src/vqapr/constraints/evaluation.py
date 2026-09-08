@@ -110,7 +110,10 @@ class StampedConstraintFinding:
         """`held`, `within_tolerance` or `breached` -- see `VERDICT_*`."""
         if self.finding.passed:
             return VERDICT_HELD
-        if self.finding.excess <= self.tolerance:
+        tolerance = self.tolerance
+        if tolerance is None:
+            raise RuntimeError("tolerance is resolved to a Decimal when the finding is stamped")
+        if self.finding.excess <= tolerance:
             return VERDICT_WITHIN_TOLERANCE
         return VERDICT_BREACHED
 
@@ -326,8 +329,11 @@ def evaluate_constraints(
         raise ValueError("projected findings must exactly match the loaded constraint instances")
     # Built only when something will read it. `window` is legitimately `None` for a run with no
     # constraints, and reaching through it for an instant nobody asked for turned "this run
-    # declared no rules" into a monitoring failure.
-    view = build_account_view(account, marks, window.evaluation_time) if loaded else None
+    # declared no rules" into a monitoring failure. A missing window with rules loaded was
+    # refused above, so past this line every rule has one.
+    if not loaded or window is None:
+        return ConstraintReport(account.version, ())
+    view = build_account_view(account, marks, window.evaluation_time)
     findings = tuple(
         ActualConstraintFinding(
             constraint.constraint_id,

@@ -23,7 +23,7 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 13  # record `162`: two cycles' deferrals gone; two roster deferrals merged by the fold
+CEILING = 12  # record `186`: the lazy roster import in `exchange/listings.py` moved to the top
 """Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
 Was 18 after record `149`. Record `162` (one-shape Step 7) removed `data/store.py`'s
 `_window_types` and the two `ExecutionTable` guards in `exchange/conventions.py`:

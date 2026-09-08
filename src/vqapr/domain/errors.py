@@ -30,7 +30,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from types import TracebackType
+from types import FrameType, TracebackType
 
 MAX_EXAMPLES = 5
 """위반 예시 상한. 8.7M행짜리 원천에서 예시가 무한히 실려 나가면 안 된다(PRD §2.6)."""
@@ -205,14 +205,14 @@ class Cause:
         frame = sys._getframe(1)
         here = Path(__file__).resolve()
 
-        def _outward(current: object) -> object:
+        def _outward(current: FrameType | None) -> FrameType | None:
             # Skip this module's own frames and the interpreter's: a dataclass-generated
             # `__init__` lives in `<string>`, and a direct `Failure(...)` passes through it.
             while current is not None and (
-                _is_interpreter_frame(current.f_code.co_filename)  # type: ignore[attr-defined]
-                or Path(current.f_code.co_filename).resolve() == here  # type: ignore[attr-defined]
+                _is_interpreter_frame(current.f_code.co_filename)
+                or Path(current.f_code.co_filename).resolve() == here
             ):
-                current = current.f_back  # type: ignore[attr-defined]
+                current = current.f_back
             return current
 
         frame = _outward(frame)

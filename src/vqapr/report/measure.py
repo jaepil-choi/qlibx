@@ -346,7 +346,7 @@ def performance(
         initial_nav=initial_nav,
         nav=Series(instants=instants, values=list(nav)),
         returns=Series(instants=return_instants, values=list(rets)),
-        drawdown=Series(instants=instants, values=dd),
+        drawdown=Series(instants=instants, values=list(dd)),
         periods=count,
         total_return=total,
         annualized_return=annualized,

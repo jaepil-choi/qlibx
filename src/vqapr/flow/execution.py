@@ -19,7 +19,7 @@ from vqapr.evidence.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.exchange.execution_table import exact_execution_snapshot
+from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.venue import ExecutionCall
 from vqapr.flow.context import (
@@ -28,6 +28,7 @@ from vqapr.flow.context import (
     DueExecutionResult,
     FlowContext,
 )
+from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
 from vqapr.flow.valuation import ValuationHandler, _marks_from_execution_snapshot
 from vqapr.orders.planning import plan_orders
 
@@ -59,7 +60,7 @@ class ExecutionHandler:
         target_instruments = tuple(target.instrument_id for target in targets)
         held_instruments = tuple(before.positions)
 
-        def select_snapshot() -> object:
+        def select_snapshot() -> ExactExecutionSnapshot:
             # A held instrument absent from the table is a market fact, not a data-contract
             # breach: it delisted, or it has not listed yet. Canon 6.1 assigns that case to
             # zero-dealt evidence, and the Exchange publishes it as ABSENT. Refusing here would
@@ -263,6 +264,9 @@ class ExecutionHandler:
             owner=committed_root.account,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
+            committed_mark = prepared_account.next_state.latest_mark
+            if committed_mark is None:
+                raise RuntimeError("a prepared Account mark must carry the mark it appends")
             prepared_marked = self._context.state.prepare_marked(
                 account=prepared_account,
                 mark=mark,
@@ -270,7 +274,7 @@ class ExecutionHandler:
                 recorder=self._valuation.measurement_recorder(
                     cutoff=pending.target.target_at,
                     account=prepared_account.next_state.snapshot,
-                    mark=prepared_account.next_state.latest_mark,
+                    mark=committed_mark,
                     selected=selected_marks,
                 ),
             )
@@ -294,6 +298,9 @@ class ExecutionHandler:
             owner=pending,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
+            marked_account = marked_root.account
+            if marked_account is None:
+                raise RuntimeError("a marked root must carry the Account it marked")
             feedback_evidence = FeedbackEvidence(
                 run_identity=self._context.frozen_run.identity,
                 agenda=self._context.layer.agenda,
@@ -302,7 +309,7 @@ class ExecutionHandler:
                 pending=pending,
                 candidates=(fills, mark),
                 root_version=marked_root.version,
-                account_version=marked_root.account.snapshot.version,
+                account_version=marked_account.snapshot.version,
             )
         # Monitoring judges the committed, marked book right here (record `148`): there is no
         # later occurrence for it, and nothing later could see more than the fill instant did.
@@ -322,7 +329,7 @@ class ExecutionHandler:
             pending.pending_id, root.account.snapshot.version, due_evidence, monitoring
         )
 
-    def _publish_account_commit(self, prepared: object) -> object:
+    def _publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
         root = self._context.state.publish_account_commit(prepared)
         if root.account != self._context.account.state:
             raise RuntimeError("Account commit root does not mirror Account authority")

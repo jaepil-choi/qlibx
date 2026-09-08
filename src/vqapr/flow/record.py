@@ -412,12 +412,17 @@ def _encode(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, Mapping):
-        return {str(key): _encode(item) for key, item in value.items()}
+        return _encode_mapping(value)
     if isinstance(value, (list, tuple)):
         return [_encode(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
+
+
+def _encode_mapping(value: Mapping[str, object]) -> dict[str, object]:
+    """A record body in the same JSON-safe form, keeping the shape a writer spreads."""
+    return {str(key): _encode(item) for key, item in value.items()}
 
 
 _ENVIRONMENT_ERRNOS = frozenset(
@@ -1005,7 +1010,7 @@ class RunRecordWriter:
         # they are dropped here rather than written twice.
         for stamped in ("run_id", *(MEMBER_KINDS[kind][3:] if kind in MEMBER_KINDS else ())):
             body.pop(stamped, None)
-        payload = json.dumps({**head, **_encode(body)}, indent=2, sort_keys=True)
+        payload = json.dumps({**head, **_encode_mapping(body)}, indent=2, sort_keys=True)
         # The tables land BEFORE the record: the record existing is what says the run is
         # complete, and a reader that finds one must find every row beside it.
         self._seal()
@@ -1085,7 +1090,7 @@ def write_run_record(root: Path, run_id: str, record: RunRecord | Mapping[str, o
         if str(existing.get("declared_digest")) != declared:
             raise RunRecordConflict(run_id, path, existing.get("declared_digest"), declared)
     payload = json.dumps(
-        {"schema": RUN_SCHEMA, "kind": RUN_KIND, "run_id": run_id, **_encode(body)},
+        {"schema": RUN_SCHEMA, "kind": RUN_KIND, "run_id": run_id, **_encode_mapping(body)},
         indent=2,
         sort_keys=True,
     )
@@ -1276,7 +1281,8 @@ def _newest_event_time(part: Path) -> datetime | None:
         return None
     if table.num_rows == 0:
         return None
-    value = pc.max(table.column("event_time")).as_py()
+    # pyarrow.compute binds its kernels at import time, so the stubs do not list `max`.
+    value = pc.max(table.column("event_time")).as_py()  # type: ignore[attr-defined]
     return value if isinstance(value, datetime) else None
 
 
@@ -1871,8 +1877,8 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     # counts and their worst excesses are filed beside it so a generous tolerance hides nothing.
     findings: dict[str, dict[str, object]] = {}
     for trace in getattr(result, "occurrences", ()):
-        report = getattr(getattr(trace, "result", None), "report", None)
-        for stamped in getattr(report, "findings", ()) or ():
+        occurrence_report = getattr(getattr(trace, "result", None), "report", None)
+        for stamped in getattr(occurrence_report, "findings", ()) or ():
             constraint_id = str(getattr(stamped, "constraint_id", "") or "")
             if not constraint_id:
                 continue

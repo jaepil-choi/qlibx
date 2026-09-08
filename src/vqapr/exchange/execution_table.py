@@ -107,7 +107,7 @@ class ExecutionTable:
         *,
         start_time: datetime,
         end_time: datetime,
-        session: object | None = None,
+        session: scan.ScanSession | None = None,
     ) -> ExecutionHorizon:
         """The run's candidate instants, read once from this table by this fill convention."""
         return self.fill.build_horizon(
@@ -395,20 +395,7 @@ def exact_execution_snapshot(
         instrument = str(row["instrument"])
         counts[instrument] = counts.get(instrument, 0) + 1
     present = set(counts)
-    exact_rows = tuple(
-        ExactExecutionRow(
-            trade_at=row["trade_at"].astimezone(UTC),
-            instrument=str(row["instrument"]),
-            is_tradable=bool(row["is_tradable"]),
-            price=None if row["price"] is None else Decimal(str(row["price"])),
-            reference=(
-                None
-                if row.get("reference") is None
-                else Decimal(str(row["reference"]))
-            ),
-        )
-        for row in rows
-    )
+    exact_rows = tuple(_exact_row(row) for row in rows)
     return ExactExecutionSnapshot(
         target_at=target_at.astimezone(UTC),
         rows=exact_rows,
@@ -421,6 +408,24 @@ def exact_execution_snapshot(
         missing_held_instruments=tuple(
             instrument for instrument in held if instrument not in present
         ),
+    )
+
+
+def _exact_row(row: Mapping[str, object]) -> ExactExecutionRow:
+    """One scanned row as the typed row a venue reads.
+
+    The scan hands its columns back untyped. The trade-at column is `TIMESTAMPTZ`, so a value
+    that is not a datetime is a table whose declared field is not one, refused by name.
+    """
+    trade_at = row["trade_at"]
+    if not isinstance(trade_at, datetime):
+        raise TypeError(f"trade_at must be a datetime, got {type(trade_at).__name__}")
+    return ExactExecutionRow(
+        trade_at=trade_at.astimezone(UTC),
+        instrument=str(row["instrument"]),
+        is_tradable=bool(row["is_tradable"]),
+        price=None if row["price"] is None else Decimal(str(row["price"])),
+        reference=(None if row.get("reference") is None else Decimal(str(row["reference"]))),
     )
 
 

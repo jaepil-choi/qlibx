@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 import duckdb
 import pyarrow as pa
@@ -273,6 +274,15 @@ def _configure(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
 def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
     _require_path(spec)
     return _configure(duckdb.connect())
+
+
+def _one_row(cursor: duckdb.DuckDBPyConnection) -> tuple[Any, ...]:
+    """The row an aggregate query always yields; `count(*)`/`min`/`max` over a relation cannot
+    return an empty result, so a missing row is duckdb breaking its contract, not a data fact."""
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("an aggregate query returned no row")
+    return row
 
 
 def _require_path(spec: SourceSpec) -> None:
@@ -606,7 +616,7 @@ def row_count(spec: SourceSpec) -> int:
     """How many rows the source holds, without reading them."""
     con = _open(spec)
     try:
-        return int(con.execute(f"SELECT count(*) FROM {_relation(spec)}").fetchone()[0])
+        return int(_one_row(con.execute(f"SELECT count(*) FROM {_relation(spec)}"))[0])
     finally:
         con.close()
 
@@ -794,10 +804,12 @@ def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
             f"SELECT {cols}, count(*) AS n, ({null_pred}) AS has_null "
             f"FROM {_relation(spec)} GROUP BY {cols}"
         )
-        null_groups, dup_groups = con.execute(
-            f"SELECT coalesce(sum(CASE WHEN has_null THEN 1 ELSE 0 END), 0), "
-            f"       coalesce(sum(CASE WHEN n > 1 THEN 1 ELSE 0 END), 0) FROM ({grouped})"
-        ).fetchone()
+        null_groups, dup_groups = _one_row(
+            con.execute(
+                f"SELECT coalesce(sum(CASE WHEN has_null THEN 1 ELSE 0 END), 0), "
+                f"       coalesce(sum(CASE WHEN n > 1 THEN 1 ELSE 0 END), 0) FROM ({grouped})"
+            )
+        )
 
         null_examples: tuple[str, ...] = ()
         dup_examples: tuple[str, ...] = ()
@@ -841,9 +853,9 @@ def span_check(spec: SourceSpec, available_at: str) -> SpanCheck:
     column = _quote(available_at)
     con = _open(spec)
     try:
-        rows, first, last = con.execute(
-            f"SELECT count(*), min({column}), max({column}) FROM {_relation(spec)}"
-        ).fetchone()
+        rows, first, last = _one_row(
+            con.execute(f"SELECT count(*), min({column}), max({column}) FROM {_relation(spec)}")
+        )
     finally:
         con.close()
     return SpanCheck(rows=int(rows), first=first, last=last)
@@ -870,7 +882,7 @@ def positive_finite_when_true(
     con = _open(spec)
     try:
         count = int(
-            con.execute(f"SELECT count(*) FROM {_relation(spec)} WHERE {invalid}").fetchone()[0]
+            _one_row(con.execute(f"SELECT count(*) FROM {_relation(spec)} WHERE {invalid}"))[0]
         )
         examples: tuple[str, ...] = ()
         if count:
@@ -942,7 +954,7 @@ def finite_check(
     read = _relation(spec) if relation is None else relation
     con = _open(spec)
     try:
-        counted = con.execute(f"SELECT {counts_sql} FROM {read}").fetchone()
+        counted = _one_row(con.execute(f"SELECT {counts_sql} FROM {read}"))
         non_finite = tuple(
             (column, int(total)) for column, total in zip(selected, counted, strict=True) if total
         )

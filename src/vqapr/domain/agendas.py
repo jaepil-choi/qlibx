@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from vqapr.domain.identifiers import AgendaId, OccurrenceId
+from vqapr.domain.identifiers import AgendaId, OccurrenceId, occurrence_id
 from vqapr.domain.values import (
     LocalInstantDeclaration,
     declare_local_instant,
@@ -224,7 +224,7 @@ class OperationAgenda:
                 days.append(day)
         occurrences = tuple(
             OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
+                occurrence_id(f"{agenda_id}-{day.isoformat()}"),
                 declare_local_instant(day, at, timezone),
             )
             for day in sorted(days)

@@ -580,7 +580,7 @@ class Workspace:
 
     def _require_run_references(self, state: _State, definition: RunDefinition) -> None:
         def component(component_id: str, kind: ComponentKind, role: str) -> None:
-            ref = state.components.get(component_id)
+            ref = state.components.get(ComponentId(component_id))
             if ref is None or ref.kind is not kind:
                 raise self._reference_error(
                     f"run {definition.run_id!r} names {role} {component_id!r}, which must be "
@@ -786,23 +786,24 @@ class Workspace:
                 )
             # Looked up after the reference check, so an unsupported kind still gets the typed
             # refusal `_references_in` raises rather than a bare `KeyError` from this dict.
-            position = {"dataset": 0, "component": 2, "run": 3}[kind]
-            declarations = dict(state[position])
+            section = {"dataset": "datasets", "component": "components", "run": "runs"}[kind]
+            declarations = dict(state._asdict()[section])
             if identity not in declarations:
                 self._replace_state(*state)
                 return False
             withdrawn = declarations.pop(identity)
-            merged = list(state)
-            merged[position] = declarations
+            merged = state._replace(**{section: declarations})
             if kind == "dataset":
                 # The physical source goes with the last dataset that named it: a source
                 # nothing reads is a path the document keeps pointing at for no one.
                 source_id = withdrawn.source
                 still_named = any(item.source == source_id for item in declarations.values())
                 if not still_named:
-                    merged[1] = {
-                        key: spec for key, spec in state.sources.items() if key != source_id
-                    }
+                    merged = merged._replace(
+                        sources={
+                            key: spec for key, spec in state.sources.items() if key != source_id
+                        }
+                    )
             self._write(*merged)
             self._replace_state(*merged)
             return True
@@ -881,14 +882,14 @@ class Workspace:
             return ()
         return tuple(sorted(blockers))
 
-    def _config_lookup(
+    def _config_lookup[T](
         self,
         key: str,
-        declarations: Mapping[str, object],
+        declarations: Mapping[str, T],
         label: str,
         *,
         noun: str = "run_id",
-    ) -> object:
+    ) -> T:
         if not isinstance(key, str) or not key:
             raise _workspace_error(
                 stage=Stage.REGISTER,

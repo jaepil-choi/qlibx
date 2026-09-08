@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
@@ -23,6 +24,21 @@ class FillSelector(StrEnum):
 
     SAME_DAY = "SAME_DAY"
     NEXT_ELIGIBLE = "NEXT_ELIGIBLE"
+
+
+def _instants(candidates: Iterable[object]) -> tuple[datetime, ...]:
+    """The scan's candidate instants, normalised to UTC.
+
+    The scan reads a `TIMESTAMPTZ` column and hands the values back untyped; anything that is not
+    a datetime is a table whose declared trade-at field is not one, and that is refused by name
+    rather than left to fail on the first attribute read.
+    """
+    instants: list[datetime] = []
+    for candidate in candidates:
+        if not isinstance(candidate, datetime):
+            raise TypeError(f"execution instant must be a datetime, got {type(candidate).__name__}")
+        instants.append(candidate.astimezone(UTC))
+    return tuple(instants)
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +193,7 @@ class FillConvention:
         trade_at_field: str,
         start_time: datetime,
         end_time: datetime,
-        session: object | None = None,
+        session: scan.ScanSession | None = None,
     ) -> ExecutionHorizon:
         """Read the run's candidate instants once from an execution table's source.
 
@@ -199,9 +215,7 @@ class FillConvention:
             end_time=end_time,
             session=session,
         )
-        return ExecutionHorizon(
-            tuple(sorted(candidate.astimezone(UTC) for candidate in candidates))
-        )
+        return ExecutionHorizon(tuple(sorted(_instants(candidates))))
 
     def select_target(
         self,
@@ -228,13 +242,14 @@ class FillConvention:
             raise ValueError("decision_time must not be after end_time")
 
         if horizon is None:
-            candidates = scan.candidate_instants(
-                source,
-                trade_at_field=trade_at_field,
-                decision_time=decision_time,
-                end_time=end_time,
+            candidates = _instants(
+                scan.candidate_instants(
+                    source,
+                    trade_at_field=trade_at_field,
+                    decision_time=decision_time,
+                    end_time=end_time,
+                )
             )
-            candidates = tuple(candidate.astimezone(UTC) for candidate in candidates)
             resolve = self.resolve_local_target
         else:
             # The horizon was read once for the whole run; bisect to this decision instead of

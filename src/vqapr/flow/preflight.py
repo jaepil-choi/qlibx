@@ -16,7 +16,8 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationAgenda
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.identifiers import agenda_id
+from vqapr.domain.values import ModelMemory, require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -78,7 +79,7 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
             session for session in sessions if first <= _local_date(session) <= last
         )
     return OperationAgenda.daily(
-        agenda_id=definition.agenda_id,
+        agenda_id=agenda_id(definition.agenda_id),
         sessions=sessions,
         at=definition.at,
         timezone=definition.timezone,
@@ -216,7 +217,7 @@ def _validate_initial_model_state(
     workspace: Workspace,
     component: ComponentRef,
     strategy: StrategyModel,
-    memory: object,
+    memory: ModelMemory,
 ) -> bytes:
     """Stage and round-trip the Flow-owned initial Strategy payload.
 
@@ -274,7 +275,7 @@ def _validate_initial_account(
 
     failures: list[Failure] = []
     for instrument_id, quantity in sorted(snapshot.positions.items()):
-        rule = exchange.listings.get(instrument_id)
+        rule = exchange.rules.listings.get(instrument_id)
         if rule is None:
             failures.append(
                 Failure.bounded(
@@ -381,7 +382,7 @@ def _validate_initial_account(
         )
 
 
-def _validate_execution_requirements(exchange: Exchange, execution_table: object) -> None:
+def _validate_execution_requirements(exchange: Exchange, execution_table: ExecutionTable) -> None:
     """Prove the venue's declared regimes have the execution prices they need.
 
     A venue computes its own regimes -- a KRX price limit is the base price times a declared rate
@@ -390,7 +391,7 @@ def _validate_execution_requirements(exchange: Exchange, execution_table: object
     switch off rather than only the missing column. Running with the regime silently inert would
     produce a result that looks like a limit-aware backtest and is not one.
     """
-    requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
+    requirements = exchange.execution_requirements()
     if not requirements:
         return
     declared = set(execution_table.table.price_fields)
@@ -438,7 +439,7 @@ def _validate_instrument_universe(
     from the traded universe and read it as data instead. Reporting both as "unlisted" would invite
     someone to register a listing that already exists.
     """
-    listings = exchange.listings
+    listings = exchange.rules.listings
     missing = tuple(instrument_id for instrument_id in instruments if instrument_id not in listings)
     untradable = tuple(
         instrument_id

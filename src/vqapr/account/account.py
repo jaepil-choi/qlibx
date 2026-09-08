@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -251,8 +253,8 @@ class Account:
         marks: MarkBatch,
         *,
         provenance: object,
-        marked_at: object = None,
-        observed_at: object = None,
+        marked_at: datetime | None = None,
+        observed_at: Mapping[str, datetime] | None = None,
     ) -> PreparedAccountTransition:
         """Validate the required post-fill valuation before any root is published."""
         if not isinstance(fill, PreparedAccountFill):
@@ -284,8 +286,8 @@ class Account:
         *,
         expected_version: int,
         provenance: object,
-        marked_at: object = None,
-        observed_at: object = None,
+        marked_at: datetime | None = None,
+        observed_at: Mapping[str, datetime] | None = None,
     ) -> PreparedAccountValuation:
         """Validate a mark taken without any fill. The Account does not change."""
         if not isinstance(state, AccountState):

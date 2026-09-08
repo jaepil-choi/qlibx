@@ -25,12 +25,7 @@ from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
 from vqapr.domain.values import Side, side_of
 from vqapr.exchange.costs import FillCost, SideCost
-from vqapr.exchange.execution_table import (
-    ExactExecutionRow,
-    accepted_requests,
-    requested_rows,
-    validate_requests,
-)
+from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
@@ -105,9 +100,12 @@ class KrxTradeRule(TradeRule):
         is no buyer, so a sell cannot. The position rule is unchanged -- this is a market fact for
         one session, not a standing venue permission.
         """
-        if self.price_limit_rate is None or base is None:
+        if base is None:
             return True
-        lower, upper = self.limit_band(base)
+        band = self.limit_band(base)
+        if band is None:
+            return True
+        lower, upper = band
         if side is Side.BUY:
             return price < upper
         return price > lower
@@ -161,7 +159,7 @@ def krx_listings(
     instrument_ids: Sequence[str],
     *,
     price_limits: bool = True,
-) -> dict[str, TradeRule]:
+) -> dict[str, KrxTradeRule]:
     """KRX's trading facts for a set of ids, needing no categories at all.
 
     A rule says how an instrument TRADES: whole shares, a minimum of one, long-only, and whether
@@ -197,7 +195,7 @@ def krx_rules(
     universe: Mapping[str, InstrumentKind | str],
     *,
     price_limits: bool = True,
-) -> tuple[dict[str, TradeRule], dict[str, Instrument]]:
+) -> tuple[dict[str, KrxTradeRule], dict[str, Instrument]]:
     """Build KRX's per-instrument terms from ``instrument_id -> kind``.
 
     The one call that gets the ETF exemption right: a stock pays the sale tax, an ETF does not,
@@ -352,9 +350,16 @@ class KrxExchange(Exchange):
                 continue
             side = side_of(request.delta_quantity)
             assert side is not None
+            price = row.price
+            if price is None:
+                # `requested_rows` refuses a tradable row without a positive finite price before
+                # any batch reaches here, so a missing one is a broken snapshot, not a market fact.
+                raise RuntimeError(
+                    f"tradable execution row for {request.instrument_id!r} carries no price"
+                )
             rule = rules.listing(request.instrument_id)
             if isinstance(rule, KrxTradeRule) and not rule.permits_side_at(
-                side, row.price, row.reference
+                side, price, row.reference
             ):
                 # Limit-up leaves no seller, limit-down no buyer. A market fact for one session,
                 # so it is typed zero-dealt evidence rather than a refusal of the batch.
@@ -367,7 +372,7 @@ class KrxExchange(Exchange):
             # The notional is no longer computed here: `_affordable` decides the quantity first,
             # and charging the requested size rather than the dealt one is what a partial fill
             # must not do.
-            dealt, cost = self._affordable(request, row, side, purse, rules)
+            dealt, cost = self._affordable(request, price, side, purse, rules)
             if dealt == 0:
                 fills.append(
                     Fill.zero_dealt(
@@ -379,7 +384,7 @@ class KrxExchange(Exchange):
                 request.instrument_id,
                 request.delta_quantity,
                 dealt,
-                row.price,
+                price,
                 cost=cost,
                 kind=rules.stamped_kind(request.instrument_id),
             )
@@ -403,12 +408,12 @@ class KrxExchange(Exchange):
     def _affordable(
         self,
         request: OrderRequest,
-        row: ExactExecutionRow,
+        price: Decimal,
         side: Side,
         purse: Decimal,
         rules: ExchangeRulesView,
     ) -> tuple[Decimal, FillCost]:
-        """How much of this request the account can pay for, and what that costs.
+        """How much of this request the account can pay for at ``price``, and what that costs.
 
         A sale always fills in full: it RAISES cash, and its own commission and tax come out of the
         proceeds rather than out of the balance.
@@ -422,13 +427,13 @@ class KrxExchange(Exchange):
         requested = abs(request.delta_quantity)
         if side is Side.SELL:
             return request.delta_quantity, rules.charge(
-                side, requested * row.price, request.instrument_id
+                side, requested * price, request.instrument_id
             )
 
-        rate = rules.charge(side, row.price, request.instrument_id).total / row.price
+        rate = rules.charge(side, price, request.instrument_id).total / price
         step = rules.listing(request.instrument_id).quantity_step
-        affordable = purse / (row.price * (Decimal(1) + rate))
+        affordable = purse / (price * (Decimal(1) + rate))
         capped = min(requested, (affordable // step) * step)
         if capped <= 0:
             return Decimal("0"), rules.charge(side, Decimal("0"), request.instrument_id)
-        return capped, rules.charge(side, capped * row.price, request.instrument_id)
+        return capped, rules.charge(side, capped * price, request.instrument_id)

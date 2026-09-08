@@ -390,19 +390,24 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
                 observed="--dataset not given",
             )
         _require_registered_dataset(args.dataset, project_root)
+        # The surface reads the flags; the rule about which window a kind may declare
+        # lives in `vqapr/authoring_lookback.py`. Record `114`.
+        window = lookback_declaration(
+            kind,
+            rows=getattr(args, "lookback", None),
+            calendar=getattr(args, "calendar_lookback", None),
+            instants=getattr(args, "instants_lookback", None),
+        )
+        lookback, lookback_kind = window["lookback"], window["lookback_kind"]
+        if not isinstance(lookback, int) or not isinstance(lookback_kind, str):
+            raise RuntimeError("lookback_declaration answered with a window that is not (n, kind)")
         source = render(
             kind,
             args.component_id,
             dataset_id=args.dataset,
             field=args.field,
-            # The surface reads the flags; the rule about which window a kind may declare
-            # lives in `vqapr/authoring_lookback.py`. Record `114`.
-            **lookback_declaration(
-                kind,
-                rows=getattr(args, "lookback", None),
-                calendar=getattr(args, "calendar_lookback", None),
-                instants=getattr(args, "instants_lookback", None),
-            ),
+            lookback=lookback,
+            lookback_kind=lookback_kind,
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     if target.suffix != ".py":

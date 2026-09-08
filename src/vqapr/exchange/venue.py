@@ -30,6 +30,7 @@ from typing import ClassVar
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Component
+from vqapr.domain.instruments import Instrument, InstrumentKind, InstrumentRoster
 from vqapr.domain.values import require_tz_aware, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
@@ -38,7 +39,12 @@ from vqapr.exchange.execution_table import (
     validate_requests,
 )
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.exchange.listings import ExchangeRulesView, ExecutionFieldRequirement, TradeRule
+from vqapr.exchange.listings import (
+    ExchangeRulesView,
+    ExecutionFieldRequirement,
+    TradeRule,
+    TradeTerms,
+)
 from vqapr.orders.batches import OrderBatch
 
 
@@ -77,7 +83,7 @@ class ExecutionCall:
         account: AccountSnapshot,
         snapshot: ExactExecutionSnapshot,
         *,
-        registry: object | None = None,
+        registry: InstrumentRoster | Mapping[str, Instrument] | None = None,
     ) -> ExecutionCall:
         """The call the handler builds: the venue's rules, bound to `registry` when there is one."""
         rules = venue.rules if registry is None else venue.rules.with_registry(registry)
@@ -135,7 +141,7 @@ class AcademicExchange(Exchange):
                 raise ValueError("each listing key must match its TradeRule instrument_id")
         self.listings = copied
 
-    terms_by_kind: ClassVar[Mapping[object, object] | None] = None
+    terms_by_kind: ClassVar[Mapping[InstrumentKind, TradeTerms] | None] = None
     """Per-category terms, for a subclass whose rate depends on WHAT an instrument is.
 
     Declare it and the charge is resolved per fill from the project's registered roster, the same
@@ -206,17 +212,18 @@ class AcademicExchange(Exchange):
             else:
                 side = side_of(request.delta_quantity)
                 assert side is not None
+                # `requested_rows` refused a tradable row without a finite positive price.
+                price = row.price
+                assert price is not None
                 fills.append(
                     Fill(
                         request.instrument_id,
                         request.delta_quantity,
                         request.delta_quantity,
-                        row.price,
+                        price,
                         cost=rules.charge(
                             side,
-                            rules.notional(
-                                request.instrument_id, request.delta_quantity, row.price
-                            ),
+                            rules.notional(request.instrument_id, request.delta_quantity, price),
                             request.instrument_id,
                         ),
                         kind=rules.stamped_kind(request.instrument_id),

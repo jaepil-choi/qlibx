@@ -458,7 +458,13 @@ def _judge_member_datasets(
         # `start`. Nothing reads at `start`: it bounds the horizon, and the strategy reads at
         # the occurrences its agenda generates inside that horizon (issue 012).
         begins = _instant(span[0]) if span is not None else None
-        if rows and begins is not None and first_read is not None and begins > first_read:
+        if (
+            rows
+            and span is not None
+            and begins is not None
+            and first_read is not None
+            and begins > first_read
+        ):
             found.append(
                 Failure.bounded(
                     LOOKBACK_UNCOVERED,

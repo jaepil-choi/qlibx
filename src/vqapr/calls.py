@@ -118,6 +118,11 @@ class _DeclaredReads:
 
     __slots__ = ()
 
+    # Declared here, supplied by each context's own dataclass fields: the mixin reads them and
+    # owns neither.
+    window: ModelWindow
+    reads: Mapping[str, DatasetInput]
+
     def _declaration(self, alias: str) -> DatasetInput:
         if not isinstance(alias, str):
             raise TypeError("alias must be a string")

@@ -66,7 +66,7 @@ class FrozenAgenda:
             if not isinstance(occurrence, OperationOccurrence):
                 raise TypeError("occurrences must contain OperationOccurrence values")
 
-    def encoded(self) -> tuple[str, list[str]]:
+    def encoded(self) -> tuple[str, list[tuple[str, str, str, int, str]]]:
         """What a model's identity folds of its agenda: the sessions' CONTENT, not their name.
 
         The zone and each occurrence's local instant. Not the agenda id or the occurrence ids:
@@ -404,6 +404,10 @@ class FrozenRun:
         return self._identity
 
     def _derive_identity(self) -> str:
+        snapshot = self.initial_account_snapshot
+        mode = self.initial_account_mode
+        if (snapshot is None) != (mode is None):
+            raise RuntimeError("initial account snapshot and mode were frozen apart")
         return _identity(
             {
                 "run_id": self.run_id,
@@ -435,17 +439,15 @@ class FrozenRun:
                 "end": self.end.astimezone(UTC).isoformat() if self.end is not None else None,
                 "initial_account": (
                     (
-                        self.initial_account_mode.value,
-                        self.initial_account_snapshot.version,
-                        str(self.initial_account_snapshot.cash),
+                        mode.value,
+                        snapshot.version,
+                        str(snapshot.cash),
                         tuple(
                             (instrument, str(quantity))
-                            for instrument, quantity in (
-                                self.initial_account_snapshot.positions.items()
-                            )
+                            for instrument, quantity in snapshot.positions.items()
                         ),
                     )
-                    if self.initial_account_snapshot is not None
+                    if snapshot is not None and mode is not None
                     else None
                 ),
                 "instruments": self.instruments,

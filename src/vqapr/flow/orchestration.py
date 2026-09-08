@@ -568,6 +568,14 @@ def _run_strategy(
     from it rather than from a read of this strategy's own.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
+    # `run` refused a strategy run frozen without a venue or an initial account before
+    # dispatching here; a worker process rebuilds the frozen run and re-states that.
+    if frozen.exchange is None:
+        raise RuntimeError("a frozen strategy run reached execution without an Exchange")
+    initial_snapshot = frozen.initial_account_snapshot
+    initial_mode = frozen.initial_account_mode
+    if initial_snapshot is None or initial_mode is None:
+        raise RuntimeError("a frozen strategy run reached execution without an initial account")
     exchange = load_exchange(frozen.exchange, project_root=root_path)
     constraints = tuple(
         load_constraint(ref, project_root=root_path) for ref in layer.constraints.constraints
@@ -597,7 +605,7 @@ def _run_strategy(
         constraint_requirements = declared_constraint_requirements(constraints)
         if constraint_requirements != layer.constraint_requirements:
             raise ValueError("loaded Constraint requirements drifted from FrozenRun")
-        root = AccountState(frozen.initial_account_snapshot)
+        root = AccountState(initial_snapshot)
         strategy.memory = normalize_memory(layer.initial_model_memory)
         strategy.load_payload(BytesIO(layer.initial_payload))
         if store is not None:
@@ -660,7 +668,7 @@ def _run_strategy(
             # DECLARATION, not the book. It retains the marks this strategy declared it would
             # read; declaring nothing keeps one.
             account=Account(
-                mode=frozen.initial_account_mode,
+                mode=initial_mode,
                 retained_marks=retained_marks(strategy.account_history()),
             ),
             exchange=exchange,
@@ -699,7 +707,7 @@ def _run_strategy(
     return result, record
 
 
-def _roster_report_or_stale(roster: RegisteredRoster | None) -> object | None:
+def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object] | None:
     """The roster block for the record, or a STALE MARKER when it cannot be built at record time.
 
     Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails

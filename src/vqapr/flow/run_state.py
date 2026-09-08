@@ -11,6 +11,7 @@ from itertools import chain
 from types import MappingProxyType
 
 from vqapr.account.account import (
+    JournalEntry,
     PreparedAccountFill,
     PreparedAccountTransition,
     PreparedAccountValuation,
@@ -102,7 +103,7 @@ class AcceptedRunState:
         {}
     )
     feedback: tuple[object, ...] = ()
-    finalization: object = None
+    finalization: RunFinalization | None = None
     model_state_commit_count: int = 0
     # Every Component carries memory (records `181`, `184`): a Constraint's and the venue's are
     # committed here beside the Strategy's: one ref per component id, into the same map, proved the
@@ -271,7 +272,7 @@ fill journal can be published and then dropped from memory rather than carried f
 
 
 def _fill_rows(
-    entries: tuple[object, ...], *, envelope: Mapping[str, object] | None = None
+    entries: tuple[JournalEntry, ...], *, envelope: Mapping[str, object] | None = None
 ) -> tuple[Mapping[str, object], ...]:
     """One row per committed fill, including zero-dealt ones.
 

@@ -97,7 +97,10 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     pointer = space.registered_instruments()
     if pointer is None:
         return None
-    declared_tables = dict(pointer["tables"])
+    pointer_tables = pointer["tables"]
+    if not isinstance(pointer_tables, dict):
+        raise RuntimeError("roster pointer left the workspace without a tables object")
+    declared_tables = dict(pointer_tables)
     # A REGISTERED roster that cannot be read is refused, not degraded. `list instruments` reports
     # the same failure as `unreadable` and carries on, because it is an orientation command and a
     # moved table should not remove the answer it can still give. A run is the opposite: it is

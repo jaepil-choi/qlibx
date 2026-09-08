@@ -207,7 +207,12 @@ def validated_output(
                 retry="return exactly the declared output fields, then retry",
             )
         try:
-            instrument = str(instrument_id(row["instrument"]))
+            raw_instrument = row["instrument"]
+            if not isinstance(raw_instrument, str):
+                raise TypeError(
+                    f"instrument_id must be a string, got {type(raw_instrument).__name__}"
+                )
+            instrument = str(instrument_id(raw_instrument))
         except (TypeError, ValueError) as error:
             raise refusal(
                 Stage.RUN,

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sys
 import traceback
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +105,8 @@ def failure(
         # 잡음이고, 증거는 사용자가 친 명령줄과 그가 준 경로 그 자체다.
         return {"ok": False, **error.as_dict(), "error": f"{type(error).__name__}: {error}"}
 
-    body = getattr(error, "as_dict", None)
+    # Any refusal that spells `as_dict` qualifies, whichever layer raised it.
+    body: Callable[[], Mapping[str, Any]] | None = getattr(error, "as_dict", None)
     if callable(body):
         # A classified refusal: its failures already carry their causes. No file is written
         # for it -- a read-only verb refusing must not create `.vqapr/` as a side effect.

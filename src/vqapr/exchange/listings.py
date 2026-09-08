@@ -33,6 +33,7 @@ from vqapr.domain.instruments import (
     INSTRUMENT_TYPES,
     Instrument,
     InstrumentKind,
+    InstrumentRoster,
     base_notional,
     base_quantity_for,
 )
@@ -320,8 +321,8 @@ class ExchangeRulesView:
 
     exchange_id: str
     listings: Mapping[str, TradeRule]
-    registry: object | None = None
-    terms_by_kind: Mapping[object, object] | None = None
+    registry: InstrumentRoster | None = None
+    terms_by_kind: Mapping[InstrumentKind, TradeTerms] | None = None
     """Per-category terms, for a venue whose rate depends on what an instrument IS.
 
     Present, the charge is resolved from the ROSTER at fill time rather than from the rule the
@@ -368,7 +369,9 @@ class ExchangeRulesView:
         object.__setattr__(self, "registry", self._as_registry(self.registry))
 
     @staticmethod
-    def _as_registry(registry: object) -> object:
+    def _as_registry(
+        registry: InstrumentRoster | Mapping[str, Instrument] | None,
+    ) -> InstrumentRoster | None:
         """Accept a roster, or a plain `{instrument_id: Instrument}` meaning the same thing.
 
         A mapping is the honest minimum this view needs -- it only ever asks "what is this id" --
@@ -376,15 +379,15 @@ class ExchangeRulesView:
         gain. The roster type is what registration produces; a mapping is what a test or an
         in-process assembly naturally has.
         """
-        if registry is None or hasattr(registry, "instrument"):
+        if registry is None or isinstance(registry, InstrumentRoster):
             return registry
         if isinstance(registry, Mapping):
-            from vqapr.domain.instruments import InstrumentRoster
-
             return InstrumentRoster(registry)
-        raise TypeError("registry must expose instrument(id), or be a mapping of them")
+        raise TypeError("registry must be an InstrumentRoster, or a mapping of instruments")
 
-    def with_registry(self, registry: object) -> ExchangeRulesView:
+    def with_registry(
+        self, registry: InstrumentRoster | Mapping[str, Instrument]
+    ) -> ExchangeRulesView:
         """This view, bound to the project's roster. The one seam a category enters through.
 
         Returns a new view rather than mutating: a venue instance may be shared, and a run binding

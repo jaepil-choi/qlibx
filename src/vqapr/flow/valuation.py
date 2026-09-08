@@ -41,6 +41,7 @@ from vqapr.flow.context import (
     ValuationResult,
 )
 from vqapr.flow.marking import SelectedMark
+from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
 
 
 def _marks_from_execution_snapshot(
@@ -101,7 +102,7 @@ class ValuationHandler:
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
-    def value_due(self, pending: PendingValuation) -> object:
+    def value_due(self, pending: PendingValuation) -> HeldResult:
         """Value the book at an execution instant that carried no orders.
 
         Same instant, same snapshot, same prices an order would have been filled at -- only
@@ -181,6 +182,9 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
+            committed_mark = prepared_account.next_state.latest_mark
+            if committed_mark is None:
+                raise RuntimeError("a prepared Account valuation must carry the mark it appends")
             prepared_root = self._context.state.prepare_valuation_only(
                 pending_id=pending.pending_id,
                 account=prepared_account,
@@ -189,7 +193,7 @@ class ValuationHandler:
                 recorder=self.measurement_recorder(
                     cutoff=pending.target.target_at,
                     account=before,
-                    mark=prepared_account.next_state.latest_mark,
+                    mark=committed_mark,
                     selected=selected_marks,
                 ),
             )
@@ -226,6 +230,10 @@ class ValuationHandler:
         callback's own account row stays for a mark nothing here recorded, which is why the
         instant is remembered in `recorded_measurements`.
         """
+        # Both mark paths stamp the instant they mark at; a mark without one was taken outside
+        # the flow and has no measurement to date.
+        if mark.marked_at is None:
+            raise RuntimeError("a mark measured in the flow must carry the instant it was taken")
         recorder = InvocationRecorder(
             DEFAULT_TABLES,
             run_id=self._context.frozen_run.identity,
@@ -267,7 +275,7 @@ class ValuationHandler:
         self._context.recorded_measurements.add(mark.marked_at)
         return recorder
 
-    def publish_marked(self, prepared: object) -> object:
+    def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
         root = self._context.state.publish_marked(prepared)
         if root.account != self._context.account.state:
             raise RuntimeError("Account mark root does not mirror Account authority")

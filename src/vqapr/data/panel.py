@@ -21,7 +21,8 @@ from __future__ import annotations
 import hashlib
 from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from types import MappingProxyType
 
@@ -176,7 +177,10 @@ class PanelWindow:
     start: int
     stop: int
     evaluation_time: datetime
-    _values: dict[str, tuple[object, ...]] = field(default_factory=dict, init=False, repr=False)
+    # The window's own `field` attribute above owns that name; the dataclasses helper is aliased.
+    _values: dict[str, tuple[object, ...]] = dataclass_field(
+        default_factory=dict, init=False, repr=False
+    )
 
     @property
     def instants(self) -> tuple[datetime, ...]:
@@ -254,7 +258,8 @@ class PanelWindow:
         found: dict[str, object] = {}
         keys = self.panel.instruments or (NO_INSTRUMENT,)
         for name in keys:
-            present = pc.drop_null(self._column(name))
+            # pyarrow's stubs omit `drop_null`; the kernel exists at runtime.
+            present = pc.drop_null(self._column(name))  # type: ignore[attr-defined]
             if len(present):
                 found[name] = present[len(present) - 1].as_py()
         # No single instant: each name's newest value may sit on a different row.

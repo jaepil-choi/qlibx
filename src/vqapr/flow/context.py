@@ -23,14 +23,17 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountSnapshot
-from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
+from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
 from vqapr.constraints.evaluation import ConstraintReport
+from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
+from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
+    DueExecutionEvidence,
     FailureObservation,
     MonitoringEvidence,
     RetryPrecondition,
@@ -42,6 +45,7 @@ from vqapr.evidence.artifacts import (
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.venue import Exchange
+from vqapr.extension.component import ComponentRef
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import DueEvent
 from vqapr.flow.marking import ValuationService
@@ -117,14 +121,16 @@ class PendingValuation:
 @dataclass(frozen=True, slots=True)
 class OccurrenceTrace:
     occurrence: OperationOccurrence
-    result: object
+    result: Hold | EconomicPortfolioIntent
+    """The decision as the callback left it: a `Hold`, or a `Rebalance` stamped into the intent
+    the run accepted."""
     state: AcceptedRunState
 
 
 @dataclass(frozen=True, slots=True)
 class DueExecutionTrace:
     due: DueEvent
-    result: DueExecutionResult
+    result: DueExecutionResult | HeldResult
     state: AcceptedRunState
 
 
@@ -168,11 +174,11 @@ class DueExecutionResult:
 
     consumed_pending_id: str
     account_version: int
-    post_account_result: object
-    monitoring: object | None = None
+    post_account_result: DueExecutionEvidence
+    monitoring: MonitoringResult | None = None
 
     @property
-    def report(self) -> object | None:
+    def report(self) -> ConstraintReport | None:
         """The constraint report, where `contract_report` looks for one."""
         return None if self.monitoring is None else self.monitoring.report
 
@@ -208,11 +214,11 @@ class ValuationResult:
 class HeldResult:
     """A held book valued at its execution instant, and what monitoring found there."""
 
-    valuation: object
-    monitoring: object | None = None
+    valuation: ValuationEvidence
+    monitoring: MonitoringResult | None = None
 
     @property
-    def report(self) -> object | None:
+    def report(self) -> ConstraintReport | None:
         return None if self.monitoring is None else self.monitoring.report
 
 
@@ -338,7 +344,7 @@ follow-up rather than something this table quietly approximates.
 
 
 def _require_constraint_identity(
-    constraints: tuple[Constraint, ...], declared: tuple[object, ...]
+    constraints: tuple[Constraint, ...], declared: tuple[ComponentRef, ...]
 ) -> None:
     """Refuse an assembly whose loaded constraints are not the ones the run froze.
 
@@ -464,13 +470,14 @@ class FlowContext:
     strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
     constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
     constraint_window_at: Callable[[datetime], ModelWindow]
-    scan_session: object | None = None
-    registry: object | None = None
+    scan_session: ScanSession | None = None
+    registry: InstrumentRoster | None = None
     reference_price: str | None = None
     record_account_positions: bool = True
     account_history_declaration: AccountHistoryInput | None = None
-    # Mutable bookkeeping is local to this strategy; authorities above are supplied once.
-    recorded_measurements: set[object] = field(default_factory=set)
+    # Mutable bookkeeping is local to this strategy; authorities above are supplied once. The
+    # measurements are the mark instants whose NAV already reached `vqapr.account`.
+    recorded_measurements: set[datetime] = field(default_factory=set)
     horizon: ExecutionHorizon | None = None
     timing: dict[str, float] = field(default_factory=dict)
 

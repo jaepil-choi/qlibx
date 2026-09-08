@@ -19,8 +19,10 @@ from datetime import datetime
 from vqapr.account.account import Account
 from vqapr.account.snapshot import AccountState
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
+from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.instruments import InstrumentRoster
 from vqapr.evidence.artifacts import (
     FinalizationEvidence,
     SimulationStage,
@@ -35,6 +37,7 @@ from vqapr.flow.context import (
     DueExecutionTrace,
     FailedAfterCommit,
     FlowContext,
+    HeldResult,
     MonitoringResult,
     OccurrenceTrace,
     PendingValuation,
@@ -109,9 +112,9 @@ class StrategyEventLoop(
         exchange: Exchange,
         constraints: tuple[Constraint, ...],
         valuation_service: ValuationService | None = None,
-        scan_session: object | None = None,
+        scan_session: ScanSession | None = None,
         on_progress: Callable[[], None] | None = None,
-        registry: object | None = None,
+        registry: InstrumentRoster | None = None,
         record_account_positions: bool = True,
     ) -> None:
         if not isinstance(frozen_run, FrozenRun):
@@ -289,7 +292,7 @@ class StrategyEventLoop(
         ):
             raise RuntimeError("pending intent changed while dispatching due execution")
         if isinstance(pending, PendingValuation):
-            result: object = self._valuation.value_due(pending)
+            result: DueExecutionResult | HeldResult = self._valuation.value_due(pending)
         else:
             result = self._execution.execute_due(pending)
         if self._context.state.current.pending_accepted_intent is not None:

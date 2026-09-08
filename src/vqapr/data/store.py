@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import lookback_fits_grain, require_declared
+from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
@@ -28,7 +28,7 @@ from vqapr.domain.values import require_tz_aware
 
 
 class DatasetCatalog(Protocol):
-    def dataset(self, raw_dataset_id: str): ...
+    def dataset(self, raw_dataset_id: str) -> DatasetRegistration: ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
 
@@ -253,7 +253,12 @@ class DuckDbObservationStore:
                 identity=identity,
                 source_digest=source_digest,
             )
-        window = panel.window(field, evaluation_time=evaluation_time, lookback=first.lookback)
+        # `lookback_fits_grain` already refused the one kind a panel cannot take; this only lets
+        # the window's signature see it.
+        lookback = first.lookback
+        if isinstance(lookback, InstantsLookback):
+            raise RuntimeError("lookback_fits_grain admitted an InstantsLookback on a panel grain")
+        window = panel.window(field, evaluation_time=evaluation_time, lookback=lookback)
         access = AccessRecord(
             consumer_id=consumer_id,
             dataset_id=first.dataset_id,

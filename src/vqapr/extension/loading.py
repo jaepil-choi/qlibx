@@ -379,7 +379,7 @@ def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     )
 
 
-SHIPPED_EXECUTION_PROFILES: tuple[type, ...] = (AcademicExchange, KrxExchange)
+SHIPPED_EXECUTION_PROFILES: tuple[type[Exchange], ...] = (AcademicExchange, KrxExchange)
 """The execution profiles this package implements end to end.
 
 A run may only execute through a profile whose venue semantics are implemented and documented
@@ -390,10 +390,7 @@ its own matching behaviour, because the resulting realism claim would be unverif
 
 def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) -> Exchange:
     exchange = _load(ref, kind=ComponentKind.EXCHANGE, project_root=project_root)
-    profile = next(
-        (base for base in SHIPPED_EXECUTION_PROFILES if isinstance(exchange, base)), None
-    )
-    if profile is None:
+    if not isinstance(exchange, SHIPPED_EXECUTION_PROFILES):
         names = ", ".join(base.__name__ for base in SHIPPED_EXECUTION_PROFILES)
         raise _failure(
             "component.wrong_type",
@@ -402,6 +399,7 @@ def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) 
             fix=f"subclass one of the shipped profiles ({names}) instead of Exchange directly",
             status=Status.CONTRACT,
         )
+    profile = next(base for base in SHIPPED_EXECUTION_PROFILES if isinstance(exchange, base))
     if type(exchange).execute is not profile.execute:
         raise _failure(
             "component.execution_profile_invalid",

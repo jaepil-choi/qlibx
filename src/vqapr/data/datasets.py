@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 
 from vqapr.data import scan
-from vqapr.data.lookback import InstantsLookback
+from vqapr.data.lookback import InstantsLookback, Lookback
 from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import (
@@ -489,12 +489,15 @@ def parse_grain(value: object, *, dataset_id: str) -> Grain:
     )
 
 
-def lookback_fits_grain(lookback: object, grain: object) -> str | None:
+def lookback_fits_grain(lookback: Lookback, grain: Grain | None) -> str | None:
     """`None` when the lookback is the grain's own kind; else the refusal, naming the right one.
 
     The types steer (design §2.4): a `rows` dataset takes only a `SeriesLookback`, a panel dataset
     only a `PanelLookback`. Said in one place so registration, preflight and the read agree.
     """
+    if grain is None:
+        # `require_declared` refuses a grain-less registration before any lookback is judged.
+        raise RuntimeError("a lookback was judged against a registration that declares no grain")
     if grain is Grain.ROWS:
         if isinstance(lookback, InstantsLookback):
             return None
@@ -958,7 +961,8 @@ def check_span(
         )
         return found.done(retry=_RETRY), None
 
-    if not measured.measured:
+    first, last = measured.first, measured.last
+    if first is None or last is None:
         found.add(
             Failure.bounded(
                 code="dataset.span_empty",
@@ -983,11 +987,11 @@ def check_span(
     # second refusal for it would be a code no fixture could ever produce -- the kind of branch
     # that looks like coverage and is really dead. `with_span` still enforces the invariant at
     # the boundary, which is where a caller bypassing validation would hit it.
-    for endpoint in (measured.first, measured.last):
+    for endpoint in (first, last):
         assert endpoint.tzinfo is not None and endpoint.utcoffset() is not None, (
             f"stage 1 admitted a non-tz-aware {registration.available_at!r}"
         )
-    return found.done(), (measured.first, measured.last)
+    return found.done(), (first, last)
 
 
 def validate(
@@ -1060,6 +1064,8 @@ def validate(
     if not span.ok:
         span_timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
         return span, span_timing, registration
+    if measured is None:
+        raise RuntimeError("check_span passed without measuring a span")
 
     values = check_values(described, spec)
     timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)

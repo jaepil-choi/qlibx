@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
+from typing import NoReturn
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from vqapr.account.history import AccountHistory
@@ -25,6 +26,7 @@ from vqapr.constraints.evaluation import (
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
@@ -35,6 +37,7 @@ from vqapr.evidence.artifacts import (
 from vqapr.evidence.recorder import InvocationRecorder
 from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExecutionHorizon
+from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.flow.context import (
     _ACCOUNT_IDENTITY,
     _VALUATION_NAMESPACE,
@@ -51,6 +54,7 @@ from vqapr.flow.context import (
 from vqapr.flow.run_state import (
     LifecycleKind,
     LifecycleTrace,
+    PreparedRunState,
     prepare_model_state,
 )
 from vqapr.portfolio.intents import (
@@ -297,15 +301,15 @@ class CallbackHandler:
 
     def _prepare_callback_publication(
         self,
-        memory: object,
+        memory: ModelMemory,
         payload: bytes,
         lifecycle: LifecycleTrace,
         recorder: InvocationRecorder,
         accepted: Hold | AcceptedIntent,
         pending_valuation: PendingValuation | None = None,
         *,
-        component_memory: Mapping[str, object] | None = None,
-    ) -> object:
+        component_memory: Mapping[str, ModelMemory] | None = None,
+    ) -> PreparedRunState:
         if isinstance(accepted, Hold):
             if pending_valuation is None:
                 # Nothing to take: leave whatever the root already had pending untouched.
@@ -335,7 +339,7 @@ class CallbackHandler:
             component_memory=component_memory,
         )
 
-    def _restore_callback_state(self, memory: object, payload: bytes) -> None:
+    def _restore_callback_state(self, memory: ModelMemory, payload: bytes) -> None:
         self._context.strategy.memory = memory
         self._context.strategy.load_payload(BytesIO(payload))
 
@@ -451,7 +455,7 @@ class CallbackHandler:
     def _set_callback_recorder(self, recorder: InvocationRecorder | None) -> None:
         self._context.strategy.recorder = recorder
 
-    def _visible_callback_state(self) -> tuple[object, object, bytes]:
+    def _visible_callback_state(self) -> tuple[ModelStateRef, ModelMemory, bytes]:
         current_ref = self._context.state.current.current_model_state_ref
         if current_ref is None:
             raise RuntimeError("callback requires a current Strategy root")
@@ -462,7 +466,7 @@ class CallbackHandler:
         )
 
     @staticmethod
-    def _raise_callback_account_state_error() -> None:
+    def _raise_callback_account_state_error() -> NoReturn:
         raise RuntimeError("callback requires an AccountState root")
 
     def _strategy_window(self, occurrence: OperationOccurrence) -> ModelWindow:
@@ -500,8 +504,8 @@ class CallbackHandler:
         )
 
     def _candidate_callback_state(
-        self, before: object, payload_before: bytes
-    ) -> tuple[object, bytes, object]:
+        self, before: ModelMemory, payload_before: bytes
+    ) -> tuple[ModelMemory, bytes, ModelStateRef]:
         candidate = normalize_memory(self._context.strategy.memory)
         payload_candidate = BytesIO()
         self._context.strategy.save_payload(payload_candidate)
@@ -514,8 +518,8 @@ class CallbackHandler:
         self,
         occurrence: OperationOccurrence,
         account: AccountSnapshot,
-        current_ref: object,
-        committed_ref: object,
+        current_ref: ModelStateRef,
+        committed_ref: ModelStateRef,
         window: ModelWindow,
         accepted: Hold | AcceptedIntent,
         projected: tuple[object, ...],
@@ -559,9 +563,9 @@ class CallbackHandler:
 
     def _validate_candidate_payload(
         self,
-        candidate: object,
+        candidate: ModelMemory,
         payload_candidate: bytes,
-        before: object,
+        before: ModelMemory,
         payload_before: bytes,
     ) -> None:
         """Prove the live Strategy can load and reproduce its candidate before root swap."""
@@ -660,20 +664,21 @@ class CallbackHandler:
                 raise RuntimeError("one callback observed multiple byte digests for one source")
         return tuple(IntentSourceRef(source_id, digest) for source_id, digest in actual.items())
 
-    def execution_horizon(self, execution_table: object) -> ExecutionHorizon:
+    def execution_horizon(self, execution_table: ExecutionTable) -> ExecutionHorizon:
         """Read the run's candidate execution instants once, not once per callback.
 
         Built lazily so constructing a StrategyEventLoop still opens no physical source. The lower
         bound is the frozen run start, which no decision can precede.
         """
-        if self._context.horizon is None:
+        horizon = self._context.horizon
+        if horizon is None:
             frozen = self._context.frozen_run
             if frozen.end is None:
                 raise ValueError("an execution horizon requires a frozen run end")
             start = frozen.start
             if start is None:
                 raise ValueError("an execution horizon requires a frozen run start")
-            self._context.horizon = execution_table.build_horizon(
+            horizon = execution_table.build_horizon(
                 start_time=start,
                 end_time=frozen.end,
                 # The run owns a scan session; the horizon is the one query that reads every
@@ -681,7 +686,8 @@ class CallbackHandler:
                 # opening a connection of its own.
                 session=self._context.scan_session,
             )
-        return self._context.horizon
+            self._context.horizon = horizon
+        return horizon
 
     def _accept_valuation(self, occurrence: OperationOccurrence) -> PendingValuation | None:
         """Bind a no-order occurrence to the execution instant it would have traded at.
@@ -708,7 +714,7 @@ class CallbackHandler:
             return None
         target = execution_table.select_target(
             decision_time=occurrence.evaluation_time,
-            end_time=self._context.frozen_run.end,
+            end_time=frozen.end,
             horizon=self.execution_horizon(execution_table),
         )
         if target is None:

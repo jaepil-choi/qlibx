@@ -18,7 +18,7 @@ records an `AccessRecord` per read -- what lets the Flow state an intent's prove
 datamodel row's `available_at`.
 
 This module is the former `models/` package (`calls.py` + `contexts.py`) as one file; the
-`Model` classes themselves live in `vqapr.authoring`.
+`Component` classes themselves live in `vqapr.authoring`.
 """
 
 from __future__ import annotations

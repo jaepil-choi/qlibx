@@ -50,7 +50,7 @@ def test_module_exports_are_exact() -> None:
         "EconomicAccountView",
         "Hold",
         "InstantsLookback",
-        "Model",
+        "Component",
         "Observation",
         "PanelWindow",
         "Rebalance",
@@ -187,7 +187,7 @@ def test_data_model_is_a_model_and_inputs_defaults_to_empty() -> None:
             return ()
 
     model = Model()
-    assert isinstance(model, authoring.Model)
+    assert isinstance(model, authoring.Component)
     assert model.inputs() == {}
     assert model.requirements() == ()
     assert model.compute(_FakeDataCall()) == ()
@@ -422,7 +422,7 @@ def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
     """One class, one abstract member; state is `memory` and rows go to `recorder` (record 132)."""
     with pytest.raises(TypeError):
         authoring.StrategyModel()  # type: ignore[abstract]
-    assert issubclass(authoring.StrategyModel, authoring.Model)
+    assert issubclass(authoring.StrategyModel, authoring.Component)
 
     class Model(authoring.StrategyModel):
         def decide(self, call: authoring.StrategyCall) -> authoring.Hold:
@@ -545,12 +545,12 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
     forbidden = {"account_version", "version", "recorder", "memory", "constraint_id"}
     for name in authoring.__all__:
-        if name in {"Model", "StrategyModel"}:
-            # `Model` carries `memory` on purpose: it is the small strict-JSON state both roles
-            # share (architecture 4.4), and it arrived on this surface with the base class in
-            # record `131`. `StrategyModel` carries `recorder` the same way (5.1, record
-            # `132`). What this test guards is that no VALUE type -- a call, a finding, a
-            # decision -- smuggles framework state in through an annotation.
+        if name in {"Component", "StrategyModel"}:
+            # `Component` carries `memory` on purpose: it is the small strict-JSON state every role
+            # shares (architecture 4.4; a Constraint too, owner ruling 2026-09-08), and it arrived on
+            # this surface with the base class in record `131`. `StrategyModel` carries `recorder`
+            # the same way (5.1, record `132`). What this test guards is that no VALUE type -- a call,
+            # a finding, a decision -- smuggles framework state in through an annotation.
             continue
         value = getattr(authoring, name)
         annotations = getattr(value, "__annotations__", {})

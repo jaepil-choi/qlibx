@@ -1,7 +1,7 @@
 """Agent-first extension authoring/read/result contracts.
 
-The sole public home for what an author subclasses (``DataModel``, ``StrategyModel``,
-``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
+The sole public home for what an author subclasses (``Component`` and its roles ``DataModel``,
+``StrategyModel``, ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
 ``PanelWindow``, ``Observation``, ``EconomicAccountView``, ``AccountHistory``,
 ``ConstraintBounds``),
 and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
@@ -44,6 +44,7 @@ __all__ = (
     "AccountHistory",
     "AccountHistoryInput",
     "CalendarLookback",
+    "Component",
     "Constraint",
     "ConstraintBounds",
     "ConstraintCall",
@@ -54,7 +55,6 @@ __all__ = (
     "EconomicAccountView",
     "Hold",
     "InstantsLookback",
-    "Model",
     "Observation",
     "PanelWindow",
     "Rebalance",
@@ -276,28 +276,48 @@ def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
     )
 
 
-class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
-    """What every Model role shares: a declaration of reads, and portable memory.
+class Component(ABC):  # noqa: B024 - concrete roles add their abstract callbacks
+    """An object the engine calls back on an event, with that event's time.
 
-    **The author's base class, so it lives on the author's surface.** It used to live in an
-    engine-side `models/` package while an authoring `DataModel` and `StrategyModel` were defined
-    here without it -- which is why the two authored kinds shared no ancestor, and why an author
-    who wrote against this module got a class the loader could not run (`docs/issues/036`). The
-    engine-side names were re-exports of these until the one-shape campaign deleted them.
+    **This is the one thing the four authored kinds are** (owner ruling, 2026-09-08; the review in
+    `docs/code-review/2026-09-08-four-readers-one-loop-and-the-missing-shapes.md`). A DataModel,
+    a StrategyModel, a Constraint and an Exchange each *declare what they read* (`inputs()`), are
+    *handed a bounded view of it at one instant* (their `Call`), *carry memory between callbacks*
+    (`memory`), and *return one judgment* -- rows, a decision, bounds or a finding, fills. What
+    differs between them is the event they answer and what their role is additionally handed:
+    the account for a Strategy, the account and the projected bounds for a Constraint's
+    `monitor`, the order batch for an Exchange. That list is the whole difference, and it is
+    stated on each role rather than here.
 
-    **Both roles declare their reads here, in one place and one shape.** A first-time user once had
-    to build a ten-row table of the ways authoring the two roles differed; the owner ruled that
+    **The author's base class, so it lives on the author's surface.** An engine-side `models/`
+    package once held it while `DataModel` and `StrategyModel` were defined here without it, so
+    the two authored kinds shared no ancestor and an author who wrote against this module got a
+    class the loader could not run (`docs/issues/036`). `Constraint` then stood outside the base
+    for a reason that turned out to be wrong -- *"a constraint is a stateless predicate"* -- and
+    copied `inputs()` and `requirements()` verbatim to get the same declaration. A rule such as
+    *"out after three breaches"* needs to count, and counting is memory; the premise was the
+    defect, not the copy.
+
+    **Every role declares its reads here, in one place and one shape.** A first-time user once had
+    to build a ten-row table of the ways authoring two roles differed; the owner ruled that
     *"the size of the current difference is itself the defect"*. `inputs()` is the one shape.
 
-    `memory` is the small strict-JSON state a Model carries between invocations. A DataModel that
-    uses it becomes order-dependent (architecture 4.4); one that does not may be computed in any
-    order.
+    `memory` is the small strict-JSON state a component carries between callbacks. The engine
+    restores it before each callback and commits what the callback left, atomically with the
+    callback's other effects; a fresh instance with its memory restored must decide the same. A
+    DataModel that uses it becomes order-dependent (architecture 4.4); one that does not may be
+    computed in any order. The engine relies on the same instance living for the whole run: it
+    never builds one per callback.
+
+    `Exchange` is not yet a subclass: it still reads through its own declaration and receives
+    its inputs as arguments rather than a `Call`. It joins when the execution table becomes a
+    registered dataset (campaign M4).
     """
 
     memory: ModelMemory = None
 
     def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Model performs. Empty by default.
+        """Declare every aliased dataset read this component performs. Empty by default.
 
         The alias is the author's own name for a read, and it is what `read(alias)` takes on the
         call. Declaring nothing is legitimate: a Model may derive its values from memory alone.
@@ -307,6 +327,11 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
         run refuses a model whose requirements then differ from the frozen ones. So the reads
         cannot depend on memory or on a run's per-model settings (`docs/issues/065`): a family
         of settings that changes WHAT is read is a family of registered components.
+
+        Declaring nothing is legitimate and is what the shipped `NoShort` constraint does: a rule
+        about a weight's sign opens no data. The loader used to require a non-empty
+        `requirements()` from a Constraint, which made the one shipped constraint that needs no
+        data the one shape it could not accept.
         """
         return {}
 
@@ -319,8 +344,8 @@ class Model(ABC):  # noqa: B024 - concrete Model roles add abstract callbacks
         )
 
 
-class DataModel(Model):
-    """A Model whose result is values: data in, a dataset out, and no account in between.
+class DataModel(Component):
+    """A Component whose result is values: data in, a dataset out, and no account in between.
 
     **What makes it a DataModel is that nothing it returns is executed** (architecture 4.4). It
     sees no account, passes through no venue, and its rows become a registered dataset that any
@@ -942,7 +967,7 @@ class StrategyCall(ABC):
         """
 
 
-class StrategyModel(Model):
+class StrategyModel(Component):
     """User extension that decides what to hold; its memory owns cadence and path-dependent rules.
 
     One class (record `132`). Two carried this name: this one, which the scaffold taught and an
@@ -1096,8 +1121,16 @@ class ConstraintFinding:
         object.__setattr__(self, "details", details)
 
 
-class Constraint(ABC):
-    """User extension contract: an immutable economic predicate over the account.
+class Constraint(Component):
+    """User extension contract: an economic predicate over the account.
+
+    **A Component like the other roles** (owner ruling, 2026-09-08). It declares its reads with
+    `inputs()` and may keep `memory` between callbacks -- *"out after three breaches"* is a rule
+    that counts, and a rule that counts remembers. The engine restores that memory before
+    `project` and before `monitor` and commits what each left, with the callback publication
+    and the monitoring publication respectively. The earlier contract called a constraint a
+    stateless predicate and kept it outside the base for that reason; the premise was wrong and
+    the copies of `inputs()` and `requirements()` it forced are gone.
 
     **Two members, because a constraint does two things and they are different things.** `project`
     bounds construction before anything is decided -- best effort, the strategy builds the best
@@ -1129,28 +1162,6 @@ class Constraint(ABC):
     @abstractmethod
     def constraint_id(self) -> str:
         """The id this rule answers to. Must equal the id it is registered under."""
-
-    def inputs(self) -> Mapping[str, DatasetInput]:
-        """Declare every aliased dataset read this Constraint performs. Empty by default.
-
-        Declaring nothing is legitimate and is what the shipped `NoShort` does: a rule about a
-        weight's sign opens no data. The loader used to require a non-empty `requirements()` here,
-        which made the one shipped constraint that needs no data the one shape it could not accept.
-        """
-        return {}
-
-    def requirements(self) -> tuple[DataRequirement, ...]:
-        """Every observation requirement, derived from `inputs()` -- `Model.requirements()`,
-        spelled the same way for the role that is not a Model.
-
-        Not a Model because `Model` carries `memory`, and a constraint is a stateless predicate
-        that must not have any. The fan-out is shared; the state is not.
-        """
-        return tuple(
-            requirement
-            for declaration in self.inputs().values()
-            for requirement in requirements_for(declaration)
-        )
 
     @property
     def tolerance(self) -> Decimal | None:

@@ -18,6 +18,7 @@ from vqapr.analysis.signal import (
     rank_information_coefficient,
 )
 from vqapr.authoring import (
+    Component,
     Constraint,
     ConstraintBounds,
     ConstraintFinding,
@@ -158,6 +159,7 @@ __all__ = (
     "AllocationViolation",
     "Budget",
     "CalendarLookback",
+    "Component",
     "ComponentKind",
     "ComponentRef",
     "Constraint",

@@ -27,7 +27,8 @@ from vqapr.flow.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.context import (
+from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
+from vqapr.flow.strategy.context import (
     _ACCOUNT_IDENTITY,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
@@ -40,7 +41,6 @@ from vqapr.flow.context import (
     PendingValuation,
     ValuationResult,
 )
-from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
 
 
 def _marks_from_execution_snapshot(

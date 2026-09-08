@@ -50,11 +50,11 @@ from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
-from vqapr.flow.run import ConstraintSet, StrategyConfig
+from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import DueExecutionTrace, StrategyEventLoop
+from vqapr.flow.strategy.loop import DueExecutionTrace, StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")
 TABLE = "vqapr.monitoring"

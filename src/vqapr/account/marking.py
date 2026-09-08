@@ -1,7 +1,7 @@
 """Closed valuation service: every held position needs an explicit selected mark.
 
-Moved from `valuation/marking.py` beside `flow/valuation.py`, its consumer (one-shape Step 7,
-record 162); `Mark`/`MarkBatch` are values and live in `domain/values.py`."""
+Moved from `valuation/marking.py` beside `flow/strategy/valuation.py`, its consumer (one-shape
+Step 7, record 162); `Mark`/`MarkBatch` are values and live in `domain/values.py`."""
 
 from __future__ import annotations
 
@@ -92,10 +92,11 @@ class ValuationService:
             price = prices.get(instrument)
             if price is None:
                 # NOT the halt case. Read this with `_marks_from_execution_snapshot`
-                # (`flow/execution.py`), which runs FIRST and carries a held name's previous
-                # mark forward when the venue published no row for it. By the time a price is
-                # missing here, the carry has already been tried and had nothing to carry -- so
-                # this is a position the venue has *never* priced, not one that stopped trading.
+                # (`flow/strategy/execution.py`), which runs FIRST and carries a held name's
+                # previous mark forward when the venue published no row for it. By the time a
+                # price is missing here, the carry has already been tried and had nothing to
+                # carry -- so this is a position the venue has *never* priced, not one that
+                # stopped trading.
                 #
                 # A halted holding therefore keeps its last price and stays in NAV, stamped with
                 # the instant that price was actually observed. Reading this branch alone invites

@@ -36,8 +36,8 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow import judgments as judgments_module
-from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.flow.declaration import judgments as judgments_module
+from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))

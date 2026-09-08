@@ -37,7 +37,13 @@ from vqapr.flow.artifacts import (
     SimulationFailureKind,
     SimulationStage,
 )
-from vqapr.flow.context import (
+from vqapr.flow.run_state import (
+    LifecycleKind,
+    LifecycleTrace,
+    PreparedRunState,
+    prepare_model_state,
+)
+from vqapr.flow.strategy.context import (
     _ACCOUNT_IDENTITY,
     _VALUATION_NAMESPACE,
     CALLBACK_STAGE,
@@ -49,12 +55,6 @@ from vqapr.flow.context import (
     PendingValuation,
     _raise_callback_return_type,
     _shadows_package_table,
-)
-from vqapr.flow.run_state import (
-    LifecycleKind,
-    LifecycleTrace,
-    PreparedRunState,
-    prepare_model_state,
 )
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,

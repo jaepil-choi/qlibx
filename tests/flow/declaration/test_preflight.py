@@ -20,8 +20,8 @@ from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
-from vqapr.flow.preflight import derived_agenda, preflight_run
-from vqapr.flow.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
+from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.flow.run_state import prepare_model_state
 from vqapr.public import register_dataset
 from vqapr.workspace import Workspace
@@ -828,7 +828,7 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     dates, before an occurrence and its offset proof exist -- and one `check` derives it once,
     one `preflight` once, rather than once per strategy inside two judges and again in preflight.
     """
-    from vqapr.flow.judgments import judgments
+    from vqapr.flow.declaration.judgments import judgments
 
     workspace, definition = _setup(tmp_path, model_price_parquet)
     # The dataset has four sessions (3/5 .. 3/8); the run's period (`_setup`: 3/5 09:00 to

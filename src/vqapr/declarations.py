@@ -42,7 +42,7 @@ from vqapr.domain.errors import (
 from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.registration import prepare_component, register_component
-from vqapr.flow.run import RunDefinition
+from vqapr.flow.declaration.run import RunDefinition
 from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.workspace import Transaction, Workspace
 from vqapr.workspace_document import (

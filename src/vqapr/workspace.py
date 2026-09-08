@@ -31,7 +31,7 @@ from vqapr.domain.identifiers import (
 )
 from vqapr.domain.values import require_tz_aware
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition
+from vqapr.flow.declaration.run import RunDefinition
 from vqapr.workspace_document import read_workspace, write_workspace
 
 WORKSPACE_DIRECTORY = ".vqapr"

@@ -119,10 +119,10 @@ def _normalize(duck_type: str) -> ColumnType:
 def column_type_of_arrow(arrow_type: pa.DataType) -> ColumnType:
     """The `ColumnType` an arrow type lands as when duckdb reads the parquet it is written to.
 
-    The producer of a materialized dataset (`flow/datamodel.py`) states its field types from the
-    schema it wrote, through this one mapping, so that what it declares is what `DESCRIBE` will
-    measure on the file (`docs/issues/088`). Kept next to `_normalize` because the two are one
-    vocabulary read from two directions.
+    The producer of a materialized dataset (`flow/datamodel/output.py`) states its field types
+    from the schema it wrote, through this one mapping, so that what it declares is what
+    `DESCRIBE` will measure on the file (`docs/issues/088`). Kept next to `_normalize` because the
+    two are one vocabulary read from two directions.
     """
     if pa.types.is_timestamp(arrow_type):
         return ColumnType.TIMESTAMP_TZ if arrow_type.tz is not None else ColumnType.TIMESTAMP_NAIVE

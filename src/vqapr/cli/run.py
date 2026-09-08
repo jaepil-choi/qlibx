@@ -209,8 +209,9 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # SAME judgment as `stage: "unhandled"` (`docs/issues/076`).
         #
         # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
-        # `flow/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and user code
-        # reached through `load_strategy_model` comes back already bounded as `component.load`.
+        # `flow/declaration/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and
+        # user code reached through `load_strategy_model` comes back already bounded as
+        # `component.load`.
         # `VqaprError` and `InputError` are therefore deliberately not caught -- both already
         # carry their own bounded body and their own truer stage.
         raise VqaprError(

@@ -64,8 +64,8 @@ write and the parts' removal cannot double-count.
 
 COMPACT_FILENAME = "all.parquet"
 """The one file a finished table or dataset is: written when the run ends, after which any spill
-part beside it is stale input. Shared with `vqapr.flow.datamodel`, which writes an output dataset
-the same way (`docs/issues/087`).
+part beside it is stale input. Shared with `vqapr.flow.datamodel.output`, which writes an output
+dataset the same way (`docs/issues/087`).
 
 Here rather than beside that writer -- where both lived until campaign M6 Step 3 -- because a
 compaction filename and a spill threshold are facts about how bytes reach the disk, not about the

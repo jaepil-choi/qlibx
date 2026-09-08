@@ -21,14 +21,14 @@ from vqapr.flow.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.context import (
+from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
+from vqapr.flow.strategy.context import (
     CALLBACK_STAGE,
     AcceptedIntent,
     DueExecutionResult,
     FlowContext,
 )
-from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
-from vqapr.flow.valuation import ValuationHandler, _marks_from_execution_snapshot
+from vqapr.flow.strategy.valuation import ValuationHandler, _marks_from_execution_snapshot
 from vqapr.orders.planning import plan_orders
 
 

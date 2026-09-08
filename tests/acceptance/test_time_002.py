@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-import vqapr.flow.execution as execution_phase
+import vqapr.flow.strategy.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
@@ -52,10 +52,10 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.run import ConstraintSet, StrategyConfig
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
+from vqapr.flow.strategy.loop import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,

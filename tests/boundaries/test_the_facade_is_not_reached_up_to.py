@@ -29,7 +29,7 @@ the one that could never be closed by deleting anything.
 **Record `125` closed the seventh, and not by deleting it either.** The bridge imported
 `EconomicPortfolioIntent`, `PortfolioTarget`, `IntentSourceRef` and `NoDecision` from the facade in
 order to STAMP an intent -- minting the UUID, rebuilding provenance, copying the account version.
-Moving that stamping into `flow/simulation.py`, where the Flow already derived every one of those
+Moving that stamping into `flow/strategy/loop.py`, where the Flow already derived every one of those
 values to check the bridge's copy of them, left the bridge with nothing to import. The file is
 still there and still translates one call surface into the other; it simply no longer reaches up.
 
@@ -106,7 +106,7 @@ def test_no_module_below_the_cli_reaches_up_to_the_facade() -> None:
         + "\n  ".join(added)
         + "\n\nThe facade is the CLI's supported surface and sits ABOVE these layers. Import the "
         "class from where it is defined -- `vqapr.workspace`, `vqapr.domain.*`, `vqapr.flow.*` -- "
-        "as `flow/preflight.py` does. If this import is genuinely correct, the ruling in "
+        "as `flow/declaration/preflight.py` does. If this import is genuinely correct, the ruling in "
         "docs/design/agent-first-surface.md has to change first, and this list with it."
     )
     assert not removed, (

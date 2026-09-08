@@ -44,7 +44,7 @@ account_version_committed
 # src/vqapr/evidence/artifacts.py, class MarkEvidence
 limitations
 
-# src/vqapr/flow/simulation.py, class DueExecutionResult; built in `_execute_due`.
+# src/vqapr/flow/strategy/loop.py, class DueExecutionResult; built in `_execute_due`.
 post_account_result
 
 

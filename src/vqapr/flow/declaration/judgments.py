@@ -38,17 +38,17 @@ from typing import Any
 from vqapr.account.account import AccountMode
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError, status_of
 
-# Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
+# Through `extension/`, not `_internal/`, matching `flow/declaration/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
-from vqapr.flow.preflight import derived_agenda
-from vqapr.flow.run import RunDefinition
+from vqapr.flow.declaration.preflight import derived_agenda
+from vqapr.flow.declaration.run import RunDefinition
 
 # `vqapr.workspace`, not `vqapr.public`. The facade is the CLI's supported surface and sits ABOVE
 # this layer; a module under `flow/` importing it reaches back up through the thing it is supposed
-# to sit beneath. `flow/preflight.py` takes the same class from the same place, and the boundary
-# tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
+# to sit beneath. `flow/declaration/preflight.py` takes the same class from the same place, and
+# the boundary tripwire in `docs/design/agent-first-surface.md` counts modules that do otherwise.
 from vqapr.workspace import Workspace
 
 __all__ = [

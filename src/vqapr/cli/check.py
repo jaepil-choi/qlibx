@@ -35,15 +35,16 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import Stage, VqaprError
-from vqapr.flow.judgments import JUDGMENT_CODES, judgments
-from vqapr.flow.preflight import preflight_run as freeze_run
+from vqapr.flow.declaration.judgments import JUDGMENT_CODES, judgments
+from vqapr.flow.declaration.preflight import preflight_run as freeze_run
 from vqapr.inputs import InputError
 from vqapr.public import Workspace
 
 STAGE = Stage.CHECK
 
 SIMULATION_CODES = frozenset(JUDGMENT_CODES)
-"""The judgments this verb makes about a registered RUN -- `flow/judgments.py`'s list, not a copy.
+"""The judgments this verb makes about a registered RUN -- `flow/declaration/judgments.py`'s list,
+not a copy.
 
 This was a hand-written tuple of the codes the judges raise, and it drifted: a judge was added
 there and the tuple here still counted the old number. The judges own their codes; this verb
@@ -61,8 +62,9 @@ The two named here (`cli/run.preflight_refusal`) carry a bare `TypeError`/`Value
 framework invariant, which has no structured body of its own and would otherwise surface as an
 `unhandled` failure.
 
-`judgment.blocked` (`flow/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is the entry
-for a judgment that could not answer; on the run path `require_judged` raises it, while this verb
+`judgment.blocked` (`flow/declaration/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
+the entry for a judgment that could not answer; on the run path `require_judged` raises it, while
+this verb
 asks the judgments itself and reports such an entry under `blocked`, never under `failures`.
 """
 

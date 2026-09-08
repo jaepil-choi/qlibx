@@ -1,7 +1,8 @@
 """The run, frozen: what preflight fixes once per run and once per member, and their identities.
 
-Split out of `flow/run.py` (one-shape campaign Step 6, record 161): `run.py` is the declaration
--- what a document registers -- and this is what preflight makes of it. A `FrozenRun` shares the
+Split out of `flow/declaration/run.py` (one-shape campaign Step 6, record 161): `run.py` is the
+declaration -- what a document registers -- and this is what preflight makes of it. A `FrozenRun`
+shares the
 run layer's identity across every strategy; each `FrozenStrategy`/`FrozenDataModel` carries its
 own. Nothing here is declared or on disk as itself: identities are hashed from explicit payloads
 and records pick fields by name, which is why these stay dataclasses rather than becoming
@@ -24,7 +25,7 @@ from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import (
+from vqapr.flow.declaration.run import (
     FINGERPRINT_PREFIX,
     ConstraintSet,
     StrategyConfig,

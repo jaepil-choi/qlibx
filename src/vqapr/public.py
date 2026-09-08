@@ -100,19 +100,9 @@ from vqapr.extension.registration import (
     register_strategy_model,
 )
 from vqapr.flow.artifacts import SimulationFailure
-from vqapr.flow.datamodel import DataModelResult
-
-# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
-# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
-# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
-# a lint autofix from deleting them as unused.
-from vqapr.flow.freeze import contract_report as contract_report
-from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
-from vqapr.flow.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
-from vqapr.flow.roster import registered_roster as registered_roster
-from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run import (
+from vqapr.flow.datamodel.loop import DataModelResult
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.run import (
     ConstraintSet,
     DataModelEntry,
     RunDefinition,
@@ -120,7 +110,17 @@ from vqapr.flow.run import (
     RunFill,
     StrategyEntry,
 )
-from vqapr.flow.simulation import SimulationResult, callback_evidence
+
+# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
+# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
+# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
+# a lint autofix from deleting them as unused.
+from vqapr.flow.freeze import contract_report as contract_report
+from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
+from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
+from vqapr.flow.roster import registered_roster as registered_roster
+from vqapr.flow.roster import roster_report as roster_report
+from vqapr.flow.strategy.loop import SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,

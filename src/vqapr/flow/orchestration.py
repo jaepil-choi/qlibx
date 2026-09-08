@@ -41,19 +41,20 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.artifacts import SimulationFailure
-from vqapr.flow.datamodel import DataModelEventLoop, DataModelOutput, DataModelResult
+from vqapr.flow.datamodel.loop import DataModelEventLoop, DataModelResult
+from vqapr.flow.datamodel.output import DataModelOutput
+from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.judgments import require_judged
+from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
+from vqapr.flow.declaration.run import RunDefinition
 from vqapr.flow.freeze import (
     freeze_datamodel_record,
     freeze_run_record,
     freeze_strategy_record,
 )
-from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.judgments import require_judged
-from vqapr.flow.preflight import preflight_run as _preflight_run
 from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.run import RunDefinition
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationResult, StrategyEventLoop
+from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
 from vqapr.record import (
     DATAMODEL_KIND,
     RunRecordWriter,

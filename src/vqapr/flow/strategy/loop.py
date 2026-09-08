@@ -1,8 +1,8 @@
 """The strategy run's event loop: one frozen strategy, its callbacks, and the due items they mint.
 
 Record `147` (deletion campaign Step 6) split the loop from the work: the callback handler
-(`flow/callback.py`), the execution handler (`flow/execution.py`) and the valuation handler
-(`flow/valuation.py`) are where the work is, and `flow/context.py` is what they share. Record
+(`callback.py`), the execution handler (`execution.py`) and the valuation handler
+(`valuation.py`) are where the work is, and `context.py` is what they share. Record
 `182` made the loop itself `EventLoop` (`flow/loop.py`): this class supplies the schedule, the
 one pending due event, and `handle`, which routes a scheduled event to the callback handler and
 a due event to the execution or valuation handler. The names this module re-exports are the ones
@@ -28,8 +28,14 @@ from vqapr.flow.artifacts import (
     FinalizationEvidence,
     SimulationStage,
 )
-from vqapr.flow.callback import CallbackHandler
-from vqapr.flow.context import (
+from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
+from vqapr.flow.loop import DueEvent, EventLoop, OccurrenceEvent
+from vqapr.flow.run_state import (
+    RunFinalization,
+    RunStateRepository,
+)
+from vqapr.flow.strategy.callback import CallbackHandler
+from vqapr.flow.strategy.context import (
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     AcceptedIntent,
@@ -48,16 +54,10 @@ from vqapr.flow.context import (
 )
 
 # Re-exported under the names tests imported from this module before the split (record `147`).
-from vqapr.flow.context import _shadows_package_table as _shadows_package_table
-from vqapr.flow.execution import ExecutionHandler
-from vqapr.flow.frozen import FrozenRun, FrozenStrategy
-from vqapr.flow.loop import DueEvent, EventLoop, OccurrenceEvent
-from vqapr.flow.run_state import (
-    RunFinalization,
-    RunStateRepository,
-)
-from vqapr.flow.valuation import ValuationHandler
-from vqapr.flow.valuation import (
+from vqapr.flow.strategy.context import _shadows_package_table as _shadows_package_table
+from vqapr.flow.strategy.execution import ExecutionHandler
+from vqapr.flow.strategy.valuation import ValuationHandler
+from vqapr.flow.strategy.valuation import (
     _marks_from_execution_snapshot as _marks_from_execution_snapshot,
 )
 

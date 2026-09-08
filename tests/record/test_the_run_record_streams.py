@@ -43,11 +43,11 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
-from vqapr.flow.run import ConstraintSet, StrategyConfig
+from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import StrategyEventLoop
+from vqapr.flow.strategy.loop import StrategyEventLoop
 
 ROWS_PER_OCCURRENCE = 200
 PADDING = "x" * 100

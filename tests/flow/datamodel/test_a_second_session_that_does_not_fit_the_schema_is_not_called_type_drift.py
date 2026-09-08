@@ -23,7 +23,7 @@ from types import SimpleNamespace
 import pytest
 
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.datamodel import DataModelOutput
+from vqapr.flow.datamodel.output import DataModelOutput
 
 
 def _output(root: Path) -> DataModelOutput:

@@ -354,7 +354,7 @@ def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     It cannot be the ONLY place, because it can only ask once per load. A `constraint_id` that
     returns a different string on each access satisfies this check at registration and again at
     `check`, and still disagrees by run assembly; `_require_constraint_identity` in
-    `flow/simulation.py` is what catches that, and red-teaming confirmed the path is live.
+    `flow/strategy/loop.py` is what catches that, and red-teaming confirmed the path is live.
     """
     declared = str(ref.component_id)
     answered = constraint.constraint_id

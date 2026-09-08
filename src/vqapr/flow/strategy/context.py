@@ -47,7 +47,7 @@ from vqapr.flow.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.frozen import FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import DueEvent
 from vqapr.flow.run_state import (
     FILL_TABLE,

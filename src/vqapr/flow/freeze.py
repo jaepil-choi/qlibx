@@ -16,10 +16,10 @@ from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.datamodel import DataModelResult
-from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.datamodel.loop import DataModelResult
+from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.run_state import LifecycleKind
-from vqapr.flow.simulation import SimulationResult
+from vqapr.flow.strategy.loop import SimulationResult
 from vqapr.record import (
     DATAMODEL_KIND,
     STRATEGY_KIND,

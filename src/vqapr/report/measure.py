@@ -49,7 +49,8 @@ from vqapr.report.document import (
 )
 
 ACCOUNT_ROW = "_ACCOUNT"
-"""The cash-and-NAV row's `instrument` in `vqapr.account` (`flow/context._ACCOUNT_IDENTITY`)."""
+"""The cash-and-NAV row's `instrument` in `vqapr.account`
+(`flow/strategy/context._ACCOUNT_IDENTITY`)."""
 
 ZERO = Decimal(0)
 ONE = Decimal(1)

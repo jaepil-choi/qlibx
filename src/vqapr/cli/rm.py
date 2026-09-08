@@ -30,7 +30,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
-from vqapr.flow.datamodel import MATERIALIZED_DIRECTORY
+from vqapr.flow.datamodel.output import MATERIALIZED_DIRECTORY
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.record import (
     DATAMODEL_KIND,

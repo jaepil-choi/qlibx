@@ -45,10 +45,10 @@ from vqapr.flow.artifacts import SimulationFailure
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.run import ConstraintSet, StrategyConfig
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import StrategyEventLoop
+from vqapr.flow.strategy.loop import StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")
 RULE = "three-strikes"

@@ -18,6 +18,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.exchange.support import execution_call
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.domain.instruments import (
@@ -32,7 +33,7 @@ from vqapr.domain.instruments import (
 from vqapr.domain.values import LocalInstantDeclaration, Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import TradeRule
-from vqapr.exchange.venue import ExecutionCall, AcademicExchange
+from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import (
     COMMISSION_RATE,
     SALE_TAX_RATE,
@@ -189,7 +190,7 @@ def test_the_exempt_band_reaches_the_account_through_a_real_fill(real_close) -> 
     )
     assert batch.requests[0].delta_quantity == Decimal("-60")
 
-    fills = venue.execute(ExecutionCall.of(venue, batch, account, _snapshot(at, {etf: price})))
+    fills = venue.execute(execution_call(venue, batch, account, _snapshot(at, {etf: price})))
     fill = fills.fills[0]
     notional = Decimal("60") * price
     assert fill.cost.tax == Decimal("0")
@@ -215,7 +216,7 @@ def test_the_exempt_band_reaches_the_account_through_a_real_fill(real_close) -> 
         budget=LONG_ONLY_SHARES,
         rules=stock_venue.rules,
     )
-    stock_fill = stock_venue.execute(ExecutionCall.of(stock_venue, 
+    stock_fill = stock_venue.execute(execution_call(stock_venue, 
         stock_batch, stock_account, _snapshot(at, {stock: prices[stock]})
     )).fills[0]
     assert stock_fill.cost.tax == Decimal("60") * prices[stock] * SALE_TAX_RATE
@@ -269,7 +270,7 @@ def test_the_exempt_sleeve_funds_more_of_the_buy_it_pays_for(real_close) -> None
         budget=LONG_ONLY,
         rules=venue.rules,
     )
-    fills = venue.execute(ExecutionCall.of(venue, batch, account, _snapshot(at, {etf: prices[etf], stock: prices[stock]})))
+    fills = venue.execute(execution_call(venue, batch, account, _snapshot(at, {etf: prices[etf], stock: prices[stock]})))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
     prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
@@ -341,7 +342,7 @@ def test_a_batch_reports_what_each_category_paid(real_close) -> None:
         ),
     )
     rows = tuple(ExactExecutionRow(at, name, True, price) for name in (stock, etf))
-    fills = venue.execute(ExecutionCall.of(venue, batch, account, ExactExecutionSnapshot(at, rows, (), (), ())))
+    fills = venue.execute(execution_call(venue, batch, account, ExactExecutionSnapshot(at, rows, (), (), ())))
 
     by_kind: dict[InstrumentKind | None, tuple[Decimal, Decimal]] = {}
     for fill in fills.fills:
@@ -384,7 +385,7 @@ def test_a_rosterless_run_is_refused_by_a_categorised_venue_and_served_by_a_flat
 
     with pytest.raises(ValueError, match="no instrument roster reached"):
         venue = KrxExchange(["A005930"])
-        venue.execute(ExecutionCall.of(venue, batch, account, snapshot))
+        venue.execute(execution_call(venue, batch, account, snapshot))
 
     # A venue whose rate does not vary by category answers unbound, because it never needed to
     # ask. That is the other half of the same rule, and it is why refusing above is a statement

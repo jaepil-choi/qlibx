@@ -23,12 +23,13 @@ from decimal import Decimal
 
 import pytest
 
+from tests.exchange.support import execution_call
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.instruments import InstrumentRoster, instrument
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ListingAccess, TradeRule
-from vqapr.exchange.venue import ExecutionCall, AcademicExchange
+from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, krx_listings
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
@@ -88,7 +89,7 @@ def _held(**positions: str) -> AccountSnapshot:
 def test_one_fill_per_request_in_instrument_order(profile: str) -> None:
     """Invariant 1. Stable order is what makes a run's fill table comparable across runs."""
     venue = dict(_profiles())[profile]
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         # Deliberately reversed, so a profile that preserved input order would fail.
         _orders(_request(_NAMES[1], "-10", held="100"), _request(_NAMES[0], "-10", held="100")),
         _held(**{_NAMES[0]: "100", _NAMES[1]: "100"}),
@@ -104,7 +105,7 @@ def test_every_zero_dealt_outcome_names_its_own_cause(profile: str) -> None:
     venue = dict(_profiles())[profile]
     absent, nontradable = _NAMES
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(
             _request(absent, "-10", held="100"),
             _request(nontradable, "-10", held="100"),
@@ -118,7 +119,7 @@ def test_every_zero_dealt_outcome_names_its_own_cause(profile: str) -> None:
     assert reasons[nontradable] is ZeroDealtReason.NONTRADABLE
 
     # `delta == 0` is the third, and it is not an error: the plan asked for nothing.
-    quiet = venue.execute(ExecutionCall.of(venue, 
+    quiet = venue.execute(execution_call(venue, 
         _orders(_request(absent, "0", held="100")),
         _held(**{absent: "100"}),
         _snapshot(ExactExecutionRow(_AT, absent, True, _PRICE)),
@@ -134,7 +135,7 @@ def test_a_tradable_row_without_a_price_fails_the_batch(profile: str) -> None:
     name = _NAMES[0]
     for price in (Decimal("0"), Decimal("-1")):
         with pytest.raises(ValueError, match="tradable price"):
-            venue.execute(ExecutionCall.of(venue, 
+            venue.execute(execution_call(venue, 
                 _orders(_request(name, "-10", held="100")),
                 _held(**{name: "100"}),
                 _snapshot(ExactExecutionRow(_AT, name, True, price)),
@@ -147,7 +148,7 @@ def test_a_batch_planned_against_another_account_version_is_refused(profile: str
     venue = dict(_profiles())[profile]
     name = _NAMES[0]
     with pytest.raises(ValueError, match=r"account_version"):
-        venue.execute(ExecutionCall.of(venue, 
+        venue.execute(execution_call(venue, 
             _orders(_request(name, "-10", held="100"), version=1),
             _held(**{name: "100"}),
             _snapshot(ExactExecutionRow(_AT, name, True, _PRICE)),
@@ -167,7 +168,7 @@ def test_a_fill_shares_its_requests_sign_and_never_exceeds_it(profile: str) -> N
     venue = dict(_profiles())[profile]
     buy, sell = _NAMES
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request(buy, "10"), _request(sell, "-10", held="100")),
         _held(**{sell: "100"}),
         _snapshot(*(ExactExecutionRow(_AT, name, True, _PRICE) for name in _NAMES)),
@@ -200,7 +201,7 @@ def test_the_academic_profile_cannot_produce_a_partial_fill() -> None:
 
     # No cash at all, and it still fills: nothing here consults the purse, because nothing here
     # can leave one short.
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request(name, "1000000")),
         AccountSnapshot(0, Decimal("0"), {}),
         _snapshot(ExactExecutionRow(_AT, name, True, _PRICE)),
@@ -226,7 +227,7 @@ def test_a_venue_fills_what_the_account_can_pay_for() -> None:
     # Exactly the notional of both buys and not one won more, so the commission is what breaks it.
     cash = shares * price * 2
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request(first, "100"), _request(second, "100")),
         AccountSnapshot(0, cash, {}),
         _snapshot(*(ExactExecutionRow(_AT, name, True, price) for name in _NAMES)),
@@ -255,7 +256,7 @@ def test_a_sale_funds_the_purchase_it_pays_for() -> None:
     sell, buy = sorted(_NAMES)
     held = Decimal("100")
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request(sell, "-100", held="100"), _request(buy, "100")),
         # No cash: the buy is payable only out of the sale.
         AccountSnapshot(0, Decimal("0"), {sell: held}),
@@ -278,7 +279,7 @@ def test_a_buy_with_no_money_behind_it_is_unfunded_rather_than_absent() -> None:
     venue = _krx()
     name = _NAMES[0]
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request(name, "100")),
         AccountSnapshot(0, Decimal("0"), {}),
         _snapshot(ExactExecutionRow(_AT, name, True, _PRICE)),

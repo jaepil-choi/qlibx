@@ -15,10 +15,11 @@ from decimal import Decimal
 
 import pytest
 
+from tests.exchange.support import execution_call
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
-from vqapr.exchange.venue import AcademicExchange, ExecutionCall
+from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, krx_listing
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
@@ -91,7 +92,7 @@ def test_both_profiles_refuse_the_same_undersized_order() -> None:
         0, (OrderRequest("A", Decimal("0"), Decimal("0.05"), Decimal("0.05"), price, None),)
     )
     with pytest.raises(ValueError, match="quantity violates listing rule"):
-        academic.execute(ExecutionCall.of(academic, undersized, account, _snapshot(at, "A", price)))
+        academic.execute(execution_call(academic, undersized, account, _snapshot(at, "A", price)))
 
     krx = KrxExchange(["A005930"])
     fractional_order = OrderBatch(
@@ -101,7 +102,7 @@ def test_both_profiles_refuse_the_same_undersized_order() -> None:
     # One refusal, in one set of words: the loop that phrases it is `validate_requests`, shared by
     # both profiles, so the KRX profile no longer has its own "not a whole share" spelling.
     with pytest.raises(ValueError, match=r"quantity violates listing rule for 'A005930': 10\.5"):
-        krx.execute(ExecutionCall.of(krx, fractional_order, account, _snapshot(at, "A005930", price)))
+        krx.execute(execution_call(krx, fractional_order, account, _snapshot(at, "A005930", price)))
 
 
 class _RegimeRule(TradeRule):

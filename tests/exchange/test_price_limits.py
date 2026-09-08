@@ -18,12 +18,12 @@ from decimal import Decimal
 
 import pytest
 
+from tests.exchange.support import execution_call
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
-from vqapr.exchange.venue import ExecutionCall
 from vqapr.exchange.venues.krx import (
     BASE_PRICE,
     PRICE_LIMIT_RATE,
@@ -72,7 +72,7 @@ def test_a_buy_at_the_upper_limit_is_typed_zero_dealt_not_a_batch_failure() -> N
     """A market fact for one session, so the rest of the rebalance still executes."""
     venue = _venue()
     account = AccountSnapshot(0, Decimal("100000000"), {})
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
     ))
     fill = fills.fills[0]
@@ -87,7 +87,7 @@ def test_a_sale_at_the_upper_limit_still_fills() -> None:
     venue = _venue()
     held = Decimal("100")
     account = AccountSnapshot(0, Decimal("0"), {NAME: held})
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _order(Decimal("-60"), Decimal("13000"), held), account, _snapshot(Decimal("13000"), BASE)
     ))
     fill = fills.fills[0]
@@ -104,10 +104,10 @@ def test_switching_the_regime_off_removes_both_the_rule_and_the_requirement() ->
 
     account = AccountSnapshot(0, Decimal("100000000"), {})
     # Same order, same price, no reference available at all.
-    blocked = on.execute(ExecutionCall.of(on, 
+    blocked = on.execute(execution_call(on, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
     )).fills[0]
-    filled = off.execute(ExecutionCall.of(off, 
+    filled = off.execute(execution_call(off, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), None)
     )).fills[0]
 

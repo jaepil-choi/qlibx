@@ -30,7 +30,7 @@ from typing import ClassVar
 
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import Component
-from vqapr.domain.instruments import Instrument, InstrumentKind, InstrumentRoster
+from vqapr.domain.instruments import InstrumentKind
 from vqapr.domain.values import require_tz_aware, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
@@ -66,22 +66,6 @@ class ExecutionCall:
 
     def __post_init__(self) -> None:
         require_tz_aware(self.at, name="at")
-
-    @classmethod
-    def of(
-        cls,
-        venue: Exchange,
-        orders: OrderBatch,
-        account: AccountSnapshot,
-        snapshot: ExactExecutionSnapshot,
-        *,
-        registry: InstrumentRoster | Mapping[str, Instrument] | None = None,
-    ) -> ExecutionCall:
-        """The call the handler builds: the venue's rules, bound to `registry` when there is one."""
-        rules = venue.rules if registry is None else venue.rules.with_registry(registry)
-        return cls(
-            at=snapshot.target_at, orders=orders, account=account, snapshot=snapshot, rules=rules
-        )
 
 
 class Exchange(Component):

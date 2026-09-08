@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import pytest
 
+from tests.exchange.support import execution_call
 from vqapr.account.marking import ValuationService
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
@@ -14,7 +15,7 @@ from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
-from vqapr.exchange.venue import AcademicExchange, ExecutionCall, TradeRule
+from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
@@ -61,7 +62,7 @@ def _snapshot(*rows: ExactExecutionRow, missing: tuple[str, ...] = ()) -> ExactE
 
 
 def test_academic_full_fills_are_fractional_and_deterministic() -> None:
-    fills = _venue().execute(ExecutionCall.of(_venue(), 
+    fills = _venue().execute(execution_call(_venue(), 
         _orders(_request("B", "-1.25"), _request("A", "2.5")),
         _account(),
         _snapshot(
@@ -78,7 +79,7 @@ def test_academic_full_fills_are_fractional_and_deterministic() -> None:
 
 
 def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> None:
-    fills = _venue().execute(ExecutionCall.of(_venue(), 
+    fills = _venue().execute(execution_call(_venue(), 
         _orders(
             _request("A", "1", execution_price=None),
             _request("B", "1", execution_price=None),
@@ -95,7 +96,7 @@ def test_absent_and_nontradable_orders_are_distinct_typed_zero_dealt_fills() -> 
 
 
 def test_absence_precedes_selected_price_validation_even_for_a_zero_delta_request() -> None:
-    fills = _venue().execute(ExecutionCall.of(_venue(), 
+    fills = _venue().execute(execution_call(_venue(), 
         _orders(_request("A", "0", execution_price=None)),
         _account(),
         _snapshot(missing=("A",)),
@@ -108,7 +109,7 @@ def test_absence_precedes_selected_price_validation_even_for_a_zero_delta_reques
 
 def test_invalid_tradable_price_rejects_the_entire_batch() -> None:
     with pytest.raises(ValueError, match="invalid tradable price"):
-        _venue().execute(ExecutionCall.of(_venue(), 
+        _venue().execute(execution_call(_venue(), 
             _orders(_request("A", "1"), _request("B", "1")),
             _account(),
             _snapshot(
@@ -120,7 +121,7 @@ def test_invalid_tradable_price_rejects_the_entire_batch() -> None:
 
 def test_duplicate_present_rows_reject_the_entire_batch() -> None:
     with pytest.raises(ValueError, match="duplicate"):
-        _venue().execute(ExecutionCall.of(_venue(), 
+        _venue().execute(execution_call(_venue(), 
             _orders(_request("A", "1")),
             _account(),
             _snapshot(
@@ -241,7 +242,7 @@ def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
     """
     venue = _CostedAcademic(_venue().listings)
 
-    fills = venue.execute(ExecutionCall.of(venue, 
+    fills = venue.execute(execution_call(venue, 
         _orders(_request("A", "10"), _request("B", "-10")),
         _account(positions={"B": Decimal("10")}),
         _snapshot(
@@ -259,7 +260,7 @@ def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
 
 
 def test_an_undeclared_cost_band_still_charges_nothing() -> None:
-    fills = _venue().execute(ExecutionCall.of(_venue(), 
+    fills = _venue().execute(execution_call(_venue(), 
         _orders(_request("A", "10")),
         _account(),
         _snapshot(ExactExecutionRow(_AT, "A", True, Decimal("100"))),

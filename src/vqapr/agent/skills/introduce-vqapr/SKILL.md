@@ -1,6 +1,6 @@
 ---
-name: vqapr
-description: Quantitative strategy backtesting framework — registration, materialization, simulation, and measurement
+name: introduce-vqapr
+description: Explains what vqapr is, initializes a workspace, and walks a complete sample backtest end to end. Use when the user is new to vqapr, asks what it can do or where to start, wants to install or initialize it in a project, or needs routing to the right vqapr skill for registering data, authoring a component, running a backtest, or reading results.
 ---
 
 # vqapr agent skill

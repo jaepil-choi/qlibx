@@ -8,7 +8,7 @@ proves the shape.
 
 ## Why
 
-Record `175` built the machinery for a skill set and shipped a set of one — the old 1,011-line
+Record `175` built the machinery for a skill set and shipped a set of one — the old 1,019-line
 body, moved wholesale. This is the first skill actually cut out of it, and it was chosen first
 because it is the only one whose job the old skill barely did.
 
@@ -62,7 +62,7 @@ prose is a copy that goes stale. The refusal catalogue: status, stage and cause 
 
 ## What did not change
 
-`introduce-vqapr/SKILL.md` still holds all 1,011 lines, including the registration prose this skill
+`introduce-vqapr/SKILL.md` still holds all 1,019 lines, including the registration prose this skill
 supersedes. Nothing is deleted until every skill has been cut, so there is no window where content
 exists in neither place. The duplication is visible and temporary; the deletion pass reconciles it.
 

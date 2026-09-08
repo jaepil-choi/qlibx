@@ -15,7 +15,7 @@ progress costs more than a wrong number in one commit subject.
 
 ## Why
 
-`src/vqapr/agent/skill/SKILL.md` had reached 1,011 lines and 67KB, and its `description` was
+`src/vqapr/agent/skill/SKILL.md` had reached 1,019 lines and 67KB, and its `description` was
 `Quantitative strategy backtesting framework — registration, materialization, simulation, and
 measurement`. Both are the same defect.
 
@@ -99,7 +99,7 @@ the command down with it. That failure was observed in test, not reasoned about.
 
 ## What did not change
 
-The nine skills do not exist yet. This record moved the existing 1,011-line body wholesale into
+The nine skills do not exist yet. This record moved the existing 1,019-line body wholesale into
 `agent/skills/introduce-vqapr/SKILL.md` and built the machinery around a set of one. Splitting the
 content is the following milestones' work, and doing it here would have mixed a mechanism whose
 correctness is testable with prose whose correctness is a judgment.

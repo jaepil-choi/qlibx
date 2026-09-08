@@ -49,7 +49,6 @@ class Materialized:
     strategy_id: str
     exchange_id: str
     dataset_id: str
-    execution_dataset_id: str
     panel: dict[str, Any]
 
     @property
@@ -258,6 +257,5 @@ def materialize(directory: str | Path) -> Materialized:
         strategy_id=STRATEGY_ID,
         exchange_id=EXCHANGE_ID,
         dataset_id=DATASET_ID,
-        execution_dataset_id=EXECUTION_ID,
         panel=panel,
     )

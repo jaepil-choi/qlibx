@@ -86,7 +86,6 @@ class SimulationStage(StrEnum):
     DUE_ACCOUNT_MARK = "simulation.due.account_mark"
     DUE_FEEDBACK_CANDIDATE = "simulation.due.feedback_candidate"
     DUE_FEEDBACK_PUBLICATION = "simulation.due.feedback_publication"
-    VALUATION = "simulation.valuation"
     MONITORING = "simulation.monitoring"
     FINALIZE = "simulation.finalize"
 

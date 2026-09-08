@@ -98,7 +98,7 @@ class CallbackHandler:
             ):
                 window = self._strategy_window(occurrence)
             state_account = self._context.state.current.account
-            if not isinstance(state_account, AccountState):
+            if state_account is None:
                 with self._context.guard(
                     SimulationStage.CALLBACK_STATE,
                     occurrence.evaluation_time,
@@ -376,7 +376,7 @@ class CallbackHandler:
         # simply not written here; the decision-time facts it also carried moved to their own
         # table below, where no measurement claim competes with them. See `docs/issues/010`.
         account_state = self._context.state.current.account
-        mark = account_state.latest_mark if isinstance(account_state, AccountState) else None
+        mark = None if account_state is None else account_state.latest_mark
         marked_at = getattr(mark, "marked_at", None)
         if (
             mark is not None
@@ -470,16 +470,10 @@ class CallbackHandler:
         raise RuntimeError("callback requires an AccountState root")
 
     def _strategy_window(self, occurrence: OperationOccurrence) -> ModelWindow:
-        window = self._context.strategy_window_for_occurrence(occurrence)
-        if not isinstance(window, ModelWindow):
-            raise TypeError("strategy_window_for_occurrence must return a ModelWindow")
-        return window
+        return self._context.strategy_window_for_occurrence(occurrence)
 
     def _constraint_window(self, occurrence: OperationOccurrence) -> ModelWindow:
-        window = self._context.constraint_window_for_occurrence(occurrence)
-        if not isinstance(window, ModelWindow):
-            raise TypeError("constraint_window_for_occurrence must return a ModelWindow")
-        return window
+        return self._context.constraint_window_for_occurrence(occurrence)
 
     def _callback_recorder(self, occurrence: OperationOccurrence) -> InvocationRecorder:
         tables = self._context.strategy.tables()
@@ -771,5 +765,5 @@ class CallbackHandler:
         far. A Strategy that declared nothing gets an empty projection that refuses every read.
         """
         state = self._context.state.current.account
-        marks = state.mark_history if isinstance(state, AccountState) else ()
+        marks = () if state is None else state.mark_history
         return AccountHistory(marks, self._context.account_history_declaration)

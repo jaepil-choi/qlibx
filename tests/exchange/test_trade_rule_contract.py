@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -19,7 +18,7 @@ import pytest
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeRule
-from vqapr.exchange.venue import ExecutionCall, AcademicExchange
+from vqapr.exchange.venue import AcademicExchange, ExecutionCall
 from vqapr.exchange.venues.krx import KrxExchange, krx_listing
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
@@ -105,9 +104,12 @@ def test_both_profiles_refuse_the_same_undersized_order() -> None:
         krx.execute(ExecutionCall.of(krx, fractional_order, account, _snapshot(at, "A005930", price)))
 
 
-@dataclass(frozen=True, slots=True)
 class _RegimeRule(TradeRule):
-    """A venue-specific regime, of the shape `KrxTradeRule.price_limit_rate` will have."""
+    """A venue-specific regime, of the shape `KrxTradeRule.price_limit_rate` will have.
+
+    A pydantic subclass: the field is declared and nothing else, and the base constructor
+    carries it by keyword.
+    """
 
     price_limit_rate: Decimal | None = None
 
@@ -126,14 +128,14 @@ def test_a_subclass_field_reaches_the_declaration_identity() -> None:
         "an explicitly disabled regime is not the same declaration as no regime at all"
     )
 
-    # Collected from the dataclass definition, so a new field cannot forget to extend identity.
+    # Collected from the model's declared fields, so a new field cannot forget to extend identity.
     assert on.declaration_identity[-1] == (("price_limit_rate", "0.30"),)
     assert base.declaration_identity[-1] == ()
 
 
 def test_a_misspelled_regime_field_fails_at_construction() -> None:
     """The reason this is a typed subclass and not a free-form dictionary."""
-    with pytest.raises(TypeError, match="unexpected keyword argument"):
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         _RegimeRule("A", Decimal("1"), Decimal("1"), False, price_limt_rate=Decimal("0.30"))
 
 

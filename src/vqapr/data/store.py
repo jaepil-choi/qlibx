@@ -117,8 +117,6 @@ class ObservationBatch:
 
     def __init__(self, rows: object, access: AccessRecord) -> None:
         object.__setattr__(self, "rows", normalize_rows(rows))
-        if not isinstance(access, AccessRecord):
-            raise TypeError("access must be an AccessRecord")
         object.__setattr__(self, "access", access)
 
     @classmethod

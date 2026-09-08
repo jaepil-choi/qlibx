@@ -305,8 +305,6 @@ def _price_diagnosis(registration: ExecutionTable) -> Diagnosis:
 
 def validate_execution_table(registration: ExecutionTable) -> Diagnosis:
     """Validate the bound execution table before a run freezes it: schema, key, chosen price."""
-    if not isinstance(registration, ExecutionTable):
-        raise TypeError("registration must be an ExecutionTable")
     for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis):
         diagnosis = check(registration)
         if not diagnosis.ok:
@@ -360,8 +358,6 @@ def exact_execution_snapshot(
     come from a different session and silently move a venue's limit band.
     """
 
-    if not isinstance(spec, ExecutionTableSpec):
-        raise TypeError("spec must be an ExecutionTableSpec")
     if target_at.tzinfo is None:
         raise ValueError("target_at must be timezone-aware")
     if trade_price not in spec.price_fields:
@@ -370,7 +366,7 @@ def exact_execution_snapshot(
         raise ValueError(f"unknown reference price {reference_price!r}")
     target = tuple(dict.fromkeys(target_instruments))
     held = tuple(dict.fromkeys(held_instruments))
-    if any(not isinstance(instrument, str) or not instrument for instrument in (*target, *held)):
+    if not all((*target, *held)):
         raise ValueError("instruments must be non-empty strings")
     requested = tuple(dict.fromkeys((*target, *held)))
     rows = scan.exact_snapshot_rows(
@@ -490,18 +486,14 @@ def validate_requests(
     """
     for request in requests:
         quantity = request.delta_quantity
-        if not isinstance(quantity, Decimal) or not quantity.is_finite():
+        if not quantity.is_finite():
             raise ValueError(f"invalid requested quantity for {request.instrument_id!r}")
         rule = rules.listing(request.instrument_id)
         row = rows.get(request.instrument_id)
         if (
             row is not None
             and row.is_tradable
-            and (
-                not isinstance(request.execution_price, Decimal)
-                or not request.execution_price.is_finite()
-                or request.execution_price <= 0
-            )
+            and (not request.execution_price.is_finite() or request.execution_price <= 0)
         ):
             raise ValueError(f"invalid selected price for {request.instrument_id!r}")
         if side_of(quantity) is None:

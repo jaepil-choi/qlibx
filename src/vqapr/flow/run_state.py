@@ -44,8 +44,6 @@ class PreparedModelState:
 
 def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
     """Detach one exact memory/payload envelope without making it visible."""
-    if not isinstance(payload, bytes):
-        raise TypeError("payload must be bytes")
     normalized = normalize_memory(memory)
     memory_bytes = json.dumps(
         normalized,
@@ -71,10 +69,6 @@ def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
 class LifecycleTrace:
     kind: LifecycleKind
     detail: object = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, LifecycleKind):
-            raise TypeError("kind must be a LifecycleKind")
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,19 +112,13 @@ class AcceptedRunState:
     def __post_init__(self) -> None:
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 0:
             raise ValueError("version must be a non-negative integer")
-        if self.account is not None and not isinstance(self.account, AccountState):
-            raise TypeError("account must be an AccountState or None")
-        if self.finalization is not None and not isinstance(self.finalization, RunFinalization):
-            raise TypeError("finalization must be a RunFinalization or None")
         if (
             self.current_model_state_ref is not None
             and self.current_model_state_ref not in self._model_states
         ):
             raise ValueError("current_model_state_ref must be visible in this root")
-        if not isinstance(self.component_state_refs, Mapping):
-            raise TypeError("component_state_refs must be a mapping of component id to ref")
         for component_id, ref in self.component_state_refs.items():
-            if not isinstance(component_id, str) or not component_id:
+            if not component_id:
                 raise ValueError("component_state_refs keys must be non-empty component ids")
             if ref not in self._model_states:
                 raise ValueError(f"component state for {component_id!r} must be visible here")
@@ -146,8 +134,6 @@ class AcceptedRunState:
         for ref in unverified:
             memory = self._model_states[ref]
             payload = self._payloads[ref]
-            if not isinstance(payload, bytes):
-                _invalid_payload(ref)
             if prepare_model_state(memory, payload).ref != ref:
                 raise ValueError("ModelStateRef must identify its exact memory and payload")
         # Detach by copying -- an externally supplied mapping must not stay reachable for
@@ -187,16 +173,12 @@ class AcceptedRunState:
         )
 
     def load_model_state(self, ref: ModelStateRef) -> ModelMemory:
-        if not isinstance(ref, ModelStateRef):
-            raise TypeError("ref must be a ModelStateRef")
         try:
             return normalize_memory(self._model_states[ref])
         except KeyError as exc:
             raise KeyError(f"unknown visible ModelStateRef: {ref.digest}") from exc
 
     def load_payload(self, ref: ModelStateRef) -> bytes:
-        if not isinstance(ref, ModelStateRef):
-            raise TypeError("ref must be a ModelStateRef")
         try:
             return bytes(self._payloads[ref])
         except KeyError as exc:
@@ -224,8 +206,6 @@ def _component_states(
     """
     if component_memory is None:
         return dict(root.component_state_refs), frozenset()
-    if not isinstance(component_memory, Mapping):
-        raise TypeError("component_memory must be a mapping of component id to memory")
     if set(component_memory) != set(root.component_state_refs):
         raise ValueError(
             "component_memory must name exactly the components this run state carries: "
@@ -328,10 +308,6 @@ def _fill_rows(
     return tuple(rows)
 
 
-def _invalid_payload(ref: ModelStateRef) -> bytes:
-    raise TypeError(f"payload for {ref.digest} must be bytes")
-
-
 class RunStateRepository:
     """Prepare complete immutable roots and publish them with one pointer swap."""
 
@@ -348,8 +324,6 @@ class RunStateRepository:
     ) -> None:
         """`initial_component_memory` is each loaded constraint's memory as assembled, by id;
         the run commits what every constraint callback leaves from there (record `181`)."""
-        if not isinstance(initial_payload, bytes):
-            raise TypeError("initial_payload must be bytes")
         if row_sink is not None and not callable(row_sink):
             raise TypeError("row_sink must be callable")
         prepared = prepare_model_state(initial_model_memory, initial_payload)
@@ -358,7 +332,7 @@ class RunStateRepository:
         current_ref = prepared.ref
         constraint_refs: dict[str, ModelStateRef] = {}
         for constraint_id, memory in dict(initial_component_memory or {}).items():
-            if not isinstance(constraint_id, str) or not constraint_id:
+            if not constraint_id:
                 raise ValueError("initial_component_memory keys must be constraint ids")
             seed = prepare_model_state(memory, b"")
             states[seed.ref] = seed.memory
@@ -444,10 +418,6 @@ class RunStateRepository:
         `component_memory` is what each constraint's `project` left, by id, committed in the
         same root as the Strategy's memory; `None` carries the constraints' refs over unchanged.
         """
-        if not isinstance(lifecycle, LifecycleTrace):
-            raise TypeError("lifecycle must be a LifecycleTrace")
-        if not isinstance(payload, bytes):
-            raise TypeError("payload must be bytes")
         root = self._root
         if root.finalization is not None:
             raise RuntimeError("cannot publish a callback after finalization")
@@ -464,8 +434,6 @@ class RunStateRepository:
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
         if recorder is not None:
-            if not isinstance(recorder, InvocationRecorder):
-                raise TypeError("recorder must be an InvocationRecorder")
             new_rows = self._stage_rows(chunks, recorder.staged_rows())
             manifests = manifests + recorder.manifests()
         next_root = AcceptedRunState(
@@ -494,8 +462,6 @@ class RunStateRepository:
 
     def publish(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Perform the sole mutable action after all fallible work is complete."""
-        if not isinstance(prepared, PreparedRunState):
-            raise TypeError("prepared must be a PreparedRunState")
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
         if self._before_swap is not None:
@@ -506,8 +472,6 @@ class RunStateRepository:
 
     def _publish_infallible(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Publish a prevalidated post-Account candidate without callback hooks."""
-        if not isinstance(prepared, PreparedRunState):
-            raise TypeError("prepared must be a PreparedRunState")
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
         self._deliver(prepared)
@@ -585,8 +549,6 @@ class RunStateRepository:
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
         if recorder is not None:
-            if not isinstance(recorder, InvocationRecorder):
-                raise TypeError("recorder must be an InvocationRecorder")
             new_rows = self._stage_rows(chunks, recorder.staged_rows())
             manifests = manifests + recorder.manifests()
         return chunks, manifests, new_rows
@@ -709,8 +671,6 @@ class RunStateRepository:
         `component_memory` is what each constraint's `monitor` left (record `181`): a rule that
         counts its breaches commits the count here, with the findings it counted.
         """
-        if not isinstance(recorder, InvocationRecorder):
-            raise TypeError("recorder must be an InvocationRecorder")
         root = self._root
         chunks = dict(root._recorder_chunks)
         new_rows = self._stage_rows(chunks, recorder.staged_rows())
@@ -747,8 +707,6 @@ class RunStateRepository:
     def prepare_feedback(
         self, feedback: tuple[object, ...], *, evidence: object = None
     ) -> PreparedRunState:
-        if not isinstance(feedback, tuple):
-            raise TypeError("feedback must be a tuple")
         root = self._root
         return PreparedRunState(
             root.version,
@@ -779,8 +737,6 @@ class RunStateRepository:
 
     def prepare_finalization(self, finalization: RunFinalization) -> PreparedRunState:
         """Prepare a typed terminal transition after all pending work is consumed."""
-        if not isinstance(finalization, RunFinalization):
-            raise TypeError("finalization must be a RunFinalization")
         root = self._root
         if root.pending_accepted_intent is not None:
             raise RuntimeError("cannot finalize with a pending accepted intent")

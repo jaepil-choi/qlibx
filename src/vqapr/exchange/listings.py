@@ -28,6 +28,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
 from vqapr.domain.instruments import (
     INSTRUMENT_TYPES,
@@ -74,9 +77,13 @@ _BASE_RULE_FIELDS = frozenset(
 )
 """The fields every venue shares. Anything else on a rule belongs to one venue's own regime."""
 
+# A rule is a value a venue author constructs, so its door validates (pydantic by default, owner
+# ruling 2026-09-08). Strict: a `float` step, a `str` access or an `int` for a flag is refused,
+# not coerced -- the rounding and charging below run on exactly the numbers declared.
+_RULE_CONFIG = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-@dataclass(frozen=True, slots=True)
-class TradeRule:
+
+class TradeRule(BaseModel):
     """Everything one venue will do with one instrument.
 
     Venue-specific regimes subclass this. A price limit is a percentage in Korea and China but a
@@ -87,6 +94,8 @@ class TradeRule:
     not fail at all.
     """
 
+    model_config = _RULE_CONFIG
+
     instrument_id: str
     quantity_step: Decimal
     minimum_quantity: Decimal
@@ -95,24 +104,57 @@ class TradeRule:
     buy: SideCost = FREE
     sell: SideCost = FREE
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.instrument_id, str) or not self.instrument_id:
+    def __init__(
+        self,
+        instrument_id: str,
+        quantity_step: Decimal,
+        minimum_quantity: Decimal,
+        fractional_allowed: bool,
+        access: ListingAccess = ListingAccess.LONG_ONLY,
+        buy: SideCost = FREE,
+        sell: SideCost = FREE,
+        **regime: object,
+    ) -> None:
+        """Positional as well as keyword, because `TradeRule("A", Decimal(1), Decimal(1), False)`
+        is how every venue file spells a listing.
+
+        `regime` carries a subclass's own fields by keyword -- `price_limit_rate=` on a KRX rule
+        -- to the model, which refuses one it does not declare (`extra="forbid"`): a misspelled
+        regime field fails at construction, which is the whole reason the regime is typed.
+        """
+        super().__init__(
+            instrument_id=instrument_id,
+            quantity_step=quantity_step,
+            minimum_quantity=minimum_quantity,
+            fractional_allowed=fractional_allowed,
+            access=access,
+            buy=buy,
+            sell=sell,
+            **regime,
+        )
+
+    @field_validator("instrument_id")
+    @classmethod
+    def _named(cls, value: str) -> str:
+        if not value:
             raise ValueError("instrument_id must be a non-empty string")
-        for name, value in (
-            ("quantity_step", self.quantity_step),
-            ("minimum_quantity", self.minimum_quantity),
-        ):
-            if not isinstance(value, Decimal):
-                raise TypeError(f"{name} must be a Decimal")
-            if not value.is_finite() or value <= 0:
-                raise ValueError(f"{name} must be finite and positive")
-        if not isinstance(self.fractional_allowed, bool):
-            raise TypeError("fractional_allowed must be a bool")
-        if not isinstance(self.access, ListingAccess):
-            raise TypeError("access must be a ListingAccess")
-        for name, value in (("buy", self.buy), ("sell", self.sell)):
-            if not isinstance(value, SideCost):
-                raise TypeError(f"{name} must be a SideCost")
+        return value
+
+    @field_validator("quantity_step", "minimum_quantity")
+    @classmethod
+    def _positive(cls, value: Decimal, info: ValidationInfo) -> Decimal:
+        # Finite is pydantic's check; positive is this rule's.
+        if value <= 0:
+            raise ValueError(f"{info.field_name} must be finite and positive")
+        return value
+
+    def replace(self, **changes: object) -> Self:
+        """This rule with some fields changed, validated whole again.
+
+        Not `model_copy(update=)`: that skips validation, and a rule carries rules.
+        """
+        fields = {name: getattr(self, name) for name in type(self).model_fields}
+        return type(self).model_validate({**fields, **changes})
 
     def quantize(self, quantity: Decimal) -> Decimal:
         """Round one signed quantity toward zero onto this rule's tradable unit.
@@ -220,8 +262,8 @@ class TradeRule:
         A venue subclass that adds a field -- a price-limit rate, a lot-unit convention -- must
         appear here or the workspace treats two different declarations as the same one, and a rate
         change silently reuses a frozen component. Subclass fields are therefore collected
-        automatically from the dataclass definition rather than by hand, so adding a field cannot
-        forget to extend the identity.
+        automatically from the model's declared fields rather than by hand, so adding a field
+        cannot forget to extend the identity.
         """
         return (
             type(self).__name__,
@@ -239,13 +281,12 @@ class TradeRule:
         """Every field a subclass declared beyond the base ones, in declared order."""
         return tuple(
             (name, str(getattr(self, name)))
-            for name in self.__dataclass_fields__
+            for name in type(self).model_fields
             if name not in _BASE_RULE_FIELDS
         )
 
 
-@dataclass(frozen=True, slots=True)
-class ExecutionFieldRequirement:
+class ExecutionFieldRequirement(BaseModel):
     """One declared execution-table price a venue needs in order to apply a regime.
 
     A venue asks for a **number the user already has**, never for a conclusion. KRX needs the
@@ -257,13 +298,17 @@ class ExecutionFieldRequirement:
     rather than only what is missing.
     """
 
+    model_config = _RULE_CONFIG
+
     price: str
     feature: str
 
-    def __post_init__(self) -> None:
-        for name, value in (("price", self.price), ("feature", self.feature)):
-            if not isinstance(value, str) or not value or value.strip() != value:
-                raise ValueError(f"{name} must be a non-empty unpadded string")
+    @field_validator("price", "feature")
+    @classmethod
+    def _unpadded(cls, value: str, info: ValidationInfo) -> str:
+        if not value or value.strip() != value:
+            raise ValueError(f"{info.field_name} must be a non-empty unpadded string")
+        return value
 
 
 @dataclass(frozen=True, slots=True)

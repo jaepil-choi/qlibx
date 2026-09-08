@@ -17,7 +17,6 @@ from dataclasses import replace
 from datetime import datetime
 
 from vqapr.account.account import Account
-from vqapr.account.snapshot import AccountState
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
@@ -117,8 +116,6 @@ class StrategyEventLoop(
         registry: InstrumentRoster | None = None,
         record_account_positions: bool = True,
     ) -> None:
-        if not isinstance(frozen_run, FrozenRun):
-            raise TypeError("frozen_run must be a FrozenRun")
         # One flow runs ONE strategy of the run (record `139`): the run layer is shared, the
         # strategy layer is this flow's own. A run with one strategy needs no `layer`.
         if layer is None:
@@ -127,33 +124,19 @@ class StrategyEventLoop(
                     "a run with several strategies must say which one this flow runs (layer=)"
                 )
             layer = frozen_run.strategies[0]
-        if not isinstance(layer, FrozenStrategy) or layer not in frozen_run.strategies:
-            raise TypeError("layer must be one of the frozen run's strategies")
-        if not isinstance(strategy, StrategyModel):
-            raise TypeError("strategy must be a StrategyModel")
-        if not isinstance(state, RunStateRepository):
-            raise TypeError("state must be a RunStateRepository")
+        if layer not in frozen_run.strategies:
+            raise ValueError("layer must be one of the frozen run's strategies")
         if not callable(strategy_window_for_occurrence):
             raise TypeError("strategy_window_for_occurrence must be callable")
         if not callable(constraint_window_for_occurrence):
             raise TypeError("constraint_window_for_occurrence must be callable")
-        if not isinstance(account, Account):
-            raise TypeError("account must be an Account")
         if not callable(getattr(exchange, "execute", None)):
             raise TypeError("exchange must provide execute")
-        if not isinstance(constraints, tuple) or not all(
-            isinstance(constraint, Constraint) for constraint in constraints
-        ):
-            raise TypeError("constraints must be a tuple of Constraint implementations")
         declared = layer.constraints.constraints
         _require_constraint_identity(constraints, declared)
-        if valuation_service is not None and not isinstance(valuation_service, ValuationService):
-            raise TypeError("valuation_service must be a ValuationService or None")
         cutoff = frozen_run.start or frozen_run.end
         if cutoff is None:
             raise RuntimeError("simulation start requires a frozen boundary")
-        if not isinstance(record_account_positions, bool):
-            raise TypeError("record_account_positions must be a bool")
         requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
         prices = {requirement.price for requirement in requirements}
         if len(prices) > 1:
@@ -162,7 +145,7 @@ class StrategyEventLoop(
         if declared_history is not None and not isinstance(declared_history, AccountHistoryInput):
             raise TypeError("account_history must return an AccountHistoryInput or None")
         initial = state.current.account
-        if not isinstance(initial, AccountState):
+        if initial is None:
             raise ValueError("state must begin with the frozen AccountState root")
         if frozen_run.initial_account_snapshot != initial.snapshot:
             raise ValueError("state AccountState must match FrozenRun initial account snapshot")

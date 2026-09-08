@@ -206,8 +206,6 @@ class FillConvention:
         `start_time` must not be later than the earliest decision the run will make, or the
         horizon would omit instants a callback is entitled to select.
         """
-        if not isinstance(source, SourceSpec):
-            raise TypeError("source must be a SourceSpec")
         candidates = scan.candidate_instants(
             source,
             trade_at_field=trade_at_field,
@@ -234,8 +232,6 @@ class FillConvention:
         `ExecutionTable.select_target`.
         """
 
-        if not isinstance(source, SourceSpec):
-            raise TypeError("source must be a SourceSpec")
         if decision_time.tzinfo is None or end_time.tzinfo is None:
             raise ValueError("decision_time and end_time must be timezone-aware")
         if decision_time.astimezone(UTC) > end_time.astimezone(UTC):

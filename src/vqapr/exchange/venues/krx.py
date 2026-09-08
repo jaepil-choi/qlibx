@@ -18,13 +18,14 @@ Not implemented, and therefore not claimed
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from decimal import Decimal
+
+from pydantic import field_validator
 
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
 from vqapr.domain.values import Side, side_of
-from vqapr.exchange.costs import FillCost, SideCost
+from vqapr.exchange.costs import FREE, FillCost, SideCost
 from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
@@ -55,7 +56,6 @@ BASE_PRICE = "base"
 """The semantic execution price a price-limit venue requires: the session's base price."""
 
 
-@dataclass(frozen=True, slots=True)
 class KrxTradeRule(TradeRule):
     """A KRX rule, which carries one regime the base rule has no field for.
 
@@ -68,21 +68,43 @@ class KrxTradeRule(TradeRule):
     KRX applies one rate today, but a managed-issue regime narrows it for named issues, and China
     runs 10% on the main boards against 20% on ChiNext and STAR. A venue-level constant could not
     express either.
+
+    The base rule's checks are inherited with its validators; only the regime is checked here.
     """
 
     price_limit_rate: Decimal | None = None
 
-    def __post_init__(self) -> None:
-        # `slots=True` rebuilds the class, so the zero-argument `super()` closure cell points at
-        # the pre-slots class and raises. The explicit form is required for a slotted subclass.
-        TradeRule.__post_init__(self)
-        rate = self.price_limit_rate
-        if rate is None:
-            return
-        if not isinstance(rate, Decimal):
-            raise TypeError("price_limit_rate must be a Decimal or None")
-        if not rate.is_finite() or not (0 < rate < 1):
+    def __init__(
+        self,
+        instrument_id: str,
+        quantity_step: Decimal,
+        minimum_quantity: Decimal,
+        fractional_allowed: bool,
+        access: ListingAccess = ListingAccess.LONG_ONLY,
+        buy: SideCost = FREE,
+        sell: SideCost = FREE,
+        price_limit_rate: Decimal | None = None,
+    ) -> None:
+        # Spelled out rather than inherited so the regime field is a named parameter: a caller
+        # and a type checker both see it, instead of it travelling as an anonymous keyword.
+        super().__init__(
+            instrument_id,
+            quantity_step,
+            minimum_quantity,
+            fractional_allowed,
+            access,
+            buy,
+            sell,
+            price_limit_rate=price_limit_rate,
+        )
+
+    @field_validator("price_limit_rate")
+    @classmethod
+    def _fraction(cls, value: Decimal | None) -> Decimal | None:
+        # Finite is pydantic's check; the open interval is this regime's.
+        if value is not None and not (0 < value < 1):
             raise ValueError("price_limit_rate must be a finite fraction between 0 and 1")
+        return value
 
     def limit_band(self, base: Decimal) -> tuple[Decimal, Decimal] | None:
         """The inclusive ``(lower, upper)`` prices this instrument may trade at today."""
@@ -294,7 +316,7 @@ class KrxExchange(Exchange):
             isinstance(rule, KrxTradeRule) and rule.price_limit_rate is not None
             for rule in self._rules.listings.values()
         ):
-            return (ExecutionFieldRequirement(BASE_PRICE, "price_limit"),)
+            return (ExecutionFieldRequirement(price=BASE_PRICE, feature="price_limit"),)
         return ()
 
     @property

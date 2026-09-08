@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.account.snapshot import AccountState
 from vqapr.evidence.artifacts import (
     AccountCommitEvidence,
     DueExecutionEvidence,
@@ -45,7 +44,7 @@ class ExecutionHandler:
         if execution_table is None:
             raise RuntimeError("due execution requires frozen execution dataset")
         account_state = self._context.state.current.account
-        if not isinstance(account_state, AccountState):
+        if account_state is None:
             raise RuntimeError("due execution requires an AccountState root")
         before = account_state.snapshot
         if pending.intent.strategy_id != str(self._context.layer.config.component.component_id):

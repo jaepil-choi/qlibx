@@ -68,12 +68,8 @@ class ValuationService:
         account: AccountSnapshot,
         selected_marks: Mapping[str, Decimal] | tuple[SelectedMark, ...],
     ) -> MarkBatch:
-        if not isinstance(account, AccountSnapshot):
-            raise TypeError("account must be an AccountSnapshot")
         prices = self._prices(selected_marks, account.version)
         positions = account.positions
-        if not isinstance(positions, Mapping):
-            raise TypeError("AccountSnapshot.positions must be a mapping")
         held = tuple(
             sorted(
                 (instrument, quantity)

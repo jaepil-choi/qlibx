@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from vqapr import authoring
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -74,11 +75,13 @@ def test_rows_lookback_requires_positive_int() -> None:
     authoring.RowsLookback(rows=1)
     with pytest.raises(ValueError):
         authoring.RowsLookback(rows=0)
-    with pytest.raises(TypeError):
+    # Strict pydantic: a bool is refused as not-an-integer, as a `ValidationError` (a
+    # `ValueError`) rather than the `TypeError` the dataclass raised.
+    with pytest.raises(ValueError, match="integer"):
         authoring.RowsLookback(rows=True)
 
 
-def test_rows_lookback_is_frozen_slotted_and_takes_its_count_either_way() -> None:
+def test_rows_lookback_is_frozen_and_takes_its_count_either_way() -> None:
     """Keyword-only is gone, and it went deliberately.
 
     `authoring.RowsLookback` was a keyword-only copy of `data.lookback.RowsLookback`, which is
@@ -87,12 +90,12 @@ def test_rows_lookback_is_frozen_slotted_and_takes_its_count_either_way() -> Non
     tree and in the research workspace already spells the keyword -- but a test asserting the
     refusal would now be pinning a difference that only existed because there were two classes.
 
-    Frozen and slotted are the properties worth keeping, and both survive the merge.
+    Frozen survives the move to pydantic; slotted did not, and was never a contract an author
+    relied on.
     """
     lookback = authoring.RowsLookback(rows=3)
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError, match="frozen"):
         lookback.rows = 4  # type: ignore[misc]
-    assert not hasattr(lookback, "__dict__")
     assert authoring.RowsLookback(3) == lookback
 
 
@@ -133,7 +136,7 @@ def test_dataset_input_rejects_reserved_and_duplicate_fields() -> None:
         )
     with pytest.raises(ValueError):
         authoring.DatasetInput(dataset_id="px", fields=(), lookback=authoring.RowsLookback(rows=1))
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError, match="Lookback"):
         authoring.DatasetInput(dataset_id="px", fields=("close",), lookback=object())
 
 
@@ -226,7 +229,7 @@ def test_account_history_input_rejects_unknown_field() -> None:
         authoring.AccountHistoryInput(
             fields=("not_a_field",), lookback=authoring.RowsLookback(rows=2)
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError, match="RowsLookback"):
         authoring.AccountHistoryInput(fields=("nav",), lookback=object())
 
 

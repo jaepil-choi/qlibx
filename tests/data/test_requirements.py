@@ -12,7 +12,9 @@ from vqapr.data.requirements import DataRequirement
 def test_rows_lookback_requires_a_positive_integer() -> None:
     with pytest.raises(ValueError, match="positive"):
         RowsLookback(0)
-    with pytest.raises(TypeError, match="integer"):
+    # A strict pydantic door: a bool is refused as not-an-integer, and the refusal is a
+    # `ValidationError`, which is a `ValueError`.
+    with pytest.raises(ValueError, match="integer"):
         RowsLookback(True)
 
 
@@ -66,5 +68,8 @@ def test_requirement_rejects_a_name_the_window_owns() -> None:
 
 
 def test_requirement_rejects_a_lookback_that_is_not_one() -> None:
-    with pytest.raises(TypeError, match="RowsLookback, CalendarLookback or InstantsLookback"):
+    # pydantic names each member of the `Lookback` union it tried.
+    with pytest.raises(ValueError, match="RowsLookback") as refused:
         DataRequirement.of("price_daily", "close", lookback=2)
+    assert "CalendarLookback" in str(refused.value)
+    assert "InstantsLookback" in str(refused.value)

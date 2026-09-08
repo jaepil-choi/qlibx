@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from pydantic import BaseModel
 
 # The showcase's own directory is not guaranteed to be on sys.path - an acceptance
 # test importing this module runs from the repo root. Locate it explicitly.
@@ -145,6 +146,8 @@ def _fill(dataset_id: str) -> RunExecution:
 def _json_value(value: Any) -> Any:
     if is_dataclass(value):
         return {field.name: _json_value(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, BaseModel):
+        return {name: _json_value(getattr(value, name)) for name in type(value).model_fields}
     if isinstance(value, dict):
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list, frozenset)):

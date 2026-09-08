@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import ClassVar
@@ -14,7 +13,7 @@ from vqapr.exchange.costs import SideCost
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
-from vqapr.exchange.venue import ExecutionCall, AcademicExchange, TradeRule
+from vqapr.exchange.venue import AcademicExchange, ExecutionCall, TradeRule
 from vqapr.flow.marking import ValuationService
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
@@ -176,7 +175,7 @@ class _CostedAcademic(AcademicExchange):
         return ExchangeRulesView(
             self.exchange_id,
             {
-                name: replace(rule, buy=BUY_COST, sell=SELL_COST)
+                name: rule.replace(buy=BUY_COST, sell=SELL_COST)
                 for name, rule in self.listings.items()
             },
         )

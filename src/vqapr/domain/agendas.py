@@ -84,8 +84,6 @@ class OperationOccurrence:
 
     def __post_init__(self) -> None:
         _require_identifier(self.occurrence_id, name="occurrence_id")
-        if not isinstance(self.local_instant, LocalInstantDeclaration):
-            raise TypeError("local_instant must be a LocalInstantDeclaration")
 
     @property
     def evaluation_time(self) -> datetime:
@@ -126,8 +124,6 @@ class OperationAgenda:
         _require_identifier(self.agenda_id, name="agenda_id")
         _require_timezone(self.timezone)
         occurrences = tuple(self.occurrences)
-        if any(not isinstance(occurrence, OperationOccurrence) for occurrence in occurrences):
-            raise TypeError("occurrences must contain OperationOccurrence values")
         if any(occurrence.local_instant.timezone != self.timezone for occurrence in occurrences):
             raise ValueError("every occurrence timezone must match the agenda timezone")
         occurrence_ids = [occurrence.occurrence_id for occurrence in occurrences]

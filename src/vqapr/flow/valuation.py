@@ -16,7 +16,6 @@ from vqapr.constraints.evaluation import (
     evaluate_constraints,
     project_constraints,
 )
-from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import MarkBatch
 from vqapr.evidence.artifacts import (
@@ -112,7 +111,7 @@ class ValuationHandler:
         if execution_table is None:
             raise RuntimeError("due valuation requires frozen execution dataset")
         account_state = self._context.state.current.account
-        if not isinstance(account_state, AccountState):
+        if account_state is None:
             raise RuntimeError("due valuation requires an AccountState root")
         before = account_state.snapshot
         held_instruments = tuple(before.positions)
@@ -316,12 +315,10 @@ class ValuationHandler:
 
     def _monitor(self, occurrence: OperationOccurrence, cutoff: datetime) -> MonitoringResult:
         state = self._context.state.current.account
-        if not isinstance(state, AccountState):
+        if state is None:
             raise RuntimeError("monitoring requires an AccountState root")
         current = state.snapshot
         window = self._context.constraint_window_at(cutoff)
-        if not isinstance(window, ModelWindow):
-            raise TypeError("constraint_window_at must return a ModelWindow")
         # Restored before, committed after, with the findings (record `181`): what `project`
         # and `monitor` leave in a constraint's memory is published in the monitoring root.
         self._context.restore_component_memory(self._context.visible_component_memory())

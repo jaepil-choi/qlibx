@@ -232,7 +232,9 @@ class Account:
         ):
             raise ValueError("fill batch would create a short position in a long-only account")
 
-        next_snapshot = AccountSnapshot(
+        # Trusted: every value was derived just above from the committed snapshot's validated
+        # fields and from fills the batch already validated, and this runs once per commit.
+        next_snapshot = AccountSnapshot.trusted(
             version=current.version + 1,
             cash=next_cash,
             positions=next_positions,

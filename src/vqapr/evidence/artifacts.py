@@ -149,14 +149,8 @@ class SimulationFailure(RuntimeError, ValueError):
         author's own file it was raised from, when a frame of that file is on the traceback.
         Both were absent (`docs/issues/071`): an eight-strategy run refused with a message
         that named no strategy, and `source` was three nulls on every callback failure."""
-        if not isinstance(stage, SimulationStage):
-            raise TypeError("stage must be a SimulationStage")
         require_tz_aware(clock, name="clock")
         require_tz_aware(cutoff, name="cutoff")
-        if not isinstance(cause, Exception):
-            raise TypeError("cause must be an Exception")
-        if not isinstance(kind, SimulationFailureKind):
-            raise TypeError("kind must be a SimulationFailureKind")
         if kind is _PRE_COMMIT and pending_id is None and stage.name.startswith("DUE_"):
             # A due operation always has an accepted pending identity before its commit.
             raise ValueError("pre-commit due failures must retain their pending identity")
@@ -334,14 +328,6 @@ class DueExecutionEvidence:
     commit: AccountCommitEvidence
     mark: MarkEvidence
     feedback: FeedbackEvidence
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.commit, AccountCommitEvidence):
-            raise TypeError("commit must be an AccountCommitEvidence")
-        if not isinstance(self.mark, MarkEvidence):
-            raise TypeError("mark must be a MarkEvidence")
-        if not isinstance(self.feedback, FeedbackEvidence):
-            raise TypeError("feedback must be a FeedbackEvidence")
 
 
 @dataclass(frozen=True, slots=True)

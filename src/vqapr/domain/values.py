@@ -325,8 +325,6 @@ def side_of(quantity: object) -> Side | None:
 # ------------------------------------------------------------------------------------------
 
 def _decimal(value: Decimal, *, name: str) -> None:
-    if not isinstance(value, Decimal):
-        raise TypeError(f"{name} must be a Decimal")
     if not value.is_finite():
         raise ValueError(f"{name} must be finite")
 
@@ -341,7 +339,7 @@ class Mark:
     value: Decimal
 
     def __post_init__(self) -> None:
-        if not isinstance(self.instrument_id, str) or not self.instrument_id:
+        if not self.instrument_id:
             raise ValueError("instrument_id must be a non-empty string")
         _decimal(self.quantity, name="quantity")
         _decimal(self.price, name="price")
@@ -362,10 +360,6 @@ class MarkBatch:
     total_value: Decimal
 
     def __post_init__(self) -> None:
-        if not isinstance(self.marks, tuple) or any(
-            not isinstance(mark, Mark) for mark in self.marks
-        ):
-            raise TypeError("marks must be a tuple of Mark")
         _decimal(self.total_value, name="total_value")
         instruments = tuple(mark.instrument_id for mark in self.marks)
         if len(instruments) != len(set(instruments)):

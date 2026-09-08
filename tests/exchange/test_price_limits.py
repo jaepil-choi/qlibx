@@ -13,8 +13,6 @@ look limit-aware.
 
 from __future__ import annotations
 
-from vqapr.exchange.venue import ExecutionCall
-
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -25,6 +23,7 @@ from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
+from vqapr.exchange.venue import ExecutionCall
 from vqapr.exchange.venues.krx import (
     BASE_PRICE,
     PRICE_LIMIT_RATE,
@@ -133,7 +132,8 @@ def test_a_declared_rate_must_be_a_usable_fraction() -> None:
     for bad in (Decimal("0"), Decimal("1"), Decimal("-0.3")):
         with pytest.raises(ValueError, match="finite fraction"):
             KrxTradeRule(NAME, Decimal("1"), Decimal("1"), False, price_limit_rate=bad)
-    with pytest.raises(TypeError, match="Decimal or None"):
+    # Strict pydantic: a float is not a Decimal, and the refusal is a `ValidationError`.
+    with pytest.raises(ValueError, match="Decimal"):
         KrxTradeRule(NAME, Decimal("1"), Decimal("1"), False, price_limit_rate=0.3)
 
 

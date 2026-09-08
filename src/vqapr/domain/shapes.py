@@ -305,10 +305,6 @@ class Series[T]:
     cells: tuple[T | None, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.instrument, str):
-            raise TypeError("instrument must be a string")
-        if not isinstance(self.instants, tuple) or not isinstance(self.cells, tuple):
-            raise TypeError("instants and cells must be tuples")
         if len(self.instants) != len(self.cells):
             raise ValueError("a series has one cell per instant")
 

@@ -187,12 +187,8 @@ class ConstraintContext(_DeclaredReads, ConstraintCall):
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
-        if not isinstance(self.instruments, tuple) or not all(
-            isinstance(name, str) and name for name in self.instruments
-        ):
-            raise TypeError("instruments must be a tuple of non-empty strings")
+        if not all(self.instruments):
+            raise ValueError("instruments must be non-empty strings")
 
     @property
     def evaluation_time(self):
@@ -211,10 +207,6 @@ class DataModelContext(_DeclaredReads, DataCall):
 
     window: ModelWindow
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
 
     @property
     def evaluation_time(self):
@@ -247,16 +239,6 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     """
 
     def __post_init__(self) -> None:
-        if not isinstance(self.occurrence, OperationOccurrence):
-            raise TypeError("occurrence must be an OperationOccurrence")
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
-        if not isinstance(self.account, EconomicAccountView):
-            raise TypeError("account must be an EconomicAccountView")
-        if not isinstance(self.account_history, AccountHistory):
-            raise TypeError("account_history must be an AccountHistory")
-        if not isinstance(self.constraint_bounds, ConstraintBounds):
-            raise TypeError("constraint_bounds must be a ConstraintBounds")
         object.__setattr__(self, "constraint_bounds", self.constraint_bounds.detached())
 
     @property

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from pydantic import BaseModel
 
 from vqapr.public import (
     AccountMode,
@@ -279,6 +280,8 @@ class SingleNameCap(Constraint):
 def _json_value(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: _json_value(getattr(value, f.name)) for f in fields(value)}
+    if isinstance(value, BaseModel):
+        return {name: _json_value(getattr(value, name)) for name in type(value).model_fields}
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Mapping):

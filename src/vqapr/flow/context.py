@@ -69,14 +69,10 @@ class AcceptedIntent:
     target: ExactExecutionTarget
 
     def __post_init__(self) -> None:
-        if not isinstance(self.occurrence, OperationOccurrence):
-            raise TypeError("occurrence must be an OperationOccurrence")
         if self.decision_time != self.occurrence.evaluation_time:
             raise ValueError("decision_time must be the current occurrence evaluation_time")
         if self.decision_time.tzinfo is None:
             raise ValueError("decision_time must be timezone-aware")
-        if not isinstance(self.target, ExactExecutionTarget):
-            raise TypeError("target must be an ExactExecutionTarget")
         target_at = self.target.target_at
         if target_at.astimezone(UTC) <= self.decision_time.astimezone(UTC):
             raise ValueError("execution target must be strictly later than decision_time")
@@ -102,14 +98,10 @@ class PendingValuation:
     valuation_id: UUID
 
     def __post_init__(self) -> None:
-        if not isinstance(self.occurrence, OperationOccurrence):
-            raise TypeError("occurrence must be an OperationOccurrence")
         if self.decision_time != self.occurrence.evaluation_time:
             raise ValueError("decision_time must be the current occurrence evaluation_time")
         if self.decision_time.tzinfo is None:
             raise ValueError("decision_time must be timezone-aware")
-        if not isinstance(self.target, ExactExecutionTarget):
-            raise TypeError("target must be an ExactExecutionTarget")
         if self.target.target_at.astimezone(UTC) <= self.decision_time.astimezone(UTC):
             raise ValueError("execution target must be strictly later than decision_time")
 
@@ -183,7 +175,7 @@ class DueExecutionResult:
         return None if self.monitoring is None else self.monitoring.report
 
     def __post_init__(self) -> None:
-        if not isinstance(self.consumed_pending_id, str) or not self.consumed_pending_id:
+        if not self.consumed_pending_id:
             raise ValueError("consumed_pending_id must be a non-empty string")
         if isinstance(self.account_version, bool) or not isinstance(self.account_version, int):
             raise TypeError("account_version must be an integer")
@@ -202,12 +194,6 @@ class ValuationResult:
     account: AccountSnapshot
     marks: MarkBatch
     evidence: ValuationEvidence
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.account, AccountSnapshot):
-            raise TypeError("account must be an AccountSnapshot")
-        if not isinstance(self.marks, MarkBatch):
-            raise TypeError("marks must be a MarkBatch")
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,10 +217,6 @@ class MonitoringResult:
     evidence: MonitoringEvidence
 
     def __post_init__(self) -> None:
-        if not isinstance(self.valuation, ValuationResult):
-            raise TypeError("valuation must be a ValuationResult")
-        if not isinstance(self.report, ConstraintReport):
-            raise TypeError("report must be a ConstraintReport")
         if self.report.account_version != self.valuation.account.version:
             raise ValueError("report must evaluate the marked account version")
 

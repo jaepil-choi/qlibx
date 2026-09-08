@@ -6,13 +6,16 @@ The sole public home for what an author subclasses (``Component`` and its roles 
 ``ConstraintBounds``),
 and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
 
-Every public declaration here is a frozen, slotted, keyword-only value unless shown
-otherwise by the approved algebra (``Observation`` is positional; ``DataCall``,
-``StrategyCall``, ``DataModel``, ``StrategyModel``, and ``Constraint`` are abstract
-call/extension contracts, not values). Constructors reject duplicate names, empty
-identifiers, naive datetimes, non-finite ``Decimal`` values, and author-supplied
-framework-envelope fields. Incoming mappings are copied into read-only sorted views;
-incoming sequences become detached tuples.
+Every public declaration here is a frozen, keyword-only value unless shown otherwise by the
+approved algebra (``Observation`` is positional; ``DataCall``, ``StrategyCall``, ``DataModel``,
+``StrategyModel``, and ``Constraint`` are abstract call/extension contracts, not values). What an
+author constructs and hands to the engine -- ``DatasetInput``, ``AccountHistoryInput``,
+``ConstraintBounds``, ``Hold``, ``Rebalance``, ``ConstraintFinding`` -- is a strict pydantic
+model (owner ruling 2026-09-08): a wrong type is refused rather than coerced, and the refusal is
+a ``pydantic.ValidationError``, which is a ``ValueError``. Constructors reject duplicate names,
+empty identifiers, naive datetimes, non-finite ``Decimal`` values, and author-supplied
+framework-envelope fields. Incoming mappings are copied into read-only sorted views; incoming
+sequences become detached tuples.
 
 This module is pure algebra: it declares contracts only. No runtime adapter, store,
 catalog, or Flow wiring lives here.
@@ -27,10 +30,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from types import MappingProxyType
-from typing import BinaryIO, Literal
+from typing import BinaryIO, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
 from vqapr.account.history import ACCOUNT_FIELDS, INSTRUMENT_FIELDS, AccountHistory
-from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.lookback import CalendarLookback, InstantsLookback, Lookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.shapes import CrossSection, Observation, Rows
@@ -182,21 +187,33 @@ def _copy_weights(values: object, *, name: str) -> CrossSection[Decimal]:
     return CrossSection._trusted(dict(sorted(normalized.items())))
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DatasetInput:
+# The one configuration every authored value shares. Strict, so an `int` where a `Decimal` was
+# declared is refused rather than widened; `arbitrary_types_allowed` because a weight-shaped
+# field is stored as the `CrossSection` `_copy_weights` builds, which is the package's own type.
+_VALUE_CONFIG = ConfigDict(extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True)
+
+
+class DatasetInput(BaseModel):
     """One declared, aliasable read of a registered dataset."""
+
+    model_config = _VALUE_CONFIG
 
     dataset_id: str
     fields: tuple[str, ...]
-    lookback: RowsLookback | CalendarLookback
+    lookback: Lookback
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "dataset_id", _identifier(self.dataset_id, name="dataset_id"))
-        fields = _unique_identifiers(self.fields, name="fields")
+    @field_validator("dataset_id")
+    @classmethod
+    def _dataset_id(cls, value: str) -> str:
+        return _identifier(value, name="dataset_id")
+
+    @field_validator("fields", mode="before")
+    @classmethod
+    def _fields(cls, value: object) -> tuple[str, ...]:
+        # Before, not after: a list of names is accepted and becomes the detached tuple.
+        fields = _unique_identifiers(value, name="fields")
         _reject_reserved(fields, _ROW_RESERVED_FIELDS, name="fields")
-        object.__setattr__(self, "fields", fields)
-        if not isinstance(self.lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
-            raise TypeError("lookback must be a RowsLookback, CalendarLookback or InstantsLookback")
+        return fields
 
 
 # `Observation` -- one row of the long shape -- is `vqapr.domain.shapes.Observation` since record
@@ -339,15 +356,20 @@ class DataModel(Component):
 # --------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AccountHistoryInput:
+class AccountHistoryInput(BaseModel):
     """A StrategyModel's declaration of which committed account history it reads."""
+
+    model_config = _VALUE_CONFIG
 
     fields: tuple[Literal["nav", "cash", "quantity", "price", "observed_at"], ...]
     lookback: RowsLookback
 
-    def __post_init__(self) -> None:
-        fields = _unique_identifiers(self.fields, name="fields")
+    @field_validator("fields", mode="before")
+    @classmethod
+    def _known(cls, value: object) -> tuple[str, ...]:
+        # Before the `Literal` check, so an unknown name is refused with the two lists it could
+        # have come from rather than with the bare literal set.
+        fields = _unique_identifiers(value, name="fields")
         unknown = sorted(set(fields) - _HISTORY_FIELDS)
         if unknown:
             raise ValueError(
@@ -355,9 +377,7 @@ class AccountHistoryInput:
                 f"account series are {ACCOUNT_FIELDS} and "
                 f"instrument panels are {INSTRUMENT_FIELDS}"
             )
-        object.__setattr__(self, "fields", fields)
-        if not isinstance(self.lookback, RowsLookback):
-            raise TypeError("lookback must be a RowsLookback")
+        return fields
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -446,23 +466,39 @@ class EconomicAccountView:
         )
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ConstraintBounds:
-    """Frozen per-instrument target-weight bounds merged from every projected Constraint."""
+class ConstraintBounds(BaseModel):
+    """Frozen per-instrument target-weight bounds merged from every projected Constraint.
 
-    lower_weights: Mapping[str, Decimal]
-    upper_weights: Mapping[str, Decimal]
+    Declared as any `Mapping[str, Decimal]`; held as the read-only `CrossSection` it validates
+    into, so `bounds.lower_weights["A"]` reads the way it always did.
+    """
 
-    def __post_init__(self) -> None:
-        lower = _copy_weights(self.lower_weights, name="lower_weights")
-        upper = _copy_weights(self.upper_weights, name="upper_weights")
+    model_config = _VALUE_CONFIG
+
+    lower_weights: CrossSection[Decimal]
+    upper_weights: CrossSection[Decimal]
+
+    def __init__(
+        self, *, lower_weights: Mapping[str, Decimal], upper_weights: Mapping[str, Decimal]
+    ) -> None:
+        # The door's own signature: what an author passes is any mapping, what the field holds
+        # is the cross-section it validated into. Written out so a type checker sees the former.
+        super().__init__(lower_weights=lower_weights, upper_weights=upper_weights)
+
+    @field_validator("lower_weights", "upper_weights", mode="before")
+    @classmethod
+    def _weights(cls, value: object, info: ValidationInfo) -> CrossSection[Decimal]:
+        return _copy_weights(value, name=str(info.field_name))
+
+    @model_validator(mode="after")
+    def _same_names_ordered(self) -> Self:
+        lower, upper = self.lower_weights, self.upper_weights
         if set(lower) != set(upper):
             raise ValueError("lower_weights and upper_weights must cover the same instruments")
         for instrument_id in lower:
             if lower[instrument_id] > upper[instrument_id]:
                 raise ValueError("lower_weights must not exceed upper_weights")
-        object.__setattr__(self, "lower_weights", lower)
-        object.__setattr__(self, "upper_weights", upper)
+        return self
 
     def lower_weight(self, instrument_id: str) -> Decimal:
         checked = _identifier(instrument_id, name="instrument_id")
@@ -475,7 +511,7 @@ class ConstraintBounds:
     def detached(self) -> ConstraintBounds:
         """A fresh value with no caller-owned mapping aliases.
 
-        `__post_init__` already copies into read-only views, so this is defensive rather than
+        Validation already copies into read-only views, so this is defensive rather than
         load-bearing -- and it is kept because `StrategyModelContext` calls it on a value it did
         not construct, where "already copied" is an assumption about someone else's code.
         """
@@ -484,8 +520,7 @@ class ConstraintBounds:
         )
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Hold:
+class Hold(BaseModel):
     """A Strategy decision that intentionally emits no order.
 
     **This is the engine's decline type as well as the author's.** It absorbed
@@ -498,11 +533,16 @@ class Hold:
     and the looser one is the correct one: a reason a human reads should be allowed spaces.
     """
 
+    model_config = _VALUE_CONFIG
+
     reason: str
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.reason, str) or not self.reason.strip():
+    @field_validator("reason")
+    @classmethod
+    def _prose(cls, value: str) -> str:
+        if not value.strip():
             raise ValueError("reason must be a non-empty string")
+        return value
 
 
 def _as_decimal(value: Decimal | int | float | str, *, name: str) -> Decimal:
@@ -563,8 +603,7 @@ def _offenders(weights: Mapping[str, Decimal]) -> str:
     return ", ".join(shown) + (f", and {rest} more" if rest > 0 else "")
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class Rebalance:
+class Rebalance(BaseModel):
     """A Strategy decision naming one complete desired portfolio.
 
     Three ways in, and the direct constructor is the last of them:
@@ -578,11 +617,23 @@ class Rebalance:
     real mistake. That is why the two constructors exist, and why anyone building this directly
     should quantise and settle through `vqapr.portfolio.weighting.rescale` on the canonical grid
     `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/075`).
+
+    `target_weights` takes any `Mapping[str, Decimal]` and is held as the read-only
+    `CrossSection` it validates into.
     """
 
-    target_weights: Mapping[str, Decimal]
+    model_config = _VALUE_CONFIG
+
+    target_weights: CrossSection[Decimal]
     cash_weight: Decimal
     budget: Budget
+
+    def __init__(
+        self, *, target_weights: Mapping[str, Decimal], cash_weight: Decimal, budget: Budget
+    ) -> None:
+        # The door's own signature: any mapping in, the validated cross-section held. Written
+        # out so a type checker accepts the dict every author and both constructors pass.
+        super().__init__(target_weights=target_weights, cash_weight=cash_weight, budget=budget)
 
     @classmethod
     def of(
@@ -837,18 +888,20 @@ class Rebalance:
             ),
         )
 
-    def __post_init__(self) -> None:
-        weights = _copy_weights(self.target_weights, name="target_weights")
-        object.__setattr__(self, "target_weights", weights)
-        cash = _finite_decimal(self.cash_weight, name="cash_weight")
-        object.__setattr__(self, "cash_weight", cash)
-        if not isinstance(self.budget, Budget):
-            raise TypeError("budget must be a Budget")
+    @field_validator("target_weights", mode="before")
+    @classmethod
+    def _weights(cls, value: object) -> CrossSection[Decimal]:
+        return _copy_weights(value, name="target_weights")
+
+    @model_validator(mode="after")
+    def _adds_up_inside_the_budget(self) -> Self:
+        # The fields are already what they claim: a read-only cross-section of finite Decimals,
+        # a finite cash weight, a Budget. What is checked here is the relation between them.
+        weights, cash, budget = self.target_weights, self.cash_weight, self.budget
         # Every refusal here names the value it saw and the bound it crossed. These five said
         # only the rule -- `cash_weight is outside the declared budget` -- and an author whose
         # quantised shorts summed to -1.000000000001 had to reason the cash of 2.000000000001 and
         # the bound of 2 out by hand, in a run of eight strategies (`docs/issues/071`).
-        budget = self.budget
         if not budget.validates_cash(cash):
             raise ValueError(
                 f"cash_weight {cash} is outside the declared budget "
@@ -881,6 +934,7 @@ class Rebalance:
             raise ValueError(
                 f"an empty complete position set requires cash_weight equal to one; got {cash}"
             )
+        return self
 
 
 class StrategyCall(ABC):
@@ -1044,8 +1098,7 @@ class ConstraintCall(ABC):
         """
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ConstraintFinding:
+class ConstraintFinding(BaseModel):
     """One Constraint's complete, immutable result for one economic observation.
 
     **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
@@ -1061,6 +1114,8 @@ class ConstraintFinding:
     field keeps that rule intact instead of widening it for one caller.
     """
 
+    model_config = _VALUE_CONFIG
+
     passed: bool
     measured: Decimal
     bound: Decimal
@@ -1068,26 +1123,31 @@ class ConstraintFinding:
     details: Mapping[str, object]
     offenders: tuple[str, ...] = ()
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.passed, bool):
-            raise TypeError("passed must be a bool")
+    @field_validator("offenders", mode="before")
+    @classmethod
+    def _named_once(cls, value: object) -> tuple[str, ...]:
         # Not `_unique_identifiers`, which requires at least one entry: an empty `offenders` is
         # the ordinary passing case and the most common value this field ever holds.
-        if not isinstance(self.offenders, Sequence) or isinstance(self.offenders, (str, bytes)):
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
             raise TypeError("offenders must be a sequence of instrument ids")
-        offenders = tuple(
-            _identifier(value, name="offenders entry") for value in self.offenders
-        )
+        offenders = tuple(_identifier(entry, name="offenders entry") for entry in value)
         if len(set(offenders)) != len(offenders):
             raise ValueError("offenders entries must be unique")
-        object.__setattr__(self, "offenders", offenders)
-        object.__setattr__(self, "measured", _finite_decimal(self.measured, name="measured"))
-        object.__setattr__(self, "bound", _finite_decimal(self.bound, name="bound"))
-        object.__setattr__(self, "excess", _finite_decimal(self.excess, name="excess"))
-        details = _copy_values(self.details, name="details", reserved=_ENVELOPE_RESERVED_FIELDS)
+        return offenders
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def _portable(cls, value: object) -> Mapping[str, object]:
+        details = _copy_values(value, name="details", reserved=_ENVELOPE_RESERVED_FIELDS)
         if len(details) > 32:
             raise ValueError("details must be bounded to 32 semantic keys")
-        object.__setattr__(self, "details", details)
+        return details
+
+    @field_validator("details")
+    @classmethod
+    def _read_only(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        # pydantic hands the mapping back as a dict; what an author reads is a view.
+        return MappingProxyType(dict(value))
 
 
 class Constraint(Component):

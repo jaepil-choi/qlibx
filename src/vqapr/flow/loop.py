@@ -39,10 +39,6 @@ class OccurrenceEvent:
 
     occurrence: OperationOccurrence
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.occurrence, OperationOccurrence):
-            raise TypeError("occurrence must be an OperationOccurrence")
-
     def sort_key(self) -> tuple[datetime, int, str]:
         return self.occurrence.sort_key()
 
@@ -61,7 +57,7 @@ class DueEvent:
 
     def __post_init__(self) -> None:
         require_tz_aware(self.due_time, name="due_time")
-        if not isinstance(self.pending_id, str) or not self.pending_id:
+        if not self.pending_id:
             raise ValueError("pending_id must be a non-empty string")
 
     def sort_key(self) -> tuple[datetime, int, str]:
@@ -89,8 +85,6 @@ class EventLoop[EventT: Event, TraceT, ResultT](ABC):
         on_progress: Callable[[], None] | None = None,
     ) -> None:
         occurrences = tuple(schedule)
-        if any(not isinstance(item, OperationOccurrence) for item in occurrences):
-            raise TypeError("schedule must contain OperationOccurrence values")
         require_tz_aware(start_cutoff, name="start_cutoff")
         if on_progress is not None and not callable(on_progress):
             raise TypeError("on_progress must be callable or None")

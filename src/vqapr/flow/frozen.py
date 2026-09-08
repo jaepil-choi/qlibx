@@ -50,21 +50,12 @@ class FrozenAgenda:
     content_identity: str = ""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.agenda_id, str) or not self.agenda_id:
-            raise TypeError("agenda_id must be an AgendaId")
-        if not isinstance(self.occurrences, tuple):
-            raise TypeError("occurrences must be a tuple of OperationOccurrence values")
-        if not isinstance(self.timezone, str):
-            raise TypeError("timezone must be an IANA timezone name")
+        if not self.agenda_id:
+            raise ValueError("agenda_id must be a non-empty AgendaId")
         if not self.timezone and self.content_identity:
             raise ValueError("an agenda identity requires a timezone")
-        if not isinstance(self.content_identity, str) or (
-            self.content_identity and len(self.content_identity) != 64
-        ):
-            raise TypeError("content_identity must be a SHA-256 identity")
-        for occurrence in self.occurrences:
-            if not isinstance(occurrence, OperationOccurrence):
-                raise TypeError("occurrences must contain OperationOccurrence values")
+        if self.content_identity and len(self.content_identity) != 64:
+            raise ValueError("content_identity must be a SHA-256 identity")
 
     def encoded(self) -> tuple[str, list[tuple[str, str, str, int, str]]]:
         """What a model's identity folds of its agenda: the sessions' CONTENT, not their name.
@@ -117,21 +108,12 @@ class FrozenStrategy:
     _identity: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.config, StrategyConfig):
-            raise TypeError("config must be a StrategyConfig")
-        if not isinstance(self.constraints, ConstraintSet):
-            raise TypeError("constraints must be a ConstraintSet")
-        if not isinstance(self.agenda, FrozenAgenda):
-            raise TypeError("agenda must be a FrozenAgenda")
         if self.agenda.agenda_id != self.config.agenda_id:
             raise ValueError("agenda must match the strategy config's agenda_id")
         _require_requirements("requirements", self.requirements)
         _require_requirements("constraint_requirements", self.constraint_requirements)
         memory = normalize_memory(self.initial_model_memory)
         object.__setattr__(self, "initial_model_memory", memory)
-        if not isinstance(self.initial_payload, bytes):
-            raise TypeError("initial_payload must be bytes")
-        object.__setattr__(self, "initial_payload", bytes(self.initial_payload))
         object.__setattr__(
             self, "initial_model_state_ref", _model_state_ref(memory, self.initial_payload)
         )
@@ -199,12 +181,8 @@ class FrozenDataModel:
     _identity: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.component, ComponentRef):
-            raise TypeError("component must be a ComponentRef")
         if self.component.kind is not ComponentKind.DATA_MODEL:
             raise ValueError("component must identify a DATA_MODEL")
-        if not isinstance(self.agenda, FrozenAgenda):
-            raise TypeError("agenda must be a FrozenAgenda")
         _require_id(self.dataset_id, "dataset_id")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
@@ -274,14 +252,6 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if not isinstance(self.strategies, tuple) or any(
-            not isinstance(layer, FrozenStrategy) for layer in self.strategies
-        ):
-            raise TypeError("strategies must contain FrozenStrategy values")
-        if not isinstance(self.datamodels, tuple) or any(
-            not isinstance(layer, FrozenDataModel) for layer in self.datamodels
-        ):
-            raise TypeError("datamodels must contain FrozenDataModel values")
         if bool(self.strategies) == bool(self.datamodels):
             raise ValueError("a frozen run holds strategies or datamodels, at least one, not both")
         ids = [layer.component_id for layer in (*self.strategies, *self.datamodels)]
@@ -293,15 +263,10 @@ class FrozenRun:
             or self.initial_account_snapshot is not None
         ):
             raise ValueError("a frozen datamodel run holds no venue, execution dataset or account")
-        if self.exchange is not None:
-            if not isinstance(self.exchange, ComponentRef):
-                raise TypeError("exchange must be a ComponentRef or None")
-            if self.exchange.kind is not ComponentKind.EXCHANGE:
-                raise ValueError("exchange must identify an EXCHANGE component")
+        if self.exchange is not None and self.exchange.kind is not ComponentKind.EXCHANGE:
+            raise ValueError("exchange must identify an EXCHANGE component")
         if (self.exchange is None) != (self.execution is None):
             raise ValueError("exchange and execution must be frozen together")
-        if self.execution is not None and not isinstance(self.execution, ExecutionTable):
-            raise TypeError("execution must be an ExecutionTable or None")
         _require_period(self.start, self.end, "frozen")
         object.__setattr__(
             self,
@@ -312,10 +277,6 @@ class FrozenRun:
         # membership from a linear tuple scan into a hash lookup.
         object.__setattr__(self, "instrument_set", _require_instruments(self.instruments))
         _require_requirements("requirements", self.requirements)
-        if not isinstance(self.datasets, tuple) or not all(
-            isinstance(dataset, DatasetRegistration) for dataset in self.datasets
-        ):
-            raise TypeError("datasets must be a tuple of DatasetRegistration values")
         dataset_ids = [dataset.dataset_id for dataset in self.datasets]
         if len(set(dataset_ids)) != len(dataset_ids) or dataset_ids != sorted(dataset_ids):
             raise ValueError("datasets must be unique and ordered by dataset_id")
@@ -347,10 +308,6 @@ class FrozenRun:
                 for dataset in self.datasets
             ),
         )
-        if not isinstance(self.sources, tuple) or not all(
-            isinstance(source, SourceSpec) for source in self.sources
-        ):
-            raise TypeError("sources must be a tuple of SourceSpec values")
         source_ids = [source.source_id for source in self.sources]
         if len(set(source_ids)) != len(source_ids):
             raise ValueError("sources must not contain duplicate source declarations")

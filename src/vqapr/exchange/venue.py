@@ -66,14 +66,6 @@ class ExecutionCall:
 
     def __post_init__(self) -> None:
         require_tz_aware(self.at, name="at")
-        if not isinstance(self.orders, OrderBatch):
-            raise TypeError("orders must be an OrderBatch")
-        if not isinstance(self.account, AccountSnapshot):
-            raise TypeError("account must be an AccountSnapshot")
-        if not isinstance(self.snapshot, ExactExecutionSnapshot):
-            raise TypeError("snapshot must be an ExactExecutionSnapshot")
-        if not isinstance(self.rules, ExchangeRulesView):
-            raise TypeError("rules must be an ExchangeRulesView")
 
     @classmethod
     def of(

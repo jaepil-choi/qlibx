@@ -22,6 +22,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
+from vqapr.account.marking import ValuationService
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
 from vqapr.constraints.evaluation import ConstraintReport
@@ -48,7 +49,6 @@ from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import DueEvent
-from vqapr.flow.marking import ValuationService
 from vqapr.flow.run_state import (
     FILL_TABLE,
     AcceptedRunState,

@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
 
+from vqapr.account.marking import SelectedMark
 from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.constraints.evaluation import (
     ConstraintReport,
@@ -39,7 +40,6 @@ from vqapr.flow.context import (
     PendingValuation,
     ValuationResult,
 )
-from vqapr.flow.marking import SelectedMark
 from vqapr.flow.run_state import AcceptedRunState, PreparedRunState
 
 

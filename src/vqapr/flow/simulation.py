@@ -17,6 +17,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from vqapr.account.account import Account
+from vqapr.account.marking import ValuationService
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
@@ -51,7 +52,6 @@ from vqapr.flow.context import _shadows_package_table as _shadows_package_table
 from vqapr.flow.execution import ExecutionHandler
 from vqapr.flow.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.loop import DueEvent, EventLoop, OccurrenceEvent
-from vqapr.flow.marking import ValuationService
 from vqapr.flow.run_state import (
     RunFinalization,
     RunStateRepository,

@@ -18,10 +18,10 @@ from decimal import Decimal
 
 import pytest
 
+from vqapr.account.marking import SelectedMark
 from vqapr.account.snapshot import AccountMark
 from vqapr.domain.values import Mark, MarkBatch
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.flow.marking import SelectedMark
 from vqapr.flow.simulation import _marks_from_execution_snapshot
 
 QUOTED = datetime(2024, 1, 4, 6, 30, tzinfo=UTC)

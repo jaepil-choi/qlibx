@@ -6,6 +6,7 @@ from typing import ClassVar
 
 import pytest
 
+from vqapr.account.marking import ValuationService
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.values import Side
@@ -14,7 +15,6 @@ from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnap
 from vqapr.exchange.fills import ZeroDealtReason
 from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, ExecutionCall, TradeRule
-from vqapr.flow.marking import ValuationService
 from vqapr.orders.batches import OrderBatch, OrderRequest
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)

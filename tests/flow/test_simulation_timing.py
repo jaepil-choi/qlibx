@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from vqapr.account.marking import ValuationService
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.authoring import (
     Constraint,
@@ -18,7 +19,6 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.flow.marking import ValuationService
 from vqapr.portfolio.intents import PortfolioTarget
 
 

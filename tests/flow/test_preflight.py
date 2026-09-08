@@ -14,7 +14,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationRole
-from vqapr.domain.errors import FailureFamily, VqaprError
+from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
@@ -304,11 +304,11 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
         preflight_run(workspace, definition)
 
     error = caught.value
-    assert error.stage == "preflight.execution"
-    assert error.family is FailureFamily.EXCHANGE
+    assert error.stage is Stage.FREEZE
+    assert error.status is Status.PRECONDITION
     assert error.mutation is False
     failure = error.failures[0]
-    assert failure.code == "preflight.execution.target_outside_horizon"
+    assert failure.code == "execution.target_outside_horizon"
     assert failure.example_total == 1
     assert failure.examples == ("preflight.sessions-2024-03-05: 2024-03-05T15:30:00+09:00",)
     assert "selector=next_eligible" in (failure.observed or "")
@@ -490,7 +490,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # so it is refused for what it actually is -- a contract violation -- rather than for having
     # changed. The distinction is the point: editing a registered component is the ordinary
     # development loop, and only a component that cannot do its job should stop a run.
-    with pytest.raises(VqaprError, match=r"component\.load\.wrong_type"):
+    with pytest.raises(VqaprError, match=r"component\.wrong_type"):
         preflight_run(workspace, definition)
 
 
@@ -508,7 +508,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # A mutated CONFIG is likewise no longer refused as drift. It reaches the component, which
     # cannot construct from a key it does not declare, so the refusal names that instead. Same
     # principle as the source edit above: judged on whether it works, not on whether it moved.
-    with pytest.raises(VqaprError, match=r"component\.load\.construction_failed"):
+    with pytest.raises(VqaprError, match=r"component\.construction_failed"):
         preflight_run(workspace, definition)
 
 
@@ -530,15 +530,17 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
         tmp_path / "no-execution", model_price_parquet, with_execution=False
     )
 
-    with pytest.raises(VqaprError, match=r"preflight\.execution\.missing") as failure:
+    with pytest.raises(VqaprError, match=r"execution\.missing") as failure:
         preflight_run(workspace, definition)
 
     error = failure.value
-    assert error.stage == "preflight.execution"
-    assert error.family is FailureFamily.EXCHANGE
+    assert error.stage is Stage.FREEZE
+    # 404: a name the run needs -- its execution input -- was never given, so the submission
+    # is what must change, not anything that ran.
+    assert error.status is Status.MISSING
     assert error.mutation is False
     # Typed, so an agent parses a verdict instead of reading a traceback.
-    assert error.as_dict()["failures"][0]["code"] == "preflight.execution.missing"
+    assert error.as_dict()["failures"][0]["code"] == "execution.missing"
     assert "register an execution input" in error.retry_precondition
 
 
@@ -557,12 +559,12 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
 
     # The execution refusal comes first, and it is the reason the universe check is reachable
     # at all once an execution input is supplied.
-    with pytest.raises(VqaprError, match=r"preflight\.execution\.missing"):
+    with pytest.raises(VqaprError, match=r"execution\.missing"):
         preflight_run(workspace, unlisted)
 
     workspace, definition = _setup(tmp_path / "listed", model_price_parquet)
 
-    with pytest.raises(VqaprError, match=r"preflight\.universe\.unlisted_instrument"):
+    with pytest.raises(VqaprError, match=r"universe\.unlisted_instrument"):
         preflight_run(workspace, definition.replace(instruments=('NOT-LISTED',)))
 
 
@@ -598,7 +600,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     with Workspace.transaction(workspace) as t:
         t.register_component(component)
 
-    with pytest.raises(VqaprError, match=r"preflight\.execution\.requirement_missing") as error:
+    with pytest.raises(VqaprError, match=r"execution\.requirement_missing") as error:
         preflight_run(workspace, definition.replace(exchange='limited'))
     failure = error.value.as_dict()["failures"][0]
     assert "price_limit" in failure["observed"], "the message names the feature to switch off"
@@ -670,10 +672,10 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
     # Publishing it is fine; the run simply does not trade it.
     assert preflight_run(workspace, tracked).exchange == component
 
-    with pytest.raises(VqaprError, match=r"preflight\.universe\.untradable_listing") as e:
+    with pytest.raises(VqaprError, match=r"universe\.untradable_listing") as e:
         preflight_run(workspace, tracked.replace(instruments=("ABC", "KOSPI200")))
     codes = [failure["code"] for failure in e.value.as_dict()["failures"]]
-    assert codes == ["preflight.universe.untradable_listing"], (
+    assert codes == ["universe.untradable_listing"], (
         "a listed instrument must not also be reported as unlisted"
     )
 
@@ -896,9 +898,9 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
         preflight_run(workspace, definition)
 
     error = caught.value
-    assert error.stage == "component.load"
+    assert error.stage is Stage.LOAD
     assert [failure.code for failure in error.failures] == [
-        "component.load.constraint_id_mismatch"
+        "component.constraint_id_mismatch"
     ]
     assert "'limit'" in error.failures[0].observed
     assert "'position-cap'" in error.failures[0].observed

@@ -367,7 +367,7 @@ def test_a_field_the_named_dataset_does_not_expose_is_refused(
         window.observations(requirement)
 
     failure = refused.value.failures[0]
-    assert failure.code == "observation_store.resolve.field_missing"
+    assert failure.code == "store.field_missing"
     assert "net_income" in failure.observed, "the refusal must say what the dataset does expose"
 
 
@@ -399,7 +399,7 @@ def test_a_registration_that_mixes_the_two_shapes_is_refused(
         )
 
     failure = refused.value.failures[0]
-    assert failure.code == "dataset.register.schema.projection_unbindable"
+    assert failure.code == "dataset.projection_unbindable"
     assert "row-wise:" in failure.observed and "grouped:" in failure.observed
 
 
@@ -440,7 +440,7 @@ def test_a_field_expression_may_not_carry_its_own_from(tmp_path: Path) -> None:
             SourceSpec.of("peeking-source", prices),
         )
 
-    assert refused.value.failures[0].code == "dataset.register.schema.field_not_an_expression"
+    assert refused.value.failures[0].code == "dataset.field_not_an_expression"
 
 
 def test_a_bounded_grouped_read_returns_the_unbounded_answer(

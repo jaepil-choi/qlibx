@@ -83,7 +83,7 @@ def test_a_damaged_pointer_refuses_rather_than_reading_as_absent(
     with pytest.raises(VqaprError) as refused:
         registered_roster(project)
 
-    assert refused.value.failures[0].code.startswith("workspace.instruments"), (
+    assert refused.value.failures[0].code == "roster.unreadable", (
         "the typed refusal must reach the caller instead of becoming `no roster`"
     )
 

@@ -143,7 +143,7 @@ class Model(va.Constraint):
 '''
 
 
-_WRONG_TYPE = "component.load.wrong_type"
+_WRONG_TYPE = "component.wrong_type"
 """The code both refusals carry today.
 
 Asserted by name rather than by exception type alone: `VqaprError` covers every refusal this

@@ -42,9 +42,7 @@ def _cli(project_root: Path, *argv: str) -> tuple[int, dict]:
 
 
 @pytest.mark.slow
-def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(
-    tmp_path: Path, sample_panel
-) -> None:
+def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: Path) -> None:
     """The whole authoring contract, end to end, as an agent would drive it.
 
     The scaffold gets a FRESH id and a FRESH run. Writing it under the sample's own strategy id
@@ -54,8 +52,8 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(
     Everything else -- the source, the class, the decision -- is the emitted file exactly as it
     was written, and the assertions below are about what that file does, not about its shape.
     """
-    panel = journey.install(tmp_path, panel=sample_panel)
-    sessions = journey._sessions(panel)
+    panel = journey.install(tmp_path)
+    sessions = journey.sessions(panel)
     source = tmp_path / "scaffolded.py"
 
     code, created = _cli(
@@ -135,9 +133,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(
     )
 
 
-def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(
-    tmp_path: Path, sample_panel
-) -> None:
+def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(tmp_path: Path) -> None:
     """The `runs:` block `vqapr new datamodel` emits is one `register` takes as written.
 
     Record 148: the declaration carries the run that computes the model, so registering the file
@@ -145,7 +141,7 @@ def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(
     reaches all the way through. What it does NOT prove is that the run computes anything: the
     instruments are placeholders the reader fills, and registration does not validate a universe.
     """
-    journey.install(tmp_path, panel=sample_panel)
+    journey.install(tmp_path)
     source = tmp_path / "scaffolded_model.py"
 
     code, created = _cli(
@@ -168,8 +164,10 @@ def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(
     # them refuses the declaration's SHAPE. (The placeholder instruments are not a judgment
     # today; whether an instrument the sessions dataset never holds should be one is open.)
     code, checked = _cli(tmp_path, "check", "signal-run")
-    assert checked["stage"] != "unhandled", checked
+    assert not any(
+        failure["code"] == "unhandled" for failure in checked.get("failures", [])
+    ), checked
     assert checked["checked"] == ["workspace", "run", "judgments", "preflight"]
     assert not any(
-        failure["code"].startswith("run.check.") for failure in checked.get("failures", [])
+        failure["code"] == "run.declaration_invalid" for failure in checked.get("failures", [])
     ), "the scaffold's shape was refused, not its placeholders"

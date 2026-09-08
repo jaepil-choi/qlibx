@@ -8,11 +8,9 @@ from datetime import datetime
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import AccessRecord, DuckDbObservationStore, ObservationBatch
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, VqaprError
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.values import require_tz_aware
-
-_STAGE = "model_window.requirement"
 
 
 class ModelWindow:
@@ -158,11 +156,11 @@ class ModelWindow:
     @staticmethod
     def _undeclared(requirement: DataRequirement) -> VqaprError:
         return VqaprError(
-                stage=_STAGE,
-                family=FailureFamily.DATA,
+                stage=Stage.RUN,
                 failures=[
                     Failure.bounded(
-                        code=f"{_STAGE}.undeclared",
+                        code="requirement.undeclared",
+                        status=Status.CONTRACT,
                         requirement=(
                             "a Model may read only a DataRequirement declared before compute"
                         ),
@@ -174,7 +172,6 @@ class ModelWindow:
                             "return this DataRequirement from the component's requirements() so "
                             "it is declared before compute"
                         ),
-                        explain=ExplainTopic.COMPONENT_CONTRACT,
                     )
                 ],
                 mutation=False,

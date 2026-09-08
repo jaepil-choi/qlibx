@@ -133,7 +133,7 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
     with pytest.raises(VqaprError) as refused:
         Workspace.open(tmp_path)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.open.invalid"
+    assert failure["code"] == "workspace.invalid"
     assert "krx-2024" in failure["observed"], failure["observed"]
 
 

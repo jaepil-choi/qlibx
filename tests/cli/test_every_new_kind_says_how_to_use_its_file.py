@@ -14,7 +14,9 @@ those four could not honestly emit it: a run SPEC was not registrable, so the en
 Since record 139 a run is a `runs:` section of a declaration document, so the one exception is
 gone: `vqapr new run` emits a declaration `vqapr register` takes, and every kind answers the
 caller's actual question -- *what do I do with this file?* -- with `declaration`. Record 148
-retired `agendas` (a run declares its own sessions and wall time), so eight kinds remain.
+retired `agendas` (a run declares its own sessions and wall time), so eight kinds remained;
+record 172 added `sample`, which writes a directory rather than a file and reports the
+declaration inside it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("dataset", ()),
     ("run", ()),
     ("execution-input", ()),
+    # The filled-in form beside the blank ones (record 172): a whole journey, one declaration.
+    ("sample", ()),
 )
 
 
@@ -131,8 +135,8 @@ def test_the_emitted_run_template_is_refused_for_its_placeholders_not_for_its_sh
     refusal = json.loads((result.stdout or result.stderr).strip().splitlines()[-1])
     assert refusal["stage"] != "unhandled"
     codes = [failure["code"] for failure in refusal["failures"]]
-    assert codes == ["workspace.run.register.reference"], codes
-    assert "declaration.read.unknown_section" not in codes, "`runs:` is a known section now"
+    assert codes == ["run.reference_invalid"], codes
+    assert "declaration.unknown_section" not in codes, "`runs:` is a known section now"
 
 
 def test_the_help_promises_the_key_for_every_kind_again() -> None:

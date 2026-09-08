@@ -18,7 +18,6 @@ import yaml
 
 from vqapr.data import scan
 from vqapr.data.datasets import (
-    GRAIN_STAGE,
     DatasetRegistration,
     Grain,
     check_key,
@@ -154,7 +153,7 @@ def test_a_declaration_document_without_grain_is_refused_with_its_own_code(
         )
     payload = refused.value.as_dict()
     codes = [failure["code"] for failure in payload["failures"]]
-    assert codes == ["declaration.read.grain_undeclared"]
+    assert codes == ["declaration.grain_undeclared"]
     fix = payload["failures"][0]["fix"]
     assert "instrument_instant" in fix and "rows" in fix and "RowsLookback" in fix
     assert not (tmp_path / ".vqapr").exists(), "a refused document creates nothing"
@@ -201,8 +200,8 @@ def test_a_workspace_written_before_grain_still_opens_and_refuses_reads(
     with pytest.raises(VqaprError) as refused:
         require_declared(registration)
     payload = refused.value.as_dict()
-    assert payload["stage"] == GRAIN_STAGE
-    assert [f["code"] for f in payload["failures"]] == [f"{GRAIN_STAGE}.undeclared"]
+    assert payload["stage"] == "register"
+    assert [f["code"] for f in payload["failures"]] == ["dataset.grain_undeclared"]
     assert "RowsLookback" in payload["failures"][0]["fix"]
 
     # Registering it again, with a grain, is the repair -- and it is an ordinary registration.

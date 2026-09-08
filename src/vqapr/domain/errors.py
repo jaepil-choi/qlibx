@@ -3,51 +3,119 @@
 첫 사용자가 agent이므로 실패는 **읽는 것이 아니라 파싱하는 것**이어야 한다. 그리고 agent가 자기
 준비 과정을 고치려면 문제를 하나씩이 아니라 **한 번에 다** 받아야 한다 — 그래서 예외 하나가
 `Failure` 여럿을 담는다.
+
+Record `171` rebuilt the vocabulary on the HTTP principle. A failure carries three things an
+agent branches on, in this order:
+
+- `status` -- WHO must act, a closed set with HTTP's numbers so an agent already knows them.
+  4xx: the submission (a declaration, an argument, a data file, a precondition) is wrong; fix
+  it before retrying. 5xx: the submission is fine; something that ran failed -- the user's own
+  code (502), the framework (500), or the machine (503). An unknown `code` is handled as its
+  status, the way an HTTP client treats an unknown 4xx as 400.
+- `stage` -- WHICH operation was under way, a closed set: opening the workspace, registering,
+  looking a reference up, checking, freezing, running, ...
+- `cause` -- WHAT actually happened, whole. The taxonomy above is not guaranteed to be MECE in
+  beta, so every failure carries its raw cause: the exception's type, message and full
+  traceback when there was one, and always the file:line the refusal was raised from. An agent
+  reads `status` to decide quickly and `cause` to decide correctly, including whether the
+  fault is upstream's.
 """
 
 from __future__ import annotations
 
+import sys
+import traceback
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import IntEnum, StrEnum
+from pathlib import Path
+from types import TracebackType
 
 MAX_EXAMPLES = 5
 """위반 예시 상한. 8.7M행짜리 원천에서 예시가 무한히 실려 나가면 안 된다(PRD §2.6)."""
 
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+"""`src/vqapr`: a traceback frame under here is the framework's; one elsewhere that is not the
+interpreter's own is the user's. `Cause.of` reads origin from this split."""
 
-class ExplainTopic(StrEnum):
-    """복구 방법을 설명하는 skill 절(節)의 안정된 id. **닫힌 집합**이다.
 
-    실패는 진단이 아니라 지시여야 한다. `fix`가 이번 한 번을 고치는 문장이라면, `explain`은
-    "이 부류의 실패는 왜 나며 어떻게 예방하는가"가 적힌 자리를 가리킨다. 그 자리는
-    `agent/skill/SKILL.md`이고, 그래서 이 enum은 package와 skill이 **공동 소유**한다.
+class Status(IntEnum):
+    """Who must act. HTTP's numbers, on purpose: an agent knows what 404 and 409 mean already.
 
-    id가 자유 문자열이면 skill에 없는 절을 가리키는 오타가 조용히 실려 나간다. 닫아 두면
-    양방향으로 검사할 수 있다: 모든 topic이 SKILL.md에 있고, SKILL.md의 모든 topic 절이
-    최소 하나의 code에서 참조된다.
+    4xx -- the submission is wrong; retrying without changing it is pointless.
+    5xx -- the submission is fine; look at what ran (the user's code, the framework, the
+    machine). The number says which of the three, which is the question an agent asks first:
+    is this mine to fix, or do I file an issue upstream?
     """
 
-    DECLARATION_SHAPE = "declaration-shape"
-    """선언 문서의 키·값 모양이 계약과 다르다."""
+    INVALID = 400
+    """The shape of what was handed in does not meet the contract: a declaration key, an
+    argument, a parquet schema."""
 
-    DATASET_PREPARATION = "dataset-preparation"
-    """등록하려는 parquet 자체가 요구를 만족하지 않는다 — 컬럼, 키, tz, span."""
+    MISSING = 404
+    """A name was given and nothing registered answers to it, or the path it names is not
+    there."""
 
-    SOURCE_ACCESS = "source-access"
-    """선언은 옳으나 그 경로를 읽을 수 없다."""
+    CONFLICT = 409
+    """What is being registered or removed disagrees with what the workspace already holds."""
 
-    COMPONENT_CONTRACT = "component-contract"
-    """사용자 코드가 framework가 부를 수 있는 모양이 아니다."""
+    PRECONDITION = 412
+    """The declaration is well-formed but a condition of running it does not hold: a lookback
+    before the data starts, a decision at or after its fill, an account that contradicts its
+    mode. What `vqapr check` is for."""
 
-    RUN_PRECONDITION = "run-precondition"
-    """실행 전에 갖춰졌어야 할 조건이 없다 — 상장, 체결 가격, 지평."""
+    CONTRACT = 422
+    """The user's code is not something the framework can call, or what it returned is not
+    something the framework can use: a wrong type, a missing method, an output with an
+    instrument nobody asked for."""
 
-    WORKSPACE_STATE = "workspace-state"
-    """workspace에 이미 있는 것과 지금 등록하려는 것이 충돌한다."""
+    LOCKED = 423
+    """Another process holds it: the workspace document, a live run record."""
 
-    PUBLICATION = "publication"
-    """산출물을 쓰는 단계에서 거절됐다."""
+    INTERNAL = 500
+    """The framework itself failed. Not the user's to fix; file it upstream with `cause`."""
+
+    CRASHED = 502
+    """The user's own code raised while the framework was running it -- the gateway's upstream
+    failed. `cause.where` names the user's line."""
+
+    UNAVAILABLE = 503
+    """The machine refused: a file could not be read or written, a disk was full."""
+
+    @property
+    def label(self) -> str:
+        """`invalid`, `missing`, ...: the word beside the number in messages and the skill."""
+        return self.name.lower()
+
+
+class Stage(StrEnum):
+    """Which operation was under way when the refusal was raised. Closed."""
+
+    USAGE = "usage"
+    """The command line itself, before any argument reached the package."""
+    OPEN = "open"
+    """Opening the workspace document."""
+    READ = "read"
+    """Reading a declared source, roster or record file from disk."""
+    REGISTER = "register"
+    """Proving and writing a declaration: dataset, execution input, component, run."""
+    LOOKUP = "lookup"
+    """Resolving a reference the workspace should hold."""
+    REMOVE = "remove"
+    """Removing a registration."""
+    WRITE = "write"
+    """Writing the workspace document."""
+    LOAD = "load"
+    """Importing and constructing a user component from its source file."""
+    CHECK = "check"
+    """The judgments `vqapr check` makes and `vqapr run` repeats."""
+    FREEZE = "freeze"
+    """Freezing a run's authority before it executes (preflight)."""
+    RUN = "run"
+    """Executing a frozen run: the callbacks, fills, valuations, datamodel computations."""
+    RECORD = "record"
+    """Writing a run's record or a datamodel's dataset."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -71,57 +139,172 @@ class FailureSource:
         return {"file": self.file, "key_path": self.key_path, "line": self.line}
 
 
-class FailureFamily(StrEnum):
-    """어느 단계의 실패인가. 집합은 미리 닫아둔다 (architecture §8.3)."""
+def _is_framework_frame(filename: str) -> bool:
+    try:
+        return Path(filename).resolve().is_relative_to(_PACKAGE_ROOT)
+    except (OSError, ValueError):
+        return False
 
-    DATA = "DATA"
-    INTENT = "INTENT"
-    ORDER = "ORDER"
-    EXCHANGE = "EXCHANGE"
-    ACCOUNT = "ACCOUNT"
-    VALUATION = "VALUATION"
-    PUBLICATION = "PUBLICATION"
+
+def _is_interpreter_frame(filename: str) -> bool:
+    """stdlib, site-packages, the REPL: neither the framework's nor the user's."""
+    if filename.startswith("<"):
+        return True
+    lowered = filename.replace("\\", "/").lower()
+    if "/site-packages/" in lowered or "/lib/python" in lowered:
+        return True
+    prefix = Path(sys.base_prefix).resolve()
+    try:
+        return Path(filename).resolve().is_relative_to(prefix)
+    except (OSError, ValueError):
+        return False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Cause:
+    """What actually happened, whole. Every failure carries one.
+
+    `type`, `message` and `traceback` are the exception as Python itself would print it, when
+    there was an exception; `where` is the innermost frame that is not the interpreter's,
+    `file:line (function)`; `origin` says whose frame that is -- `"user"` for a file outside
+    the package, `"framework"` for one inside it, `None` when no frame was found. A refusal the
+    framework raised deliberately, without an exception, still carries `where` and `origin`:
+    the line that decided to refuse is evidence too, and it is what an agent needs when it
+    suspects the classification rather than the submission.
+
+    Nothing here is truncated. This is beta, and a traceback cut at eight lines is a
+    traceback the reader cannot use.
+    """
+
+    type: str | None = None
+    message: str | None = None
+    where: str | None = None
+    origin: str | None = None
+    traceback: str | None = None
+
+    @classmethod
+    def of(cls, error: BaseException) -> Cause:
+        """The cause of an exception, read from its traceback."""
+        text = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        where, origin = _innermost(error.__traceback__)
+        return cls(
+            type=type(error).__name__,
+            message=str(error),
+            where=where,
+            origin=origin,
+            traceback=text,
+        )
+
+    @classmethod
+    def here(cls, *, skip: int = 0) -> Cause:
+        """The framework line that decided to refuse, for a failure with no exception.
+
+        `skip` steps that many further frames out, for a constructor that wants to name the
+        `raise` line rather than itself (`InputError.__init__` passes 1).
+        """
+        frame = sys._getframe(1)
+        here = Path(__file__).resolve()
+
+        def _outward(current: object) -> object:
+            # Skip this module's own frames and the interpreter's: a dataclass-generated
+            # `__init__` lives in `<string>`, and a direct `Failure(...)` passes through it.
+            while current is not None and (
+                _is_interpreter_frame(current.f_code.co_filename)  # type: ignore[attr-defined]
+                or Path(current.f_code.co_filename).resolve() == here  # type: ignore[attr-defined]
+            ):
+                current = current.f_back  # type: ignore[attr-defined]
+            return current
+
+        frame = _outward(frame)
+        for _ in range(skip):
+            frame = _outward(None if frame is None else frame.f_back)
+        if frame is None:
+            return cls()
+        filename = frame.f_code.co_filename
+        return cls(
+            where=f"{_short(filename)}:{frame.f_lineno} ({frame.f_code.co_name})",
+            origin="framework" if _is_framework_frame(filename) else "user",
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "type": self.type,
+            "message": self.message,
+            "where": self.where,
+            "origin": self.origin,
+            "traceback": self.traceback,
+        }
+
+
+def _short(filename: str) -> str:
+    try:
+        return Path(filename).resolve().relative_to(_PACKAGE_ROOT.parent).as_posix()
+    except ValueError:
+        return filename
+
+
+def _innermost(tb: TracebackType | None) -> tuple[str | None, str | None]:
+    """The innermost non-interpreter frame of a traceback, and whose it is.
+
+    A user frame wins over a framework frame when both are present below the interpreter's:
+    the innermost frame is where the exception was raised, and if that is the user's file the
+    user's code crashed (502) even though framework frames sit above it.
+    """
+    frames = traceback.extract_tb(tb) if tb is not None else []
+    for summary in reversed(frames):
+        if _is_interpreter_frame(summary.filename):
+            continue
+        origin = "framework" if _is_framework_frame(summary.filename) else "user"
+        return f"{_short(summary.filename)}:{summary.lineno} ({summary.name})", origin
+    return None, None
+
+
+def status_of(error: BaseException) -> Status:
+    """500 or 502 for an exception nobody classified: whose frame raised it."""
+    _, origin = _innermost(error.__traceback__)
+    return Status.CRASHED if origin == "user" else Status.INTERNAL
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Failure:
     """충족되지 않은 요구 하나. **진단이 아니라 지시**다.
 
-    code        점으로 구분된 stage path. 접두사로 분류할 수 있어야 한다
-                예: "dataset.register.schema.field_missing"
+    code        `<subject>.<detail>`: which thing, and what about it. 접두사로 분류하지 않는다 --
+                분류는 `status`가 한다. 예: "dataset.field_missing"
+    status      누가 고쳐야 하나. `Status`, 닫힌 집합
     source      어느 자리인가 — 파일·키·줄. 포맷된 문자열이 아니라 구조다
     requirement 무엇을 요구했나
     observed    실제로 무엇을 봤나. 없으면 None
     fix         **이번 한 번을 고치는 문장.** 다음에 무엇을 할지가 여기 있다
-    explain     이 부류를 설명하는 skill 절의 id. 닫힌 집합에서 온다
+    cause       실제로 무엇이 일어났나 -- 예외 전문, 또는 거절을 낸 프레임워크의 줄. 항상 있다
     examples    위반 예시. MAX_EXAMPLES개로 잘린다
     example_total 잘리기 전 전체 개수. 예시가 전부인지 일부인지 알 수 있어야 한다
 
-    `kw_only=True`가 붙은 이유는 문법이지 취향이 아니다: `observed`·`examples`·`example_total`이
-    기본값을 갖고 있으므로, 기본값 없는 `source`·`fix`·`explain`을 그 뒤에 붙이면 dataclass가
-    **클래스 정의 시점에** TypeError를 낸다. 모듈이 아예 import되지 않는다.
+    `kw_only=True`가 붙은 이유는 문법이지 취향이 아니다: 기본값을 갖는 필드 뒤에 기본값 없는
+    필드를 붙이면 dataclass가 **클래스 정의 시점에** TypeError를 낸다.
     """
 
     code: str
+    status: Status
     requirement: str
     fix: str
-    explain: ExplainTopic
     source: FailureSource = FailureSource()
     observed: str | None = None
+    cause: Cause | None = None
     examples: tuple[str, ...] = ()
     example_total: int = 0
 
     def __post_init__(self) -> None:
         if not self.code or " " in self.code:
             raise ValueError(f"failure code must be a dotted path without spaces: {self.code!r}")
+        if not isinstance(self.status, Status):
+            raise TypeError(
+                f"{self.code}: status must be a Status, got {type(self.status).__name__}"
+            )
         if not self.requirement:
             raise ValueError(f"{self.code}: requirement must say what was required")
         if not self.fix:
             raise ValueError(f"{self.code}: fix must name the next action, not restate the problem")
-        if not isinstance(self.explain, ExplainTopic):
-            raise TypeError(
-                f"{self.code}: explain must be an ExplainTopic, got {type(self.explain).__name__}"
-            )
         if not isinstance(self.source, FailureSource):
             raise TypeError(
                 f"{self.code}: source must be a FailureSource, got {type(self.source).__name__}"
@@ -130,23 +313,27 @@ class Failure:
             raise ValueError(
                 f"examples must be bounded to {MAX_EXAMPLES}, got {len(self.examples)}"
             )
+        if self.cause is None:
+            # Always a cause: the line that decided to refuse, when nothing was raised.
+            object.__setattr__(self, "cause", Cause.here())
+        elif not isinstance(self.cause, Cause):
+            raise TypeError(f"{self.code}: cause must be a Cause, got {type(self.cause).__name__}")
 
     def as_dict(self) -> dict[str, object]:
         """The one failure entry every envelope carries, in the one key order.
 
-        `VqaprError.as_dict`, `InputError`, `SimulationFailure` and `check` all emit this entry,
-        and each used to write the eight keys out by hand -- six literals that agreed only as
-        long as nobody edited one. A reader parses these by name (`SKILL.md`), so the shape is a
-        contract, and a contract has one implementation. Anything that renders a failure builds
-        a `Failure` and calls this; nothing else spells the keys.
+        `VqaprError.as_dict`, `InputError`, `SimulationFailure` and `check` all emit this entry
+        through this method; nothing else spells the keys (record `170`).
         """
+        assert self.cause is not None
         return {
             "code": self.code,
+            "status": int(self.status),
             "source": self.source.as_dict(),
             "requirement": self.requirement,
             "observed": self.observed,
             "fix": self.fix,
-            "explain": str(self.explain),
+            "cause": self.cause.as_dict(),
             "examples": list(self.examples),
             "example_total": self.example_total,
         }
@@ -157,27 +344,31 @@ class Failure:
         code: str,
         requirement: str,
         *,
+        status: Status,
         fix: str,
-        explain: ExplainTopic,
         source: FailureSource | None = None,
         observed: str | None = None,
+        cause: BaseException | Cause | None = None,
         examples: Sequence[str] = (),
         example_total: int | None = None,
     ) -> Failure:
         """예시를 상한까지 잘라 만든다. 호출자가 자르는 것을 잊지 않게 하려는 것.
 
-        `code`와 `requirement`만 위치 인자로 남겨 둔 것은 기존 호출부 49곳의 모양을 유지하기
-        위해서다. 새로 요구되는 셋은 키워드로만 받는다.
+        `cause` may be the exception itself; it is read into a `Cause` here so a raise site
+        writes `cause=error` and nothing more. Omitted, the cause is this call's own raise site.
         """
         kept = tuple(str(e) for e in examples[:MAX_EXAMPLES])
         total = example_total if example_total is not None else len(examples)
+        if isinstance(cause, BaseException):
+            cause = Cause.of(cause)
         return cls(
             code=code,
+            status=status,
             requirement=requirement,
             fix=fix,
-            explain=explain,
             source=source if source is not None else FailureSource(),
             observed=observed,
+            cause=cause if cause is not None else Cause.here(),
             examples=kept,
             example_total=total,
         )
@@ -190,8 +381,7 @@ class Diagnosis:
     `failures`가 비어 있으면 통과다. 비어 있지 않으면 `raise_if_failed()`가 던진다.
     """
 
-    stage: str
-    family: FailureFamily
+    stage: Stage
     failures: tuple[Failure, ...] = ()
     mutation: bool = False
     retry_precondition: str | None = None
@@ -204,7 +394,6 @@ class Diagnosis:
         if self.failures:
             raise VqaprError(
                 stage=self.stage,
-                family=self.family,
                 failures=self.failures,
                 mutation=self.mutation,
                 retry_precondition=self.retry_precondition,
@@ -221,15 +410,15 @@ class VqaprError(Exception):
     def __init__(
         self,
         *,
-        stage: str,
-        family: FailureFamily,
+        stage: Stage,
         failures: Sequence[Failure],
         mutation: bool = False,
         retry_precondition: str | None = None,
         correlation_id: str | None = None,
     ) -> None:
+        if not isinstance(stage, Stage):
+            raise TypeError(f"stage must be a Stage, got {type(stage).__name__}")
         self.stage = stage
-        self.family = family
         self.failures: tuple[Failure, ...] = tuple(failures)
         self.mutation = mutation
         self.retry_precondition = retry_precondition
@@ -241,16 +430,14 @@ class VqaprError(Exception):
 
         The default pickling of an exception calls `cls(*args)` with the message, which this
         constructor refuses; a `--jobs` worker's refusal then came back to the parent as
-        `TypeError: ... takes 1 positional argument` and rendered `stage: "unhandled"` with no
-        failures (`docs/issues/073`, closed for strategies by returning an outcome instead; the
-        datamodel worker raises, so its exception has to travel as itself -- record `170`).
+        `TypeError: ... takes 1 positional argument` and rendered as unhandled with no failures
+        (`docs/issues/073`; record `170`).
         """
         return (
             _rebuild_error,
             (
                 type(self),
                 self.stage,
-                self.family,
                 self.failures,
                 self.mutation,
                 self.retry_precondition,
@@ -258,15 +445,21 @@ class VqaprError(Exception):
             ),
         )
 
+    @property
+    def status(self) -> Status:
+        """The most severe status among the failures: 5xx before 4xx, then by number."""
+        return max((f.status for f in self.failures), default=Status.INTERNAL)
+
     def _summary(self) -> str:
-        head = f"{self.family}:{self.stage} — {len(self.failures)} failure(s)"
-        return head + "".join(f"\n  [{f.code}] {f.requirement}" for f in self.failures)
+        head = f"{self.stage}: {len(self.failures)} failure(s)"
+        return head + "".join(
+            f"\n  [{int(f.status)} {f.code}] {f.requirement}" for f in self.failures
+        )
 
     def as_dict(self) -> dict[str, object]:
         """agent가 읽는 형태. 사람이 읽는 것은 `str(err)`."""
         return {
-            "stage": self.stage,
-            "family": str(self.family),
+            "stage": str(self.stage),
             "mutation": self.mutation,
             "retry_precondition": self.retry_precondition,
             "correlation_id": self.correlation_id,
@@ -276,8 +469,7 @@ class VqaprError(Exception):
 
 def _rebuild_error(
     cls: type[VqaprError],
-    stage: str,
-    family: FailureFamily,
+    stage: Stage,
     failures: tuple[Failure, ...],
     mutation: bool,
     retry_precondition: str | None,
@@ -286,7 +478,6 @@ def _rebuild_error(
     """The unpickling half of `VqaprError.__reduce__`: the same error, same correlation id."""
     return cls(
         stage=stage,
-        family=family,
         failures=failures,
         mutation=mutation,
         retry_precondition=retry_precondition,
@@ -294,12 +485,38 @@ def _rebuild_error(
     )
 
 
+def unhandled(error: BaseException, *, stage: Stage) -> Failure:
+    """The one failure for an exception nobody classified: 500 or 502 by whose frame raised it.
+
+    The old envelope rendered these as `stage: "unhandled"` with an empty failure list and a
+    traceback that was cut at eight lines or sent to a file. An agent could not tell the
+    framework's bug from its own (`docs/issues/076`). Now it is a failure like any other, with
+    the whole traceback in `cause` and the status saying whose it is.
+    """
+    status = status_of(error)
+    cause = Cause.of(error)
+    if status is Status.CRASHED:
+        fix = f"read the traceback in `cause`; the innermost frame is yours: {cause.where}"
+    else:
+        fix = (
+            "this is not your submission's fault: file an issue upstream with the whole "
+            "`cause` (type, message, traceback) and the command that produced it"
+        )
+    return Failure.bounded(
+        "unhandled",
+        "every failure is classified and named by the framework",
+        status=status,
+        observed=f"{type(error).__name__}: {error}",
+        fix=fix,
+        cause=cause,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _Collector:
     """단계 안에서 실패를 모은다. 하나 나왔다고 멈추지 않는다."""
 
-    stage: str
-    family: FailureFamily
+    stage: Stage
     _found: list[Failure] = field(default_factory=list)
 
     def add(self, failure: Failure) -> None:
@@ -308,12 +525,11 @@ class _Collector:
     def done(self, *, mutation: bool = False, retry: str | None = None) -> Diagnosis:
         return Diagnosis(
             stage=self.stage,
-            family=self.family,
             failures=tuple(self._found),
             mutation=mutation,
             retry_precondition=retry,
         )
 
 
-def collector(stage: str, family: FailureFamily = FailureFamily.DATA) -> _Collector:
-    return _Collector(stage=stage, family=family)
+def collector(stage: Stage) -> _Collector:
+    return _Collector(stage=stage)

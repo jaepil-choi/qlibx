@@ -59,10 +59,10 @@ call in `decide()` and not the Flow's guard."""
 STRATEGIES = ("ou-first", "never-ready", "ou-last")
 
 
-def _project(tmp_path: Path, sample_panel) -> tuple[Path, Path]:
+def _project(tmp_path: Path) -> tuple[Path, Path]:
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project, panel=sample_panel)
+    panel = journey.install(project)
     raising = tmp_path / "never_ready.py"
     raising.write_text(RAISING_SOURCE, encoding="utf-8")
     register_strategy_model(project, "ou-first", journey.STRATEGY_SOURCE, "SampleReversal5d")
@@ -79,7 +79,14 @@ def _assert_failure_names_its_strategy(failure: dict) -> None:
     """The payload alone says which strategy, which file and which line (`071`)."""
     assert failure["component_id"] == "never-ready"
     (entry,) = failure["failures"]
-    assert entry["code"] == "simulation.callback.intent.ValueError"
+    assert entry["code"] == "strategy.callback.intent"
+    # 502, not 500: the innermost frame of the traceback is the author's file, so the author's
+    # code crashed and the framework is only the gateway that ran it (record `171`).
+    assert entry["status"] == 502, entry
+    assert entry["cause"]["type"] == "ValueError"
+    assert entry["cause"]["origin"] == "user"
+    assert entry["cause"]["traceback"].startswith("Traceback"), entry["cause"]
+    assert "never_ready.py" in entry["cause"]["traceback"]
     assert entry["observed"].startswith("the signal is not ready: "), entry["observed"]
     assert entry["source"]["key_path"] == "strategies.never-ready"
     assert entry["source"]["file"].endswith("never_ready.py"), entry["source"]
@@ -88,10 +95,8 @@ def _assert_failure_names_its_strategy(failure: dict) -> None:
     )
 
 
-def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(
-    tmp_path: Path, sample_panel
-) -> None:
-    project, store = _project(tmp_path, sample_panel)
+def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(tmp_path: Path) -> None:
+    project, store = _project(tmp_path)
     frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
 
     outcome = execute_run(project, frozen, store_root=store)
@@ -122,11 +127,9 @@ def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(
 
 
 @pytest.mark.slow
-def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(
-    tmp_path: Path, sample_panel
-) -> None:
+def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(tmp_path: Path) -> None:
     """The finding itself: `--jobs`, one refusal, the parent used to see `cannot pickle`."""
-    project, store = _project(tmp_path, sample_panel)
+    project, store = _project(tmp_path)
     frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
 
     outcome = execute_run(project, frozen, store_root=store, jobs=3)

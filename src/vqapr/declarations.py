@@ -33,10 +33,10 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
     Diagnosis,
-    ExplainTopic,
     Failure,
-    FailureFamily,
     FailureSource,
+    Stage,
+    Status,
     collector,
 )
 from vqapr.exchange.conventions import FillConvention, FillSelector
@@ -67,15 +67,6 @@ _COMPONENT_KINDS = {
 
 무엇이 실제로 좁은 문인지는 `load_exchange`가 정한다 — shipped profile을 상속하지 않거나
 `execute()`를 갈아치운 것은 거기서 거부된다. CLI가 kind 목록으로 막을 일이 아니다.
-"""
-
-DECLARE_STAGE = "declaration.read"
-"""Reading the user's declaration document, before any workspace work begins.
-
-Separate from `workspace.dataset.register` on purpose: that stage means the workspace refused a
-well-formed declaration, while this one means the document itself is incomplete. Reporting the
-second as the first sends a reader to inspect their workspace when the file on their disk is what
-needs editing.
 """
 
 SECTIONS = (
@@ -211,10 +202,11 @@ def refusals_from(
 
     pydantic owns the key sets, the types, the enums and the timestamps of a declaration
     (record `145`); what it must not own is the sentence an author reads. Each line error
-    becomes one `Failure` with the package's own `code`, a `fix` that says what to write, the
-    `DECLARATION_SHAPE` topic and a `source` at the dotted key path -- and all of them travel in
-    ONE `Diagnosis`, which is what `_require_keys` promised: an agent fixing its declaration is
-    told every problem at once, not one per round trip.
+    becomes one `Failure` with the package's own `code`, status 400 (the document is what must
+    change), a `fix` that says what to write and a `source` at the dotted key path -- and all of
+    them travel in ONE `Diagnosis`, which is what `_require_keys` promised: an agent fixing its
+    declaration is told every problem at once, not one per round trip. The `ValidationError`
+    itself rides on every entry as `cause`.
 
     Four shapes, four codes. A missing key (`key_missing`) names what the declaration does
     have, so the reader sees the set whole. An unknown key (`key_unknown`) and a value outside a
@@ -222,7 +214,7 @@ def refusals_from(
     typo they typed. Everything else is `value_invalid` at its own path. Nothing pydantic wrote
     reaches the envelope; its `msg` is a hint for the requirement sentence and no more.
     """
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     for extra in also:
         found.add(extra)
     for line in error.errors(include_url=False):
@@ -235,7 +227,9 @@ def refusals_from(
             vocabulary = _permitted_values(model, loc)
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.key_missing",
+                    "declaration.key_missing",
+                    status=Status.INVALID,
+                    cause=error,
                     requirement=(
                         f"{parent} must declare {key}"
                         + (f", one of: {', '.join(vocabulary)}" if vocabulary else "")
@@ -243,7 +237,6 @@ def refusals_from(
                     observed=f"{parent} declares: {', '.join(present) or '(nothing)'}",
                     source=_at(parent),
                     fix=f"add {key} under {parent} in the declaration YAML",
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
         elif kind == "extra_forbidden":
@@ -251,7 +244,9 @@ def refusals_from(
             permitted = _permitted_keys(model, loc[:-1])
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.key_unknown",
+                    "declaration.key_unknown",
+                    status=Status.INVALID,
+                    cause=error,
                     requirement=f"{parent} may declare: {', '.join(permitted)}",
                     observed=f"{parent} declares {key!r}, which is not one of them",
                     examples=[key],
@@ -263,7 +258,6 @@ def refusals_from(
                         if permitted
                         else f"remove {key} from {parent}"
                     ),
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
         elif kind in ("enum", "literal_error"):
@@ -272,25 +266,27 @@ def refusals_from(
             written = str(line.get("input"))
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.value_not_permitted",
+                    "declaration.value_not_permitted",
+                    status=Status.INVALID,
+                    cause=error,
                     requirement=f"{path} must be one of: {', '.join(expected)}",
                     observed=written,
                     examples=expected,
                     source=_at(path),
                     fix=_nearest_hint(written, expected, path),
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
         else:
             path = ".".join((name, *loc))
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.value_invalid",
+                    "declaration.value_invalid",
+                    status=Status.INVALID,
+                    cause=error,
                     requirement=f"{path} must be {_shape_words(line)}",
                     observed=f"{path} is {line.get('input')!r}",
                     source=_at(path),
                     fix=f"correct {path} in the declaration YAML",
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
     return found.done()
@@ -472,7 +468,6 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
                 "remove the id line under `instruments:` and lift `tables:` up one level; a "
                 "project holds one roster and each registration replaces it, so it has no name"
             ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
         )
     try:
         declared = InstrumentsDeclaration.model_validate(bodies)
@@ -497,7 +492,6 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
                 requirement=f"{name}.tables.{kind} must name a readable instrument table",
                 observed=str(error),
                 fix=f"write {path.name} with instrument_id and kind columns, then re-register",
-                explain=ExplainTopic.DECLARATION_SHAPE,
                 source=FailureSource(file=str(path)),
             ) from error
         resolved[str(kind)] = path
@@ -524,7 +518,6 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
                 "correct the instrument tables so each id appears once under a declared kind; "
                 "re-running the emitted instruments.py produces a table that satisfies this"
             ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
         ) from error
 
     transaction.register_instruments(resolved, digest=digest.hexdigest())
@@ -622,10 +615,12 @@ def _dataset(
         # Two keys can object here, and each has its own sentence: `field_types` names a field
         # or a type, `grain` names the other keys it disagrees with.
         about_types = "field_types" in str(error)
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found = collector(Stage.REGISTER)
         found.add(
             Failure.bounded(
-                f"{DECLARE_STAGE}.value_invalid",
+                "declaration.value_invalid",
+                status=Status.INVALID,
+                cause=error,
                 requirement=(
                     f"{name}.field_types must give every field in {name}.fields one of "
                     f"{DECLARABLE_FIELD_TYPE_NAMES}, and nothing else"
@@ -641,7 +636,6 @@ def _dataset(
                     else f"set {name}.grain to one of {GRAIN_NAMES} and make the other keys "
                     "match it"
                 ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -668,12 +662,14 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
     """
     try:
         return kind[str(value).upper()]
-    except KeyError:
+    except KeyError as unknown:
         permitted = ", ".join(member.name.lower() for member in kind)
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found = collector(Stage.REGISTER)
         found.add(
             Failure.bounded(
-                f"{DECLARE_STAGE}.value_not_permitted",
+                "declaration.value_not_permitted",
+                status=Status.INVALID,
+                cause=unknown,
                 requirement=f"{name} must be one of: {permitted}",
                 observed=str(value),
                 examples=[member.name.lower() for member in kind],
@@ -682,7 +678,6 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
                 # permitted set with the verb swapped would say nothing `requirement` has not
                 # already said, and a near-miss is usually a typo the reader cannot see.
                 fix=_nearest_hint(str(value), [member.name.lower() for member in kind], name),
-                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done().raise_if_failed()
@@ -700,10 +695,11 @@ def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
     raw = body.get("grain")
     if isinstance(raw, str) and raw in GRAIN_NAMES.split(", "):
         return
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     found.add(
         Failure.bounded(
-            f"{DECLARE_STAGE}.grain_undeclared",
+            "declaration.grain_undeclared",
+            status=Status.INVALID,
             requirement=f"{name} must declare grain, one of: {GRAIN_NAMES}",
             observed=("absent" if raw is None else repr(raw)),
             examples=GRAIN_NAMES.split(", "),
@@ -714,7 +710,6 @@ def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
                 "available_at, no instrument axis; rows: the vendor's grain, unique on key_fields. "
                 f"Note: {ROWS_LOOKBACK_MEANING}"
             ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
         )
     )
     found.done().raise_if_failed()
@@ -776,7 +771,7 @@ def _require_declared_ids(section: Any) -> None:
     written. Collected rather than stopping at the first, for the reason the whole surface
     collects -- a document with three bad keys should cost one command, not three.
     """
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     for key, (label, judge) in _DECLARED_IDS.items():
         for declared in section(key):
             raw = str(declared)
@@ -785,7 +780,9 @@ def _require_declared_ids(section: Any) -> None:
             except (TypeError, ValueError) as invalid:
                 found.add(
                     Failure.bounded(
-                        f"{DECLARE_STAGE}.value_invalid",
+                        "declaration.value_invalid",
+                        status=Status.INVALID,
+                        cause=invalid,
                         requirement=(
                             f"a {label} must be a non-empty string with no whitespace inside it "
                             "and none around it"
@@ -796,7 +793,6 @@ def _require_declared_ids(section: Any) -> None:
                             f"rename the key under `{key}:` to a non-empty identifier without "
                             "spaces, such as `daily-prices`"
                         ),
-                        explain=ExplainTopic.DECLARATION_SHAPE,
                     )
                 )
     found.done().raise_if_failed()
@@ -874,12 +870,13 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
         # was one lumped refusal with no `source` and a `fix` that only repeated the names back,
         # so `dataset:` -- the typo this package's own test names -- was reported without ever
         # saying `datasets`.
-        found = collector(DECLARE_STAGE, FailureFamily.DATA)
+        found = collector(Stage.REGISTER)
         for section_name in unknown:
             note, remedy = _SECTION_NOTES.get(section_name, ("", ""))
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.unknown_section",
+                    "declaration.unknown_section",
+                    status=Status.INVALID,
                     requirement=f"a declaration may contain: {', '.join(SECTIONS)}",
                     observed=f"unknown section: {section_name}{note}",
                     examples=[section_name],
@@ -888,7 +885,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                     or _nearest_hint(
                         section_name, SECTIONS, section_name, removable=True
                     ).replace("set ", "rename ", 1),
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
         found.done().raise_if_failed()
@@ -950,10 +946,12 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                 if isinstance(invalid, ValidationError)
                 else str(invalid)
             )
-            found = collector(DECLARE_STAGE, FailureFamily.DATA)
+            found = collector(Stage.REGISTER)
             found.add(
                 Failure.bounded(
-                    f"{DECLARE_STAGE}.run_invalid",
+                    "declaration.run_invalid",
+                    status=Status.INVALID,
+                    cause=invalid,
                     requirement=(
                         "a run declares strategies (with exchange, execution_input and "
                         "initial_account) or datamodels, plus instruments, start, end, "
@@ -964,7 +962,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> dict[
                     examples=["2024-01-02T00:00:00+09:00"],
                     source=_at(name),
                     fix=f"correct `{name}` in the declaration, then register again",
-                    explain=ExplainTopic.DECLARATION_SHAPE,
                 )
             )
             found.done().raise_if_failed()
@@ -996,7 +993,7 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
     for run_id, definition in definitions:
         for entry in definition.datamodels:
             produced.setdefault(str(entry.dataset_id), run_id)
-    found = collector(DECLARE_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
         wanted = definition.sessions_from
         producer = None if wanted is None else produced.get(str(wanted))
@@ -1004,7 +1001,8 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
             continue
         found.add(
             Failure.bounded(
-                f"{DECLARE_STAGE}.run_fed_by_sibling",
+                "declaration.run_fed_by_sibling",
+                status=Status.INVALID,
                 requirement=(
                     "a run that takes its sessions from a dataset must be registered after "
                     "that dataset exists"
@@ -1018,7 +1016,6 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
                     f"split the document: register and run {producer!r} first, then register "
                     f"{run_id!r} from its own file once {wanted!r} exists"
                 ),
-                explain=ExplainTopic.WORKSPACE_STATE,
             )
         )
     found.done().raise_if_failed()

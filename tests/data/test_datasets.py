@@ -10,15 +10,9 @@ import pyarrow as pa
 import pytest
 
 from vqapr.data import scan
-from vqapr.data.datasets import (
-    KEY_STAGE,
-    SCHEMA_STAGE,
-    VALUE_STAGE,
-    DatasetRegistration,
-    validate,
-)
+from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
+from vqapr.domain.errors import MAX_EXAMPLES, Stage, VqaprError
 
 
 def _registration(**overrides) -> DatasetRegistration:
@@ -55,8 +49,8 @@ def test_every_schema_problem_arrives_together(hive_parquet: Path) -> None:
     )
     codes = sorted(f.code for f in diagnosis.failures)
     assert codes == [
-        f"{SCHEMA_STAGE}.available_at_not_a_timestamp",
-        f"{SCHEMA_STAGE}.field_missing",
+        "dataset.available_at_not_a_timestamp",
+        "dataset.field_missing",
     ]
 
 
@@ -67,7 +61,7 @@ def test_a_failed_schema_skips_the_full_scan(hive_parquet: Path) -> None:
         _registration(fields={"close": "nope"}, field_types={"close": "INTEGER"}), spec
     )
     assert not diagnosis.ok
-    assert diagnosis.stage == SCHEMA_STAGE
+    assert diagnosis.stage is Stage.REGISTER
     assert timing.key_was_skipped is True
 
 
@@ -75,7 +69,7 @@ def test_naive_timestamp_is_refused(naive_parquet: Path) -> None:
     """저장도 조회도 되지만 조용히 틀린다. 등록이 유일하게 잡을 수 있는 자리다."""
     spec = SourceSpec.of("s", naive_parquet)
     diagnosis, _, _measured = validate(_registration(), spec)
-    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.available_at_not_tz"]
+    assert [f.code for f in diagnosis.failures] == ["dataset.available_at_not_tz"]
     assert diagnosis.failures[0].observed == "TIMESTAMP_NAIVE"
 
 
@@ -89,7 +83,7 @@ def test_key_problems_arrive_together(dup_parquet: Path) -> None:
     spec = SourceSpec.of("s", dup_parquet)
     diagnosis, timing, _measured = validate(_registration(), spec)
     codes = sorted(f.code for f in diagnosis.failures)
-    assert codes == [f"{KEY_STAGE}.duplicate", f"{KEY_STAGE}.null"]
+    assert codes == ["dataset.key_duplicate", "dataset.key_null"]
     assert timing.key_was_skipped is False
 
 
@@ -198,7 +192,7 @@ def test_a_decimal_column_is_refused_whatever_it_is_declared_as(tmp_path: Path) 
 
     diagnosis, timing, _measured = validate(_typed("DOUBLE"), spec)
 
-    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_decimal"]
+    assert [f.code for f in diagnosis.failures] == ["dataset.field_decimal"]
     assert "DECIMAL(18,4)" in (diagnosis.failures[0].observed or "")
     assert "DOUBLE" in diagnosis.failures[0].fix
     assert timing.key_was_skipped is True
@@ -213,7 +207,7 @@ def test_a_declaration_that_disagrees_with_the_file_is_refused_naming_both(
     diagnosis, timing, _measured = validate(_typed("INTEGER"), spec)
 
     (failure,) = diagnosis.failures
-    assert failure.code == f"{SCHEMA_STAGE}.field_type_mismatch"
+    assert failure.code == "dataset.field_type_mismatch"
     assert "INTEGER" in failure.requirement
     assert "DOUBLE" in (failure.observed or "")
     assert "field_types.close: DOUBLE" in failure.fix
@@ -235,7 +229,7 @@ def test_source_id_mismatch_fails_before_opening_the_source(tmp_path: Path) -> N
 
     diagnosis, timing, _measured = validate(_registration(), spec)
 
-    assert [failure.code for failure in diagnosis.failures] == [f"{SCHEMA_STAGE}.source_mismatch"]
+    assert [failure.code for failure in diagnosis.failures] == ["dataset.source_mismatch"]
     assert timing.key_was_skipped is True
 
 
@@ -388,8 +382,8 @@ def test_a_nan_column_is_refused_at_registration(unprepared_parquet: Path) -> No
     diagnosis, _timing, _measured = validate(_exposing(close="close"), spec)
 
     assert not diagnosis.ok
-    assert diagnosis.stage == VALUE_STAGE
-    assert [f.code for f in diagnosis.failures] == [f"{VALUE_STAGE}.not_finite"]
+    assert diagnosis.stage is Stage.REGISTER
+    assert [f.code for f in diagnosis.failures] == ["dataset.value_not_finite"]
 
 
 def test_the_refusal_names_the_field_and_counts_what_it_found(
@@ -430,7 +424,7 @@ def test_a_naive_timestamp_field_is_refused_before_any_scan(
     spec = SourceSpec.of("s", unprepared_parquet)
     diagnosis, timing, _measured = validate(_exposing(stamped_at="stamped_at"), spec)
 
-    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_not_tz"]
+    assert [f.code for f in diagnosis.failures] == ["dataset.field_not_tz"]
     assert timing.key_was_skipped is True
 
 
@@ -441,7 +435,7 @@ def test_a_field_that_is_not_a_scalar_is_refused_before_any_scan(
     spec = SourceSpec.of("s", unprepared_parquet)
     diagnosis, timing, _measured = validate(_exposing(payload="payload"), spec)
 
-    assert [f.code for f in diagnosis.failures] == [f"{SCHEMA_STAGE}.field_not_portable"]
+    assert [f.code for f in diagnosis.failures] == ["dataset.field_not_portable"]
     assert timing.key_was_skipped is True
 
 

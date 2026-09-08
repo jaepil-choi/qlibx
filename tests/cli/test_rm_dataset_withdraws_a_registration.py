@@ -101,7 +101,7 @@ def test_a_dataset_a_run_takes_its_sessions_from_is_refused_naming_the_run(
 ) -> None:
     code, refused = _cli(capsys, "--project-root", str(project), "rm", "dataset", "price_daily")
     assert code == 1, refused
-    assert refused["failures"][0]["code"] == "workspace.remove.referenced"
+    assert refused["failures"][0]["code"] == "remove.referenced"
     assert "run 'daily' (sessions_from)" in refused["failures"][0]["observed"]
     code, listed = _cli(capsys, "--project-root", str(project), "list", "datasets")
     assert {row["dataset_id"] for row in listed["items"]} == {"price_daily", "derived"}

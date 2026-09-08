@@ -166,7 +166,7 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
         t.register_run(_definition(instruments=("A",)))
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.conflict"
+    assert failure["code"] == "run.registered"
     assert "run_id 'krx-2024'" in failure["requirement"]
     # `docs/issues/084`: the two options the fix used to list were the two things an author
     # editing a run during setup did not want. The third ships, and the refusal names it.
@@ -191,7 +191,7 @@ def test_a_run_naming_anything_unregistered_is_refused_by_name(
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
         t.register_run(_definition(**override))
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.reference"
+    assert failure["code"] == "run.reference_invalid"
     assert names in failure["requirement"], failure["requirement"]
 
 
@@ -263,7 +263,7 @@ def test_a_malformed_run_declaration_is_refused_with_its_own_code(
     with pytest.raises(VqaprError) as refused:
         apply(document, workspace.project_root, base=workspace.project_root)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert failure["source"]["key_path"] == "runs.bad"
     assert said in failure["observed"], failure["observed"]
 

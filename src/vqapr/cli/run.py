@@ -20,11 +20,12 @@ from vqapr.cli.envelope import success
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
 # themselves, which is what keeps `flow/` free of `cli`.
 from vqapr.domain.errors import (
-    ExplainTopic,
     Failure,
-    FailureFamily,
     FailureSource,
+    Stage,
+    Status,
     VqaprError,
+    status_of,
 )
 from vqapr.flow.orchestration import COMPLETED, FAILED
 from vqapr.flow.record import (
@@ -89,13 +90,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
-PREFLIGHT_STAGE = "run.check"
-"""`run`'s preflight refusals carry `check`'s stage and codes, because they are the same judgment.
-
-A reader who learned to handle `run.check.preflight_refused` from `vqapr check` must not have to
-learn a second vocabulary for the verb that actually runs.
-"""
-
 _MAX_CAUSE_LINKS = 4
 """How many `__cause__` hops `observed` carries before it stops at `...`.
 
@@ -132,27 +126,32 @@ def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
 
     The two codes are written literally rather than selected into a variable so the refusal-code
-    inventory's constant folding can see them.
+    inventory's constant folding can see them. Both carry the exception whole as `cause`; the
+    `run`/`spec` phases are the declaration's fault (400), and a preflight invariant is classified
+    by whose frame raised it (`status_of`: 500 framework, 502 user code), because a bare
+    `ValueError` here may be either and the traceback is what says which (record `171`).
     """
     detail = _chain(error)
     fix = f"correct the run {target!r} so the {phase} phase completes, then check again"
     source = FailureSource(key_path=f"runs.{target}")
     if phase in ("run", "spec"):
         return Failure.bounded(
-            "run.check.declaration_invalid",
+            "run.declaration_invalid",
             "the run must resolve against what the workspace has registered",
+            status=Status.INVALID,
             observed=detail,
             fix=fix,
-            explain=ExplainTopic.DECLARATION_SHAPE,
             source=source,
+            cause=error,
         )
     return Failure.bounded(
-        "run.check.preflight_refused",
+        "preflight.refused",
         "every run precondition must hold before the run starts",
+        status=status_of(error),
         observed=detail,
         fix=fix,
-        explain=ExplainTopic.RUN_PRECONDITION,
         source=source,
+        cause=error,
     )
 
 
@@ -215,8 +214,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # `VqaprError` and `InputError` are therefore deliberately not caught -- both already
         # carry their own bounded body and their own truer stage.
         raise VqaprError(
-            stage=PREFLIGHT_STAGE,
-            family=FailureFamily.INTENT,
+            stage=Stage.FREEZE,
             failures=[preflight_refusal("preflight", refused, target)],
         ) from refused
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
@@ -307,11 +305,9 @@ def _strategy_failed(
     holds the full replay coordinates (`at`, `retry_precondition`) for each.
     """
     failed = {name: block for name, block in strategies.items() if block["status"] == FAILED}
-    families = {block.get("family") for block in failed.values()}
     return {
         "ok": False,
         "stage": "run.strategy_failed",
-        "family": families.pop() if len(families) == 1 else None,
         "mutation": any(bool(block.get("mutation")) for block in failed.values()),
         "retry_precondition": None,
         "correlation_id": frozen.identity,
@@ -371,8 +367,11 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
     }
 
 
-def _held_record(running: RunRecordLive) -> InputError:
+def _held_record(running: RunRecordLive) -> VqaprError:
     """The refusal for a record whose lock is still inside its heartbeat window.
+
+    Status 423 at stage `record` (record `171`): another process holds it, and the submission is
+    not what must change. It was an `InputError`, which told the reader their argument was wrong.
 
     **What this refusal may not say is that the holder is alive.** The lock proves only that it
     was touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
@@ -381,19 +380,29 @@ def _held_record(running: RunRecordLive) -> InputError:
     correct under both readings and costs nothing.
     """
     claim = running.claim
-    return InputError(
-        VALUE_INVALID,
-        requirement="a record must not already be held by a lock inside its heartbeat window",
-        observed=(
-            f"{running.run_id!r} holds a lock last refreshed {claim.age:.0f}s ago at "
-            f"{running.directory} (pid {claim.pid}, not interrogated)"
-        ),
-        retry=(
-            f"wait about {claim.releases_in:.0f}s: a live run refreshes that lock continuously, "
-            f"and if its process is gone the lock is released automatically, after which "
-            f"re-running this exact command reclaims the record. Do not use --force while the "
-            f"holder may be live: against a run that is still writing it destroys that run's rows"
-        ),
+    fix = (
+        f"wait about {claim.releases_in:.0f}s: a live run refreshes that lock continuously, "
+        f"and if its process is gone the lock is released automatically, after which "
+        f"re-running this exact command reclaims the record. Do not use --force while the "
+        f"holder may be live: against a run that is still writing it destroys that run's rows"
+    )
+    return VqaprError(
+        stage=Stage.RECORD,
+        failures=[
+            Failure.bounded(
+                "record.live",
+                "a record must not already be held by a lock inside its heartbeat window",
+                status=Status.LOCKED,
+                observed=(
+                    f"{running.run_id!r} holds a lock last refreshed {claim.age:.0f}s ago at "
+                    f"{running.directory} (pid {claim.pid}, not interrogated)"
+                ),
+                fix=fix,
+                source=FailureSource(file=str(running.directory)),
+                cause=running,
+            )
+        ],
+        retry_precondition=fix,
     )
 
 

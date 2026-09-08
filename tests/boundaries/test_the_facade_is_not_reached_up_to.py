@@ -51,10 +51,11 @@ import pytest
 # empties, the facade has no consumers and the question is whether it should exist at all.
 PERMANENT: frozenset[str] = frozenset(
     {
-        # The sample journey (`agent/sample/exchange.py`, `agent/sample/journey.py`) stood here
-        # until record `170` moved it to `tests/sample/`: no command, public name or skill path
-        # reached it, so it was test code shipped in the wheel, the shape record `124` deleted. It
-        # still calls the facade the way a user would; it just no longer lives under `src/`.
+        # The sample venue `vqapr new sample` copies into a user's project: shipped code written
+        # the way a user writes it, so it reaches the surface a user reaches. Record `170` moved
+        # the sample out of `src/` (nothing reached it); record `172` gave it a door and brought
+        # it back.
+        "src/vqapr/agent/sample/exchange.py",
         # The CLI itself, which is the product the facade exists for.
         "src/vqapr/cli/check.py",
         # `cli/register.py` left this list in record `112`: its declaration parsing moved to
@@ -128,11 +129,12 @@ def test_the_count_still_matches_the_ruling() -> None:
     **Where it went**, recorded rather than asserted: **12** when the ruling was written, **11**
     after record `112` moved `cli/register.py`'s declaration parsing into `vqapr/declarations.py`,
     **5** after record `124` deleted `project.py` and the five bridges reachable only from it,
-    **4** after record `125` took the facade import out of `strategy_bridge.py`, and **2** after
-    record `170` moved the two sample modules out of `src/` into `tests/sample/`.
+    **4** after record `125` took the facade import out of `strategy_bridge.py`, **2** after
+    record `170` moved the two sample modules out of `src/` into `tests/sample/`, and **3** after
+    record `172` shipped the sample venue again behind `vqapr new sample`.
 
-    Two is `len(PERMANENT)`, which the ruling called the floor: the two CLI verbs calling the
-    product's own supported surface. Record `105` wrote that floor as **6** and it is left here
+    Three is `len(PERMANENT)`, which the ruling called the floor: the two CLI verbs and the one
+    shipped sample calling the product's own supported surface. Record `105` wrote that floor as **6** and it is left here
     as a caution rather than repeated as a fact -- it itemized to five in the tree it measured,
     and the verbs and samples have since left one by one. A hand-carried number drifts from the
     list it summarizes, which is the argument for the note staying a note.
@@ -142,7 +144,7 @@ def test_the_count_still_matches_the_ruling() -> None:
     (`docs/design/agent-first-surface.md`, "For completeness and to stop the earlier error being
     inherited silently"). A facade with no consumers would be a facade with no reason to exist.
     """
-    assert len(_importers()) == 2
+    assert len(_importers()) == 3
 
 
 @pytest.mark.parametrize(

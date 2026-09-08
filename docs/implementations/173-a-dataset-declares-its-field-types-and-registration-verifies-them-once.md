@@ -35,7 +35,7 @@ distinguishes a field_types fault from a grain fault. `DatasetCodec` is unchange
 `field_types` was already written as a measurement, so an entry from the old regime decodes as
 declared (what duckdb measured is what the author would have written), and an entry without it
 is quarantined like one without `grain`: `require_grain` became `require_declared`, refusing
-either by name (`dataset.register.schema.undeclared`).
+either by name (`dataset.field_types_undeclared`).
 
 **Verification** (`check_schema`). After the projection binds, per field: `DECIMAL` is
 `field_decimal` (fix: cast to DOUBLE while preparing); naive timestamp and non-scalar keep
@@ -50,7 +50,7 @@ construction. A value field whose type no declaration may carry -- a `Decimal` a
 refused at that first append as `datamodel.output.field_type`, before any further session runs.
 `schema_mismatch` for a later session that does not fit is unchanged.
 
-**The sample panel** (`tests/sample/build.py`) writes prices as float64. Adjustment still
+**The sample panel** (`scripts/build_sample_panel.py`, shipped under `src/vqapr/agent/sample/data` since record `172`) writes prices as float64; the two parquet files were regenerated with seed 172, same 6,900 / 6,903 rows. Adjustment still
 multiplies in `Decimal` so the warehouse's digits multiply exactly; the write is the `DOUBLE` the
 dataset declares. `journey.py` declares the five field types. The reversal template and the
 scaffold keep `Decimal(str(v))` as the one deliberate crossing into the intent's arithmetic; the
@@ -108,6 +108,20 @@ uv run pytest tests/ -q -m ""                1461 passed, 4 skipped             
   (one failure in that run, tests/agent/test_sample_panel.py::test_prices_are_exact,
    was the reversed premise itself; rewritten, 9 passed)
 uv run python showcases/show_003_real_data_long_short/run.py   report written
+```
+
+**Merged onto records `171` and `172` (develop `51bcc4fa`) before landing.** The refusal
+vocabulary is `171`'s: the four new codes are `dataset.field_decimal`,
+`dataset.field_type_mismatch`, `dataset.field_types_undeclared` (all 400, stage `register`) and
+`datamodel.output.field_type` (422, stage `run`); the baseline was regenerated once with the v2
+scanner and lists all four as runtime-observed. The sample is `172`'s: `sample.yaml` declares
+the five field types and the shipped parquet is float64. After the merge, on the same worktree:
+
+```
+uv run ruff check src/                       All checks passed
+uv run vulture                               (no output)
+uv run pytest tests/ -q                      1462 passed, 4 skipped, 24 deselected   273 s
+uv run pytest tests/ -q -m ""                1488 passed, 4 skipped                   259 s
 ```
 
 `ruff check tests/` reports 21 pre-existing findings (E501, B017) on lines this change did not

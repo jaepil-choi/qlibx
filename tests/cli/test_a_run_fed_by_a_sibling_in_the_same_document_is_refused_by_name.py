@@ -102,7 +102,7 @@ runs:
 
     assert code != 0
     (failure,) = refused["failures"]
-    assert failure["code"] == "declaration.read.run_fed_by_sibling"
+    assert failure["code"] == "declaration.run_fed_by_sibling"
     assert "run 'downstream' takes sessions from 'ratio_values'" in failure["observed"]
     assert "run 'upstream' in this same document will write" in failure["observed"]
     assert "split the document" in failure["fix"]

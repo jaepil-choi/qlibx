@@ -56,9 +56,9 @@ def test_a_misspelled_key_names_the_permitted_set_and_the_nearest_spelling(
     # Both facts, in one round trip: the key that is not one of ours, and the one that is
     # missing. That is what `refusals_from` promises every other section.
     by_code = {failure["code"]: failure for failure in refused["failures"]}
-    assert set(by_code) == {"declaration.read.key_unknown", "declaration.read.key_missing"}
+    assert set(by_code) == {"declaration.key_unknown", "declaration.key_missing"}
 
-    unknown = by_code["declaration.read.key_unknown"]
+    unknown = by_code["declaration.key_unknown"]
     assert unknown["requirement"] == "instruments may declare: tables"
     assert "'tabels'" in unknown["observed"]
     assert "tables" in unknown["fix"], "the nearest spelling, which the typist cannot see"

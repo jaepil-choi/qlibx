@@ -122,9 +122,9 @@ def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> No
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert [failure["code"] for failure in payload["failures"]] == [
-        "workspace.dataset.register.conflict"
+        "dataset.registered"
     ]
     assert workspace.path.read_bytes() == before
     assert Workspace.open(tmp_path).dataset("price_daily") == original
@@ -136,7 +136,7 @@ def test_opening_a_missing_workspace_is_a_structured_failure(tmp_path: Path) -> 
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.missing"
+    assert payload["failures"][0]["code"] == "workspace.missing"
 
 
 def test_opening_malformed_yaml_is_a_structured_failure(tmp_path: Path) -> None:
@@ -149,7 +149,7 @@ def test_opening_malformed_yaml_is_a_structured_failure(tmp_path: Path) -> None:
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.invalid"
+    assert payload["failures"][0]["code"] == "workspace.invalid"
 
 
 def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
@@ -211,7 +211,7 @@ def test_idempotent_registration_rechecks_that_workspace_still_exists(tmp_path: 
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.missing"
+    assert payload["failures"][0]["code"] == "workspace.missing"
     assert not workspace.path.exists()
 
 
@@ -232,9 +232,9 @@ def test_invalid_dataset_id_lookup_is_a_structured_failure(tmp_path: Path) -> No
         workspace.dataset("bad id")
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.invalid"
+    assert payload["failures"][0]["code"] == "dataset.reference_invalid"
 
 
 def test_missing_dataset_lookup_is_a_structured_failure(tmp_path: Path) -> None:
@@ -244,9 +244,9 @@ def test_missing_dataset_lookup_is_a_structured_failure(tmp_path: Path) -> None:
         workspace.dataset("missing")
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.missing"
+    assert payload["failures"][0]["code"] == "dataset.unregistered"
 
 
 def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Path) -> None:
@@ -257,9 +257,9 @@ def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Pat
         t.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_mismatch"
+    assert payload["failures"][0]["code"] == "dataset.source_mismatch"
     assert workspace.path.read_bytes() == before
 
 
@@ -276,17 +276,17 @@ def test_conflicting_source_spec_fails_without_mutation(tmp_path: Path) -> None:
         )
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_conflict"
+    assert payload["failures"][0]["code"] == "dataset.source_conflict"
     assert workspace.path.read_bytes() == before
 
 
 @pytest.mark.parametrize(
     ("raw_source_id", "code"),
     [
-        ("bad id", "workspace.source.lookup.invalid"),
-        ("missing", "workspace.source.lookup.missing"),
+        ("bad id", "source.reference_invalid"),
+        ("missing", "source.unregistered"),
     ],
 )
 def test_source_lookup_failures_are_structured(
@@ -298,7 +298,7 @@ def test_source_lookup_failures_are_structured(
         workspace.source(raw_source_id)
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.source.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
     assert payload["failures"][0]["code"] == code
 
@@ -384,9 +384,9 @@ def test_conflicting_execution_input_fails_without_mutation(
     with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
         t.register_execution_input(_execution(execution_parquet, trade_price="open"))
 
-    assert caught.value.stage == "workspace.execution_input.register"
+    assert caught.value.stage == "register"
     assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "workspace.execution_input.register.conflict"
+    assert caught.value.failures[0].code == "execution_input.registered"
     assert workspace.path.read_bytes() == before
 
 
@@ -490,7 +490,7 @@ def test_using_a_quarantined_registration_names_the_command_that_repairs_it(
         reopened.dataset("alpha")
 
     failure = refused.value.failures[0]
-    assert failure.code == "dataset.register.span.absent"
+    assert failure.code == "dataset.span_absent"
     assert "alpha" in (failure.observed or "")
     assert "vqapr register <declaration.yaml>" in (refused.value.retry_precondition or "")
 
@@ -520,7 +520,7 @@ def test_the_advertised_repair_command_actually_runs(tmp_path: Path) -> None:
     assert repaired.span("gamma") == _SPAN, "repairing one dataset disturbed a healthy one"
     with pytest.raises(VqaprError) as still_stale:
         repaired.dataset("beta")
-    assert still_stale.value.failures[0].code == "dataset.register.span.absent"
+    assert still_stale.value.failures[0].code == "dataset.span_absent"
 
     with Workspace.transaction(tmp_path) as t:
         t.register_dataset(_registration("beta"), _source())
@@ -545,7 +545,7 @@ def test_repairing_a_quarantined_registration_may_not_change_its_declaration(
     with pytest.raises(VqaprError) as refused, Workspace.transaction(tmp_path) as t:
         t.register_dataset(_registration("alpha", key_fields=("instrument",)), _source())
 
-    assert refused.value.failures[0].code == "workspace.dataset.register.conflict"
+    assert refused.value.failures[0].code == "dataset.registered"
 
 
 def _make_undeclared(workspace: Workspace, count: int) -> None:
@@ -594,7 +594,7 @@ def test_a_registration_without_field_types_is_quarantined_not_a_deadlock(tmp_pa
     with pytest.raises(VqaprError) as refused:
         require_declared(reopened.dataset("alpha"))
     failure = refused.value.failures[0]
-    assert failure.code == "dataset.register.schema.undeclared"
+    assert failure.code == "dataset.field_types_undeclared"
     assert "alpha" in (failure.observed or "")
     assert "field_types:" in failure.fix, "the refusal must name the key that repairs it"
 
@@ -651,5 +651,5 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
         t.register_dataset(unmeasured, _source())
 
-    assert refused.value.failures[0].code == "dataset.register.span.absent"
+    assert refused.value.failures[0].code == "dataset.span_absent"
     assert "register_dataset" in (refused.value.retry_precondition or "")

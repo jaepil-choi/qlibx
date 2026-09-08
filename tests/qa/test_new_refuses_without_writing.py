@@ -52,7 +52,7 @@ def test_unregistered_dataset_with_out_in_a_nonexistent_directory_creates_nothin
     )
 
     assert code == 1, payload
-    assert payload["failures"][0]["code"] == "cli.input.value_invalid"
+    assert payload["failures"][0]["code"] == "argument.value_invalid"
     assert not bad_out.parent.exists(), (
         "the parent directory was created despite the dataset refusal never producing a file"
     )
@@ -77,7 +77,7 @@ def test_unregistered_dataset_with_out_already_existing_creates_nothing_new(
     # The dataset check runs first (`_require_registered_dataset` is called before any path
     # logic), so the reported code names the dataset problem, not the file-exists problem --
     # but regardless of WHICH refusal fires, the existing file must be untouched.
-    assert payload["failures"][0]["code"] == "cli.input.value_invalid"
+    assert payload["failures"][0]["code"] == "argument.value_invalid"
     assert existing.read_text(encoding="utf-8") == "PRE-EXISTING CONTENT"
     assert not existing.with_suffix(".yaml").exists()
 
@@ -107,7 +107,7 @@ def test_unregistered_dataset_with_out_in_an_unwritable_directory_creates_nothin
             "new", "strategy", "my-gamma", "--dataset", "never-registered", "--out", str(target),
         )
         assert code == 1, payload
-        assert payload["failures"][0]["code"] == "cli.input.value_invalid"
+        assert payload["failures"][0]["code"] == "argument.value_invalid"
         assert not target.exists()
     finally:
         subprocess.run(
@@ -130,7 +130,7 @@ def test_the_dataset_refusal_runs_before_any_path_logic_at_all(
     )
 
     assert code == 1, payload
-    assert payload["failures"][0]["code"] == "cli.input.value_invalid"
+    assert payload["failures"][0]["code"] == "argument.value_invalid"
     assert "never-registered" in payload["failures"][0]["observed"]
     # The default path this command would have used had the dataset been registered.
     default_target = tmp_path / "totally_unregistered_alpha.py"

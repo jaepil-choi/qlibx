@@ -93,7 +93,7 @@ def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
     _corrupt_the_sessions_dataset(tmp_path)
 
     blocked = check("r1", tmp_path)["blocked"]
-    by_check = {entry["check"]: entry["blocked_by"] for entry in blocked}
+    by_check = _by_judge(blocked)
 
     assert "execution_ordering" in by_check, by_check
     assert "datasets[my-alpha]" in by_check, by_check
@@ -102,16 +102,37 @@ def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
     )
 
 
-def test_a_blocked_entry_names_its_error_type(
+def _by_judge(blocked: list[dict]) -> dict[str, str]:
+    """`{judge name: reason}` from the blocked entries, which are `judgment.blocked` failures.
+
+    A blocked judgment renders through the one failure shape (record `171`): `observed` opens
+    with the judge's name, and the exception rides whole in `cause`.
+    """
+    out: dict[str, str] = {}
+    for entry in blocked:
+        assert entry["code"] == "judgment.blocked", entry
+        name, reason = entry["observed"].split(" could not answer: ", 1)
+        out[name] = reason
+    return out
+
+
+def test_a_blocked_entry_carries_its_cause_whole(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`error_type` rides separately so a framework bug reads differently from a decline."""
+    """`cause` rides separately so a framework bug reads differently from a decline: its type,
+    its message, the whole traceback, and a status saying whose fault it is."""
     _workspace_for_run(tmp_path, capsys)
     _corrupt_the_sessions_dataset(tmp_path)
 
     for entry in check("r1", tmp_path)["blocked"]:
-        assert entry["error_type"], entry
-        assert entry["blocked_by"].startswith(f"{entry['error_type']}:"), entry
+        cause = entry["cause"]
+        assert cause["type"], entry
+        assert entry["observed"].split(" could not answer: ", 1)[1].startswith(
+            f"{cause['type']}:"
+        ), entry
+        assert cause["traceback"] and cause["type"] in cause["traceback"], entry
+        assert cause["where"], "every failure names the line it came from"
+        assert entry["status"] >= 400
 
 
 def test_the_defect_is_named_twice_and_that_is_the_decision(
@@ -131,7 +152,7 @@ def test_the_defect_is_named_twice_and_that_is_the_decision(
 
     assert body["blocked"], "the question that could not be asked is not reported"
     assert body["failures"], "the defect itself is not reported"
-    assert "source.scan.distinct.unreadable" in {f["code"] for f in body["failures"]}
+    assert "source.distinct_unreadable" in {f["code"] for f in body["failures"]}
 
 
 def test_one_member_that_does_not_load_does_not_silence_another_members_datasets(
@@ -155,10 +176,10 @@ def test_one_member_that_does_not_load_does_not_silence_another_members_datasets
 
     assert body["ok"] is False
     assert "judgments" not in body["passed"], json.dumps(body)
-    datasets = [entry for entry in body["blocked"] if entry["check"].startswith("datasets[")]
+    datasets = [name for name in _by_judge(body["blocked"]) if name.startswith("datasets[")]
     assert datasets, f"the unloadable member was not reported as blocked: {json.dumps(body)}"
     # The NAME is where the reader learns which member: the exception's own text does not say.
-    assert datasets[0]["check"] == "datasets[my-alpha]", datasets
+    assert datasets[0] == "datasets[my-alpha]", datasets
 
 
 def test_a_healthy_run_still_passes_every_judgment(

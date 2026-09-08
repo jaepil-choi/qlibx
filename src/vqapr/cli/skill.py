@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
+from vqapr.domain.errors import Status
 from vqapr.inputs import InputError
 
 _SKILL_PACKAGE = "vqapr.agent.skill"
@@ -95,9 +96,12 @@ def _install(root: Path, *, targets: tuple[str, ...], dry_run: bool) -> dict[str
     source_files = _collect_skill_files()
     if not source_files:
         raise InputError(
-            "cli.input.skill_empty",
+            "argument.skill_empty",
             requirement="the vqapr package must ship skill files",
             observed="no files found in the skill resource directory",
+            # Not the caller's to fix: an installed package without its skill files is a
+            # packaging fault, and the status says to file it upstream.
+            status=Status.INTERNAL,
         )
 
     # Write skill files.
@@ -262,9 +266,10 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     root = Path(args.into) if getattr(args, "into", None) else _find_git_root(project_root)
     if root is None:
         raise InputError(
-            "cli.input.no_git_root",
+            "argument.no_git_root",
             requirement="skill install needs a .git root (or pass --into)",
             observed=f"no .git found above {project_root}",
+            status=Status.MISSING,
         )
 
     action = args.skill_action
@@ -276,7 +281,8 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return _list(root)
 
     raise InputError(
-        "cli.input.unknown_action",
+        "argument.unknown_action",
         requirement="skill action must be install, remove, or list",
         observed=action,
+        status=Status.INVALID,
     )

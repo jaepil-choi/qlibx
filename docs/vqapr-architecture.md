@@ -2336,7 +2336,7 @@ instrument panel   quantity, avg_entry_price, realized_pnl, last_mark_price
   빠진다.**
 - 정지와 상폐는 cutoff 시점에 동일하며, 다시 거래되는지로만 갈린다 — 그건 미래의 사실이다. valuation은
   `observed_at`이라는 **사실**을 기록하고 그 간격의 **의미**는 reporting에 맡긴다(§9).
-- `VALUATION_*` failure는 **Fill이 이미 commit된 뒤**일 수 있는 유일한 실패다 → 정확한 account version을 기록.
+- valuation 실패는 **Fill이 이미 commit된 뒤**일 수 있는 유일한 실패다(`mutation: true`) → 정확한 account version을 기록(§8.3).
 
 ---
 
@@ -2408,15 +2408,26 @@ commit 후 발행 실패   → FAILED_AFTER_COMMIT(account_version 기록)
   (`UC-RECOVERY-001`). 실패하면 처음부터 다시 실행한다. 한 Model invocation 안의 `context.checkpoint()` 재개는
   이 state machine을 복원하지 않는 별도 current capability다(§5.1.1).
 
-### 8.3 Failure taxonomy
+### 8.3 Failure model: status, stage, cause
 
-| family | mutation |
-|---|---|
-| `DATA_*`, `INTENT_*`, `ORDER_*`, `EXCHANGE_*`, `ACCOUNT_*` | 없음 |
-| `VALUATION_*` | Fill commit 되었을 수 있음. exact version 기록 |
-| `PUBLICATION_*` | authority 변화 여부 기록 |
+실패 어휘는 HTTP 원리 위에 있다(record `171`). 한 `Failure`는 agent가 분기하는 세 가지를 이 순서로
+든다.
 
-모든 error: hierarchical stage path, 실패한 requirement, mutation 여부, retry precondition, correlation id.
+| 필드 | 무엇 | 집합 |
+|---|---|---|
+| `status` | **누가** 고쳐야 하나. 4xx는 제출물(선언·인자·데이터·전제)이 틀렸다 — 고치기 전 재시도는 무의미. 5xx는 제출물은 맞고 실행된 것이 실패했다 — 사용자 코드(502), 프레임워크(500), 머신(503) | 닫힘. `400 invalid` `404 missing` `409 conflict` `412 precondition` `422 contract` `423 locked` `500 internal` `502 crashed` `503 unavailable` |
+| `stage` | **어느 operation**이 진행 중이었나 (`VqaprError`에 실림) | 닫힘. `usage` `open` `read` `register` `lookup` `remove` `write` `load` `check` `freeze` `run` `record` |
+| `code` | 어떤 상황인가, `<subject>.<detail>` | 열림(beta). 모르는 code는 status로 처리 — HTTP의 x00 규칙 |
+| `cause` | **실제로 무엇이** 일어났나, 통째로: 예외의 `type`·`message`·전체 `traceback`(잘리지 않음), 항상 `where`(`file:line (function)`)와 `origin`(`user`/`framework`) | 모든 failure에 항상 있다 |
+
+분류가 beta에서 MECE임을 보장하지 않으므로 `cause`는 항상 실린다: agent는 `status`로 빨리 결정하고
+`cause`로 옳게 결정한다 — 특히 그 잘못이 upstream의 것인지. 분류되지 않은 예외는 `code: unhandled`
+하나로 렌더되고, traceback의 가장 안쪽 비-인터프리터 프레임이 사용자 파일이면 502, 패키지 안이면
+500이다.
+
+envelope(`VqaprError.as_dict`): `stage`, `mutation`(commit 이후 실패했을 수 있는가 — valuation 단계의
+실패가 유일하게 true일 수 있고, 그때 exact account version을 기록), `retry_precondition`,
+`correlation_id`, `failures`. `family`도 `explain`도 없다.
 **비슷한 field·이전 가격·다른 cost policy로의 silent fallback 없음.** → `UC-ERROR-001`, `UC-COST-004`
 
 ---
@@ -2705,7 +2716,7 @@ src/vqapr/
 │   ├── instruments.py     Stock/Etf discriminated union. exchange_id 없음, 거래 가능 여부 없음
 │   ├── timestamps.py      TzAware 검증 · at_local · shift_calendar. **감싸는 클래스 없음**
 │   ├── rows.py            Scalar · Rows — compute 반환·recorder 입력·publish 표현이 같은 타입
-│   └── errors.py          VqaprError(stage path·requirement·mutation·retry·correlation) · FailureFamily
+│   └── errors.py          Status(HTTP 번호) · Stage · Cause · Failure · VqaprError(stage·mutation·retry·correlation·failures)
 │
 ├── runtime/         frozen finite agenda merge와 고정 event 순서
 │   ├── agendas.py             OperationAgenda value/validation/identity. recurrence 해석 없음

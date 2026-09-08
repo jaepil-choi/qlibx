@@ -196,8 +196,8 @@ def test_a_scan_session_still_refuses_a_missing_path_on_every_lookup(tmp_path: P
     with pytest.raises(VqaprError) as second:
         session.connection(missing)
 
-    assert first.value.failures[0].code == "source.scan.path_missing"
-    assert second.value.failures[0].code == "source.scan.path_missing"
+    assert first.value.failures[0].code == "source.path_missing"
+    assert second.value.failures[0].code == "source.path_missing"
 
 
 # --------------------------------------------------------------------------------------

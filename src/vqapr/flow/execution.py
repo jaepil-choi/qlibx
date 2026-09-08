@@ -15,7 +15,6 @@ from vqapr.evidence.artifacts import (
     DueExecutionEvidence,
     FeedbackEvidence,
     MarkEvidence,
-    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
@@ -77,7 +76,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_SNAPSHOT,
             cutoff=pending.target.target_at,
             owner=execution_input,
-            family=SimulationFailureFamily.DATA,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             snapshot = select_snapshot()
@@ -105,7 +103,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ORDER_PLANNING,
             cutoff=pending.target.target_at,
             owner=pending.intent,
-            family=SimulationFailureFamily.ORDER,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             orders = plan_orders(
@@ -122,7 +119,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_EXCHANGE_EXECUTION,
             cutoff=pending.target.target_at,
             owner=self._context.frozen_run.exchange,
-            family=SimulationFailureFamily.EXCHANGE,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             fills = self._context.exchange.execute(orders, before, snapshot)
@@ -130,7 +126,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             prepared_fill = self._context.account.prepare_fill(
@@ -161,7 +156,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_PREPARATION,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             prepared_commit = self._context.state.prepare_account_commit(
@@ -180,7 +174,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_COMMIT,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             self._context.account.commit_fill(prepared_fill)
@@ -188,7 +181,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_COMMIT,
             cutoff=pending.target.target_at,
             owner=account_state,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             committed_root = self._publish_account_commit(prepared_commit)
@@ -196,7 +188,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
-            family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             selected_marks = _marks_from_execution_snapshot(
@@ -209,7 +200,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=pending.target.target_at,
             owner=self._context.layer.agenda,
-            family=SimulationFailureFamily.VALUATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             mark = self._context.valuation_service.mark(prepared_fill.next_snapshot, selected_marks)
@@ -217,7 +207,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=committed_root.account,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             prepared_account = self._context.account.prepare_mark(
@@ -254,7 +243,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=committed_root.account,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             prepared_marked = self._context.state.prepare_marked(
@@ -272,7 +260,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=committed_root.account,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             self._context.account.commit_mark(prepared_account)
@@ -280,7 +267,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=pending.target.target_at,
             owner=committed_root.account,
-            family=SimulationFailureFamily.ACCOUNT,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             marked_root = self._valuation.publish_marked(prepared_marked)
@@ -288,7 +274,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_FEEDBACK_CANDIDATE,
             cutoff=pending.target.target_at,
             owner=pending,
-            family=SimulationFailureFamily.PUBLICATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             feedback_evidence = FeedbackEvidence(
@@ -309,7 +294,6 @@ class ExecutionPhase:
             stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,
             cutoff=pending.target.target_at,
             owner=feedback_evidence,
-            family=SimulationFailureFamily.PUBLICATION,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             root = self._context.state.publish_feedback(

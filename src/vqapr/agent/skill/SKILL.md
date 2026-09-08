@@ -48,6 +48,15 @@ Work with vqapr follows three rungs. Each rung depends on the previous one succe
 **Goal:** a workspace where every dataset, source, component and execution input is
 registered and passes validation.
 
+**Before you author anything, see one run happen.** `vqapr new sample --out ./first-run` writes a
+complete journey the product can run as it is: a five-day reversal strategy, a venue, a small
+synthetic panel (ten names over three years of real KRX sessions, prices and names made up so it
+is not market data) and `sample.yaml`, the one declaration that registers all of it. Then
+`vqapr register ./first-run/sample.yaml`, `vqapr check sample-run`, `vqapr run sample-run`,
+`vqapr show run sample-run`. The panel is deliberately unbalanced -- one name lists late, one
+stops trading early -- so what you see is the shape a real run has. Do not draw a conclusion about
+a market from it; do copy its `sample.yaml` when you write your own declaration.
+
 1. `vqapr list datasets` -- see what exists (returns empty on a fresh workspace, that is fine)
 2. `vqapr new strategy <id> --dataset <d>` or `vqapr new datamodel <id> --dataset <d>` --
    scaffold a runnable `.py` plus a matching `.yaml`. You can register either one: the YAML with
@@ -180,7 +189,7 @@ session (evaluation time, output `available_at`, row count), no per-instrument l
 `vqapr show datamodel <run-id>/<id>@<fp8>` read the record, and `vqapr show dataset <id>` reads
 back what it computed. The output is readable by any component that declares it -- which is the
 point: one model's output is the next model's input. Running the same run again is refused while
-its output dataset is registered (`check.datamodel.output_registered`); `vqapr rm dataset <id>`
+its output dataset is registered (`datamodel.output_registered`, 409); `vqapr rm dataset <id>`
 withdraws the registration and deletes the files under `.vqapr/materialized/<id>/`, and is the
 way to retry a datamodel run or to drop a throw-away output. It refuses while a registered run
 takes its sessions from that dataset (`sessions_from`), naming the run; a dataset you registered
@@ -325,7 +334,7 @@ your Constraint returning a `Decimal` share of NAV (`None`, the default, keeps t
 **Stop condition:** `register` accepted every declaration without failures, and each kind you
 registered lists what you expect. `list` takes exactly one kind per call and `kind` is a required
 positional -- there is no all-kinds form, and bare `vqapr list` is refused with
-`cli.usage.rejected` -- so checking a Rung 1 setup is one call per kind:
+`usage.rejected` -- so checking a Rung 1 setup is one call per kind:
 
 ```
 vqapr list datasets
@@ -347,7 +356,7 @@ registered is the ordinary loop: change the file and run the same `vqapr registe
 registration in place, with no flag -- there is no `register --force`; the only `--force` the CLI
 has belongs to `vqapr run`, where it replaces a run RECORD. **A `runs:` declaration is the
 exception:** a run definition is the provenance of a result, so re-registering the same `run_id`
-with a changed body is refused (`workspace.run.register.conflict`). To edit one during setup,
+with a changed body is refused (`run.registered`, 409). To edit one during setup,
 withdraw it first -- `vqapr rm run-definition <run-id>` -- and register the edited declaration
 again; its records, if any, stay readable. The success payload then carries
 `replaced: {fingerprint: <the old one>}`, and is silent about it when the id was new or the bytes
@@ -707,18 +716,26 @@ Every vqapr command returns exactly one line of JSON to stdout. The shape is alw
 ```
 or
 ```json
-{"ok": false, "stage": "...", "family": "...", "failures": [...], "error": "..."}
+{"ok": false, "stage": "...", "mutation": false, "retry_precondition": null,
+ "correlation_id": "...", "failures": [...]}
 ```
 
 **`ok`** — did the command succeed?
-**`stage`** — which processing stage produced this result (e.g. `workspace.register`,
-`run.complete`, `cli.input`)
-**`failures`** — an array of structured diagnostics. Every entry carries `code`, `source`,
-`requirement`, `observed`, `fix` and `explain`; `examples` and `example_total` are present but
-**may be empty**. The six keys are always present, including on a `cli.usage` refusal from the
-argument parser; `source` and `explain` are `null` there, because a rejected command line has no
-file to point at and no package concept to explain, but `fix` is always a sentence you can act on
-**`error`** — the Python exception as a string, for traceability
+**`stage`** — which operation was under way when the command stopped (the closed set is listed
+below)
+**`mutation`** — whether anything was written before the refusal; `retry_precondition` says what
+must hold before retrying when it was
+**`correlation_id`** — quote it when you report the refusal anywhere
+**`error`** — the exception as one line, `Type: message`; the whole traceback is in each
+failure's `cause`. When a `detail` key is present it names a diagnostics file holding the same
+traceback, written beside the workspace as a convenience, never as a substitute
+**`failures`** — an array of structured diagnostics, **one entry per unmet requirement**: vqapr
+collects every failure of an operation before refusing, so fix them all in one pass. Every entry
+carries exactly these keys, in this order: `code`, `status`, `source`, `requirement`, `observed`,
+`fix`, `cause`, `examples`, `example_total`. All nine are always present, including on a `usage`
+refusal from the argument parser; `source`'s three fields (`file`, `key_path`, `line`) and
+`observed` may be `null`, `examples` **may be empty**, and `fix` is always a sentence you can act
+on.
 
 When `ok` is false, read `fix` first. It is the sentence that fixes *this* occurrence, written as
 an action you can take. `requirement` says what was needed and `observed` says what was found;
@@ -726,11 +743,36 @@ an action you can take. `requirement` says what was needed and `observed` says w
 `null` when the failure does not have that kind of location. Read `source` as structure, never by
 parsing a formatted string out of the other fields.
 
-`explain` names the section of this skill that explains why the whole class of failure happens and
-how to stop causing it. The set of topic ids is closed and every one of them resolves to a
-"Recovering from…" section below. It is `null` on a `cli.usage` refusal, and only there: the
-argument parser rejected the command line before any package concept was involved, so there is no
-class of failure to explain — `fix` carries the whole answer.
+Beyond `fix`, an agent branches on three things, in this order:
+
+1. **`status` — who must act.** A closed set with HTTP's numbers, on purpose: you already know
+   what 404 and 409 mean. **4xx: your submission is wrong** — a declaration, an argument, a data
+   file, a precondition — and retrying without changing it is pointless. **5xx: your submission
+   is fine; something that ran failed** — your own code (502), the framework (500), or the
+   machine (503). Branch on `status` before you branch on `code`. `code` names the specific
+   situation (`dataset.field_missing`, `workspace.locked`) and the set of codes is open in beta;
+   **a `code` you do not recognise is handled as its `status`**, the way an HTTP client treats an
+   unknown 4xx as 400. Each status has a "Recovering from" section below.
+2. **`stage` — which operation was under way.** One of: `usage` (the command line itself),
+   `open` (opening the workspace), `read` (reading a source, roster or record file), `register`
+   (proving and writing a declaration), `lookup` (resolving a reference), `remove`, `write`
+   (writing the workspace document), `load` (importing and constructing your component), `check`
+   (the judgments `vqapr check` makes and `vqapr run` repeats), `freeze` (freezing a run's
+   authority before it executes), `run` (executing: callbacks, fills, valuations, datamodel
+   computations), `record` (writing a record or a datamodel's dataset). The same `code` can be
+   raised at more than one stage — `datamodel.output_registered` at `check` and at `freeze` — and
+   the stage tells you how far the command got.
+3. **`cause` — what actually happened, whole.** An object with `type`, `message`, `where`,
+   `origin` and `traceback`. When an exception was involved, `type`/`message`/`traceback` are the
+   exception as Python would print it, **never truncated**; when the framework refused
+   deliberately without one, those three are `null`. `where` is always set: the innermost frame
+   that is not the interpreter's, as `file:line (function)`. `origin` says whose frame that is:
+   `"user"` for a file outside the vqapr package, `"framework"` for one inside it. The
+   classification above is not guaranteed to be MECE in beta, so `cause` is how you decide
+   *correctly* after `status` let you decide *quickly*. Two readings matter most: **`origin:
+   "user"` with status 502 means your own code raised** — go to `where`, it is your line; and
+   **`origin: "framework"` with status 500 means the framework failed** — that is not yours to
+   fix, so file an issue upstream and quote `cause` whole, traceback included.
 
 **`examples` is empty for structural checks, and that is not a bug.** A check on a column's
 *type* has no offending row to quote, so it reports `"examples": [], "example_total": 0`. A check
@@ -742,59 +784,134 @@ Fix the inputs and retry.
 
 ## Recovering from a refusal
 
-Every refusal carries an `explain` topic. There are seven, and each names one of the sections
-below. `fix` tells you what to do about the single failure in front of you; these sections tell
-you what the failure means and how to stop hitting it.
+Every refusal carries a `status`, and there are nine. Each names one of the sections below.
+`fix` tells you what to do about the single failure in front of you; these sections tell you what
+the status means, which codes you will typically see under it, and the recovery move for the
+whole class. When several failures arrive together, the error's own status is the most severe
+among them (5xx before 4xx), but each entry carries its own — read them one by one.
 
-### Recovering from: declaration-shape
+### Recovering from: 400 invalid
 
-The declaration document does not have the shape the contract requires — a missing key, a value
-of the wrong type, a value outside the permitted set, or a section vqapr does not recognise.
+The shape of what you handed in does not meet the contract: a declaration key, a command-line
+argument, a parquet schema. Nothing ran on it; nothing could.
 
-vqapr never guesses a missing key and never coerces a value. Read `source.key_path`: it names the
-exact position in the document, so you can go straight there rather than re-reading the file.
-`observed` shows what was found at that position. When a value must come from a fixed set, the
-`requirement` lists that set.
+Typical codes: `declaration.key_missing`, `declaration.key_unknown`,
+`declaration.unknown_section`, `declaration.value_invalid`, `declaration.value_not_permitted`,
+`declaration.grain_undeclared`, `declaration.run_invalid`; `dataset.field_missing`,
+`dataset.key_duplicate`, `dataset.key_null`, `dataset.available_at_not_tz`,
+`dataset.available_at_not_a_timestamp`, `dataset.field_not_tz`, `dataset.field_not_portable`,
+`dataset.projection_unbindable`, `dataset.span_absent`, `dataset.span_empty`,
+`dataset.value_not_finite`; `execution_input.field_type`, `execution_input.price_type`,
+`execution_input.price_invalid`, `execution_input.key_duplicate`, `execution_input.key_null`;
+`argument.not_a_mapping`, `argument.keys_missing`, `argument.value_invalid`, `usage.rejected`;
+`workspace.invalid`, `dataset.reference_invalid`, `component.reference_invalid`,
+`run.reference_invalid`, `remove.unsupported_kind`.
 
-Generate a fresh template with `vqapr new` when a document has drifted far from the contract;
-editing a correct template is faster than repairing a wrong one.
+**A declaration document** (`declaration.*`, stage `register`): vqapr never guesses a missing key
+and never coerces a value. Read `source.key_path`: it names the exact position in the document, so
+you can go straight there rather than re-reading the file. `observed` shows what was found at
+that position. When a value must come from a fixed set, the `requirement` lists that set. Generate
+a fresh template with `vqapr new` when a document has drifted far from the contract; editing a
+correct template is faster than repairing a wrong one.
 
-### Recovering from: dataset-preparation
-
-The declaration is well-formed but the parquet behind it does not satisfy what registration
-requires: a declared column is absent, the logical key is not unique or contains nulls,
-`available_at` is not timezone-aware, a field's column is not the type `field_types` declares
-for it (`field_type_mismatch` quotes both; a DECIMAL column is `field_decimal` and is cast to
-DOUBLE while preparing), or the dataset carries no dated row at all.
-
-These are all fixed while *preparing* the source, not while registering it. vqapr deliberately
-does not convert a naive timestamp for you: only you know which instant a value means, and a
-wrong localisation is a silent point-in-time leak rather than an error. Localize at the instant
-the row became knowable — a daily close is knowable at that session's close in the venue's
-timezone, not at midnight.
-
-For key failures, `examples` quotes up to five offending values and `example_total` says how many
+**A data file** (`dataset.*`, `execution_input.*`, stage `register`): the declaration is
+well-formed but the parquet behind it does not satisfy what registration requires — a declared
+column is absent, the logical key is not unique or contains nulls, `available_at` is not
+timezone-aware, a field's column is not the type `field_types` declares for it
+(`dataset.field_type_mismatch` quotes both; a DECIMAL column is `dataset.field_decimal` and is
+cast to DOUBLE while preparing), or the dataset carries no dated row at all. These are all fixed
+while *preparing* the source, not while registering it. vqapr deliberately does not convert a
+naive timestamp for you: only you know which instant a value means, and a wrong localisation is
+a silent point-in-time leak rather than an error. Localize at the instant the row became knowable
+— a daily close is knowable at that session's close in the venue's timezone, not at midnight. For
+key failures, `examples` quotes up to five offending values and `example_total` says how many
 there were, so you can tell a typo from a systematic duplicate.
 
-### Recovering from: source-access
+**A command line** (`usage.rejected`, `argument.*`, stage `usage`): the parser refused before any
+package concept was involved; `fix` carries the whole answer, and `vqapr <command> --help` the
+rest.
 
-The declaration is right and the data may be fine, but the path cannot be reached or read: the
-file is not there, it is not readable parquet, or a specific field cannot be queried from it.
+### Recovering from: 404 missing
 
-Check `source.file` first — it is the path vqapr actually resolved, which is often the surprise.
-A relative path is resolved against the declaration's own directory, so a path that looks right
-in the document can still resolve somewhere you did not expect.
+A name was given and nothing registered answers to it, or the path it names is not there.
 
-### Recovering from: component-contract
+Typical codes: `workspace.missing` (no workspace at the root you pointed at), `source.path_missing`
+and `argument.file_missing` (a path that does not exist), `dataset.unregistered`,
+`source.unregistered`, `component.unregistered`, `execution_input.unregistered`,
+`run.unregistered` (a run id the workspace does not hold),
+`field.absent`, `universe.absent`, `store.field_missing` (a field a component asked for that the
+dataset does not carry), `execution.missing`, `execution.requirement_missing` (a run that names an
+execution input, or a price on one, that was never declared).
 
-User code does not have the shape the framework can call: a required method is missing or is not
-callable, a signature does not accept the arguments the framework passes, the module fails to
-import, or a Model read a `DataRequirement` it never declared.
+Check `source.file` first when the refusal is about a path — it is the path vqapr actually
+resolved, which is often the surprise. A relative path is resolved against the declaration's own
+directory, so a path that looks right in the document can still resolve somewhere you did not
+expect. When the refusal is about an id, `vqapr list <kind>` shows what the workspace holds under
+that kind; register the missing declaration, or correct the reference to one that exists. A
+missing field is fixed in the dataset declaration's `fields` — the requirement names the field and
+the dataset it was expected in.
+
+### Recovering from: 409 conflict
+
+What is being registered or removed disagrees with what the workspace already holds.
+
+Typical codes: `dataset.registered`, `execution_input.registered`, `run.registered` (the id is
+bound to a different declaration), `dataset.source_conflict`, `execution_input.source_conflict`,
+`dataset.source_mismatch` (the same id, a different source), `datamodel.output_registered` (a
+datamodel run whose output dataset is already there), `remove.referenced` (something still
+depends on what you are removing), `constraint.identity_mismatch`, `argument.file_exists` (an
+output path that already exists).
+
+vqapr never silently redefines a registered id, because a later reader would have no way to know
+which definition produced an earlier result. Either keep the existing declaration or register the
+new one under a new id. A `runs:` declaration is the one that refuses on a changed body — withdraw
+it with `vqapr rm run-definition <run-id>` and register the edited one. A datamodel's output is
+withdrawn with `vqapr rm dataset <id>` before the run is repeated. vqapr refuses to overwrite a
+published artifact for the same reason: one producer owns one output, so a repeated run to the
+same result name is a conflict rather than an update — choose a new name, or remove the existing
+artifact deliberately if it is genuinely obsolete. `remove.referenced` names the dependant; remove
+it first, or leave both.
+
+### Recovering from: 412 precondition
+
+The declaration is well-formed and everything it names exists, but a condition of running it does
+not hold. This is what `vqapr check` is for, and `vqapr run` makes the same judgments before it
+starts.
+
+Typical codes: `lookback.uncovered`, `period.uncovered` (a lookback or a run period reaching
+before the data starts or past where it ends), `execution.not_after_decision` (an execution
+instant at or before its decision), `weights.mode_conflict`, `weights.venue_conflict`;
+at stage `freeze`: `account.mode` (a short in a long-only account), `account.unlisted_holding`,
+`account.holding_not_closable`, `account.minimum_quantity`, `account.quantity_step`,
+`account.fractional_quantity`, `universe.unlisted_instrument`, `universe.untradable_listing`,
+`execution.target_outside_horizon` (a strategy occurrence with no execution instant inside the
+horizon).
+
+Every one of these is a fact about the declared run rather than about the data. Fix the
+declaration — the sessions and times, the lookback, the Exchange listing set, the initial account,
+the execution input, or the horizon — and run `vqapr check` again. Preflight exists so these fail
+in seconds instead of after a long run.
+
+### Recovering from: 422 contract
+
+Your code is not something the framework can call, or what it returned is not something the
+framework can use. Distinct from 502: nothing of yours crashed; it has the wrong shape.
+
+Typical codes: `component.method_missing`, `component.method_not_callable`,
+`component.signature_invalid`, `component.wrong_type`, `component.module_invalid`,
+`component.requirements_missing`, `component.requirements_invalid`,
+`component.execution_profile_invalid`, `component.constraint_id_mismatch` (a Constraint registered
+under an id its own `constraint_id` does not return); `requirement.undeclared` (a Model read a
+`DataRequirement` it never declared); `datamodel.output.schema_mismatch`,
+`datamodel.output.empty`, `datamodel.output.fields_invalid`, `datamodel.output.rows_invalid`,
+`datamodel.output.instrument_invalid`, `datamodel.output.instrument_duplicate`,
+`datamodel.output.instrument_unrequested`, `datamodel.output.available_at_owned`.
 
 The contract is checked before the run so that a component fails at registration rather than
 halfway through a simulation. Declare every requirement before compute — reading an undeclared
 one is refused deliberately, because a requirement that is not declared is not point-in-time
-bounded.
+bounded. `cause.where` names the framework line that judged the shape; `requirement` names the
+method or signature it expected, and `vqapr.public`'s base classes are the authority on both.
 
 The checks on a DataModel's *output rows* scan the whole batch: when rows name instruments that
 were never requested, or name one instrument twice, `examples` quotes up to five of the offending
@@ -803,40 +920,25 @@ name from a systematic fault in one pass, instead of one refusal per offending r
 a row's *shape* — a missing field, a forged `available_at` — still stop at the first bad row,
 which has no content to quote.
 
-### Recovering from: run-precondition
+### Recovering from: 423 locked
 
-Something a run needs was not in place before it started: a holding with no listing on the
-selected Exchange, a holding that cannot be closed, a quantity below a listing minimum or off its
-step, a short in a long-only account, an execution input that does not declare a price the
-Exchange requires, or a strategy occurrence with no execution instant inside the horizon.
+Another process holds it: the workspace document, or a live strategy record. Nothing is corrupt,
+and nothing about your submission is wrong.
 
-Every one of these is a fact about the declared run rather than about the data. Fix the
-declaration — the Exchange listing set, the initial account, the execution input, or the horizon —
-and re-run preflight. Preflight exists so these fail in seconds instead of after a long run.
+Typical codes: `workspace.locked` (stage `write`), `record.live` (stage `record`).
 
-### Recovering from: workspace-state
-
-What is already registered in the workspace conflicts with what is being registered now: an id
-bound to a different declaration or a different source, a lookup for something never registered,
-or a registration written before a contract the current version requires.
-
-vqapr never silently redefines a registered id, because a later reader would have no way to know
-which definition produced an earlier result. Either keep the existing declaration or register the
-new one under a new id. When a registration predates a required field, the refusal names the
-exact command that repairs it, and repairing one id does not disturb the others.
-
-A workspace can also refuse because another process holds its lock. Registration takes an
-exclusive lock so two concurrent writers cannot lose each other's declarations; the refusal means
-something else is registering right now, not that anything is corrupt. Wait for the other command
-to finish and retry. If nothing else is running, a lock file was left behind by a process that
-died, and removing it is safe once you have confirmed no vqapr command is live.
+**The workspace** takes an exclusive lock so two concurrent writers cannot lose each other's
+declarations; the refusal means something else is registering right now. Wait for the other
+command to finish and retry. If nothing else is running, a lock file was left behind by a process
+that died, and removing it is safe once you have confirmed no vqapr command is live.
 
 **A strategy record refuses on the same principle, with a different clock and no file to
-remove.** `vqapr run` claims each strategy's record with a lock it refreshes as it writes, so a refusal that the id is `held by a
-lock inside its heartbeat window` means the lock was touched in the last 120 seconds -- **not**
-that the holder is provably alive. The pid in that message is copied out of the lock file, never
-interrogated. A run killed by Ctrl-C, a CI timeout or an OOM kill leaves exactly this state, and
-inside the window nothing can tell it from a run that is executing.
+remove.** `vqapr run` claims each strategy's record with a lock it refreshes as it writes, so a
+refusal that the id is `held by a lock inside its heartbeat window` means the lock was touched in
+the last 120 seconds -- **not** that the holder is provably alive. The pid in that message is
+copied out of the lock file, never interrogated. A run killed by Ctrl-C, a CI timeout or an OOM
+kill leaves exactly this state, and inside the window nothing can tell it from a run that is
+executing.
 
 That lock releases itself 120 seconds after its last refresh, and the refusal states how many
 seconds are left; re-running the same command after that reclaims the record with no flag and
@@ -845,14 +947,59 @@ no cleanup. Waiting is the answer that is safe under both readings; `vqapr rm st
 is neither, and against a run that really is live it destroys the rows that run is still
 writing.
 
-### Recovering from: publication
+### Recovering from: 500 internal
 
-A step that writes an artifact refused: the output path already exists, or the workspace file
-could not be written back to disk.
+The framework itself failed. Your submission is not at fault, and there is nothing in it to fix.
 
-vqapr refuses to overwrite a published artifact. One producer owns one output, so a repeated run
-to the same result name is a conflict rather than an update — choose a new result name, or remove
-the existing artifact deliberately if it is genuinely obsolete.
+Typical codes: `unhandled` (an exception nobody classified, whose innermost non-interpreter frame
+is under the vqapr package); `judgment.blocked` and `preflight.refused` when their `cause.origin`
+is `"framework"`.
+
+Do not retry the same command hoping for a different answer, and do not work around it by changing
+a declaration that was correct. File an issue upstream and quote `cause` whole — `type`, `message`,
+`where` and the full `traceback` — together with the command that produced it and the
+`correlation_id`. `cause.where` is the framework line that raised, which is exactly what the
+maintainer needs. If the same failure appears with `origin: "user"` instead, it is a 502 and the
+section below applies: the classification is read from the traceback, not from the code.
+
+### Recovering from: 502 crashed
+
+Your own code raised while the framework was running it — the gateway's upstream failed.
+`cause.where` names your line.
+
+Typical codes: `component.import_failed` (your module raised on import), 
+`component.construction_failed` (your class raised in `__init__`), `component.requirements_failed`
+(your `requirements()` raised), `datamodel.compute_failed` (your `compute` raised),
+`strategy.<stage>` — `strategy.callback.intent`, `strategy.callback.no_decision` and the other
+simulation stages — when a strategy callback raised, and `unhandled` when the innermost frame of
+an unclassified exception is a file of yours; `judgment.blocked` and `preflight.refused` when
+their `cause.origin` is `"user"`.
+
+Read `cause.traceback` from the bottom: the innermost frame that is not the interpreter's is
+yours, and `cause.where` already points at it. `cause.type` and `cause.message` are the exception
+as your code raised it, whole. Fix the code, and rerun; the run's record, if one was started, was
+not completed and needs no cleanup beyond what the refusal states in `retry_precondition`. A crash
+inside a callback is the one refusal whose `mutation` can be true — a fill may already have been
+committed — so read `retry_precondition` before rerunning.
+
+### Recovering from: 503 unavailable
+
+The machine refused: a file could not be read or written, a disk was full, a path was not
+readable parquet. The declaration is right and the data may be fine.
+
+Typical codes: `workspace.unreadable`, `workspace.write_failed` (the workspace document itself),
+`source.unreadable`, `source.observations_unreadable`, `source.distinct_unreadable`,
+`source.finite_unreadable`, `source.conditional_positive_unreadable`,
+`source.execution_snapshot_unreadable`, `source.execution_candidates_unreadable` (a source that
+exists but could not be scanned or queried), `roster.unreadable`, `component.source_unreadable`,
+`argument.file_unreadable`, `datamodel.chunk_failed` (a datamodel's output could not be written).
+
+Check `source.file` first — it is the path vqapr actually resolved. `cause.type` and
+`cause.message` carry the operating system's or the reader's own error (`PermissionError`,
+pyarrow's `ArrowInvalid`), which usually says what is wrong with the file. Fix the file or the
+permission and retry the same command unchanged; nothing in the declaration needs to change. A
+write that failed (`workspace.write_failed`, `datamodel.chunk_failed`) left the previous document
+or no chunk at all — the refusal's `mutation` says which.
 
 ## CLI reference
 

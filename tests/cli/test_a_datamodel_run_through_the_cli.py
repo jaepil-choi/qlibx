@@ -199,16 +199,18 @@ def test_a_datamodel_run_is_registered_checked_run_listed_and_shown(
     assert code == 1, again
     assert again["ok"] is False
     codes = [failure["code"] for failure in again["failures"]]
-    assert codes.count("check.datamodel.output_registered") == 2
+    # One code for the one fact (record `171`): the judgments say it once per datamodel, and
+    # the freeze says it again, so three entries carry it.
+    assert codes.count("datamodel.output_registered") == 3, codes
     assert {
         failure["source"]["key_path"]
         for failure in again["failures"]
-        if failure["code"] == "check.datamodel.output_registered"
-    } == {
+        if failure["code"] == "datamodel.output_registered"
+    } >= {
         "runs.factors.datamodels.reversal.dataset_id",
         "runs.factors.datamodels.momentum.dataset_id",
     }
-    assert "preflight.datamodel.output_registered" in codes
+    assert all(failure["status"] == 409 for failure in again["failures"]), again["failures"]
 
 
 def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
@@ -261,7 +263,7 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     assert code == 0 and later["count"] == 0, later
     code, no_run = _cli(capsys, *project, "list", "datamodels")
     assert code == 1, no_run
-    assert no_run["failures"][0]["code"] == "cli.input.value_invalid"
+    assert no_run["failures"][0]["code"] == "argument.value_invalid"
     assert "list datamodels --run" in no_run["failures"][0]["fix"]
 
     # `show datamodel`: the full form and the short form answer the same record, and the answer
@@ -295,7 +297,7 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     )
     assert code == 1, refused
     detail = refused["failures"][0]
-    assert detail["code"] == "cli.input.value_invalid"
+    assert detail["code"] == "argument.value_invalid"
     assert "reversal_2d" in detail["observed"]
     assert "vqapr show dataset reversal_2d" in detail["fix"]
 
@@ -332,4 +334,4 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     assert len(_scores(tmp_path, "reversal_2d")) == 4, "the rows outlive the record"
     code, again = _cli(capsys, *project, "rm", "datamodel", "factors/reversal")
     assert code == 1, "a record already removed is refused, not removed twice"
-    assert again["failures"][0]["code"] == "cli.input.value_invalid"
+    assert again["failures"][0]["code"] == "argument.value_invalid"

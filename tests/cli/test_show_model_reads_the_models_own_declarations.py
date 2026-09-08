@@ -89,7 +89,7 @@ def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused
          strategy_model component"}
 
     which is false -- this verb reads three kinds and had just shown a datamodel -- and
-    unstructured. The neighbouring mistake, an unregistered id, gets a `cli.input.value_invalid`
+    unstructured. The neighbouring mistake, an unregistered id, gets a `argument.value_invalid`
     naming what is registered; the wrong kind is the same mistake and gets the same answer.
     """
     source = tmp_path / "wide.py"
@@ -105,7 +105,7 @@ def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused
     assert code != 0
     assert refused["stage"] != "unhandled", refused
     (failure,) = refused["failures"]
-    assert failure["code"] == "cli.input.value_invalid"
+    assert failure["code"] == "argument.value_invalid"
     assert "strategy, datamodel, constraint" in failure["requirement"]
     assert failure["observed"] == "'venue' is registered as exchange"
     assert "list components --kind" in refused["retry_precondition"]
@@ -137,7 +137,7 @@ def test_list_components_filters_by_kind_so_the_wrong_ref_is_never_assembled(
 
     wrong = listed("runs", "--kind", "strategy")
     assert wrong["ok"] is False
-    assert wrong["failures"][0]["code"] == "cli.input.value_invalid"
+    assert wrong["failures"][0]["code"] == "argument.value_invalid"
 
 
 def test_reads_decides_forms_and_records_come_from_the_model(

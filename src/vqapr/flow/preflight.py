@@ -15,12 +15,7 @@ from vqapr.data.datasets import lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.agendas import OperationAgenda, OperationRole
-from vqapr.domain.errors import (
-    ExplainTopic,
-    Failure,
-    FailureFamily,
-    VqaprError,
-)
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionInputRegistration,
@@ -219,14 +214,14 @@ def _validate_initial_account(
         if rule is None:
             failures.append(
                 Failure.bounded(
-                    "preflight.account.unlisted_holding",
+                    "account.unlisted_holding",
                     "every initial holding must have a listing on the selected Exchange",
                     observed=instrument_id,
                     fix=(
                         f"add a listing for {instrument_id} to the Exchange, or drop it from "
                         "the initial account"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
             continue
@@ -234,21 +229,21 @@ def _validate_initial_account(
         if not rule.permits_position(quantity, -quantity):
             failures.append(
                 Failure.bounded(
-                    "preflight.account.holding_not_closable",
+                    "account.holding_not_closable",
                     "each initial holding must be closable on the selected Exchange",
                     observed=f"{instrument_id}: {rule.access.value}",
                     fix=(
                         f"permit closing access for {instrument_id} on the Exchange, or drop "
                         "the holding from the initial account"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
         absolute = abs(quantity)
         if absolute < rule.minimum_quantity:
             failures.append(
                 Failure.bounded(
-                    "preflight.account.minimum_quantity",
+                    "account.minimum_quantity",
                     "each initial holding must meet its listing minimum_quantity",
                     observed=f"{instrument_id}: {absolute}",
                     fix=(
@@ -256,7 +251,7 @@ def _validate_initial_account(
                         f"minimum_quantity ({rule.minimum_quantity}), or drop it from the "
                         "initial account"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
         if (
@@ -277,46 +272,45 @@ def _validate_initial_account(
             )
             failures.append(
                 Failure.bounded(
-                    "preflight.account.quantity_step",
+                    "account.quantity_step",
                     "each initial holding must align to its listing quantity_step",
                     observed=f"{instrument_id}: {absolute}",
                     fix=(
                         f"round the {instrument_id} holding to a multiple of the listing "
                         f"quantity_step ({rule.quantity_step}); {nearest_hint}"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
         if not rule.fractional_allowed and absolute != absolute.to_integral_value():
             failures.append(
                 Failure.bounded(
-                    "preflight.account.fractional_quantity",
+                    "account.fractional_quantity",
                     "each initial holding must satisfy its listing fractional quantity rule",
                     observed=f"{instrument_id}: {absolute}",
                     fix=(
                         f"round the {instrument_id} holding to a whole quantity, or set the "
                         "listing's fractional_allowed to permit fractional holdings"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
         if mode is AccountMode.LONG_ONLY and quantity < Decimal("0"):
             failures.append(
                 Failure.bounded(
-                    "preflight.account.mode",
+                    "account.mode",
                     "a long-only initial account must not contain short holdings",
                     observed=f"{instrument_id}: {quantity}",
                     fix=(
                         f"remove the short {instrument_id} holding from the initial account, "
                         "or declare the account mode as not long-only"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                 )
             )
     if failures:
         raise VqaprError(
-            stage="preflight.account",
-            family=FailureFamily.EXCHANGE,
+            stage=Stage.FREEZE,
             failures=failures,
             mutation=False,
             retry_precondition=("correct the initial account or Exchange listing, then retry"),
@@ -342,11 +336,11 @@ def _validate_execution_requirements(exchange: Exchange, execution_input: object
     if not missing:
         return
     raise VqaprError(
-        stage="preflight.execution",
-        family=FailureFamily.EXCHANGE,
+        stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
-                code="preflight.execution.requirement_missing",
+                code="execution.requirement_missing",
+                status=Status.MISSING,
                 requirement=(
                     "the execution input must declare every price the Exchange requires, "
                     "or the feature that needs it must be switched off"
@@ -358,7 +352,6 @@ def _validate_execution_requirements(exchange: Exchange, execution_input: object
                     "register the missing price fields on the execution input, or construct "
                     "the Exchange with the features that need them disabled"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
             )
         ],
         mutation=False,
@@ -394,32 +387,31 @@ def _validate_instrument_universe(
     if missing:
         failures.append(
             Failure.bounded(
-                code="preflight.universe.unlisted_instrument",
+                code="universe.unlisted_instrument",
                 requirement="every frozen run instrument must have an Exchange listing",
                 observed=repr(missing),
                 fix=(
                     "add an Exchange listing for each missing instrument, or remove it from "
                     "the run's traded instrument universe"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
             )
         )
     if untradable:
         failures.append(
             Failure.bounded(
-                code="preflight.universe.untradable_listing",
+                code="universe.untradable_listing",
                 requirement="the Exchange must permit a side for every traded instrument",
                 observed=repr(untradable),
                 fix=(
                     "remove each untradable instrument from the traded universe and read it "
                     "as data instead, or update the Exchange listing to permit a side"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
             )
         )
     raise VqaprError(
-        stage="preflight.universe",
-        family=FailureFamily.EXCHANGE,
+        stage=Stage.FREEZE,
         failures=failures,
         mutation=False,
         retry_precondition="register complete listings or remove unlisted instruments, then retry",
@@ -444,11 +436,11 @@ def _require_execution_authority(definition: RunDefinition) -> None:
     if definition.exchange is not None and definition.execution_input_id is not None:
         return
     raise VqaprError(
-        stage="preflight.execution",
-        family=FailureFamily.EXCHANGE,
+        stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
-                code="preflight.execution.missing",
+                code="execution.missing",
+                status=Status.MISSING,
                 requirement=(
                     "a run must declare an Exchange and an execution input; the execution price "
                     "is required even when the Strategy reads no observation dataset"
@@ -461,7 +453,6 @@ def _require_execution_authority(definition: RunDefinition) -> None:
                     "declare both an Exchange and an execution input on the RunDefinition "
                     "before calling preflight_run"
                 ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         ],
         mutation=False,
@@ -508,11 +499,10 @@ def _validate_execution_targets(
 
     selector = execution_input.fill.selector.value.lower()
     raise VqaprError(
-        stage="preflight.execution",
-        family=FailureFamily.EXCHANGE,
+        stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
-                code="preflight.execution.target_outside_horizon",
+                code="execution.target_outside_horizon",
                 requirement=(
                     "every strategy occurrence must have an exact execution target strictly "
                     "later than the occurrence and inside the run horizon; extend end through "
@@ -530,7 +520,7 @@ def _validate_execution_targets(
                     f"execution snapshot, or choose a fill selector other than {selector!r} "
                     "whose target resolves inside the horizon"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
             )
         ],
         mutation=False,
@@ -612,18 +602,17 @@ def _freeze_datamodel(
         )
     if any(str(item.dataset_id) == entry.dataset_id for item in workspace.datasets):
         raise VqaprError(
-            stage="preflight.datamodel",
-            family=FailureFamily.DATA,
+            stage=Stage.FREEZE,
             failures=[
                 Failure.bounded(
-                    code="preflight.datamodel.output_registered",
+                    code="datamodel.output_registered",
+                    status=Status.CONFLICT,
                     requirement="a datamodel run writes a dataset that does not exist yet",
                     observed=f"{entry.dataset_id!r} is already registered",
                     fix=(
                         f"declare a new dataset_id for {entry.component_id!r}, or remove the "
                         f"existing {entry.dataset_id} registration from the workspace first"
                     ),
-                    explain=ExplainTopic.WORKSPACE_STATE,
                 )
             ],
             mutation=False,

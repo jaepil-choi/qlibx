@@ -14,8 +14,8 @@ speculation it started as.
    bare `Exception`, records the judgment as `blocked` with its exception type, withholds
    `judgments` from `passed`, and returns `ok: false`. The other judgments still report.
 
-3. **Three advertised codes that could never fire.** `check.dataset.unregistered`,
-   `check.field.absent` and `check.lookback.uncovered` read requirements off the raw `ComponentRef`
+3. **Three advertised codes that could never fire.** `dataset.unregistered`,
+   `field.absent` and `lookback.uncovered` read requirements off the raw `ComponentRef`
    that `workspace.component()` returns -- which has no `requirements` attribute at all, so a
    `getattr(..., ())` fallback always won and the loop body never executed. `check` now LOADS the
    component, and all three fire; this file proves the first of them end to end below.
@@ -169,11 +169,11 @@ def test_several_simultaneous_independent_defects_all_report(workspace: Path) ->
 
     reported = {entry["code"] for entry in body["failures"]}
     assert {
-        "check.execution.not_after_decision",
-        "check.weights.mode_conflict",
-        "check.dataset.unregistered",
+        "execution.not_after_decision",
+        "weights.mode_conflict",
+        "dataset.unregistered",
     } <= reported, f"expected three independent judgments, got {sorted(reported)}"
-    assert any(not code.startswith("check.") for code in reported), (
+    assert reported - set(judgments_module.JUDGMENT_CODES), (
         f"preflight ran and refused, and its refusal must be reported: {sorted(reported)}"
     )
     assert body["blocked"] == [], "every phase could run; nothing was blocked"
@@ -206,11 +206,15 @@ def test_an_unexpected_exception_type_inside_one_judgment_is_reported_as_blocked
         "a judgment that could not run was reported as passed, so a run nothing was proven "
         "about reads as clean and ready"
     )
-    reasons = [entry["blocked_by"] for entry in body["blocked"] if entry["check"] == "universe"]
-    assert reasons and "RuntimeError" in reasons[0], body["blocked"]
+    universe = [
+        entry for entry in body["blocked"] if entry["observed"].startswith("universe could not")
+    ]
+    assert universe, body["blocked"]
+    assert universe[0]["cause"]["type"] == "RuntimeError", universe
+    assert "RuntimeError" in universe[0]["cause"]["traceback"]
 
     # And the other judgments still reported, which is the property this verb exists for.
-    assert {entry["code"] for entry in body["failures"]} >= {"check.weights.mode_conflict"}
+    assert {entry["code"] for entry in body["failures"]} >= {"weights.mode_conflict"}
 
 
 def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(workspace: Path) -> None:
@@ -226,7 +230,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(workspac
 
     body = check(run_id, workspace)
     codes = {entry["code"] for entry in body["failures"]}
-    assert "check.dataset.unregistered" in codes, (
+    assert "dataset.unregistered" in codes, (
         "the dataset judgment is dead again: it is reading the ComponentRef rather than the "
         "loaded model, so the loop body never runs and the code only looks implemented"
     )

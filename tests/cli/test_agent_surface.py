@@ -246,8 +246,8 @@ def test_a_missing_input_file_is_typed_and_writes_nothing(
     )
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
-    assert payload["failures"][0]["code"] == "cli.input.file_missing"
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["code"] == "argument.file_missing"
     assert "detail" not in payload
     assert "traceback" not in payload
     assert not (tmp_path / ".vqapr").exists(), "a refusal left a side effect behind"
@@ -272,8 +272,8 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
     code, payload = _envelope(capsys, *argv)
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
-    assert payload["failures"][0]["code"] == "cli.input.file_exists"
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["code"] == "argument.file_exists"
     assert "alpha" in payload["failures"][0]["observed"]
 
 
@@ -359,9 +359,9 @@ def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
     code, payload = _envelope(capsys, "--project-root", str(tmp_path), "run", str(spec))
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
+    assert payload["stage"] == "usage"
     detail = payload["failures"][0]
-    assert detail["code"] == "cli.input.value_invalid"
+    assert detail["code"] == "argument.value_invalid"
     assert "registered run" in detail["requirement"]
     assert spec.name in detail["observed"]
     for command in ("vqapr new datamodel", "vqapr register", "vqapr run <run-id>"):
@@ -507,7 +507,7 @@ def test_unknown_section_sources_explains_inline_declaration(
     )
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     observed = payload["failures"][0]["observed"]
     assert "inline" in observed.lower() or "pair" in observed.lower()
 
@@ -538,7 +538,7 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     assert payload["stage"] != "unhandled"
     assert payload["failures"], "a bad enum value produced no structured failure"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["code"] == "declaration.value_not_permitted"
     for member in ("same_day", "next_eligible"):
         assert member in failure["requirement"], f"{member} was not named"
     assert failure["examples"], "permitted values must ride as examples"
@@ -744,5 +744,5 @@ def test_a_declaration_that_is_not_a_mapping_says_what_it_parsed_as(
     code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(spec))
 
     assert code == 1
-    assert payload["failures"][0]["code"] == "cli.input.not_a_mapping"
+    assert payload["failures"][0]["code"] == "argument.not_a_mapping"
     assert "str" in payload["failures"][0]["observed"]

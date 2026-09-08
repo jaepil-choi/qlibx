@@ -29,7 +29,6 @@ from vqapr.domain.values import normalize_memory
 from vqapr.evidence.artifacts import (
     CallbackEvidence,
     SimulationFailure,
-    SimulationFailureFamily,
     SimulationFailureKind,
     SimulationStage,
 )
@@ -71,7 +70,6 @@ class CallbackPhase:
         with self._context.guard(
             SimulationStage.CALLBACK_STATE,
             occurrence.evaluation_time,
-            family=SimulationFailureFamily.DATA,
             owner=self._context.layer.config,
         ):
             current_ref, before, payload_before = self._visible_callback_state()
@@ -80,14 +78,12 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
             with self._context.guard(
                 SimulationStage.CALLBACK_WINDOW,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.requirements,
             ):
                 window = self._strategy_window(occurrence)
@@ -96,7 +92,6 @@ class CallbackPhase:
                 with self._context.guard(
                     SimulationStage.CALLBACK_STATE,
                     occurrence.evaluation_time,
-                    family=SimulationFailureFamily.DATA,
                     owner=self._context.layer.config,
                 ):
                     self._raise_callback_account_state_error()
@@ -106,7 +101,6 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.PUBLICATION,
                 owner=recorder,
             ):
                 self._set_callback_recorder(recorder)
@@ -115,7 +109,6 @@ class CallbackPhase:
                 with self._context.guard(
                     SimulationStage.CALLBACK_WINDOW,
                     occurrence.evaluation_time,
-                    family=SimulationFailureFamily.DATA,
                     owner=self._context.layer.constraint_requirements,
                 ):
                     constraint_window = self._constraint_window(occurrence)
@@ -184,7 +177,6 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
             ):
                 candidate, payload_candidate, committed_ref = self._candidate_callback_state(
@@ -197,7 +189,6 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.PUBLICATION,
                 owner=evidence,
             ):
                 prepared = self._prepare_callback_publication(
@@ -206,7 +197,6 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.PUBLICATION,
                 owner=prepared,
             ):
                 root = self._context.state.publish(prepared)
@@ -214,7 +204,6 @@ class CallbackPhase:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
                 occurrence.evaluation_time,
-                family=SimulationFailureFamily.DATA,
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
@@ -239,27 +228,25 @@ class CallbackPhase:
         *,
         data_owner: object | None = None,
     ) -> Iterator[None]:
-        """Keep callback data-access failures out of the intent boundary."""
+        """Keep callback data-access failures out of the intent boundary.
+
+        A typed refusal raised inside this boundary is the framework refusing a READ the callback
+        made -- a source that cannot be scanned, a field the dataset does not expose, a
+        requirement the model never declared -- so it is reported at the window stage against
+        the layer's requirements. Until record `171` this branched on the refusal's `family`, and
+        every family that could reach here was `DATA`: the author's own code raises bare
+        exceptions, which the two clauses below own, and no other typed refusal is raised
+        between a window and a published intent.
+        """
         try:
             yield
         except SimulationFailure:
             raise
         except VqaprError as error:
-            family = SimulationFailureFamily(error.family.value)
-            if family is SimulationFailureFamily.DATA:
-                raise self._context.failure(
-                    stage=SimulationStage.CALLBACK_WINDOW,
-                    cutoff=occurrence.evaluation_time,
-                    owner=self._context.layer.requirements,
-                    family=SimulationFailureFamily.DATA,
-                    cause=error,
-                    kind=SimulationFailureKind.PRE_COMMIT,
-                ) from error
             raise self._context.failure(
-                stage=SimulationStage.CALLBACK_INTENT,
+                stage=SimulationStage.CALLBACK_WINDOW,
                 cutoff=occurrence.evaluation_time,
-                owner=owner,
-                family=SimulationFailureFamily.INTENT,
+                owner=self._context.layer.requirements,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
@@ -268,7 +255,6 @@ class CallbackPhase:
                 stage=SimulationStage.CALLBACK_WINDOW,
                 cutoff=occurrence.evaluation_time,
                 owner=owner if data_owner is None else data_owner,
-                family=SimulationFailureFamily.DATA,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
@@ -277,7 +263,6 @@ class CallbackPhase:
                 stage=SimulationStage.CALLBACK_INTENT,
                 cutoff=occurrence.evaluation_time,
                 owner=owner,
-                family=SimulationFailureFamily.INTENT,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
             ) from error
@@ -535,7 +520,6 @@ class CallbackPhase:
         with self._context.guard(
             SimulationStage.CALLBACK_WINDOW,
             occurrence.evaluation_time,
-            family=SimulationFailureFamily.DATA,
             owner=self._context.layer.requirements,
         ):
             return self._actual_source_refs(window)

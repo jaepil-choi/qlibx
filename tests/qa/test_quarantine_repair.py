@@ -1,7 +1,7 @@
 """Adversarial attack on claim 5: quarantine, not failure, for a legacy dataset registration.
 
 `tests/test_workspace.py` already exercises this at the library level (`Workspace.open` still
-works, `dataset.register.span.absent` fires at use, the advertised repair command runs). This
+works, `dataset.span_absent` fires at use, the advertised repair command runs). This
 file's job is to attack the properties that file does NOT prove:
 
 - The repair is driven through the actual CLI (`vqapr register <file>`), exactly as the refusal's
@@ -125,7 +125,7 @@ def test_using_either_stale_entry_by_name_refuses(two_stale_workspace: tuple[Pat
     for name in ("alpha", "beta"):
         with pytest.raises(VqaprError) as refused:
             reopened.dataset(name)
-        assert refused.value.failures[0].code == "dataset.register.span.absent"
+        assert refused.value.failures[0].code == "dataset.span_absent"
         assert name in (refused.value.failures[0].observed or "")
 
     # The healthy neighbour is untouched by either quarantine.
@@ -174,7 +174,7 @@ datasets:
     # beta is STILL quarantined -- the repair of alpha must not have touched it.
     with pytest.raises(VqaprError) as still_stale:
         repaired.dataset("beta")
-    assert still_stale.value.failures[0].code == "dataset.register.span.absent"
+    assert still_stale.value.failures[0].code == "dataset.span_absent"
 
     # gamma was never quarantined and must be untouched by alpha's repair.
     gamma_span_after = repaired.span("gamma")
@@ -207,7 +207,7 @@ def test_an_entry_without_field_types_is_quarantined_and_repaired_the_same_way(
     assert registration.field_types is None, "decoded as undeclared, never derived from the file"
     with pytest.raises(VqaprError) as refused:
         require_declared(registration)
-    assert [f.code for f in refused.value.failures] == ["dataset.register.schema.undeclared"]
+    assert [f.code for f in refused.value.failures] == ["dataset.field_types_undeclared"]
     assert "field_types" in refused.value.failures[0].fix
 
     declaration = root / "repair-gamma.yaml"
@@ -260,6 +260,6 @@ datasets:
     code, payload = _cli(capsys, root, "register", str(declaration))
     assert code == 1, payload
     codes = {f["code"] for f in payload["failures"]}
-    assert "workspace.dataset.register.conflict" in codes, (
+    assert "dataset.registered" in codes, (
         f"a changed declaration under cover of a span repair was not refused: {codes}"
     )

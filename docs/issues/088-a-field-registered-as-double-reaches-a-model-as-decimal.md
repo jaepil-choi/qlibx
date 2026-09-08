@@ -61,7 +61,7 @@ carried two numeric types and the registration could not say which.
   `scan.DECLARABLE_FIELD_TYPES`; the reason not to is the whole of this file.
 - A registration written before `field_types` existed is quarantined like one written before
   `grain` (`require_declared`): it opens, lists, removes and re-registers, and every read on it
-  is refused with `dataset.register.schema.undeclared`.
+  is refused with `dataset.field_types_undeclared`.
 - **Open:** a DataModel's `value_fields` stays a list of names. The producer states the types
   from what it wrote, which is honest but is the framework inferring rather than the author
   declaring. Whether `value_fields` becomes `name: type` is the same question as this file's,

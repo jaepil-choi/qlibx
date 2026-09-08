@@ -40,7 +40,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import AccessRecord
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.values import Row, Rows, normalize_rows, require_tz_aware
 from vqapr.flow.frozen import FrozenDataModel, FrozenRun
@@ -51,9 +51,9 @@ MATERIALIZED_DIRECTORY = "materialized"
 """Under `.vqapr/`: one directory per output dataset, one parquet file (`all.parquet`) once
 the run has registered it; spill parts beside it only while a large run is still computing."""
 
-COMPUTE_STAGE = "datamodel.compute"
-OUTPUT_STAGE = "datamodel.output"
-PUBLISH_STAGE = "datamodel.publish"
+OUTPUT_CODES = "datamodel.output"
+"""The prefix of the output-contract codes, `datamodel.output.<breach>`: what `compute` returned
+is not something the framework can use (422, under the `run` stage)."""
 
 
 class LookAheadDetected(AssertionError):
@@ -104,15 +104,15 @@ def derived_available_at(
 
 
 def refusal(
-    stage: str,
+    stage: Stage,
     code: str,
     requirement: str,
     observed: str,
     *,
+    status: Status,
     fix: str,
-    explain: ExplainTopic,
-    family: FailureFamily = FailureFamily.DATA,
     retry: str,
+    cause: BaseException | None = None,
     source: FailureSource | None = None,
     examples: Sequence[str] = (),
     example_total: int | None = None,
@@ -122,18 +122,19 @@ def refusal(
     `examples`/`example_total` are optional because most refusals here are structural -- a wrong
     field set, a forged column -- and a structural check has no offending *value* to quote. A
     check on row contents does, and passes them: `Failure.bounded` truncates to `MAX_EXAMPLES`
-    and `example_total` carries the count before truncation (record `121`).
+    and `example_total` carries the count before truncation (record `121`). `cause` is the
+    exception in hand, when there is one, so the whole traceback rides on the failure.
     """
     return VqaprError(
         stage=stage,
-        family=family,
         failures=[
             Failure.bounded(
                 code,
                 requirement,
+                status=status,
                 observed=observed,
                 fix=fix,
-                explain=explain,
+                cause=cause,
                 source=source,
                 examples=examples,
                 example_total=example_total,
@@ -149,7 +150,6 @@ def validated_output(
     *,
     value_fields: Sequence[str],
     selected_instruments: Sequence[str],
-    stage: str = OUTPUT_STAGE,
 ) -> Rows:
     """One evaluation's rows, as the contract admits them, or the refusal that names the breach.
 
@@ -163,15 +163,16 @@ def validated_output(
         rows = normalize_rows(raw)
     except (TypeError, ValueError) as error:
         raise refusal(
-            stage,
-            f"{stage}.rows_invalid",
+            Stage.RUN,
+            f"{OUTPUT_CODES}.rows_invalid",
             "DataModel output must contain portable finite scalar rows",
             f"{type(error).__name__}: {error}",
+            status=Status.CONTRACT,
             fix=(
                 "return only finite scalar values (no NaN/inf, no nested objects) from "
                 "DataModel.compute"
             ),
-            explain=ExplainTopic.COMPONENT_CONTRACT,
+            cause=error,
             retry="fix DataModel.compute output, register the component again, then retry",
         ) from error
 
@@ -186,34 +187,35 @@ def validated_output(
         actual = set(row)
         if "available_at" in actual:
             raise refusal(
-                stage,
-                f"{stage}.available_at_owned",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.available_at_owned",
                 "DataModel output must not set package-owned available_at",
                 f"row {index} fields={sorted(actual)}",
+                status=Status.CONTRACT,
                 fix="drop available_at from the row dict returned by DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="remove available_at from DataModel output, then retry",
             )
         if actual != expected:
             raise refusal(
-                stage,
-                f"{stage}.fields_invalid",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.fields_invalid",
                 f"every output row must contain exactly {sorted(expected)}",
                 f"row {index} fields={sorted(actual)}",
+                status=Status.CONTRACT,
                 fix=f"return exactly {sorted(expected)} on every row from DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="return exactly the declared output fields, then retry",
             )
         try:
             instrument = str(instrument_id(row["instrument"]))
         except (TypeError, ValueError) as error:
             raise refusal(
-                stage,
-                f"{stage}.instrument_invalid",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.instrument_invalid",
                 "every output row must identify one valid requested instrument",
                 f"row {index}: {error}",
+                status=Status.CONTRACT,
                 fix="return only valid instrument identities from DataModel.compute",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
+                cause=error,
                 retry="return valid requested instrument identities, then retry",
             ) from error
         if instrument not in selected:
@@ -231,30 +233,30 @@ def validated_output(
         seen.add(instrument)
     if unrequested:
         raise refusal(
-            stage,
-            f"{stage}.instrument_unrequested",
+            Stage.RUN,
+            f"{OUTPUT_CODES}.instrument_unrequested",
             "DataModel output instruments must come from the run's universe",
             (
                 f"{len(unrequested)} unrequested instrument(s) across {unrequested_rows} "
                 f"of {len(rows)} output row(s)"
             ),
+            status=Status.CONTRACT,
             fix="only emit rows for instruments the run declares under `instruments:`",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
             retry="return values only for requested instruments, then retry",
             examples=unrequested,
             example_total=len(unrequested),
         )
     if duplicated:
         raise refusal(
-            stage,
-            f"{stage}.instrument_duplicate",
+            Stage.RUN,
+            f"{OUTPUT_CODES}.instrument_duplicate",
             "DataModel output must contain at most one row per instrument per evaluation",
             (
                 f"{len(duplicated)} repeated instrument(s) across {duplicate_rows} "
                 f"extra of {len(rows)} output row(s)"
             ),
+            status=Status.CONTRACT,
             fix="emit at most one row per instrument per evaluation from DataModel.compute",
-            explain=ExplainTopic.COMPONENT_CONTRACT,
             retry="deduplicate DataModel output, then retry",
             examples=duplicated,
             example_total=len(duplicated),
@@ -341,17 +343,17 @@ class DataModelOutput:
             declared[name] = column_type
         if offending:
             raise refusal(
-                OUTPUT_STAGE,
-                f"{OUTPUT_STAGE}.field_type",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.field_type",
                 "every value field must be a type a dataset can declare: "
                 f"{DECLARABLE_FIELD_TYPE_NAMES}",
                 "; ".join(offending),
+                status=Status.CONTRACT,
                 fix=(
                     "return float for a continuous quantity and int for a count. A Decimal "
                     "reaches a model as `Decimal` while a float reaches it as `float`, and a "
                     "dataset carries one numeric type per field"
                 ),
-                explain=ExplainTopic.COMPONENT_CONTRACT,
                 retry="fix DataModel.compute output, then retry",
             )
         return declared
@@ -376,12 +378,13 @@ class DataModelOutput:
         except (pa.ArrowException, TypeError, ValueError) as error:
             if self._schema is None:
                 raise refusal(
-                    OUTPUT_STAGE,
-                    f"{OUTPUT_STAGE}.rows_invalid",
+                    Stage.RUN,
+                    f"{OUTPUT_CODES}.rows_invalid",
                     "a session's rows must be portable scalars pyarrow can type",
                     f"{type(error).__name__}: {error}",
+                    status=Status.CONTRACT,
                     fix="return only finite scalar values from DataModel.compute",
-                    explain=ExplainTopic.COMPONENT_CONTRACT,
+                    cause=error,
                     retry="fix DataModel.compute output, then retry",
                 ) from error
             # The schema is whatever pyarrow inferred from the first non-empty session, and this
@@ -396,16 +399,17 @@ class DataModelOutput:
             # nothing it cannot tell).
             established = ", ".join(f"{field.name}: {field.type}" for field in self._schema)
             raise refusal(
-                OUTPUT_STAGE,
-                f"{OUTPUT_STAGE}.schema_mismatch",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.schema_mismatch",
                 "every session's rows must fit the schema the first non-empty session established",
                 f"{type(error).__name__}: {error}; established schema: {established}",
+                status=Status.CONTRACT,
                 fix=(
                     "return values that fit that schema on every session. A Decimal's precision "
                     "and scale are part of its type, so for a continuous quantity return float, "
                     "and where you need Decimal, quantize it to one scale in compute"
                 ),
-                explain=ExplainTopic.COMPONENT_CONTRACT,
+                cause=error,
                 retry="fix DataModel.compute output, then retry",
             ) from error
         if self._schema is None:
@@ -433,13 +437,13 @@ class DataModelOutput:
             os.replace(staging, target)
         except (OSError, pa.ArrowException) as error:
             raise refusal(
-                PUBLISH_STAGE,
-                f"{PUBLISH_STAGE}.chunk_failed",
+                Stage.RECORD,
+                "datamodel.chunk_failed",
                 "a session's rows must land on the project filesystem",
                 f"{type(error).__name__}: {error}",
+                status=Status.UNAVAILABLE,
                 fix=f"check filesystem permissions and free space for {self._directory}",
-                explain=ExplainTopic.PUBLICATION,
-                family=FailureFamily.PUBLICATION,
+                cause=error,
                 retry="repair project filesystem access, then retry",
                 source=FailureSource(file=str(target)),
             ) from error
@@ -468,17 +472,17 @@ class DataModelOutput:
         if self._rows == 0:
             self._discard()
             raise refusal(
-                OUTPUT_STAGE,
-                f"{OUTPUT_STAGE}.empty",
+                Stage.RUN,
+                f"{OUTPUT_CODES}.empty",
                 "a datamodel run must produce at least one output row",
                 f"all {self._sessions} session(s) returned zero rows",
+                status=Status.CONTRACT,
                 fix=(
                     "a lookback longer than the available history makes every window short and "
                     "every session empty: check that each input dataset holds enough rows before "
                     "the first session. Otherwise widen the instruments or the sessions, or fix "
                     "DataModel.compute to emit rows"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
                 retry="fix input coverage or DataModel output, then retry",
             )
         source_id = output_source_id(self._layer.dataset_id)
@@ -567,12 +571,16 @@ class DataModelPhase:
             raise
         except Exception as error:
             raise refusal(
-                COMPUTE_STAGE,
-                f"{COMPUTE_STAGE}.failed",
+                Stage.RUN,
+                "datamodel.compute_failed",
                 "DataModel.compute must complete for every session",
                 f"{occurrence.occurrence_id}: {type(error).__name__}: {error}",
-                fix="fix the exception raised inside DataModel.compute for this session",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
+                status=Status.CRASHED,
+                fix=(
+                    "fix the exception raised inside DataModel.compute for this session; the "
+                    "traceback is in `cause`"
+                ),
+                cause=error,
                 retry="fix the DataModel or its declared input sufficiency, then retry",
             ) from error
         rows = validated_output(

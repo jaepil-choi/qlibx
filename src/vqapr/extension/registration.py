@@ -18,29 +18,27 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.testing.conformance import conformance
 from vqapr.workspace import Workspace
 
-_STAGE = "component.register"
-
 
 def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError:
     return VqaprError(
-        stage=_STAGE,
-        family=FailureFamily.DATA,
+        stage=Stage.REGISTER,
         failures=[
             Failure.bounded(
-                f"{_STAGE}.source_unreadable",
+                "component.source_unreadable",
                 f"{kind_label} source must be a readable Python file",
-                observed=str(error),
-                # SOURCE_ACCESS, not COMPONENT_CONTRACT: fingerprinting failed on an OSError while
+                # UNAVAILABLE (503), not CONTRACT: fingerprinting failed on an OSError while
                 # reading the file at `path` -- the declared path and kind are already fine, only
-                # the filesystem read failed, which is exactly what SOURCE_ACCESS describes.
+                # the filesystem read failed, which is what the machine's status describes.
+                status=Status.UNAVAILABLE,
+                observed=str(error),
                 fix=f"create or fix permissions on the {kind_label} source file at {path}",
-                explain=ExplainTopic.SOURCE_ACCESS,
+                cause=error,
                 source=FailureSource(file=str(path)),
             )
         ],

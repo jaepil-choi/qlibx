@@ -533,9 +533,9 @@ def test_a_yaml_path_handed_to_run_or_check_is_refused_by_name(
             code, refused = _cli(capsys, "--project-root", str(tmp_path), verb, str(target))
 
             assert code == 1, refused
-            assert refused["stage"] == "cli.input"
+            assert refused["stage"] == "usage"
             detail = refused["failures"][0]
-            assert detail["code"] == "cli.input.value_invalid"
+            assert detail["code"] == "argument.value_invalid"
             assert detail["requirement"] == f"`vqapr {verb}` takes the id of a registered run"
             assert target.name in detail["observed"]
             for command in (f"vqapr register {target}", f"vqapr {verb} <run-id>"):
@@ -588,7 +588,7 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
         emitted["path"],
     )
     assert code == 1
-    assert mismatched["failures"][0]["code"] == "component.load.constraint_id_mismatch"
+    assert mismatched["failures"][0]["code"] == "component.constraint_id_mismatch"
 
     # The rule BITES, and the run FINISHES. This workspace holds one instrument, so the scaffold
     # strategy proposes 100% of the book in it, which a 20% cap forbids.
@@ -876,7 +876,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
 
     assert code == 1, checked
     assert checked["ok"] is False
-    assert "component.load.constraint_id_mismatch" in [
+    assert "component.constraint_id_mismatch" in [
         failure["code"] for failure in checked["failures"]
     ]
 
@@ -888,7 +888,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
     # empty `failures[]`, which tells a user the framework broke when their registration was wrong.
     assert ran["stage"] != "unhandled"
     assert ran["failures"], "a refusal must carry its failures, not an empty list"
-    assert "component.load.constraint_id_mismatch" in [
+    assert "component.constraint_id_mismatch" in [
         failure["code"] for failure in ran["failures"]
     ]
 
@@ -919,7 +919,7 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     assert registered["registered"]["components"] == ["no-short"]
 
     # `ok:true` outright, which this test could not assert until issue 012 was closed: the fixture
-    # spec used to fail `check` on `check.lookback.uncovered` while `run` completed it, so this
+    # spec used to fail `check` on `lookback.uncovered` while `run` completed it, so this
     # compared against the unconstrained spec's failures instead and said so. The judgment now
     # measures at the first decision rather than at `start`, the two verbs agree, and the weaker
     # comparison is gone with the defect it worked around.
@@ -972,7 +972,7 @@ def test_register_refuses_a_date_boundary_as_a_structured_declaration_refusal(
     assert code == 1
     assert payload["stage"] != "unhandled"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert "UTC offset" in failure["observed"]
     assert "vqapr new run" in failure["requirement"]
     assert failure["source"]["key_path"] == "runs.dated"
@@ -1014,7 +1014,7 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     assert code == 1
     assert payload["stage"] != "unhandled"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     for key in (
         "strategies", "instruments", "start", "end", "exchange",
         "execution_input", "initial_account",
@@ -1036,21 +1036,23 @@ def test_a_rejected_command_line_still_answers_in_the_envelope(
 
     assert code == 1
     assert payload["ok"] is False
-    assert payload["stage"] == "cli.usage"
-    assert payload["failures"][0]["code"] == "cli.usage.rejected"
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["code"] == "usage.rejected"
     # argparse's wording rides verbatim; the CLI does not invent a second remedy text.
     assert "invalid choice" in payload["failures"][0]["requirement"]
     assert "datamodel" in payload["failures"][0]["requirement"]
 
 
-def test_a_usage_refusal_carries_no_package_failure_family(
+def test_a_usage_refusal_is_a_400_at_the_usage_stage_with_no_dump(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`FailureFamily` is the closed set of package stages, and usage never reached one."""
+    """The command line is the submission, and it is what must change (record `171`)."""
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "list", "nonsense")
 
     assert code == 1
-    assert payload["family"] is None
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["status"] == 400
+    assert payload["failures"][0]["cause"]["where"], "even a usage refusal names its line"
     assert payload["mutation"] is False
     # No traceback and no dump: the command line is the whole evidence.
     assert "traceback" not in payload
@@ -1063,7 +1065,7 @@ def test_an_unknown_command_does_not_escape_as_a_bare_exit_code(
     code, payload = _cli(capsys, "definitely-not-a-command")
 
     assert code == 1
-    assert payload["stage"] == "cli.usage"
+    assert payload["stage"] == "usage"
 
 
 def test_help_keeps_argparses_own_behaviour(capsys: pytest.CaptureFixture[str]) -> None:
@@ -1141,7 +1143,7 @@ def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
 
     assert code == 1 and ran["ok"] is False
     assert ran["stage"] == "run.strategy_failed"
-    assert ran["family"] == "INTENT"
+    assert "family" not in ran, "record 171: stage and status replaced family"
     assert ran["run_id"] == "mixed" and ran["store_root"]
     assert ran["strategies"]["my-alpha"]["status"] == "completed"
     assert ran["strategies"]["my-alpha"]["record"].startswith("my-alpha@"), (
@@ -1154,7 +1156,10 @@ def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
     assert failed["at"]["clock"], "the replay coordinates ride with the strategy's block"
     (entry,) = ran["failures"]
     assert entry["strategy"] == "never-ready"
-    assert entry["code"] == "simulation.callback.intent.ValueError"
+    assert entry["code"] == "strategy.callback.intent"
+    assert entry["status"] == 502, "the author's own decide() raised: theirs to fix"
+    assert entry["cause"]["type"] == "ValueError"
+    assert "the signal is not ready" in entry["cause"]["traceback"]
     assert entry["observed"] == "the signal is not ready"
     assert entry["source"]["key_path"] == "strategies.never-ready"
     assert entry["source"]["file"].endswith(".py") and isinstance(entry["source"]["line"], int)

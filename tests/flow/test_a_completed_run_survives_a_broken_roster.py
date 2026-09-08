@@ -32,27 +32,21 @@ from pathlib import Path
 import pytest
 
 import vqapr.flow.orchestration as orchestration
-from vqapr.domain.errors import (
-    ExplainTopic,
-    Failure,
-    FailureFamily,
-    VqaprError,
-)
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.flow.orchestration import _roster_report_or_stale
 from vqapr.workspace import Workspace
 
 
 def _unreadable(*_args: object, **_kwargs: object) -> object:
     raise VqaprError(
-        stage="workspace.instruments",
-        family=FailureFamily.DATA,
+        stage=Stage.READ,
         failures=[
             Failure.bounded(
-                "workspace.instruments.unreadable",
+                "roster.unreadable",
                 "the registered instrument roster pointer must be readable JSON",
+                status=Status.UNAVAILABLE,
                 observed="instruments.json: broken",
                 fix="re-register the roster",
-                explain=ExplainTopic.WORKSPACE_STATE,
             )
         ],
         mutation=False,
@@ -92,7 +86,7 @@ def test_the_record_says_stale_rather_than_claiming_the_run_knew_no_roster(
     assert isinstance(block, dict)
     assert block["known"] is True, "the run did read its roster; the record must not deny it"
     assert block["stale"] is True, "and must say the categories are no longer recoverable"
-    assert "workspace.instruments.unreadable" in str(block["note"]), (
+    assert "roster.unreadable" in str(block["note"]), (
         "the note must carry the underlying refusal so a reader can act on the real cause"
     )
 

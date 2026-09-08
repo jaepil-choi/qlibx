@@ -36,7 +36,7 @@ from difflib import get_close_matches
 from typing import Any
 
 from vqapr.account.account import AccountMode
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError, status_of
 
 # Through `extension/`, not `_internal/`, matching `flow/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
@@ -59,24 +59,25 @@ __all__ = [
     "require_judged",
 ]
 
-JUDGMENT_STAGE = "run.judgments"
+JUDGMENT_STAGE = Stage.CHECK
 """The stage a refused judgment is reported under, by every door that asks them."""
 
 # One constant per code, and each judge below raises through its constant rather than through a
 # literal of its own. `cli/check.py` publishes the set of codes this verb can emit, and when that
 # set was a hand-written copy of the literals here it drifted: a ninth judge was added and the copy
-# still said eight. `JUDGMENT_CODES` is the only list, `check` imports it, and a test regex over
-# this module's source holds every `"check.` literal to membership in it -- so the next judge
-# added without a line here fails the suite rather than the reader.
-UNIVERSE_ABSENT = "check.universe.absent"
-PERIOD_UNCOVERED = "check.period.uncovered"
-EXECUTION_NOT_AFTER_DECISION = "check.execution.not_after_decision"
-FIELD_ABSENT = "check.field.absent"
-LOOKBACK_UNCOVERED = "check.lookback.uncovered"
-DATASET_UNREGISTERED = "check.dataset.unregistered"
-WEIGHTS_MODE_CONFLICT = "check.weights.mode_conflict"
-WEIGHTS_VENUE_CONFLICT = "check.weights.venue_conflict"
-DATAMODEL_OUTPUT_REGISTERED = "check.datamodel.output_registered"
+# still said eight. `JUDGMENT_CODES` is the only list, `check` imports it, and a test over this
+# module's source holds every code literal to membership in it -- so the next judge added without
+# a line here fails the suite rather than the reader. Record `171`: the codes lost their `check.`
+# prefix; `status` says who must act and `stage` (CHECK) says which operation was under way.
+UNIVERSE_ABSENT = "universe.absent"
+PERIOD_UNCOVERED = "period.uncovered"
+EXECUTION_NOT_AFTER_DECISION = "execution.not_after_decision"
+FIELD_ABSENT = "field.absent"
+LOOKBACK_UNCOVERED = "lookback.uncovered"
+DATASET_UNREGISTERED = "dataset.unregistered"
+WEIGHTS_MODE_CONFLICT = "weights.mode_conflict"
+WEIGHTS_VENUE_CONFLICT = "weights.venue_conflict"
+DATAMODEL_OUTPUT_REGISTERED = "datamodel.output_registered"
 
 JUDGMENT_CODES = (
     UNIVERSE_ABSENT,
@@ -96,12 +97,13 @@ Each is a question a run must answer YES to before it starts, asked independentl
 rather than the first one four times. `check` renders these as failures; `run` refuses on them.
 """
 
-JUDGMENT_BLOCKED = "run.check.judgment_blocked"
-"""`require_judged`'s own code, for a judgment that could not ANSWER on the run path.
+JUDGMENT_BLOCKED = "judgment.blocked"
+"""The code of a judgment that could not ANSWER, whichever door asked.
 
-Not in `JUDGMENT_CODES`: it is not a judgment, and `check` never emits it -- `check` asks
-`judgments` itself and reports a blocked entry AS blocked, so only the doors that go through
-`require_judged` (`preflight_run`, hence `run` and the sample's `execute`) ever raise it.
+Not in `JUDGMENT_CODES`: it is not a judgment. `judgments` builds one such failure per judge that
+raised, carrying the exception whole in `cause` and its status by whose frame raised; `check`
+reports them AS blocked and `require_judged` (`preflight_run`, hence `run` and the sample's
+`execute`) refuses on them beside the refusals proper.
 """
 
 
@@ -125,32 +127,14 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
     failures, blocked = judgments(definition, workspace)
     if not failures and not blocked:
         return
-    run_id = definition.run_id
-    reported = list(failures)
-    for entry in blocked:
-        reported.append(
-            Failure.bounded(
-                JUDGMENT_BLOCKED,
-                "every judgment must be answerable before the run starts",
-                observed=(
-                    f"the {entry.get('check')} judgment could not answer: {entry.get('blocked_by')}"
-                ),
-                fix=(
-                    f"run `vqapr check {run_id}` to see the full report, then fix what stopped "
-                    "the judgment from answering"
-                ),
-                explain=ExplainTopic.RUN_PRECONDITION,
-                source=FailureSource(key_path=f"runs.{run_id}"),
-            )
-        )
-    raise VqaprError(stage=JUDGMENT_STAGE, family=FailureFamily.INTENT, failures=reported)
+    raise VqaprError(stage=Stage.CHECK, failures=[*failures, *blocked])
 
 
 def judgments(
     definition: RunDefinition, workspace: Workspace
-) -> tuple[list[Failure], list[dict[str, str]]]:
+) -> tuple[list[Failure], list[Failure]]:
     """The judgments (`JUDGMENT_CODES`), each answered independently of the others, for every
-    strategy.
+    strategy: `(found, blocked)`.
 
     Independence is the whole design: each judge reads the definition and the workspace and
     answers on its own, so a run carrying four defects produces four refusals in a single call.
@@ -158,12 +142,13 @@ def judgments(
     suppresses the field and lookback questions about it, because there is nothing to ask them of
     -- and each such gate carries its own reason.
 
-    A judgment that could not ANSWER is recorded as blocked, carrying the exception type separately
-    from its message so a framework bug reads differently from a routine decline. It is never
-    reported as passing, and `ok` is false while anything is blocked.
+    A judgment that could not ANSWER is returned as a `JUDGMENT_BLOCKED` failure in the second
+    list, carrying the exception whole in `cause` and a status that says whose fault it is, so a
+    framework bug reads differently from a routine decline. It is never reported as passing, and
+    `ok` is false while anything is blocked.
     """
     found: list[Failure] = []
-    blocked: list[dict[str, str]] = []
+    blocked: list[Failure] = []
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
     # The run's one agenda, derived at most ONCE for every judge that reads it
@@ -210,15 +195,25 @@ def judgments(
             # abort the loop would quietly restore the stop-at-first behaviour this verb exists to
             # replace. But swallowing it silently is the worse half of that trade: the judgment
             # did not find nothing, it could not look, and a run nothing was proven about would
-            # then report as clean and ready. So it is recorded as BLOCKED. `error_type` rides
-            # separately so a reader can tell a `VqaprError` (the framework declining to answer)
-            # from a `KeyError` (almost certainly this verb being wrong) at a glance.
+            # then report as clean and ready. So it is recorded as BLOCKED, with the exception
+            # whole in `cause`. Its status is the refusal's own when the framework declined to
+            # answer (a `VqaprError` already says who must act: an unregistered dataset is the
+            # submission's 404, not the framework's 500), and by whose frame raised otherwise --
+            # a `KeyError` from inside this module is almost certainly this verb being wrong.
+            status = error.status if isinstance(error, VqaprError) else status_of(error)
             blocked.append(
-                {
-                    "check": name,
-                    "error_type": type(error).__name__,
-                    "blocked_by": f"{type(error).__name__}: {error}",
-                }
+                Failure.bounded(
+                    JUDGMENT_BLOCKED,
+                    "every judgment answers before a run is accepted",
+                    status=status,
+                    observed=f"{name} could not answer: {type(error).__name__}: {error}",
+                    fix=(
+                        f"run `vqapr check {definition.run_id}` to see the full report, then fix "
+                        "what stopped the judgment from answering; the exception is in `cause`"
+                    ),
+                    cause=error,
+                    source=at,
+                )
             )
     return found, blocked
 
@@ -242,7 +237,7 @@ def _judge_universe(definition: RunDefinition, at: FailureSource) -> list[Failur
             "a run must declare at least one instrument to decide about",
             observed=f"instruments: {definition.instruments!r}",
             fix="list the instrument ids the run trades under `instruments:` in the run",
-            explain=ExplainTopic.RUN_PRECONDITION,
+            status=Status.MISSING,
             source=_key(at, "instruments"),
         )
     ]
@@ -284,7 +279,7 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
                 "a run must declare both start and end so its period is bounded",
                 observed=f"start={start!r}, end={end!r}",
                 fix="declare both start and end as ISO-8601 timestamps with an explicit offset",
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
                 source=_key(at, "start" if start is None else "end"),
             )
         ]
@@ -296,7 +291,7 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
                 observed=f"start={start.isoformat()}, end={end.isoformat()}",
                 fix=f"set end later than {start.isoformat()}, or set start earlier than "
                 f"{end.isoformat()}",
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
                 source=_key(at, "end"),
             )
         ]
@@ -376,7 +371,7 @@ def _judge_execution_ordering(
                     f"move the strategy cadence earlier than {fill_at.isoformat()}, or declare a "
                     "fill convention whose instant is later than every decision"
                 ),
-                explain=ExplainTopic.RUN_PRECONDITION,
+                status=Status.PRECONDITION,
                 source=_key(at, "strategies", entry.component_id),
             )
         )
@@ -452,7 +447,7 @@ def _judge_member_datasets(
                         f"add {field_id} to the dataset's fields mapping and register it "
                         "again, or read a field it already exposes"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
+                    status=Status.MISSING,
                     source=source,
                 )
             )
@@ -481,7 +476,7 @@ def _judge_member_datasets(
                         f"after {span[0]}, or prepare the dataset with history reaching "
                         "further back"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
+                    status=Status.PRECONDITION,
                     source=_key(at, "start"),
                 )
             )
@@ -502,7 +497,7 @@ def _judge_member_datasets(
                     if close
                     else f"register {dataset_id!r} with `vqapr register <declaration>`"
                 ),
-                explain=ExplainTopic.WORKSPACE_STATE,
+                status=Status.MISSING,
                 source=source,
             )
         )
@@ -514,7 +509,7 @@ def _judge_outputs(
 ) -> list[Failure]:
     """A datamodel run writes a dataset that does not exist yet (record `148`).
 
-    The refusal preflight raises at `preflight.datamodel.output_registered`, asked here so
+    The refusal preflight raises as `datamodel.output_registered` under `freeze`, asked here so
     `check` cannot certify a run that `run` then refuses.
     """
     found: list[Failure] = []
@@ -530,7 +525,7 @@ def _judge_outputs(
                     f"declare a new dataset_id for {entry.component_id!r}, or remove the "
                     f"existing {entry.dataset_id} registration from the workspace first"
                 ),
-                explain=ExplainTopic.WORKSPACE_STATE,
+                status=Status.CONFLICT,
                 source=_key(at, "datamodels", entry.component_id, "dataset_id"),
             )
         )
@@ -589,7 +584,7 @@ def _judge_weights(
                         f"drop {', '.join(shorts)} from the initial account, or declare the "
                         "account mode as SIGNED"
                     ),
-                    explain=ExplainTopic.RUN_PRECONDITION,
+                    status=Status.PRECONDITION,
                     source=_key(at, "initial_account", "positions"),
                 )
             )
@@ -622,8 +617,8 @@ def _judge_weights(
     unshortable = [
         f"{name}: {declared[name]}"
         for name in definition.instruments
-        # An instrument with no listing at all is `preflight.universe.unlisted_instrument`'s
-        # refusal to make; reporting it here too would give one defect two names.
+        # An instrument with no listing at all is `universe.unlisted_instrument`'s refusal to
+        # make (preflight); reporting it here too would give one defect two names.
         if name in declared and str(declared[name]) != "signed"
     ]
     if not unshortable:
@@ -643,7 +638,7 @@ def _judge_weights(
                 "declare the account mode as LONG_ONLY, or list those instruments with signed "
                 "access on the exchange"
             ),
-            explain=ExplainTopic.RUN_PRECONDITION,
+            status=Status.PRECONDITION,
             source=_key(at, "initial_account", "mode"),
         )
     )

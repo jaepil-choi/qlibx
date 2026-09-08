@@ -20,10 +20,10 @@ from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import (
     Diagnosis,
-    ExplainTopic,
     Failure,
-    FailureFamily,
     FailureSource,
+    Stage,
+    Status,
     collector,
 )
 from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
@@ -74,11 +74,6 @@ is the one sure moment to tell the author that `RowsLookback` on their table now
 else. Nothing decodes a grain-less registration as `rows` silently (§7-3).
 """
 
-GRAIN_STAGE = "dataset.register.grain"
-SCHEMA_STAGE = "dataset.register.schema"
-KEY_STAGE = "dataset.register.key"
-SPAN_STAGE = "dataset.register.span"
-VALUE_STAGE = "dataset.register.value"
 _RETRY = "fix the prepared dataset, then register again"
 
 
@@ -400,10 +395,11 @@ def require_declared(registration: DatasetRegistration) -> None:
     if registration.grain is not None and registration.field_types is not None:
         return
     if registration.grain is None:
-        found = collector(GRAIN_STAGE, FailureFamily.DATA)
+        found = collector(Stage.REGISTER)
         found.add(
             Failure.bounded(
-                code=f"{GRAIN_STAGE}.undeclared",
+                code="dataset.grain_undeclared",
+                status=Status.INVALID,
                 requirement=(
                     f"a dataset must declare its grain before it can be read: {GRAIN_NAMES}"
                 ),
@@ -416,14 +412,14 @@ def require_declared(registration: DatasetRegistration) -> None:
                     f"add `grain: <{GRAIN_NAMES}>` to the dataset's declaration and register it "
                     f"again. Note: {ROWS_LOOKBACK_MEANING}"
                 ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         found.done(retry="declare the dataset's grain and register it again").raise_if_failed()
-    found = collector(SCHEMA_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     found.add(
         Failure.bounded(
-            code=f"{SCHEMA_STAGE}.undeclared",
+            code="dataset.field_types_undeclared",
+            status=Status.INVALID,
             requirement=(
                 "a dataset must declare the type of every field before it can be read: "
                 f"{scan.DECLARABLE_FIELD_TYPE_NAMES}"
@@ -437,7 +433,6 @@ def require_declared(registration: DatasetRegistration) -> None:
                 "add `field_types:` mapping every field to its type to the dataset's declaration "
                 "and register it again"
             ),
-            explain=ExplainTopic.DECLARATION_SHAPE,
         )
     )
     found.done(retry="declare the dataset's field types and register it again").raise_if_failed()
@@ -465,7 +460,7 @@ def check_schema(
     두 번째 반환값은 **잰 projection 스키마**다(grouping 판정이 여기서 나온다). 무엇이든
     실패했다면 붙일 것이 없으므로 `None`이다.
     """
-    found = collector(SCHEMA_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     observed = ", ".join(sorted(columns)) or "(no columns)"
     identity_ok = True
 
@@ -474,7 +469,8 @@ def check_schema(
             identity_ok = False
             found.add(
                 Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_missing",
+                    code="dataset.field_missing",
+                    status=Status.INVALID,
                     requirement=f"{role} declares column {column!r}, which must exist",
                     observed=observed,
                     source=FailureSource(key_path=f"datasets.{registration.dataset_id}.{role}"),
@@ -482,7 +478,6 @@ def check_schema(
                         f"add column {column!r} to the prepared source, or point {role} at a "
                         "column it already has"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             )
 
@@ -492,7 +487,8 @@ def check_schema(
         suffix = "not_tz" if actual is ColumnType.TIMESTAMP_NAIVE else "not_a_timestamp"
         found.add(
             Failure.bounded(
-                code=f"{SCHEMA_STAGE}.available_at_{suffix}",
+                code=f"dataset.available_at_{suffix}",
+                status=Status.INVALID,
                 requirement=(
                     f"available_at column {registration.available_at!r} must be a "
                     f"timezone-aware timestamp. Localize it while preparing the source, at the "
@@ -508,7 +504,6 @@ def check_schema(
                     f"localize {registration.available_at!r} to the venue timezone while "
                     "preparing the source, then register again"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
 
@@ -519,7 +514,8 @@ def check_schema(
         identity_ok = False
         found.add(
             Failure.bounded(
-                code=f"{SCHEMA_STAGE}.field_not_an_expression",
+                code="dataset.field_not_an_expression",
+                status=Status.INVALID,
                 requirement=(
                     f"field {name!r} must be a value expression, not a statement. An expression "
                     "is evaluated within one instant, which is what makes it impossible to write "
@@ -534,7 +530,6 @@ def check_schema(
                     f"express {name!r} over this source's own columns, or compute it in a "
                     "DataModel where reading across instants is declared"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
 
@@ -550,7 +545,8 @@ def check_schema(
     if not projection.ok:
         found.add(
             Failure.bounded(
-                code=f"{SCHEMA_STAGE}.projection_unbindable",
+                code="dataset.projection_unbindable",
+                status=Status.INVALID,
                 requirement=(
                     "every declared field must be an expression this source can evaluate, and "
                     "the whole set must be one shape: either every field is row-wise, or every "
@@ -570,7 +566,6 @@ def check_schema(
                     "fix the expression the message names, or wrap the row-wise fields in an "
                     "aggregate so the whole projection groups"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
         return found.done(retry=_RETRY), None
@@ -584,7 +579,8 @@ def check_schema(
             typed_ok = False
             found.add(
                 Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_decimal",
+                    code="dataset.field_decimal",
+                    status=Status.INVALID,
                     requirement=(
                         f"field {name!r} evaluates {expression!r}, which must not be a DECIMAL. "
                         f"A model does arithmetic in one numeric type, and a DECIMAL column "
@@ -600,14 +596,14 @@ def check_schema(
                         f"cast {name!r} to DOUBLE (or INTEGER) while preparing the source, then "
                         f"register again"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             )
         elif exposed is ColumnType.TIMESTAMP_NAIVE:
             typed_ok = False
             found.add(
                 Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_not_tz",
+                    code="dataset.field_not_tz",
+                    status=Status.INVALID,
                     requirement=(
                         f"field {name!r} evaluates {expression!r}, whose timestamps must be "
                         f"timezone-aware. A naive timestamp reaches a model as an instant nobody "
@@ -622,14 +618,14 @@ def check_schema(
                         f"localize what {name!r} reads to the venue timezone while preparing the "
                         f"source, or stop exposing it as a field"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             )
         elif exposed is ColumnType.OTHER:
             typed_ok = False
             found.add(
                 Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_not_portable",
+                    code="dataset.field_not_portable",
+                    status=Status.INVALID,
                     requirement=(
                         f"field {name!r} evaluates {expression!r}, which must produce a portable "
                         f"scalar -- a boolean, number, string, date or timestamp. A model "
@@ -644,7 +640,6 @@ def check_schema(
                         f"flatten what {name!r} reads into scalar columns while preparing the "
                         f"source, or stop exposing it as a field"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             )
         elif name in declared_types and exposed is not declared_types[name]:
@@ -655,7 +650,8 @@ def check_schema(
             declared = declared_types[name]
             found.add(
                 Failure.bounded(
-                    code=f"{SCHEMA_STAGE}.field_type_mismatch",
+                    code="dataset.field_type_mismatch",
+                    status=Status.INVALID,
                     requirement=(
                         f"field {name!r} is declared {declared.value}, so {expression!r} must "
                         f"evaluate to a {declared.value} on the source"
@@ -669,7 +665,6 @@ def check_schema(
                         f"cast {name!r} to {declared.value} while preparing the source, or "
                         f"declare field_types.{name}: {exposed.value} if the file is right"
                     ),
-                    explain=ExplainTopic.DATASET_PREPARATION,
                 )
             )
 
@@ -685,7 +680,7 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
     grain has nothing to prove -- `GROUP BY` yields one row per pair by construction -- so the scan
     is skipped rather than run against source rows the projection collapses.
     """
-    found = collector(KEY_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     if registration.grain is not Grain.ROWS and registration.aggregated:
         return found.done(retry=_RETRY)
     axis = registration.key_axis()
@@ -694,7 +689,8 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
     if result.null_groups:
         found.add(
             Failure.bounded(
-                code=f"{KEY_STAGE}.null",
+                code="dataset.key_null",
+                status=Status.INVALID,
                 requirement=f"logical key ({declared}) must not contain nulls",
                 observed=f"{result.null_groups} key group(s) with a null",
                 examples=result.null_examples,
@@ -704,13 +700,13 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
                     f"drop or repair the rows whose ({declared}) is null, or declare a key "
                     "whose columns are always present"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     if result.duplicate_groups:
         found.add(
             Failure.bounded(
-                code=f"{KEY_STAGE}.duplicate",
+                code="dataset.key_duplicate",
+                status=Status.INVALID,
                 requirement=f"logical key ({declared}) must be unique",
                 observed=f"{result.duplicate_groups} duplicated key group(s)",
                 examples=result.duplicate_examples,
@@ -720,7 +716,6 @@ def check_key(registration: DatasetRegistration, spec: SourceSpec) -> Diagnosis:
                     f"deduplicate the source on ({declared}), or widen the key until it "
                     "identifies one row"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     return found.done(retry=_RETRY)
@@ -746,7 +741,7 @@ def check_values(registration: DatasetRegistration, spec: SourceSpec) -> Diagnos
     """
     if registration.field_types is None:
         raise ValueError("check_values needs the field types check_schema derives")
-    found = collector(VALUE_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     numeric = tuple(
         name
         for name, column_type in registration.field_types.items()
@@ -775,7 +770,8 @@ def check_values(registration: DatasetRegistration, spec: SourceSpec) -> Diagnos
         expression = registration.fields[name]
         found.add(
             Failure.bounded(
-                code=f"{VALUE_STAGE}.not_finite",
+                code="dataset.value_not_finite",
+                status=Status.INVALID,
                 requirement=(
                     f"field {name!r} evaluates {expression!r}, whose values must be finite. A "
                     f"NaN or an infinity reaching a model does not fail there -- it propagates "
@@ -793,7 +789,6 @@ def check_values(registration: DatasetRegistration, spec: SourceSpec) -> Diagnos
                     f"the source; a value that is genuinely absent belongs as NULL, which is "
                     f"read as a missing observation rather than a number"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
     return found.done(retry=_RETRY)
@@ -820,18 +815,18 @@ def check_span(
     (`span.empty`). 빈 dataset의 span은 존재하지 않으므로, 나중에 조용히 틀린 답을 주느니
     지금 거절한다.
     """
-    found = collector(SPAN_STAGE, FailureFamily.DATA)
+    found = collector(Stage.REGISTER)
     measured = scan.span_check(spec, registration.available_at)
 
     if measured.rows == 0:
         found.add(
             Failure.bounded(
-                code=f"{SPAN_STAGE}.empty",
+                code="dataset.span_empty",
+                status=Status.INVALID,
                 requirement="a registered dataset must carry at least one row to have a span",
                 observed=f"{spec.source_id} resolved to 0 rows",
                 source=FailureSource(file=str(spec.path)),
                 fix="prepare the source with at least one row, then register again",
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
         return found.done(retry=_RETRY), None
@@ -839,7 +834,8 @@ def check_span(
     if not measured.measured:
         found.add(
             Failure.bounded(
-                code=f"{SPAN_STAGE}.empty",
+                code="dataset.span_empty",
+                status=Status.INVALID,
                 requirement=(
                     f"available_at column {registration.available_at!r} must carry a value on "
                     "at least one row, so the dataset can say when it begins and ends"
@@ -850,7 +846,6 @@ def check_span(
                     f"fill {registration.available_at!r} while preparing the source; a row "
                     "nobody can date cannot be read point-in-time"
                 ),
-                explain=ExplainTopic.DATASET_PREPARATION,
             )
         )
         return found.done(retry=_RETRY), None
@@ -890,10 +885,11 @@ def validate(
     """
     started = time.perf_counter()
     if registration.source != spec.source_id:
-        found = collector(SCHEMA_STAGE, FailureFamily.DATA)
+        found = collector(Stage.REGISTER)
         found.add(
             Failure.bounded(
-                code=f"{SCHEMA_STAGE}.source_mismatch",
+                code="dataset.source_mismatch",
+                status=Status.INVALID,
                 requirement="DatasetRegistration.source must match SourceSpec.source_id",
                 observed=(
                     f"registration source={registration.source!r}, source spec={spec.source_id!r}"
@@ -905,7 +901,6 @@ def validate(
                     f"declare source_id {str(spec.source_id)!r} on the dataset, or pass the "
                     f"SourceSpec whose id is {str(registration.source)!r}"
                 ),
-                explain=ExplainTopic.DECLARATION_SHAPE,
             )
         )
         return (

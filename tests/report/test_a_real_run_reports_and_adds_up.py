@@ -14,16 +14,15 @@ from pathlib import Path
 import pytest
 
 import tests.sample.journey as journey
-from vqapr.public import Workspace, preflight_run, register_run, run_report
+from vqapr.public import Workspace, preflight_run, run_report
 from vqapr.public import run as execute_run
 
 
 @pytest.mark.slow
-def test_the_sample_journeys_report_adds_up(tmp_path: Path, sample_panel) -> None:
+def test_the_sample_journeys_report_adds_up(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    panel = journey.install(project, panel=sample_panel)
-    register_run(project, journey.definition(panel))
+    journey.install(project)
     frozen = preflight_run(project, Workspace.open(project).run_definition(journey.RUN_ID))
     store = tmp_path / "store"
     execute_run(project, frozen, store_root=store)

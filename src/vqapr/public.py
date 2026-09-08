@@ -43,7 +43,7 @@ from vqapr.domain.agendas import (
     OperationOccurrence,
     OperationRole,
 )
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.instruments import (
     EtfInstrument,
     FactorInstrument,
@@ -227,6 +227,8 @@ __all__ = (
     "SimulationFailure",
     "SimulationResult",
     "SourceSpec",
+    "Stage",
+    "Status",
     "StockInstrument",
     "StrategyEntry",
     "StrategyModel",

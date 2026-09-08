@@ -66,7 +66,7 @@ def test_the_skill_does_not_promise_a_register_force_flag(
     assert code == 0, cap
     code, refused = _cli(capsys, tmp_path, "register", "constraint", "cap20", cap["path"], "--force")
     assert code == 1
-    assert refused["failures"][0]["code"] == "cli.usage.rejected"
+    assert refused["failures"][0]["code"] == "usage.rejected"
     assert "--force" in refused["failures"][0]["requirement"]
 
 

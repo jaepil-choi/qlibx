@@ -1,0 +1,27 @@
+{
+  "synthetic": true,
+  "instruments": [
+    "K000001",
+    "K000002",
+    "K000003",
+    "K000004",
+    "K000005",
+    "K000006",
+    "K000007",
+    "K000008",
+    "K000009",
+    "K000010"
+  ],
+  "late_listed": "K000010",
+  "delisted": "K000009",
+  "sessions": 735,
+  "first_session": "20220103",
+  "last_session": "20241230",
+  "late_sessions": 200,
+  "dead_sessions": 250,
+  "wind_down_sessions": 3,
+  "observations": 6900,
+  "execution_rows": 6903,
+  "generator": "scripts/build_sample_panel.py",
+  "seed": 172
+}

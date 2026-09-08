@@ -21,6 +21,7 @@ from typing import Any, NoReturn
 
 from vqapr.cli import check, list_, new, register, rm, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure
+from vqapr.domain.errors import Stage
 from vqapr.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
 
@@ -34,6 +35,23 @@ _COMMANDS: dict[str, Any] = {
     "rm": rm,
     "skill": skill,
 }
+
+_STAGES: dict[str, Stage] = {
+    "new": Stage.WRITE,
+    "register": Stage.REGISTER,
+    "check": Stage.CHECK,
+    "run": Stage.RUN,
+    "list": Stage.READ,
+    "show": Stage.READ,
+    "rm": Stage.REMOVE,
+    "skill": Stage.READ,
+}
+"""The operation each verb is, for an exception the verb itself did not classify.
+
+An unhandled exception does not know which stage it escaped from; the command that was running
+does (record `171`). `read` for the three verbs that only read; `write` for `new`, which writes
+a file and touches no workspace.
+"""
 
 _SUMMARIES: dict[str, str] = {
     "new": "scaffold a component, or emit a dataset/execution-input/run declaration template",
@@ -259,16 +277,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except UsageError as error:
         # The command line never reached a handler, so there is no project root to dump beside.
-        return emit(failure(error))
+        return emit(failure(error, stage=Stage.USAGE))
     try:
         project_root = _resolve_project_root(args.project_root)
     except InputError as refused:
-        return emit(failure(refused))
+        return emit(failure(refused, stage=Stage.USAGE))
     handler: Callable[..., dict[str, Any]] = args.handler
     try:
         payload = handler(args, project_root=project_root)
     except Exception as error:  # every failure leaves through the same envelope
-        payload = failure(error, project_root=project_root)
+        payload = failure(error, project_root=project_root, stage=_STAGES[args.command])
     # Every envelope says WHICH workspace it is about (`docs/issues/066`): a refusal about
     # registration state that names the cure but not the place it looked is correct and not
     # enough to act on. Absolute, so a reader comparing two commands' answers can see when

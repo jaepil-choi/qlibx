@@ -166,7 +166,7 @@ def test_a_decimal_column_cannot_become_a_field(tmp_path: Path) -> None:
             SourceSpec.of("mixed-source", parquet),
         )
     (failure,) = refused.value.failures
-    assert failure.code == "dataset.register.schema.field_decimal"
+    assert failure.code == "dataset.field_decimal"
     assert "DECIMAL(10,4)" in (failure.observed or "")
 
     public.register_dataset(

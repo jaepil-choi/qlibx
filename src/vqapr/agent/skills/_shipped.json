@@ -1,0 +1,152 @@
+{
+  "analyze-result/SKILL.md": {
+    "b512da792ac08d63846f127c43f5e3a03bba6b12515b4cd65b3335bdd92554ba": "0.8.0"
+  },
+  "analyze-result/references/paper-figures.md": {
+    "bc96df8120d12ece6e79070a247cfd136bba028b07b42a687ed6663ddac99993": "0.8.0"
+  },
+  "analyze-result/references/plotting-environment.md": {
+    "3ef824999c0774a27cc1dde84588ccb5e5ff5904f67c7ec1824f346b60fa2e2f": "0.8.0"
+  },
+  "analyze-result/references/reading-a-record.md": {
+    "d7202466b6a2993c5d501e410b82632be8e419b97090cfa0b58adb47b26997de": "0.8.0"
+  },
+  "analyze-result/references/report-sections.md": {
+    "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0"
+  },
+  "analyze-result/references/result-tables.md": {
+    "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0"
+  },
+  "analyze-result/scripts/check_plotting_env.py": {
+    "9b437bc625e9d852efe1565ca69630d1d3792a252a05f6f66344ae977ff739bb": "0.8.0"
+  },
+  "inspect-workspace/SKILL.md": {
+    "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0"
+  },
+  "inspect-workspace/references/deleting.md": {
+    "6f5657a4bbe40b65e208b167d8cc1162bd469e39cf8fbf486085e616e4db1982": "0.8.0"
+  },
+  "inspect-workspace/references/reuse-judgement.md": {
+    "35d13c293882742075a4d72fbc9b338585bc29fe1f46b4030d7a3c7da6bd147a": "0.8.0"
+  },
+  "introduce-vqapr/SKILL.md": {
+    "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0"
+  },
+  "introduce-vqapr/references/install-and-environment.md": {
+    "b1f5b73f00eb4a902e5f634b4f9651c480c1547196a54637376bc081dd98b3c5": "0.8.0"
+  },
+  "introduce-vqapr/references/mental-model.md": {
+    "6b6254a01457963bbb85517903fd035c0f4a5d93e61279f4e3437685f64bc28e": "0.8.0"
+  },
+  "introduce-vqapr/references/reading-the-envelope.md": {
+    "281460eec14305eb72adeb8242785affffcda6a6dcde7a9be7c9e5e9d881392f": "0.8.0"
+  },
+  "introduce-vqapr/references/sample-journey.md": {
+    "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0"
+  },
+  "make-constraint/SKILL.md": {
+    "d969395d752d64957741bc2507e5fe375045552b22992df9de1d1f0040c378af": "0.8.0"
+  },
+  "make-constraint/references/declaring-data.md": {
+    "3f9c738e073bff8ff95a1d556fb8747d3276f85dbe296ab36110c1e604e05a13": "0.8.0"
+  },
+  "make-constraint/references/project-and-monitor.md": {
+    "d48d904d34199d204aafadfa6c23a686de3be86f0f1ab5ad1245bf987170069c": "0.8.0"
+  },
+  "make-constraint/references/tolerance.md": {
+    "3b7f8892b5a0b9a3f95f2361ca7debab80c489217a50707c38caa95e94cbed9b": "0.8.0"
+  },
+  "make-datamodel/SKILL.md": {
+    "c00c898a8bd66724b6ce2abab0821df99a258ffe18bd9a84c4882472f90e1f46": "0.8.0"
+  },
+  "make-datamodel/references/datamodel-or-strategy.md": {
+    "474ec0b562319267aae8655bd736ec010af3cba9fa4dbaa02047ae31e6d10196": "0.8.0"
+  },
+  "make-datamodel/references/output-schema.md": {
+    "75af009b704d5522b8636692b54b9ab59a682a77f6f7c15d52fb3962151aa273": "0.8.0"
+  },
+  "make-datamodel/references/reading-inputs.md": {
+    "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0"
+  },
+  "make-datamodel/references/running-a-datamodel.md": {
+    "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
+  },
+  "make-exchange/SKILL.md": {
+    "3f3aedc2af43b7a1f7e508a22cb3ec0c2d17984877d4f94eb4da811c1b6e1754": "0.8.0"
+  },
+  "make-exchange/references/access-and-account.md": {
+    "d4f4a9bc3ee3f12d4864ece4b46c13208caf0761c902c562ec9d327c0620af89": "0.8.0"
+  },
+  "make-exchange/references/cost-model.md": {
+    "bf0cabc109fad25075dde886859608648b3f3ada6573a15cbca267264e555a7e": "0.8.0"
+  },
+  "make-exchange/references/execution-profiles.md": {
+    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0"
+  },
+  "make-exchange/references/fill-timing.md": {
+    "1b303aa9a32616e06ab2c7a50a05d5475dac67a0f7d57e4c22660fd730ea0819": "0.8.0"
+  },
+  "make-strategy/SKILL.md": {
+    "fd570362c354edd089af796dedc73bb67ce26b35bfad2afb1f032168bf4f8b60": "0.8.0"
+  },
+  "make-strategy/references/composition-and-budget.md": {
+    "9338d7dc7f3c2b47ccffb153c556b21e53e4af56c69ffb938e30781eb66bf65f": "0.8.0"
+  },
+  "make-strategy/references/memory-and-payload.md": {
+    "5cb2473443628daf196af870d0ef7c6c1ed465f2b22fdb039f467862fc014708": "0.8.0"
+  },
+  "make-strategy/references/public-helpers.md": {
+    "30042906d2fa185a979addcd3206865f41071efbea2bc0ecaac7e9569f14d2e4": "0.8.0"
+  },
+  "make-strategy/references/reading-inputs.md": {
+    "0bb1100ab8d1290f0033395426092f98844cb8ecc14fb824c47487ea7cf59754": "0.8.0"
+  },
+  "make-strategy/references/rebalance.md": {
+    "73b394fdb0b64cc75ad8902f67b8c0b5821d4ad93747b3359f1213a4b4e5f7b7": "0.8.0"
+  },
+  "register-dataset/SKILL.md": {
+    "3744c4b026b14ecc260646504695fa3efbf25959fe84cb37e0069ea717335968": "0.8.0"
+  },
+  "register-dataset/references/correcting-a-registration.md": {
+    "96a7a2791e4a15d69e77b54bcc7466e80eede39e8edda9e55196ff59fc4caaf8": "0.8.0"
+  },
+  "register-dataset/references/discouraged-preparation.md": {
+    "3f933641a7625e022850b9df8cba295fdd07ed9fae42c905edfcd418f548eddd": "0.8.0"
+  },
+  "register-dataset/references/grain-and-cost.md": {
+    "f92b6dfdb48330cfa0dbb4099ddaedbe542e1962eacc04b5f95d03f41856e591": "0.8.0"
+  },
+  "register-dataset/references/point-in-time.md": {
+    "0fd71a580c230e2dc73617ad10d76997d294ba149c7a3c62fdc1faab17de28a4": "0.8.0"
+  },
+  "register-dataset/references/price-axis.md": {
+    "9b4a6e59c86a3847537b92c10dddcc3577c33eae17a7a39fe351d3c021b13c15": "0.8.0"
+  },
+  "register-dataset/references/timezone-proof.md": {
+    "0b6d474df865c03adf31559304a712e5061be95231edf26e53674449719e1d54": "0.8.0"
+  },
+  "register-dataset/references/universe-and-tradability.md": {
+    "168657ab44e8100f1a2f683654e4e46c6d9e27a583aad1074831eed2d6456612": "0.8.0"
+  },
+  "register-dataset/scripts/profile_source.py": {
+    "6f0682395416906b33d373cb02d712c562bf5ff7018c87b210b0b06cfe5ff6ba": "0.8.0"
+  },
+  "run-backtest/SKILL.md": {
+    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0"
+  },
+  "run-backtest/references/check-before-run.md": {
+    "bedc547dce75939d1545936bb80ed01598df051bd79a951f8bfa335970562a1d": "0.8.0"
+  },
+  "run-backtest/references/feeding-the-next-run.md": {
+    "9585bb08e676c3ce773fad13e736b09ac7d2b47709c93f788b79fd6e88d83332": "0.8.0"
+  },
+  "run-backtest/references/records-and-tweaks.md": {
+    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0"
+  },
+  "run-backtest/references/run-declaration.md": {
+    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0"
+  },
+  "run-backtest/references/watching-and-failures.md": {
+    "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0"
+  }
+}

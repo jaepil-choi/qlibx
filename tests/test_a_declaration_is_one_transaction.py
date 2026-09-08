@@ -28,7 +28,7 @@ from vqapr import workspace as workspace_module
 from vqapr.declarations import apply
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.inputs import InputError
+from vqapr.domain.inputs import InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 

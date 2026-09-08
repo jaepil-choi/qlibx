@@ -19,7 +19,7 @@ from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.public import register_constraint
-from vqapr.testing.conformance import STAGE, conformance
+from vqapr.extension.conformance import STAGE, conformance
 
 GOOD_CONSTRAINT = """
 from vqapr.public import Constraint, ConstraintBounds

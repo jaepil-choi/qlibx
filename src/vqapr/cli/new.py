@@ -33,11 +33,11 @@ import yaml
 from vqapr.account.account import AccountMode
 from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
 from vqapr.agent.sample.materialize import materialize as materialize_sample
-from vqapr.authoring_lookback import lookback_declaration
 from vqapr.cli.envelope import success
+from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
+from vqapr.extension.lookback import lookback_declaration
 from vqapr.extension.scaffold import _class_name, render
-from vqapr.inputs import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {

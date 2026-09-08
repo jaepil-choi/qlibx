@@ -1,5 +1,12 @@
 """The user's own files, refused in the envelope instead of around it.
 
+`domain/` since record `193`. This is failure vocabulary -- it imports `domain.errors` and
+nothing else -- and its readers sit at three different altitudes: `cli/` (ten call sites),
+the declaration layer, and `extension/lookback.py`. A module every layer reads and none owns
+is what `domain/` is for; at the top level it was a flat module the layer table could only
+place by guessing.
+
+
 `register`와 `run`은 사용자가 준 경로를 그대로 읽는다. 그 경로가 없거나, YAML이 mapping이 아니거나,
 `new`가 이미 있는 파일을 덮어쓰게 되는 경우는 **framework가 깨진 것이 아니라 입력이 틀린 것**인데,
 bare `FileNotFoundError`/`TypeError`/`FileExistsError`로 나가면 `envelope.py`가 stage를 알 수 없어

@@ -21,7 +21,7 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.domain.errors import VqaprError
-from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.record import (
     DATAMODEL_KIND,
     RECORD_FIELDS_BY_KIND,

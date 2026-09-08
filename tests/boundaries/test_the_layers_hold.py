@@ -61,7 +61,6 @@ LAYERS: dict[str, int] = {
     "account": 10,
     "record": 10,
     "analysis": 10,
-    "inputs": 10,
     # 20 -- the extension contract: everything a Component sees, and nothing above it.
     "authoring": 20,
     # 30 -- the venue. Reads the execution table, executes orders, and subclasses `Component`,
@@ -74,8 +73,6 @@ LAYERS: dict[str, int] = {
     # 45-55 -- what a project accumulates between commands, and how a document enters it.
     "workspace_document": 45,
     "workspace": 50,
-    "testing": 50,
-    "authoring_lookback": 50,
     "project": 50,
     "declarations": 55,
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.
@@ -100,8 +97,6 @@ LAYERS: dict[str, int] = {
 """
 
 OPEN: dict[tuple[str, str], str] = {
-    # Closed by M4 -- the conformance suite is what registration proves, not a peer above it.
-    ("extension", "testing"): "M4: testing/conformance moves to extension/conformance.py",
     # Closed by M5 -- the project layer.
     ("extension", "workspace"): (
         "M5: register_component's persisting half moves to project/; extension keeps "

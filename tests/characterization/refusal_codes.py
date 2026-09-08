@@ -963,7 +963,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
     from vqapr.public import register_constraint
-    from vqapr.testing.conformance import conformance
+    from vqapr.extension.conformance import conformance
 
     codes: list[str] = []
 

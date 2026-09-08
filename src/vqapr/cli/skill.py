@@ -38,7 +38,7 @@ from vqapr.agent.skillset import (
 )
 from vqapr.cli.envelope import success
 from vqapr.domain.errors import Status
-from vqapr.inputs import InputError
+from vqapr.domain.inputs import InputError
 
 _TARGET_ROOTS = {
     "agents": Path(".agents") / "skills",

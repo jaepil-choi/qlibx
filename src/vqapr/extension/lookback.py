@@ -1,5 +1,10 @@
 """Which lookback window a component kind may declare, and how much of it.
 
+Beside `scaffold.py`, because that is what it serves. It was `authoring_lookback.py` at the
+top level until record `193`, where the name put it next to the authoring contract -- but it
+declares nothing an author subclasses. It answers what `vqapr new` should emit, its only
+caller is `cli/new.py`, and it reads `ComponentKind` from this package.
+
 **Moved out of `cli/new.py` by record `114`.** This is a domain rule, not an argparse concern: the
 strategy scaffold takes rows only, because its emitted `len(values) >= LOOKBACK` guard counts
 observations and a calendar window would make that guard count observations against a number of
@@ -11,8 +16,8 @@ Takes the two values rather than a `Namespace`, so a caller that never saw argpa
 
 from __future__ import annotations
 
+from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.extension.component import ComponentKind
-from vqapr.inputs import VALUE_INVALID, InputError
 
 LOOKBACK_DEFAULT = 6
 """Rows of history the scaffold declares when the author does not say."""

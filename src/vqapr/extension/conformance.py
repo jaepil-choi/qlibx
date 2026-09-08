@@ -29,6 +29,15 @@ The Flow already takes that verdict — `validate_economic_intent` for an intent
 for computed rows, an `isinstance` gate for projected bounds — and it belongs there, where the
 returned object exists.
 
+**Shipped, and here rather than in `testing/`.** Canon 10.3 ships this instead of keeping it in
+`tests/`, so a user can prove their own component before registering it rather than reading our
+test suite to guess the contract. That is a packaging fact, not a layering one, and for a while it
+bought a package of its own -- which put `extension/registration.py` below the suite it calls while
+the suite imported `extension/loading.py` back. A cycle, at module scope, that only import order
+kept quiet. Registration is the door and conformance is what the door proves, so the two live
+together (record `193`); `vqapr.public` re-exports `conformance`, which is how a user reaches it
+and why the move costs them nothing.
+
 So this suite answers exactly one question: **will Flow be able to call this component at all.**
 Arity is decidable before a run; the returned value is not. Checking the first here and the second
 there is the whole division of labour, and widening either one into the other's territory would

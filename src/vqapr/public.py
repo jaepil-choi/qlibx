@@ -83,6 +83,7 @@ from vqapr.exchange.listings import (
 from vqapr.exchange.venue import AcademicExchange, ExecutionCall
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.extension.conformance import conformance
 
 # One door into the extension authorities: `vqapr.extension.*`, never `vqapr._internal.*`.
 # The adapters below are transitional and scheduled for deletion, and that is the reason to use
@@ -148,7 +149,6 @@ from vqapr.record import (
 from vqapr.record import read_typed_table as read_strategy_table
 from vqapr.report.document import RunReport, StrategyReport
 from vqapr.report.record import run_report, strategy_report
-from vqapr.testing.conformance import conformance
 from vqapr.transforms.cross_section import rank
 from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
 from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize

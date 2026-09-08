@@ -20,8 +20,8 @@ from pathlib import Path
 
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.extension.conformance import conformance
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.testing.conformance import conformance
 from vqapr.workspace import Workspace
 
 

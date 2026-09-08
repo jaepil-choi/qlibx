@@ -29,7 +29,7 @@ from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.inputs import InputError
+from vqapr.domain.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 

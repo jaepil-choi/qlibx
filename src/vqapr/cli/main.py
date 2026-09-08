@@ -23,7 +23,7 @@ from vqapr.agent.skillset import upgrade_note
 from vqapr.cli import check, list_, new, register, rm, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure, note
 from vqapr.domain.errors import Stage
-from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
 
 _COMMANDS: dict[str, Any] = {

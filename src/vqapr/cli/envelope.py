@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.domain.errors import Failure, Stage, Status, unhandled
-from vqapr.inputs import BoundedRefusal
+from vqapr.domain.inputs import BoundedRefusal
 from vqapr.workspace import WORKSPACE_DIRECTORY
 
 DIAGNOSTICS_DIRECTORY = "diagnostics"

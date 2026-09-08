@@ -174,7 +174,7 @@ def test_the_flag_reaches_the_scaffold(tmp_path: Path) -> None:
 
 def test_declaring_both_windows_is_refused_rather_than_resolved(tmp_path: Path) -> None:
     """No precedence rule, because a reader would have to know it to predict their own command."""
-    from vqapr.inputs import InputError
+    from vqapr.domain.inputs import InputError
 
     with pytest.raises(InputError) as refused:
         new_command(_namespace(lookback=313, calendar_lookback=365), project_root=tmp_path)
@@ -192,7 +192,7 @@ def test_the_conflict_is_caught_even_when_rows_is_typed_at_its_default(tmp_path:
     refusal's own docstring promises cannot happen. Presence, not value, is the question.
     """
     from vqapr.cli.new import _LOOKBACK_DEFAULT
-    from vqapr.inputs import InputError
+    from vqapr.domain.inputs import InputError
 
     with pytest.raises(InputError) as refused:
         new_command(
@@ -212,7 +212,7 @@ def test_neither_flag_still_scaffolds_the_rows_default(tmp_path: Path) -> None:
 
 def test_a_strategy_is_told_why_the_flag_does_not_apply(tmp_path: Path) -> None:
     """The strategy body counts observations per name, so a day count would leave it meaningless."""
-    from vqapr.inputs import InputError
+    from vqapr.domain.inputs import InputError
 
     with pytest.raises(InputError) as refused:
         new_command(

@@ -2076,7 +2076,7 @@ execution/accounting result에서만 나온다.
 
 ### 11.1 Bundled agent skill
 
-vqapr distribution은 현재 package version과 일치하는 agent skill resource를 포함해야 한다. project onboarding은
+vqapr distribution은 현재 package version과 일치하는 agent skill resource(§11.2가 정한 집합)를 포함해야 한다. project onboarding은
 사용자가 선택한 coding-agent environment에서 이 skill을 사용할 수 있게 한다.
 
 skill은 다음을 담당한다: public status·capability inventory·schema·example·error 조회, package error와 skill
@@ -2150,20 +2150,68 @@ user가 데이터 위치만 알려준다. agent는 파일을 읽어 축, availab
 결과의 의미를 바꾸는 사실 — 체결 가격의 관측 시점, 유도된 거래 가능 여부의 한계 — 은 확인 대상으로
 제시되고 result의 limitation에 남는다. **agent의 제안이 package validation을 대체하거나 우회하지 않는다.**
 
-### 11.2 Skill entrypoint — normative product contract
+### 11.2 Skill set — normative product contract
+
+vqapr는 skill 하나가 아니라 **skill 집합**을 출하한다.
+
+이유는 discovery에 있다. agent가 시작할 때 미리 읽는 것은 각 skill의 `name`과 `description`뿐이고, 본문은
+그 skill이 관련 있다고 판정된 **뒤에야** 읽힌다. 그러므로 description이 "언제 이것을 써야 하는가"를 말하지
+못하면 skill은 발견되지 않는다. 그런데 vqapr 전체를 하나로 표현하면 description은 프레임워크 소개문 말고는
+될 수가 없다 — "등록하고 싶다"와 "결과를 그림으로 보고 싶다"는 서로 다른 요청인데 같은 문장이 둘 다를
+대표하게 되기 때문이다.
+
+경계는 임의로 긋지 않는다. **user가 무엇을 하려고 왔는가**가 축이며, §12.3이 이미 정한 확장점 넷이 그
+축의 절반을 그대로 준다.
+
+| skill | 담당 | 주요 절 |
+|---|---|---|
+| `introduce-vqapr` | vqapr가 무엇인지, workspace 만들기, sample journey, 다른 skill로의 routing | §1.4·1.5, §11.3·11.4 |
+| `register-dataset` | user의 원천을 읽고 의미를 인터뷰해 dataset 등록까지 | §3, §4, §11.1 |
+| `make-datamodel` | 재사용 가능한 파생 panel 작성과 검증 | §5.1, §2.3 |
+| `make-strategy` | signed weight와 intended position을 만드는 코드 | §5.2·5.4·5.5·5.6·5.7 |
+| `make-exchange` | 언제·얼마에·어떤 단위로 체결되는가 | §6.3·6.4·6.5, §8 |
+| `make-constraint` | 무엇을 지켜야 하는가, adjust와 report | §7 |
+| `run-backtest` | run 선언, `check`, 실행 | §6.1·6.2·6.9, §3.6 |
+| `analyze-result` | 끝난 run의 기록을 답·표·그림으로 | §9.1·9.4, §2.8 |
+| `inspect-workspace` | workspace가 무엇을 들고 있는가, 재사용 판정, 삭제 | §9.6, §2.8 |
+
+각 skill의 `description`은 **무엇을 하는가와 언제 쓰는가를 모두** 담고, 3인칭으로 쓰며, user가 실제로 말할
+법한 단어를 앞쪽에 둔다. description 문구 자체는 각 `SKILL.md`가 소유한다 — 이 표에 복제하면 둘 중 하나는
+반드시 stale해진다(§11.1).
+
+**failure recovery는 skill이 아니다.** refusal은 status(누가 행동해야 하는가), stage(어디서 닫혔는가),
+cause(무엇이 일어났는가)를 스스로 싣고, `fix`·`requirement`·`observed`·`source`가 나머지를 싣는다(§10.1).
+그것을 산문으로 다시 말하는 skill은 봉투가 이미 답한 것을 중복하고 릴리스마다 낡는다. 봉투가 원리적으로
+실을 수 없는 것 — 왜 naive timestamp를 대신 변환하지 않는가 같은 도메인 지식 — 만 그것을 소유하는 skill의
+reference에 남는다.
+
+#### 설치 경로
 
 다음 path는 selected target이 skill을 발견하기 위해 사용하는 **normative product contract**다. 일반적인
 directory convention이나 architecture candidate가 아니다.
 
-| target | skill directory | required entrypoint |
-|---|---|---|
-| Codex | `.agents/skills/vqapr/` | `.agents/skills/vqapr/SKILL.md` |
-| Claude Code | `.claude/skills/vqapr-skill/` | `.claude/skills/vqapr-skill/SKILL.md` |
-| explicit custom root | `<user-selected-output>/vqapr/` | `<user-selected-output>/vqapr/SKILL.md` |
+| target | skill directory |
+|---|---|
+| Codex | `.agents/skills/vqapr-<skill-name>/` |
+| Claude Code | `.claude/skills/vqapr-<skill-name>/` |
+| explicit custom root | `<user-selected-output>/vqapr-<skill-name>/` |
 
-custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다. 각
-skill directory 안의 `references/`, `scripts/`, `examples/` 같은 보조 resource는 해당 target protocol과 generated
-manifest가 허용하는 범위에서 둘 수 있다.
+각 directory의 required entrypoint는 그 안의 `SKILL.md`다. `references/`, `scripts/`, `examples/`, `assets/`
+같은 보조 resource는 해당 target protocol이 허용하는 범위에서 둘 수 있으며, SKILL.md에서 **한 단계 깊이로만**
+가리킨다 — reference가 다시 reference를 가리키면 읽는 쪽이 부분 읽기로 끝내고 불완전한 정보를 얻는다.
+
+custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다.
+
+#### 여러 target에 설치된 같은 skill은 byte-identical하다
+
+한 target을 authoritative로 두고 다른 target에 pointer를 놓지 않는다. 모든 target이 같은 bytes를 받는다.
+
+pointer 방식은 복사본이 stale해지는 것을 막으려는 것이었다. 그러나 §11.3의 출하 해시 판정이 생기면 복사본이
+어긋났다는 사실 자체가 target별로 드러나므로, 막을 이유가 사라진다. 반대로 pointer는 읽는 쪽에 한 단계를
+더 강요하고, 그것은 위에서 금지한 중첩 참조와 같은 문제다.
+
+이 규칙 때문에 skill 안에서의 상대 경로가 target과 무관해진다 — §11.3의 해시 표가 target별로 항목을 두
+벌 갖지 않는 이유다.
 
 ### 11.3 Safe and idempotent onboarding
 
@@ -2185,10 +2233,62 @@ instruction file의 managed block, skill resource version, validation command를
   artifact를 삭제하지 않는다.
 - 결과에 package version, skill schema/version, target type을 기록하고 target별 structure를 validation한다.
 
+#### 설치본의 출처는 출하 해시로 판정한다
+
+"설치본이 우리가 준 그대로인가"는 manifest가 아니라 **내용**이 답해야 한다. manifest는 지워질 수 있고,
+skill directory는 손으로 복사되거나 git으로 clone되어 manifest 없이 도착할 수 있다. 그런 설치본도 판정되어야
+한다.
+
+그래서 package는 자신이 **정식 릴리스에서 출하한 적 있는 모든 파일 내용의 해시**를 들고 다닌다. 키는 skill
+안에서의 상대 경로이며, 값은 그 내용이 처음 출하된 릴리스다.
+
+판정은 두 물음으로 끝난다.
+
+| 지금 출하본과 같은가 | 출하한 적 있는 내용인가 | 판정 |
+|---|---|---|
+| 그렇다 | — | `current` |
+| 아니다 | 그렇다 | `outdated` — 이전 릴리스의 정본이다 |
+| 아니다 | 아니다 | `modified` — 우리가 출하한 어떤 판과도 다르다 |
+
+`outdated`는 **확인 없이 갱신한다.** 잃을 것이 없다 — 사용자가 손대지 않은 이전 릴리스의 정본이기 때문이다.
+`modified`는 **명시적 확인 없이 덮어쓰지 않는다.** 사용자의 작업이 거기 있다.
+
+이 표는 릴리스 시점에 실제로 출하되는 내용에서 생성되며, 표에 없는 내용으로 릴리스하려는 시도는 실패한다.
+손으로 관리하면 반드시 잊는다.
+
+**표에서 항목을 제거하지 않는다.** 오래된 릴리스의 해시를 지우면 그 판을 설치해둔 사용자는 손대지 않았는데
+`modified` 판정을 받고, 확인 절차를 습관적으로 건너뛰는 법을 배운다 — 이 판정이 막으려던 바로 그 습관이다.
+
+판정은 target별·파일별로 이루어진다. 한 target의 사본만 수정된 경우 그 사실이 그대로 보고된다.
+
+**우리가 출하한 적 없는 경로에 있는 파일은 우리 것이 아니다.** 그것은 보고되며 제거되지 않는다. skill
+directory는 user가 자기 메모를 둘 수 있는 곳이고, 그것을 지우는 것은 vqapr가 소유하지 않은 것을 지우는
+일이다.
+
+#### 낡은 설치본은 명령을 방해하지 않고 알려진다
+
+설치본이 낡았다는 사실은 refusal이 아니다. 명령은 정상적으로 끝나고, 경고는 **stdout이 아닌 곳으로** 나간다.
+stdout은 §10.1의 단일 봉투 하나만 싣는다 — agent의 파싱 경로가 하나라는 것이 그 봉투의 존재 이유이므로,
+경고 한 줄 때문에 그것을 깨지 않는다.
+
+경고할 자리는 skill 관련 명령 하나가 아니다. 낡은 skill이 해를 끼치는 순간은 agent가 그것을 읽고 **다른**
+명령을 실행할 때이므로, 판정은 특정 명령이 아니라 공유 경로에 있어야 한다.
+
 #### UC-ONBOARD-001 — Preview / apply / update / remove
 
 installed project에서 onboarding 변경을 preview, apply, update, remove할 수 있고 product-owned 영역만 안전하고
 idempotent하게 변경한다.
+
+#### UC-ONBOARD-002 — 낡은 것과 수정된 것을 구별한다
+
+user가 package를 upgrade한다. 설치되어 있던 skill 중 일부는 그 사이 내용이 바뀌었고 일부는 그대로다.
+user는 그중 하나의 reference file을 자기 프로젝트에 맞게 편집해 두었고, 다른 skill directory에는 자기 메모
+파일을 하나 넣어 두었다.
+
+update는 **바뀐 skill만** 대상으로 하고, 그중 user가 손대지 않은 파일은 확인 없이 갱신하며, 편집된 파일은
+갱신하지 않고 그 사실과 이유를 보고한다. user의 메모 파일은 언급되되 제거되지 않는다. user가 명시적으로
+덮어쓰기를 요청하면 편집된 파일도 갱신된다. 어느 경우에도 어떤 파일이 왜 그렇게 처리되었는지가 결과에
+남는다.
 
 ### 11.4 Optional sample journey
 
@@ -2735,7 +2835,7 @@ reference implementation, 특정 class hierarchy, global stage enum, storage bac
 | `UC-REPORT-001`, `UC-REPORT-002`, `UC-MONITOR-001` | §9.4 | current |
 | `UC-ERROR-001`, `UC-RETURN-001` | §10 | current |
 | `UC-AGENT-002` | §11.1 | current |
-| `UC-ONBOARD-001` | §11.3 | current |
+| `UC-ONBOARD-001`, `UC-ONBOARD-002` | §11.3 | current |
 | `UC-CONFIG-001` | §12.1 | current |
 | `UC-EXTENSION-001`, `UC-EXTENSION-002` | §12.3 | current |
 | `UC-FUTURE-001`, `UC-PERP-001`, `UC-CASHFLOW-001`, `UC-SETTLEMENT-001` | §13.3 | future |

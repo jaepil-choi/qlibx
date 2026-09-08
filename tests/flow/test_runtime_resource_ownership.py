@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.flow.test_a_datamodel_is_a_run import _definition, _prepared
-from tests.flow.test_preflight import _setup
+from tests.flow.datamodel.test_a_datamodel_is_a_run import _definition, _prepared
+from tests.flow.declaration.test_preflight import _setup
 from vqapr.flow import orchestration as runtime
-from vqapr.flow.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
-from vqapr.flow.run import DataModelEntry
+from vqapr.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
+from vqapr.flow.declaration.run import DataModelEntry
 
 
 @pytest.fixture(params=["strategy", "datamodel"])
@@ -72,7 +72,7 @@ def test_pre_loop_failure_closes_session_and_releases_only_owned_writer(
         monkeypatch.setattr(RunRecordWriter, "open", fail)
     else:
         monkeypatch.setattr(
-            runtime, "SimulationFlow" if kind == "strategy" else "DataModelFlow", fail
+            runtime, "StrategyEventLoop" if kind == "strategy" else "DataModelEventLoop", fail
         )
     with pytest.raises(ValueError) as caught:
         execute()

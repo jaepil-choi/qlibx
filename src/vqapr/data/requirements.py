@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
-from vqapr.data.lookback import CalendarLookback, InstantsLookback, Lookback, RowsLookback
+from vqapr.data.lookback import Lookback
 from vqapr.domain.identifiers import DatasetId, dataset_id
 
 _RESERVED_FIELDS = frozenset({"available_at", "instrument"})
@@ -18,8 +18,7 @@ def _name(kind: str, raw: str) -> str:
     return raw
 
 
-@dataclass(frozen=True, slots=True)
-class DataRequirement:
+class DataRequirement(BaseModel):
     """One dataset, one field, and how far back to read it (`docs/issues/049`).
 
     **A dataset and a field, because a field id is not an id on its own.** The ruling in `049`
@@ -37,7 +36,12 @@ class DataRequirement:
     **One field, not a tuple.** Requirements are all declared before any read, so expressions over
     one dataset fuse into a single scan; asking for one field at a time therefore does not
     multiply scans (`docs/issues/046`).
+
+    `of` is the door: it cleans the raw ids and refuses a field the window owns. The keyword
+    constructor takes ids already cleaned; the lookback is checked at both.
     """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     dataset_id: DatasetId
     field_id: str
@@ -48,6 +52,4 @@ class DataRequirement:
         field_id = _name("framework field", raw_field_id)
         if field_id in _RESERVED_FIELDS:
             raise ValueError(f"framework field is reserved by ModelWindow: {field_id!r}")
-        if not isinstance(lookback, (RowsLookback, CalendarLookback, InstantsLookback)):
-            raise TypeError("lookback must be RowsLookback, CalendarLookback or InstantsLookback")
-        return cls(dataset_id(raw_dataset_id), field_id, lookback)
+        return cls(dataset_id=dataset_id(raw_dataset_id), field_id=field_id, lookback=lookback)

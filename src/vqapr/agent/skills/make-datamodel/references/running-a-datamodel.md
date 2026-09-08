@@ -30,7 +30,7 @@ A YAML path handed to `run` or `check` is refused by name — both take a regist
 
 ## What is refused on a datamodel run
 
-`account`, `venue` and `execution_input`. There is nothing to execute, so those keys are not
+`account`, `venue` and `execution`. There is nothing to execute, so those keys are not
 merely unnecessary — declaring them is an error, and the refusal says so.
 
 ## Where the output lands

@@ -21,6 +21,12 @@ remains importable without dragging heavier layers in behind it —
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # The lazy `__getattr__` below is the runtime door; this is the same name for the checker.
+    from vqapr import authoring
+
 __all__ = ("authoring",)
 
 _CAPABILITIES = frozenset({"authoring"})

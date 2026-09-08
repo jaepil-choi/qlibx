@@ -8,7 +8,6 @@ from typing import NewType
 DatasetId = NewType("DatasetId", str)
 SourceId = NewType("SourceId", str)
 InstrumentId = NewType("InstrumentId", str)
-ExecutionInputId = NewType("ExecutionInputId", str)
 ComponentId = NewType("ComponentId", str)
 AgendaId = NewType("AgendaId", str)
 OccurrenceId = NewType("OccurrenceId", str)
@@ -38,14 +37,6 @@ def source_id(raw: str) -> SourceId:
     if any(c.isspace() for c in value):
         raise ValueError(f"source_id must not contain whitespace: {value!r}")
     return SourceId(value)
-
-
-def execution_input_id(raw: str) -> ExecutionInputId:
-    """한 project 안에서 고정한 execution-table + fill declaration의 이름."""
-    value = _clean("execution_input_id", raw)
-    if any(c.isspace() for c in value):
-        raise ValueError(f"execution_input_id must not contain whitespace: {value!r}")
-    return ExecutionInputId(value)
 
 
 def component_id(raw: str) -> ComponentId:

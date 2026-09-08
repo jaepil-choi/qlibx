@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -159,8 +158,8 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
     )
 
     assert rows == [
-        {"instrument": "A", "value": Decimal("0.05")},
-        {"instrument": "B", "value": Decimal("0.06")},
+        {"instrument": "A", "value": 0.05},
+        {"instrument": "B", "value": 0.06},
     ]
 
 

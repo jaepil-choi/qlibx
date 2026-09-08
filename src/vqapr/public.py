@@ -18,6 +18,7 @@ from vqapr.analysis.signal import (
     rank_information_coefficient,
 )
 from vqapr.authoring import (
+    Component,
     Constraint,
     ConstraintBounds,
     ConstraintFinding,
@@ -27,10 +28,11 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
+from vqapr.authoring_records import TableSpec
 from vqapr.calls import DataModelContext, StrategyModelContext
 from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
 from vqapr.constraints.evaluation import ConstraintReport
-from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.datasets import DatasetRegistration, ExecutionRole
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.data.requirements import DataRequirement
@@ -38,10 +40,8 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import ObservationBatch
 from vqapr.data.windows import ModelWindow
 from vqapr.declarations import register_dataset as register_dataset
-from vqapr.declarations import register_execution_input as register_execution_input
 from vqapr.domain.agendas import (
     OperationOccurrence,
-    OperationRole,
 )
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.instruments import (
@@ -57,6 +57,7 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.shapes import CrossSection, Grain, Series
 from vqapr.domain.values import (
     LocalInstantDeclaration,
     Mark,
@@ -64,12 +65,10 @@ from vqapr.domain.values import (
     Side,
     declare_local_instant,
 )
-from vqapr.evidence.artifacts import SimulationFailure
-from vqapr.evidence.tables import TableSpec
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.costs import FillCost, SideCost
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
 )
 from vqapr.exchange.fills import ZeroDealtReason
@@ -81,7 +80,7 @@ from vqapr.exchange.listings import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.exchange.venue import AcademicExchange
+from vqapr.exchange.venue import AcademicExchange, ExecutionCall
 from vqapr.exchange.venues.krx import KrxExchange, KrxTradeRule, krx_listings, krx_rules
 from vqapr.extension.component import ComponentKind, ComponentRef
 
@@ -100,28 +99,28 @@ from vqapr.extension.registration import (
     register_exchange,
     register_strategy_model,
 )
-from vqapr.flow.datamodel import DataModelResult
-from vqapr.flow.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
-from vqapr.flow.record import (
-    RunRecordMissing,
-    read_run_record,
-    read_strategy_record,
-    run_ids,
-    strategy_refs,
+from vqapr.flow.artifacts import SimulationFailure
+from vqapr.flow.datamodel.loop import DataModelResult
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.run import (
+    ConstraintSet,
+    DataModelEntry,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
 )
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
 # deliberate: it marks these as intentional re-exports, which is both what they are and what stops
 # a lint autofix from deleting them as unused.
-from vqapr.flow.record import contract_report as contract_report
-from vqapr.flow.record import freeze_strategy_record as freeze_strategy_record
-from vqapr.flow.record import read_typed_table as read_strategy_table
+from vqapr.flow.freeze import contract_report as contract_report
+from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
+from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run import ConstraintSet, DataModelEntry, RunDefinition, StrategyEntry
-from vqapr.flow.simulation import SimulationResult, callback_evidence
+from vqapr.flow.strategy.loop import SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -139,6 +138,14 @@ from vqapr.portfolio.weighting import (
     rescale,
     signal_weight,
 )
+from vqapr.record import (
+    RunRecordMissing,
+    read_run_record,
+    read_strategy_record,
+    run_ids,
+    strategy_refs,
+)
+from vqapr.record import read_typed_table as read_strategy_table
 from vqapr.report.document import RunReport, StrategyReport
 from vqapr.report.record import run_report, strategy_report
 from vqapr.testing.conformance import conformance
@@ -158,6 +165,7 @@ __all__ = (
     "AllocationViolation",
     "Budget",
     "CalendarLookback",
+    "Component",
     "ComponentKind",
     "ComponentRef",
     "Constraint",
@@ -165,6 +173,7 @@ __all__ = (
     "ConstraintFinding",
     "ConstraintReport",
     "ConstraintSet",
+    "CrossSection",
     "DataModel",
     "DataModelContext",
     "DataModelEntry",
@@ -176,8 +185,10 @@ __all__ = (
     "EtfInstrument",
     "ExactExecutionTarget",
     "ExchangeRulesView",
+    "ExecutionCall",
     "ExecutionFieldRequirement",
-    "ExecutionInputRegistration",
+    "ExecutionRole",
+    "ExecutionTable",
     "ExecutionTableSpec",
     "FactorInstrument",
     "FillConvention",
@@ -210,7 +221,6 @@ __all__ = (
     # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
     "OperationOccurrence",
-    "OperationRole",
     "OptimizeRefusal",
     "OptimizeResult",
     "PanelWindow",
@@ -219,9 +229,12 @@ __all__ = (
     "Rebalance",
     "RowsLookback",
     "RunDefinition",
+    "RunExecution",
+    "RunFill",
     "RunRecordMissing",
     "RunReport",
     "RunResult",
+    "Series",
     "Side",
     "SideCost",
     "SimulationFailure",
@@ -273,7 +286,6 @@ __all__ = (
     "register_data_model",
     "register_dataset",
     "register_exchange",
-    "register_execution_input",
     "register_run",
     "register_strategy_model",
     "rescale",

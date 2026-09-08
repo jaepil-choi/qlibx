@@ -12,7 +12,7 @@ This showcase demonstrates the production DataModel path:
 - consume that derived dataset through a second ordinary `DataRequirement`;
 - reject timestamp forgery without changing the workspace or publishing partial output.
 
-It does **not** demonstrate StrategyModel callbacks, execution inputs, orders, fills, Account
+It does **not** demonstrate StrategyModel callbacks, venue tables, orders, fills, Account
 mutation, valuation, or performance.
 
 ## Reproduce

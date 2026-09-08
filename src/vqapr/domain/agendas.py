@@ -6,6 +6,15 @@ is handed (`calls.py` imports it), so it lives with the other values, below `flo
 Agendas are resolved input, never a recurrence or calendar source.  Their local
 clock proof is retained with each occurrence so the canonical UTC ordering is
 reproducible across timezone transitions.
+
+**An occurrence has no role and an agenda no provenance** (record `182`). Both were the clothes
+of the time an agenda was a registered declaration one of three roles could own; since record
+`148` the one agenda is derived from the run, every run kind walks the same occurrences, and
+what an occurrence dispatches to is decided by the loop that handles it (`flow/loop.py`), not
+by a field on the occurrence. The role priority that ordered occurrences of different roles at
+one instant had no reachable input -- an agenda is single-role by construction -- and
+`provenance` was computed, verified and carried with no reader
+(`docs/code-review/2026-09-08-the-agenda-carries-a-role-nobody-chose.md`).
 """
 
 from __future__ import annotations
@@ -15,34 +24,19 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from vqapr.domain.identifiers import AgendaId, OccurrenceId
+from vqapr.domain.identifiers import AgendaId, OccurrenceId, occurrence_id
 from vqapr.domain.values import (
     LocalInstantDeclaration,
     declare_local_instant,
     require_tz_aware,
 )
 
-
-class OperationRole(StrEnum):
-    STRATEGY_CALLBACK = "STRATEGY_CALLBACK"
-    VALUATION = "VALUATION"
-    MONITORING = "MONITORING"
-
-
-_ROLE_PRIORITY = {
-    OperationRole.STRATEGY_CALLBACK: 0,
-    OperationRole.VALUATION: 1,
-    OperationRole.MONITORING: 2,
-}
-
-
-def operation_role_priority(role: OperationRole) -> int:
-    if not isinstance(role, OperationRole):
-        raise TypeError("role must be an OperationRole")
-    return _ROLE_PRIORITY[role]
+SCHEDULED_PRIORITY = 0
+"""The second term of a scheduled occurrence's sort key. A due event (`flow/loop.py`) sorts at
+`-1`, ahead of every occurrence at the same instant: what was decided earlier is settled before
+anything new is decided there."""
 
 
 def _identity(payload: object) -> str:
@@ -77,7 +71,6 @@ def _require_identifier(value: str, *, name: str) -> str:
 @dataclass(frozen=True, slots=True)
 class OperationOccurrence:
     occurrence_id: OccurrenceId
-    role: OperationRole
     local_instant: LocalInstantDeclaration
     _content_identity: str = field(default="", init=False, repr=False, compare=False)
     """Memo for `content_identity`, which is derived from frozen fields and cannot change.
@@ -91,10 +84,6 @@ class OperationOccurrence:
 
     def __post_init__(self) -> None:
         _require_identifier(self.occurrence_id, name="occurrence_id")
-        if not isinstance(self.role, OperationRole):
-            raise TypeError("role must be an OperationRole")
-        if not isinstance(self.local_instant, LocalInstantDeclaration):
-            raise TypeError("local_instant must be a LocalInstantDeclaration")
 
     @property
     def evaluation_time(self) -> datetime:
@@ -113,7 +102,6 @@ class OperationOccurrence:
                 _identity(
                     {
                         "occurrence_id": self.occurrence_id,
-                        "role": self.role,
                         "local_instant": self.local_instant.identity(),
                     }
                 ),
@@ -121,40 +109,21 @@ class OperationOccurrence:
         return self._content_identity
 
     def sort_key(self) -> tuple[datetime, int, str]:
-        return (
-            self.utc_evaluation_time,
-            operation_role_priority(self.role),
-            self.occurrence_id,
-        )
+        return (self.utc_evaluation_time, SCHEDULED_PRIORITY, self.occurrence_id)
 
 
 @dataclass(frozen=True, slots=True)
 class OperationAgenda:
     agenda_id: AgendaId
-    role: OperationRole
     timezone: str
     occurrences: tuple[OperationOccurrence, ...]
-    provenance: str
     _content_identity: str = field(default="", init=False, repr=False, compare=False)
-    _provenance_identity: str = field(default="", init=False, repr=False, compare=False)
-    """Memos for the two derived identities. See `OperationOccurrence._content_identity`.
-
-    `provenance_identity` is derived from `content_identity`, so leaving both uncached meant one
-    provenance read re-hashed every occurrence twice.
-    """
+    """Memo for the derived identity. See `OperationOccurrence._content_identity`."""
 
     def __post_init__(self) -> None:
         _require_identifier(self.agenda_id, name="agenda_id")
-        if not isinstance(self.role, OperationRole):
-            raise TypeError("role must be an OperationRole")
         _require_timezone(self.timezone)
-        if not isinstance(self.provenance, str) or not self.provenance.strip():
-            raise ValueError("provenance must be a non-empty string")
         occurrences = tuple(self.occurrences)
-        if any(not isinstance(occurrence, OperationOccurrence) for occurrence in occurrences):
-            raise TypeError("occurrences must contain OperationOccurrence values")
-        if any(occurrence.role is not self.role for occurrence in occurrences):
-            raise ValueError("every occurrence role must match the agenda role")
         if any(occurrence.local_instant.timezone != self.timezone for occurrence in occurrences):
             raise ValueError("every occurrence timezone must match the agenda timezone")
         occurrence_ids = [occurrence.occurrence_id for occurrence in occurrences]
@@ -174,7 +143,6 @@ class OperationAgenda:
                 "_content_identity",
                 _identity(
                     {
-                        "role": self.role,
                         "timezone": self.timezone,
                         "occurrences": [
                             occurrence.content_identity for occurrence in self.occurrences
@@ -183,22 +151,6 @@ class OperationAgenda:
                 ),
             )
         return self._content_identity
-
-    @property
-    def provenance_identity(self) -> str:
-        if not self._provenance_identity:
-            object.__setattr__(
-                self,
-                "_provenance_identity",
-                _identity(
-                    {
-                        "agenda_id": self.agenda_id,
-                        "provenance": self.provenance,
-                        "content_identity": self.content_identity,
-                    }
-                ),
-            )
-        return self._provenance_identity
 
     def inclusive_slice(self, start: datetime, end: datetime) -> tuple[OperationOccurrence, ...]:
         require_tz_aware(start, name="start")
@@ -218,11 +170,9 @@ class OperationAgenda:
         cls,
         *,
         agenda_id: AgendaId,
-        role: OperationRole,
         sessions: Iterable[datetime | date],
         at: time,
         timezone: str,
-        provenance: str | None = None,
     ) -> OperationAgenda:
         """One occurrence per session, at the same venue-local wall time.
 
@@ -270,20 +220,9 @@ class OperationAgenda:
                 days.append(day)
         occurrences = tuple(
             OperationOccurrence(
-                f"{agenda_id}-{day.isoformat()}",
-                role,
+                occurrence_id(f"{agenda_id}-{day.isoformat()}"),
                 declare_local_instant(day, at, timezone),
             )
             for day in sorted(days)
         )
-        return cls(
-            agenda_id=agenda_id,
-            role=role,
-            timezone=timezone,
-            occurrences=occurrences,
-            provenance=(
-                provenance
-                if provenance is not None
-                else f"{len(occurrences)} sessions at {at.isoformat()} {timezone}"
-            ),
-        )
+        return cls(agenda_id=agenda_id, timezone=timezone, occurrences=occurrences)

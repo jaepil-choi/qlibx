@@ -18,7 +18,7 @@ records an `AccessRecord` per read -- what lets the Flow state an intent's prove
 datamodel row's `available_at`.
 
 This module is the former `models/` package (`calls.py` + `contexts.py`) as one file; the
-`Model` classes themselves live in `vqapr.authoring`.
+`Component` classes themselves live in `vqapr.authoring`.
 """
 
 from __future__ import annotations
@@ -38,10 +38,10 @@ from vqapr.authoring import (
     StrategyCall,
     requirements_for,
 )
-from vqapr.data.datasets import Grain
 from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.shapes import Grain
 
 
 def observations(
@@ -118,6 +118,11 @@ class _DeclaredReads:
 
     __slots__ = ()
 
+    # Declared here, supplied by each context's own dataclass fields: the mixin reads them and
+    # owns neither.
+    window: ModelWindow
+    reads: Mapping[str, DatasetInput]
+
     def _declaration(self, alias: str) -> DatasetInput:
         if not isinstance(alias, str):
             raise TypeError("alias must be a string")
@@ -182,12 +187,8 @@ class ConstraintContext(_DeclaredReads, ConstraintCall):
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
-        if not isinstance(self.instruments, tuple) or not all(
-            isinstance(name, str) and name for name in self.instruments
-        ):
-            raise TypeError("instruments must be a tuple of non-empty strings")
+        if not all(self.instruments):
+            raise ValueError("instruments must be non-empty strings")
 
     @property
     def evaluation_time(self):
@@ -206,10 +207,6 @@ class DataModelContext(_DeclaredReads, DataCall):
 
     window: ModelWindow
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
 
     @property
     def evaluation_time(self):
@@ -242,16 +239,6 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     """
 
     def __post_init__(self) -> None:
-        if not isinstance(self.occurrence, OperationOccurrence):
-            raise TypeError("occurrence must be an OperationOccurrence")
-        if not isinstance(self.window, ModelWindow):
-            raise TypeError("window must be a ModelWindow")
-        if not isinstance(self.account, EconomicAccountView):
-            raise TypeError("account must be an EconomicAccountView")
-        if not isinstance(self.account_history, AccountHistory):
-            raise TypeError("account_history must be an AccountHistory")
-        if not isinstance(self.constraint_bounds, ConstraintBounds):
-            raise TypeError("constraint_bounds must be a ConstraintBounds")
         object.__setattr__(self, "constraint_bounds", self.constraint_bounds.detached())
 
     @property

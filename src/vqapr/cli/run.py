@@ -28,16 +28,16 @@ from vqapr.domain.errors import (
     status_of,
 )
 from vqapr.flow.orchestration import COMPLETED, FAILED
-from vqapr.flow.record import (
+from vqapr.flow.run_state import FILL_TABLE
+from vqapr.inputs import VALUE_INVALID, InputError
+from vqapr.public import RunDefinition, Workspace, preflight_run
+from vqapr.public import run as execute_run
+from vqapr.record import (
     RunRecordConflict,
     RunRecordExists,
     RunRecordLive,
     read_typed_table,
 )
-from vqapr.flow.run_state import FILL_TABLE
-from vqapr.inputs import VALUE_INVALID, InputError
-from vqapr.public import RunDefinition, Workspace, preflight_run
-from vqapr.public import run as execute_run
 from vqapr.workspace import WORKSPACE_DIRECTORY
 
 
@@ -209,8 +209,9 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # SAME judgment as `stage: "unhandled"` (`docs/issues/076`).
         #
         # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
-        # `flow/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and user code
-        # reached through `load_strategy_model` comes back already bounded as `component.load`.
+        # `flow/declaration/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and
+        # user code reached through `load_strategy_model` comes back already bounded as
+        # `component.load`.
         # `VqaprError` and `InputError` are therefore deliberately not caught -- both already
         # carry their own bounded body and their own truer stage.
         raise VqaprError(

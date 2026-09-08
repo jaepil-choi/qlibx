@@ -14,8 +14,11 @@ Two independent passes, on purpose:
   (`f"{SUBJECT}.key_missing"`), sometimes forwarded through a local helper (`workspace.
   _workspace_error`, `loading._failure`), so a plain text/regex scan for string literals would
   miss part of the vocabulary. This pass constant-folds those f-strings and follows parameter
-  forwarding across calls within the same file instead of guessing, for `code` and `status`
-  alike. A `status` that is a `Status` member (the case at almost every site) buckets the code
+  forwarding across call sites instead of guessing, for `code` and `status` alike -- across the
+  whole package, because a refusal helper and its callers need not share a file
+  (`flow/datamodel/compute.py` raises through `flow/datamodel/output.py`'s `refusal`), and an
+  index that stopped at the file boundary silently dropped a code whenever a module was split.
+  A `status` that is a `Status` member (the case at almost every site) buckets the code
   under that member's number; a `status` computed from an exception (`status_of(error)`, a
   variable holding one) buckets it under `by_cause`, because the number is decided at runtime by
   whose frame raised.
@@ -26,8 +29,8 @@ Two independent passes, on purpose:
   make visible rather than hide.
 
 Neither pass may guess: a `code` expression that cannot be resolved to one or more concrete
-string values through constant folding and same-file call-site tracing is recorded as
-*unresolved* -- file, line, and the raw unparsed expression -- never as a partial or wildcard code.
+string values through constant folding and call-site tracing is recorded as *unresolved* --
+file, line, and the raw unparsed expression -- never as a partial or wildcard code.
 Where a parameter genuinely has more than one possible value across its call sites, every distinct
 resolved code is recorded -- that is enumeration of real reachable values, not a guess.
 
@@ -48,7 +51,7 @@ import json
 import sys
 import tempfile
 import textwrap
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -123,23 +126,54 @@ def status_members() -> dict[str, int]:
 # --------------------------------------------------------------------------------------------
 
 
-class _FileIndex:
-    """Everything needed to resolve names and forwarded parameters within one module.
+class _SourceIndex:
+    """Everything needed to resolve names and forwarded parameters across a set of modules.
 
-    Built once per file, then reused for every `Failure` construction found in it. `parents` and
-    `enclosing_function` let the resolver ask "which function scope owns this expression" without
-    re-walking the tree for every query; `functions_by_name` and `calls_by_target` let it answer
-    "who calls this function, and with what argument for this parameter" — the two questions a
-    forwarded `code`/`stage` parameter needs answered before it can be folded into a literal.
+    Built once over *every* module under `src/vqapr`, then reused for every `Failure` construction
+    found in any of them. `parents` and `enclosing_function` let the resolver ask "which function
+    scope owns this expression" without re-walking the tree for every query; `functions_by_name`
+    and `calls_by_target` let it answer "who calls this function, and with what argument for this
+    parameter" — the two questions a forwarded `code`/`stage` parameter needs answered before it
+    can be folded into a literal.
+
+    Those two are merged across modules on purpose. A per-file index only ever resolved a code
+    forwarded through a helper defined in the same file, so splitting a module dropped codes from
+    the inventory without any refusal changing: `flow/datamodel/compute.py` raises through the
+    `refusal` helper `flow/datamodel/output.py` defines, and `datamodel.compute_failed` vanished
+    from the static pass the moment the two stopped sharing a file. A refusal helper is not
+    required to live beside its callers, so neither is this index.
+
+    Module-level constants are the one thing that must **not** merge. `NAME = "..."` is a per-file
+    binding: two modules may legitimately bind the same name to different strings, and a name that
+    is a module constant in one module is often an ordinary parameter in another. A merged mapping
+    would fold a code to a stranger's value, or (via `_is_forwarded`) refuse to follow a parameter
+    that was forwarding one — both worse than not resolving at all, because both are silent. They
+    are kept per module and looked up through the module that owns the node being resolved.
+
+    The trees are held for the index's lifetime because `parents` is keyed by `id(node)`: a
+    collected tree could see its ids reused by a later one and cross-wire two files' scopes.
     """
 
-    def __init__(self, tree: ast.Module) -> None:
-        self.tree = tree
-        self.module_constants = _module_string_constants(tree)
+    def __init__(self, trees: Sequence[ast.Module]) -> None:
+        self._trees = tuple(trees)
+        self._constants_by_module: dict[int, dict[str, str]] = {}
         self.parents: dict[int, ast.AST] = {}
         self.functions_by_name: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
         self.calls_by_target: dict[str, list[ast.Call]] = {}
-        self._index(tree, None)
+        for tree in self._trees:
+            self._constants_by_module[id(tree)] = _module_string_constants(tree)
+            self._index(tree, None)
+
+    def module_constants(self, node: ast.AST) -> dict[str, str]:
+        """The module-level string constants of the file that owns `node`, and no other file's.
+
+        Walking `parents` to the root reaches the `ast.Module` the node was parsed from, which is
+        the only file whose module scope that node can see.
+        """
+        root = node
+        while (parent := self.parents.get(id(root))) is not None:
+            root = parent
+        return self._constants_by_module.get(id(root), {})
 
     def _index(self, node: ast.AST, parent: ast.AST | None) -> None:
         if parent is not None:
@@ -166,10 +200,11 @@ def _call_target_name(func: ast.expr) -> str | None:
     """The plain name a call resolves to, for matching against `functions_by_name`.
 
     `obj.method(...)` and a bare `name(...)` both resolve by the trailing identifier. This
-    over-matches if two unrelated functions in the same file share a name (e.g. two different
-    classes' same-named method), which this package does not do for the refusal-construction
-    helpers this resolver cares about; a spurious match would only ever add a *false* candidate
-    value to a code, which the unresolved/orphan tests below would catch, never hide.
+    over-matches if two unrelated functions share a name (e.g. two different classes' same-named
+    method) -- package-wide since the index spans every module, not only within one file. The
+    package does not do that for the refusal-construction helpers this resolver cares about, and
+    a spurious match would only ever add a *false* candidate value to a code, which the baseline
+    gate would show as a gained code rather than hide.
     """
     if isinstance(func, ast.Name):
         return func.id
@@ -247,7 +282,7 @@ def _argument_for_param(
 def _fold_local_assignments(
     func: ast.FunctionDef | ast.AsyncFunctionDef,
     name: str,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[str] | None:
     """Every value `name` is assigned within `func`'s own body (not a nested function), folded.
@@ -279,25 +314,30 @@ def _fold_local_assignments(
 
 
 def _resolve_name(
-    name: str,
+    reference: ast.Name,
     func: ast.FunctionDef | ast.AsyncFunctionDef | None,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[str] | None:
-    """Every concrete string value `name` may hold at the point it is referenced.
+    """Every concrete string value the name `reference` may hold at the point it is referenced.
 
     Resolution order: a local assignment inside `func` wins first (it shadows everything outer),
-    then a module-level constant, then — only if `name` is one of `func`'s own parameters — the
-    default value and every value passed for it across `func`'s call sites in this file. The last
-    step is the interprocedural hop that lets a forwarded `stage`/`code` parameter resolve to the
-    concrete constants its various callers actually pass.
+    then a module-level constant of the module the reference is written in, then — only if the
+    name is one of `func`'s own parameters — the default value and every value passed for it
+    across `func`'s call sites. The last step is the interprocedural hop that lets a forwarded
+    `stage`/`code` parameter resolve to the concrete constants its various callers actually pass.
+
+    The node itself, not just its name, is what arrives here: a module constant is scoped to the
+    file that binds it, and `index.module_constants` needs the reference to find that file.
     """
+    name = reference.id
     if func is not None:
         local = _fold_local_assignments(func, name, index, visited)
         if local is not None:
             return local
-    if name in index.module_constants:
-        return {index.module_constants[name]}
+    constants = index.module_constants(reference)
+    if name in constants:
+        return {constants[name]}
     if func is None or name not in _param_names(func):
         return None
     return _resolve_parameter(func, name, index, visited)
@@ -306,7 +346,7 @@ def _resolve_name(
 def _resolve_parameter(
     func: ast.FunctionDef | ast.AsyncFunctionDef,
     name: str,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[str] | None:
     key = (id(func), name)
@@ -337,14 +377,14 @@ def _resolve_parameter(
 def _resolve_expr(
     expr: ast.expr,
     func: ast.FunctionDef | ast.AsyncFunctionDef | None,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[str] | None:
     """Every concrete string value `expr` may evaluate to, or `None` if it cannot be folded."""
     if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
         return {expr.value}
     if isinstance(expr, ast.Name):
-        return _resolve_name(expr.id, func, index, visited)
+        return _resolve_name(expr, func, index, visited)
     if (
         isinstance(expr, ast.Attribute)
         and isinstance(expr.value, ast.Name)
@@ -367,7 +407,7 @@ def _resolve_expr(
 def _resolve_joined_str(
     expr: ast.JoinedStr,
     func: ast.FunctionDef | ast.AsyncFunctionDef | None,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[str] | None:
     """Cartesian-fold an f-string: each literal segment is fixed, each interpolation may carry
@@ -447,14 +487,14 @@ def _is_exception_type_name(expr: ast.expr) -> bool:
 
 
 def _is_rerender(
-    expr: ast.expr, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _FileIndex
+    expr: ast.expr, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _SourceIndex
 ) -> bool:
     """A `code` that re-renders what the site already holds, rather than declaring a new one.
 
     Three shapes, all exact: an attribute the site was handed (`code=self.code` in
     `InputError.as_failure`); an f-string whose every interpolation is such an attribute or an
     exception's type name (`f"{self.stage.value}.{type(cause).__name__}"`, the older
-    `SimulationFailure`); or a same-file helper called with nothing but those
+    `SimulationFailure`); or a helper the index knows, called with nothing but those
     (`_code_for(self.stage)`, today's `SimulationFailure`, which renders `strategy.<stage>` from a
     `SimulationStage` the object carries). Anything with a literal interpolation source, a module
     constant or a folded parameter is a declaration and never reaches this check, because
@@ -491,11 +531,22 @@ def _bucket_of(token: str, members: dict[str, int]) -> str | None:
 
 
 def _scan_file(
-    path: Path, members: dict[str, int]
+    path: Path, members: dict[str, int], *, probes: Sequence[Path] = ()
 ) -> tuple[list[StaticCode], list[UnresolvedExpression]]:
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    index = _FileIndex(tree)
+    """Scan one file standalone, resolving through `probes` as well as through itself.
+
+    The scanner's own tests call this on a probe module outside the repo; `probes` lets such a
+    test put the helper in one file and its callers in another, the way `collect_static` sees the
+    package. Every finding is still reported against `path`, so an unresolved entry keeps pointing
+    at the line that produced it.
+    """
+    trees = {p: _parse(p) for p in (path, *probes)}
+    return _scan_tree(path, trees[path], members, _SourceIndex(list(trees.values())))
+
+
+def _scan_tree(
+    path: Path, tree: ast.Module, members: dict[str, int], index: _SourceIndex
+) -> tuple[list[StaticCode], list[UnresolvedExpression]]:
     # A probe module outside the repo (the scanner's own tests) is reported by its full path.
     relative = (
         path.relative_to(REPO_ROOT).as_posix()
@@ -557,14 +608,14 @@ current function's context, or already a set of values carried down from a calle
 
 
 def _is_forwarded(
-    expr: _Operand, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _FileIndex
+    expr: _Operand, func: ast.FunctionDef | ast.AsyncFunctionDef | None, index: _SourceIndex
 ) -> str | None:
     """The parameter name `expr` forwards, when it is a bare parameter of `func` that nothing in
-    `func` reassigns and no module constant shadows; otherwise `None`."""
+    `func` reassigns and no module constant of `func`'s own module shadows; otherwise `None`."""
     if not isinstance(expr, ast.Name) or func is None:
         return None
     name = expr.id
-    if name not in _param_names(func) or name in index.module_constants:
+    if name not in _param_names(func) or name in index.module_constants(expr):
         return None
     for node in ast.walk(func):
         if isinstance(node, ast.Assign) and any(
@@ -577,7 +628,7 @@ def _is_forwarded(
 def _settle(
     expr: _Operand,
     func: ast.FunctionDef | ast.AsyncFunctionDef | None,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
     *,
     is_status: bool,
@@ -597,7 +648,7 @@ def _resolve_pair(
     code: _Operand,
     status: _Operand,
     func: ast.FunctionDef | ast.AsyncFunctionDef | None,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> set[tuple[str, str]] | None:
     """Every `(code, status token)` pair one construction site can produce, resolved together.
@@ -648,7 +699,7 @@ def _operand_at_caller(
     func: ast.FunctionDef | ast.AsyncFunctionDef,
     param: str | None,
     settled: _Operand,
-    index: _FileIndex,
+    index: _SourceIndex,
     visited: frozenset[int],
 ) -> _Operand | None:
     """What one caller contributes for an operand: the argument it passed for the forwarded
@@ -670,14 +721,24 @@ def _source_files() -> Iterator[Path]:
     yield from sorted(PACKAGE_ROOT.rglob("*.py"))
 
 
+def _parse(path: Path) -> ast.Module:
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
 def collect_static() -> StaticInventory:
     """Pass 1 -- AST walk with interprocedural constant folding over every module under
-    `src/vqapr`, each resolved code bucketed by the `Status` it is raised under."""
+    `src/vqapr`, each resolved code bucketed by the `Status` it is raised under.
+
+    Every module is parsed first and indexed together, so a code forwarded into a refusal helper
+    resolves whether or not the helper's callers share its file.
+    """
     members = status_members()
+    trees = [(path, _parse(path)) for path in _source_files()]
+    index = _SourceIndex([tree for _path, tree in trees])
     codes: set[StaticCode] = set()
     unresolved: list[UnresolvedExpression] = []
-    for path in _source_files():
-        file_codes, file_unresolved = _scan_file(path, members)
+    for path, tree in trees:
+        file_codes, file_unresolved = _scan_tree(path, tree, members, index)
         codes.update(file_codes)
         unresolved.extend(file_unresolved)
     unresolved.sort(key=lambda entry: (entry.file, entry.line))
@@ -838,19 +899,19 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
     return codes
 
 
-def _runtime_execution_input(tmp_path: Path) -> list[str]:
+def _runtime_execution_table(tmp_path: Path) -> list[str]:
     from vqapr.data.sources import SourceSpec
     from vqapr.exchange.conventions import FillConvention, FillSelector
     from vqapr.exchange.execution_table import (
-        ExecutionInputRegistration,
+        ExecutionTable,
         ExecutionTableSpec,
-        validate_execution_input,
+        validate_execution_table,
     )
 
     codes: list[str] = []
 
-    def _registration(path: Path) -> ExecutionInputRegistration:
-        return ExecutionInputRegistration.of(
+    def _registration(path: Path) -> ExecutionTable:
+        return ExecutionTable.of(
             "krx-daily",
             ExecutionTableSpec(
                 source=SourceSpec.of("krx-execution", path),
@@ -872,7 +933,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
         """SELECT TIMESTAMP '2024-03-05 15:30:00' AS trade_at, 1 AS instrument,
                   'yes' AS is_tradable, 'nope' AS open, 'nope' AS close""",
     )
-    diagnosis = validate_execution_input(_registration(bad_types))
+    diagnosis = validate_execution_table(_registration(bad_types))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     dup_null = _write_parquet(
@@ -883,7 +944,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
              (TIMESTAMPTZ '2024-03-06 15:30:00+09', NULL, true, 1.0::DOUBLE, 1.0::DOUBLE)
            ) AS t(trade_at, instrument, is_tradable, open, close)""",
     )
-    diagnosis = validate_execution_input(_registration(dup_null))
+    diagnosis = validate_execution_table(_registration(dup_null))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     bad_price = _write_parquet(
@@ -891,7 +952,7 @@ def _runtime_execution_input(tmp_path: Path) -> list[str]:
         """SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at, 'A' AS instrument,
                   true AS is_tradable, 99.0::DOUBLE AS open, 0.0::DOUBLE AS close""",
     )
-    diagnosis = validate_execution_input(_registration(bad_price))
+    diagnosis = validate_execution_table(_registration(bad_price))
     codes.extend(failure.code for failure in diagnosis.failures)
 
     return codes
@@ -993,7 +1054,10 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
         "end": "2024-03-06T00:00:00+09:00",
         "timezone": "Asia/Seoul",
         "exchange": "venue",
-        "execution_input": "fills",
+        "execution": {
+            "dataset": "fills",
+            "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+        },
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
     }
     scenarios: list[dict] = [
@@ -1079,18 +1143,13 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
 
-    try:
-        workspace.execution_input("does-not-exist")
-    except VqaprError as error:
-        codes.extend(failure.code for failure in error.failures)
-
     # A run that takes its sessions from a dataset nobody registered (record `148`: the run
     # declares its sessions; the workspace refuses an id it cannot resolve at registration).
     from datetime import time
 
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.flow.run import RunDefinition, StrategyEntry
+    from vqapr.flow.declaration.run import RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(
@@ -1194,7 +1253,7 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     from types import SimpleNamespace
 
     from vqapr.domain.errors import VqaprError
-    from vqapr.flow.datamodel import DataModelOutput
+    from vqapr.flow.datamodel.output import DataModelOutput
 
     codes: list[str] = []
     output = DataModelOutput(
@@ -1218,7 +1277,7 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
 
 _RUNTIME_SCENARIOS = (
     _runtime_dataset_schema_and_key,
-    _runtime_execution_input,
+    _runtime_execution_table,
     _runtime_conformance_and_loading,
     _runtime_declaration_read,
     _runtime_workspace,

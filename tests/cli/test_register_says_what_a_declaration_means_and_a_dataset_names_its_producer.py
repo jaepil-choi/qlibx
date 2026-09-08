@@ -43,6 +43,25 @@ class ReadsNothingHere(va.DataModel):
 
     def compute(self, context):
         return []
+
+
+class Holds(va.StrategyModel):
+    def inputs(self):
+        return {}
+
+    def decide(self, call):
+        return va.Hold(reason='says')
+
+
+from decimal import Decimal
+from vqapr.exchange.venue import AcademicExchange, TradeRule
+from vqapr.exchange.listings import ListingAccess
+
+
+class Venue(AcademicExchange):
+    def __init__(self):
+        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,
+            ListingAccess.SIGNED)})
 """
 
 
@@ -102,21 +121,21 @@ def _declaration(root: Path) -> Path:
       close: close
     field_types:
       close: DOUBLE
-execution_inputs:
   krx-daily:
-    table:
-      source_id: execution
-      path: {_execution(root).as_posix()}
-      trade_at_field: trade_at
-      instrument_field: instrument
-      is_tradable_field: is_tradable
-      price_fields:
-        close: close
-    fill:
-      selector: same_day
-      at: "15:30"
-      timezone: Asia/Seoul
-      trade_price: close
+    source_id: execution
+    path: {_execution(root).as_posix()}
+    instrument_field: instrument
+    available_at: trade_at
+    grain: instrument_instant
+    key_fields: [trade_at, instrument]
+    fields:
+      close: close
+      is_tradable: is_tradable
+    field_types:
+      close: DOUBLE
+      is_tradable: BOOLEAN
+    execution:
+      is_tradable: is_tradable
 components:
   reads:
     kind: datamodel
@@ -126,6 +145,14 @@ components:
     kind: datamodel
     path: {models.as_posix()}
     object_name: ReadsNothingHere
+  holds:
+    kind: strategy
+    path: {models.as_posix()}
+    object_name: Holds
+  venue:
+    kind: exchange
+    path: {models.as_posix()}
+    object_name: Venue
 runs:
   alpha:
     instruments: [A]
@@ -138,6 +165,23 @@ runs:
       reads:
         dataset_id: alpha_values
         value_fields: [score]
+  beta:
+    instruments: [A]
+    start: "2024-03-06T00:00:00+09:00"
+    end: "2024-03-08T00:00:00+09:00"
+    sessions_from: price_daily
+    timezone: Asia/Seoul
+    at: "09:00"
+    exchange: venue
+    execution:
+      dataset: krx-daily
+      fill:
+        selector: same_day
+        at: "15:30"
+        timezone: Asia/Seoul
+        trade_price: close
+    initial_account: {{cash: "1000", mode: long_only, positions: {{}}}}
+    strategies: {{holds: {{}}}}
 """,
         encoding="utf-8",
     )
@@ -151,19 +195,21 @@ def test_register_says_what_each_pit_bearing_declaration_means_once(
 
     assert code == 0, registered
     spoken = registered["spoken"]
-    # One dataset sentence, two execution-input sentences (the table's clock; the fill, whose
-    # four fields mean nothing apart), one run sentence. Nothing for the components: they carry
+    # Two dataset sentences (the prices; the venue table, whose clock is `trade_at`), one
+    # datamodel-run sentence, then the strategy run's two: its fill (whose four fields mean
+    # nothing apart, record 185) and its callback. Nothing for the components: they carry
     # no point-in-time field of their own.
-    assert len(spoken) == 4, spoken
-    dataset, clock, fill, run = spoken
+    assert len(spoken) == 5, spoken
+    dataset, clock, run, fill, beta = spoken
     assert dataset.startswith("dataset 'price_daily':") and "'available_at'" in dataset
     assert "never earlier" in dataset
-    assert clock.startswith("execution input 'krx-daily':") and "'trade_at'" in clock
-    assert fill.startswith("execution input 'krx-daily':")
+    assert clock.startswith("dataset 'krx-daily':") and "'trade_at'" in clock
+    assert fill.startswith("run 'beta' fills against dataset 'krx-daily':")
     for word in ("same_day", "15:30:00", "Asia/Seoul", "'close'"):
         assert word in fill, (word, fill)
     assert run.startswith("run 'alpha':") and "16:00:00 Asia/Seoul" in run
     assert "knowable before" in run
+    assert beta.startswith("run 'beta':") and "09:00:00 Asia/Seoul" in beta
 
 
 def test_a_declaration_with_no_pit_field_says_nothing(

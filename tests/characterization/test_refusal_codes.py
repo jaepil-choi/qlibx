@@ -204,6 +204,95 @@ def test_a_forwarded_pair_keeps_each_callers_status(tmp_path: Path) -> None:
     }
 
 
+def test_a_code_forwarded_from_another_module_still_resolves(tmp_path: Path) -> None:
+    """A refusal helper and its callers need not share a file.
+
+    This is what the M6 layout move exposed: `flow/datamodel.py` became a package, the `refusal`
+    helper landed in `output.py` and `ComputeHandler.dispatch` kept calling it from `compute.py`,
+    and a per-file index dropped `datamodel.compute_failed` from the inventory -- not as
+    unresolved, which would have been visible, but silently, because the construction site the
+    scanner walks lives in the helper's file and only the *caller* moved. The refusal itself never
+    changed. The probe below puts the helper in one module and two callers in another, and the
+    scanner must resolve both pairs from the file that declares neither of them.
+
+    The two callers bind the same module constant, `SUBJECT`, to different strings -- the reason
+    the index keeps module constants per file instead of merging them. A merged mapping would fold
+    both codes against whichever module was parsed last (or, if conflicting names were dropped,
+    resolve neither), and a code filed under a stranger's subject is worse than one left
+    unresolved, because it is silent. Each finding is still reported against the file it was found
+    in, so both codes surface in the helper's module -- that is where `Failure.bounded` is written.
+    """
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        textwrap.dedent(
+            """
+            from vqapr.domain.errors import Failure, Stage, VqaprError
+
+
+            def refusal(*, code, status, requirement, fix):
+                return VqaprError(
+                    stage=Stage.RUN,
+                    failures=[Failure.bounded(code, requirement, status=status, fix=fix)],
+                )
+            """
+        ),
+        encoding="utf-8",
+    )
+    crashing = tmp_path / "crashing.py"
+    crashing.write_text(
+        textwrap.dedent(
+            """
+            from helper import refusal
+            from vqapr.domain.errors import Status
+
+            SUBJECT = "widget"
+
+
+            def compute():
+                raise refusal(
+                    code=f"{SUBJECT}.compute_failed", status=Status.CRASHED, requirement="r",
+                    fix="f",
+                )
+            """
+        ),
+        encoding="utf-8",
+    )
+    looking_up = tmp_path / "looking_up.py"
+    looking_up.write_text(
+        textwrap.dedent(
+            """
+            from helper import refusal
+            from vqapr.domain.errors import Status
+
+            SUBJECT = "gadget"
+
+
+            def find():
+                raise refusal(
+                    code=f"{SUBJECT}.unregistered", status=Status.MISSING, requirement="r",
+                    fix="f",
+                )
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    members = rc.status_members()
+    codes, unresolved = rc._scan_file(helper, members, probes=[crashing, looking_up])
+
+    assert unresolved == []
+    assert {(entry.bucket, entry.code) for entry in codes} == {
+        ("502", "widget.compute_failed"),
+        ("404", "gadget.unregistered"),
+    }
+
+    # Without the callers there is nothing to fold, and the site is reported as unresolved rather
+    # than guessed at -- the scanner's wider reach is reach, not permissiveness.
+    alone, alone_unresolved = rc._scan_file(helper, members)
+    assert alone == []
+    assert len(alone_unresolved) == 1
+
+
 def test_re_renders_are_skipped_not_reported_as_unresolved() -> None:
     """`InputError.as_failure` and `SimulationFailure` rebuild a failure they already hold.
 

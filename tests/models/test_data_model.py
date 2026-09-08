@@ -19,5 +19,5 @@ def test_datamodel_context_has_no_account_execution_or_workspace_surface() -> No
     """
     assert [item.name for item in fields(DataModelContext)] == ["window", "reads"]
     assert not hasattr(DataModelContext, "account")
-    assert not hasattr(DataModelContext, "execution_input")
+    assert not hasattr(DataModelContext, "execution_table")
     assert not hasattr(DataModelContext, "workspace")

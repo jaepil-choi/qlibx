@@ -12,10 +12,9 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from enum import StrEnum
 
 from vqapr.data import scan
-from vqapr.data.lookback import InstantsLookback
+from vqapr.data.lookback import InstantsLookback, Lookback
 from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import (
@@ -27,6 +26,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
+from vqapr.domain.shapes import Grain
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 """A field expression that is nothing but a name, which is what every registration wrote before
@@ -38,28 +38,8 @@ an expression nobody here can check on its own, so it gets duckdb's message from
 untouched.
 """
 
-class Grain(StrEnum):
-    """What one row of the dataset IS, declared by the author and never derived.
-
-    `docs/design/the-panel-the-surface-and-the-run.md` §2.2. The grain decides what registration
-    checks for uniqueness, whether a panel can be built from the table, and -- with the lookback
-    types that follow it (§2.4) -- what `RowsLookback` means on it. An `aggregated` projection is
-    a *means* of reaching `instrument_instant` from a long source; it is not the grain itself, and
-    a fact derived from expressions gives the author no place to state intent. `049`'s story --
-    registered long, six hundred times slower, and nobody said why -- is what a declared grain
-    prevents.
-    """
-
-    INSTRUMENT_INSTANT = "instrument_instant"
-    """One value per field per (available_at, instrument). A panel can be built."""
-
-    INSTANT = "instant"
-    """One value per available_at; no instrument axis (`docs/issues/038`). A one-column panel."""
-
-    ROWS = "rows"
-    """The vendor's grain: long / EAV. Unique on the declared `key_fields`. No panel."""
-
-
+# `Grain` -- what one row of the dataset IS -- lives in `domain/shapes.py` since record `183`:
+# it is the fact the shapes are derived from, and it belongs beside them.
 GRAIN_NAMES = ", ".join(member.value for member in Grain)
 
 ROWS_LOOKBACK_MEANING = (
@@ -75,6 +55,31 @@ else. Nothing decodes a grain-less registration as `rows` silently (§7-3).
 """
 
 _RETRY = "fix the prepared dataset, then register again"
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionRole:
+    """What makes a dataset an execution table: which field says a name was tradable.
+
+    **The execution table is data** (owner ruling, 2026-09-08; record `185`). A venue table is
+    registered like every other dataset -- `available_at` is the instant its row is a fact
+    about, `instrument_field` names the instrument, its numeric fields are the prices it
+    published -- and this role is the one thing it declares beyond that. Which price a run
+    fills at is the RUN's choice (`runs.<id>.execution.fill.trade_price`), so one table serves
+    a close-fill run and an open-fill run without being registered twice.
+
+    The role is a property of the table, not of a read: the venue reads the table exactly at
+    the fill instant, a Strategy may read it as ordinary point-in-time data, and the grain
+    (`instrument_instant`, required) is the same for both.
+    """
+
+    is_tradable: str
+    """The declared field (a `fields:` key, BOOLEAN) that says whether a name could be filled at
+    that instant. A halted row still carries a price -- a halt suspends trading, not valuation."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.is_tradable, str) or not self.is_tradable.strip():
+            raise ValueError("execution.is_tradable must name a declared field")
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +152,11 @@ class DatasetRegistration:
     Python이 표현식을 파싱해 집계 여부를 추측하지 않는다.
     """
 
+    execution: ExecutionRole | None = None
+    """The execution role, when this table is one a run may fill against (record `185`).
+    `None` for every other dataset. Declared, never derived: a table with a boolean column is
+    not thereby a venue table."""
+
     @classmethod
     def of(
         cls,
@@ -159,8 +169,16 @@ class DatasetRegistration:
         fields: Mapping[str, str],
         field_types: Mapping[str, ColumnType | str],
         grain: Grain | str | None = None,
+        execution: ExecutionRole | Mapping[str, str] | None = None,
     ) -> DatasetRegistration:
         declared_grain = parse_grain(grain, dataset_id=raw_dataset_id)
+        role = parse_execution_role(execution, fields=fields, dataset_id=raw_dataset_id)
+        if role is not None and declared_grain is not Grain.INSTRUMENT_INSTANT:
+            raise ValueError(
+                f"dataset {raw_dataset_id!r}: an execution table is grain instrument_instant -- "
+                "one row per (available_at, instrument) -- and this one declares "
+                f"{declared_grain.value if declared_grain else 'no grain'}"
+            )
         if declared_grain is Grain.INSTRUMENT_INSTANT and instrument_field is None:
             raise ValueError(
                 f"dataset {raw_dataset_id!r}: grain instrument_instant needs an instrument_field; "
@@ -192,6 +210,7 @@ class DatasetRegistration:
             fields=dict(fields),
             field_types=parse_field_types(field_types, fields=fields, dataset_id=raw_dataset_id),
             grain=declared_grain,
+            execution=role,
         )
 
     @classmethod
@@ -206,6 +225,7 @@ class DatasetRegistration:
         fields: Mapping[str, str],
         field_types: Mapping[str, ColumnType] | None = None,
         grain: Grain | None = None,
+        execution: ExecutionRole | None = None,
     ) -> DatasetRegistration:
         """A registration read back from a document written before `grain` or `field_types` was
         declared.
@@ -227,6 +247,7 @@ class DatasetRegistration:
                 dict.fromkeys(fields, ColumnType.VARCHAR) if field_types is None else field_types
             ),
             grain=Grain.ROWS if grain is None else grain,
+            execution=execution,
         )
         return replace(declared, grain=grain, field_types=field_types)
 
@@ -346,6 +367,112 @@ def parse_field_types(
     return parsed
 
 
+def parse_execution_role(
+    value: object, *, fields: Mapping[str, str], dataset_id: str
+) -> ExecutionRole | None:
+    """The declared execution role, or a refusal naming what it must be.
+
+    `is_tradable` must be one of the dataset's own fields and that field must be a bare column
+    (record `185`): the venue reads it exactly at the fill instant by column name, and a boolean
+    expression would be a rule about tradability the registration cannot check.
+    """
+    if value is None:
+        return None
+    if isinstance(value, ExecutionRole):
+        role = value
+    elif isinstance(value, Mapping):
+        unknown = sorted(set(value) - {"is_tradable"})
+        if unknown:
+            raise ValueError(
+                f"dataset {dataset_id!r}: execution declares unknown key(s) {unknown}; the one "
+                "key is is_tradable"
+            )
+        role = ExecutionRole(str(value.get("is_tradable", "")))
+    else:
+        raise TypeError(f"dataset {dataset_id!r}: execution must be a mapping with is_tradable")
+    if role.is_tradable not in fields:
+        raise ValueError(
+            f"dataset {dataset_id!r}: execution.is_tradable names {role.is_tradable!r}, which is "
+            f"not one of its fields: {', '.join(sorted(fields))}"
+        )
+    if not _BARE_COLUMN.fullmatch(fields[role.is_tradable].strip()):
+        raise ValueError(
+            f"dataset {dataset_id!r}: execution.is_tradable field {role.is_tradable!r} must be a "
+            "bare column, not an expression; the venue reads it by column name at the fill instant"
+        )
+    return role
+
+
+def execution_role_failures(
+    registration: DatasetRegistration, columns: Mapping[str, ColumnType]
+) -> tuple[Failure, ...]:
+    """What an execution table must additionally satisfy: a boolean tradable flag, and at least
+    one numeric field a run could bind as its trade price."""
+    role = registration.execution
+    if role is None:
+        return ()
+    failures: list[Failure] = []
+    tradable_column = registration.fields[role.is_tradable].strip()
+    observed = columns.get(tradable_column)
+    if observed is not ColumnType.BOOLEAN:
+        failures.append(
+            Failure.bounded(
+                code="dataset.execution_tradable_not_boolean",
+                status=Status.INVALID,
+                requirement=(
+                    f"execution.is_tradable field {role.is_tradable!r} (column "
+                    f"{tradable_column!r}) must be BOOLEAN"
+                ),
+                observed="missing" if observed is None else str(observed),
+                source=FailureSource(
+                    key_path=f"datasets.{registration.dataset_id}.execution.is_tradable"
+                ),
+                fix=(
+                    f"make column {tradable_column!r} a boolean in the prepared source, or point "
+                    "execution.is_tradable at a boolean field"
+                ),
+            )
+        )
+    if not execution_price_fields(registration):
+        failures.append(
+            Failure.bounded(
+                code="dataset.execution_no_price",
+                status=Status.INVALID,
+                requirement=(
+                    "an execution table must expose at least one numeric field a run can bind "
+                    "as its trade_price"
+                ),
+                observed=", ".join(
+                    f"{name}: {type_.value}"
+                    for name, type_ in sorted((registration.field_types or {}).items())
+                )
+                or "(no fields typed)",
+                source=FailureSource(key_path=f"datasets.{registration.dataset_id}.fields"),
+                fix=(
+                    "declare the venue's price columns as DOUBLE or INTEGER fields of this "
+                    "dataset"
+                ),
+            )
+        )
+    return tuple(failures)
+
+
+def execution_price_fields(registration: DatasetRegistration) -> dict[str, str]:
+    """The fields a run may bind as `trade_price`: the numeric ones, by field id.
+
+    A field is an expression, as every dataset field is (`docs/issues/049`); the venue reads
+    it through the same projection a model would, so `CAST(close AS DOUBLE)` over a DECIMAL
+    column is a price like any other.
+    """
+    numeric = {ColumnType.INTEGER, ColumnType.DOUBLE}
+    types = registration.field_types or {}
+    return {
+        name: expression.strip()
+        for name, expression in registration.fields.items()
+        if types.get(name) in numeric
+    }
+
+
 def parse_grain(value: object, *, dataset_id: str) -> Grain:
     """The declared grain, or a refusal that names the three values and what changed."""
     if isinstance(value, Grain):
@@ -362,12 +489,15 @@ def parse_grain(value: object, *, dataset_id: str) -> Grain:
     )
 
 
-def lookback_fits_grain(lookback: object, grain: object) -> str | None:
+def lookback_fits_grain(lookback: Lookback, grain: Grain | None) -> str | None:
     """`None` when the lookback is the grain's own kind; else the refusal, naming the right one.
 
     The types steer (design §2.4): a `rows` dataset takes only a `SeriesLookback`, a panel dataset
     only a `PanelLookback`. Said in one place so registration, preflight and the read agree.
     """
+    if grain is None:
+        # `require_declared` refuses a grain-less registration before any lookback is judged.
+        raise RuntimeError("a lookback was judged against a registration that declares no grain")
     if grain is Grain.ROWS:
         if isinstance(lookback, InstantsLookback):
             return None
@@ -831,7 +961,8 @@ def check_span(
         )
         return found.done(retry=_RETRY), None
 
-    if not measured.measured:
+    first, last = measured.first, measured.last
+    if first is None or last is None:
         found.add(
             Failure.bounded(
                 code="dataset.span_empty",
@@ -856,11 +987,11 @@ def check_span(
     # second refusal for it would be a code no fixture could ever produce -- the kind of branch
     # that looks like coverage and is really dead. `with_span` still enforces the invariant at
     # the boundary, which is where a caller bypassing validation would hit it.
-    for endpoint in (measured.first, measured.last):
+    for endpoint in (first, last):
         assert endpoint.tzinfo is not None and endpoint.utcoffset() is not None, (
             f"stage 1 admitted a non-tz-aware {registration.available_at!r}"
         )
-    return found.done(), (measured.first, measured.last)
+    return found.done(), (first, last)
 
 
 def validate(
@@ -914,6 +1045,10 @@ def validate(
     schema_seconds = time.perf_counter() - started
     if not schema.ok:
         return schema, ValidationTiming(schema_seconds, None), registration
+    role_failures = execution_role_failures(registration, columns)
+    if role_failures:
+        role = Diagnosis(stage=Stage.REGISTER, failures=role_failures, retry_precondition=_RETRY)
+        return role, ValidationTiming(time.perf_counter() - started, None), registration
     assert projection is not None
     described = registration.with_aggregation(projection.aggregated)
 
@@ -929,6 +1064,8 @@ def validate(
     if not span.ok:
         span_timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)
         return span, span_timing, registration
+    if measured is None:
+        raise RuntimeError("check_span passed without measuring a span")
 
     values = check_values(described, spec)
     timing = ValidationTiming(schema_seconds, time.perf_counter() - key_started)

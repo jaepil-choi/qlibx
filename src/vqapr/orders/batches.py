@@ -7,8 +7,6 @@ from decimal import Decimal
 
 
 def _decimal(value: Decimal, *, name: str, positive: bool = False) -> None:
-    if not isinstance(value, Decimal):
-        raise TypeError(f"{name} must be a Decimal")
     if not value.is_finite():
         raise ValueError(f"{name} must be finite")
     if positive and value <= 0:
@@ -16,7 +14,7 @@ def _decimal(value: Decimal, *, name: str, positive: bool = False) -> None:
 
 
 def _instrument(value: str, *, name: str = "instrument_id") -> None:
-    if not isinstance(value, str) or not value:
+    if not value:
         raise ValueError(f"{name} must be a non-empty string")
 
 
@@ -99,15 +97,6 @@ class OrderBatch:
             raise TypeError("account_version must be an integer")
         if self.account_version < 0:
             raise ValueError("account_version must be non-negative")
-        if not isinstance(self.requests, tuple) or any(
-            not isinstance(request, OrderRequest) for request in self.requests
-        ):
-            raise TypeError("requests must be a tuple of OrderRequest")
-        if not isinstance(self.zero_delta_diagnostics, tuple) or any(
-            not isinstance(diagnostic, ZeroDeltaDiagnostic)
-            for diagnostic in self.zero_delta_diagnostics
-        ):
-            raise TypeError("zero_delta_diagnostics must be a tuple of ZeroDeltaDiagnostic")
         instruments = tuple(request.instrument_id for request in self.requests)
         if len(instruments) != len(set(instruments)):
             raise ValueError("an OrderBatch may contain each instrument only once")

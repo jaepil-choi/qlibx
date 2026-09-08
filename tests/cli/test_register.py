@@ -281,10 +281,11 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     same lie, as the constraint-identity crash this slice exists to remove.
 
     Driven per section because the first fix covered only `components:` and red-teaming found
-    `datasets:` and `execution_inputs:` still crashing. A per-handler check is a list you can be
-    one short of — and the first version of this test was one short of the table that replaced it.
-    The table is `_DECLARED_IDS`; since record `148` retired `agendas` and `strategy_configs` it
-    is these three, and the test asserts that rather than restating it.
+    `datasets:` (and, then, `execution_inputs:`) still crashing. A per-handler check is a list
+    you can be one short of — and the first version of this test was one short of the table
+    that replaced it. The table is `_DECLARED_IDS`; record `148` retired `agendas` and
+    `strategy_configs`, record `185` folded `execution_inputs` into `datasets`, so it is these
+    two, and the test asserts that rather than restating it.
     """
     (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
     sections = {
@@ -295,7 +296,6 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
             "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
             "    field_types: {{close: DOUBLE}}\n"
         ),
-        "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",
         "components": (
             "components:\n  {key}:\n    kind: constraint\n"
             "    path: limit.py\n    object_name: Limit\n"
@@ -360,7 +360,7 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
 ) -> None:
     """The crash `check` could not see, moved to the door that can.
 
-    `SimulationFlow` has always required the loaded constraints to carry exactly the ids the run
+    `StrategyEventLoop` has always required the loaded constraints to carry exactly the ids the run
     froze, and enforced it with a bare `ValueError`. Nothing before it looked, so `check` returned
     `ok:true` on all five phases and `run` then died with `stage: "unhandled"` and an empty
     `failures` list -- the framework reporting itself broken when the registration was wrong.
@@ -510,7 +510,10 @@ def _run_document(**overrides: str) -> str:
         "timezone": "Asia/Seoul",
         "at": '"04:00"',
         "exchange": "venue",
-        "execution_input": "venue-daily",
+        "execution": (
+            "{dataset: venue-daily, fill: {selector: next_eligible, at: \"15:30\", "
+            "timezone: Asia/Seoul, trade_price: close}}"
+        ),
         "initial_account": '{cash: "1000", mode: long_only}',
         "strategies": "{alpha: {}}",
     }

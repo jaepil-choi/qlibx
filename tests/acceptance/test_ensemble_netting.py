@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.flow.record import RunRecordWriter
+from vqapr.record import RunRecordWriter
 from vqapr.public import (
     QUANTUM,
     DatasetRegistration,

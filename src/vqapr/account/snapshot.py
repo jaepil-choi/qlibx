@@ -9,6 +9,8 @@ from decimal import Decimal
 from itertools import pairwise
 from types import MappingProxyType
 
+from pydantic import BaseModel, ConfigDict, field_validator
+
 from vqapr.domain.values import MarkBatch, require_tz_aware
 
 
@@ -22,30 +24,67 @@ def _decimal(value: object, *, name: str, nonnegative: bool = False) -> Decimal:
     return value
 
 
-@dataclass(frozen=True, slots=True)
-class AccountSnapshot:
-    """A value snapshot that cannot expose or alias mutable Account state."""
+class AccountSnapshot(BaseModel):
+    """A value snapshot that cannot expose or alias mutable Account state.
+
+    Two doors. The constructor validates: it is what a run declaration, a test and the CLI
+    hand in, and strict pydantic refuses a `bool` version, a `float` cash or an `int` quantity
+    rather than coercing them. `trusted` does not: it is for the one place that derives the next
+    snapshot from a snapshot already validated, once per commit, on the hot path.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     version: int
     cash: Decimal
     positions: Mapping[str, Decimal]
 
-    def __post_init__(self) -> None:
-        if isinstance(self.version, bool) or not isinstance(self.version, int):
-            raise TypeError("version must be an integer")
-        if self.version < 0:
+    def __init__(self, version: int, cash: Decimal, positions: Mapping[str, Decimal]) -> None:
+        # Positional as well as keyword: `AccountSnapshot(0, Decimal("100"), {})` is how a run
+        # declaration and every test spell it.
+        super().__init__(version=version, cash=cash, positions=positions)
+
+    @classmethod
+    def trusted(
+        cls, *, version: int, cash: Decimal, positions: Mapping[str, Decimal]
+    ) -> AccountSnapshot:
+        """The engine's door: a snapshot from values it derived from a validated one.
+
+        No validation runs. The caller guarantees what the constructor would have checked --
+        a non-negative version and cash, finite quantities, and no zero position -- because it
+        computed them from a snapshot that already passed and from fills the batch already
+        validated. The mapping is copied into a read-only view so the result aliases nothing.
+        """
+        return cls.model_construct(
+            version=version, cash=cash, positions=MappingProxyType(dict(positions))
+        )
+
+    @field_validator("version")
+    @classmethod
+    def _non_negative_version(cls, value: int) -> int:
+        if value < 0:
             raise ValueError("version must be non-negative")
-        _decimal(self.cash, name="cash", nonnegative=True)
-        if not isinstance(self.positions, Mapping):
-            raise TypeError("positions must be a mapping")
+        return value
+
+    @field_validator("cash")
+    @classmethod
+    def _non_negative_cash(cls, value: Decimal) -> Decimal:
+        if value < 0:
+            raise ValueError("cash must be non-negative")
+        return value
+
+    @field_validator("positions")
+    @classmethod
+    def _held(cls, value: Mapping[str, Decimal]) -> Mapping[str, Decimal]:
+        # After pydantic has checked the keys are strings and the values finite Decimals: an
+        # empty id is still a string, and a zero quantity is not a position.
         normalized: dict[str, Decimal] = {}
-        for instrument_id, quantity in self.positions.items():
-            if not isinstance(instrument_id, str) or not instrument_id:
+        for instrument_id, quantity in value.items():
+            if not instrument_id:
                 raise ValueError("position instrument ids must be non-empty strings")
-            value = _decimal(quantity, name=f"positions[{instrument_id!r}]")
-            if value != 0:
-                normalized[instrument_id] = value
-        object.__setattr__(self, "positions", MappingProxyType(normalized))
+            if quantity != 0:
+                normalized[instrument_id] = quantity
+        return MappingProxyType(normalized)
 
 
 @dataclass(frozen=True, slots=True)

@@ -12,6 +12,7 @@ from vqapr.authoring import Constraint, ConstraintBounds, ConstraintFinding, Eco
 from vqapr.calls import ConstraintContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
+from vqapr.domain.shapes import CrossSection
 from vqapr.domain.values import MarkBatch
 
 # ------------------------------------------------------------------------------------------
@@ -109,7 +110,10 @@ class StampedConstraintFinding:
         """`held`, `within_tolerance` or `breached` -- see `VERDICT_*`."""
         if self.finding.passed:
             return VERDICT_HELD
-        if self.finding.excess <= self.tolerance:
+        tolerance = self.tolerance
+        if tolerance is None:
+            raise RuntimeError("tolerance is resolved to a Decimal when the finding is stamped")
+        if self.finding.excess <= tolerance:
             return VERDICT_WITHIN_TOLERANCE
         return VERDICT_BREACHED
 
@@ -124,7 +128,7 @@ class StampedConstraintFinding:
 
         Read here rather than at each call site because a refusal that cannot say WHICH name
         breached WHICH bound sends its reader back to re-run the strategy without the constraint
-        (`docs/implementations/086`, and the message `flow/valuation.py` builds from it).
+        (`docs/implementations/086`, and the message `flow/strategy/valuation.py` builds from it).
         """
         return self.finding.offenders
 
@@ -273,18 +277,27 @@ def merged_constraint_bounds(
         raise TypeError("projected must be a tuple of ProjectedConstraintFinding")
     if not projected:
         return ConstraintBounds(lower_weights={}, upper_weights={})
-    instruments = tuple(projected[0].bounds.lower_weights)
-    if any(set(item.bounds.lower_weights) != set(instruments) for item in projected[1:]):
-        raise ValueError("projected bounds must cover the same instruments")
-    lower = {
-        instrument: max(item.bounds.lower_weights[instrument] for item in projected)
-        for instrument in instruments
-    }
-    upper = {
-        instrument: min(item.bounds.upper_weights[instrument] for item in projected)
-        for instrument in instruments
-    }
+    first, *rest = (item.bounds for item in projected)
+    if not rest:
+        return first
+    # The intersection of boxes: lower bounds take the max, upper bounds the min, name by name.
+    # `elementwise` refuses a projection that covers different names (record `183`).
+    try:
+        lower = _section(first.lower_weights).elementwise(
+            max, *(item.lower_weights for item in rest)
+        )
+        upper = _section(first.upper_weights).elementwise(
+            min, *(item.upper_weights for item in rest)
+        )
+    except ValueError as error:
+        raise ValueError("projected bounds must cover the same instruments") from error
     return ConstraintBounds(lower_weights=lower, upper_weights=upper)
+
+
+def _section(weights: Mapping[str, Decimal]) -> CrossSection[Decimal]:
+    """The cross-section a bounds field holds; `ConstraintBounds` stores one, its annotation
+    is the `Mapping` an author may pass in."""
+    return weights if isinstance(weights, CrossSection) else CrossSection(weights)
 
 
 def evaluate_constraints(
@@ -316,8 +329,11 @@ def evaluate_constraints(
         raise ValueError("projected findings must exactly match the loaded constraint instances")
     # Built only when something will read it. `window` is legitimately `None` for a run with no
     # constraints, and reaching through it for an instant nobody asked for turned "this run
-    # declared no rules" into a monitoring failure.
-    view = build_account_view(account, marks, window.evaluation_time) if loaded else None
+    # declared no rules" into a monitoring failure. A missing window with rules loaded was
+    # refused above, so past this line every rule has one.
+    if not loaded or window is None:
+        return ConstraintReport(account.version, ())
+    view = build_account_view(account, marks, window.evaluation_time)
     findings = tuple(
         ActualConstraintFinding(
             constraint.constraint_id,

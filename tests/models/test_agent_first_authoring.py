@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from vqapr import authoring
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
@@ -50,7 +51,7 @@ def test_module_exports_are_exact() -> None:
         "EconomicAccountView",
         "Hold",
         "InstantsLookback",
-        "Model",
+        "Component",
         "Observation",
         "PanelWindow",
         "Rebalance",
@@ -74,11 +75,13 @@ def test_rows_lookback_requires_positive_int() -> None:
     authoring.RowsLookback(rows=1)
     with pytest.raises(ValueError):
         authoring.RowsLookback(rows=0)
-    with pytest.raises(TypeError):
+    # Strict pydantic: a bool is refused as not-an-integer, as a `ValidationError` (a
+    # `ValueError`) rather than the `TypeError` the dataclass raised.
+    with pytest.raises(ValueError, match="integer"):
         authoring.RowsLookback(rows=True)
 
 
-def test_rows_lookback_is_frozen_slotted_and_takes_its_count_either_way() -> None:
+def test_rows_lookback_is_frozen_and_takes_its_count_either_way() -> None:
     """Keyword-only is gone, and it went deliberately.
 
     `authoring.RowsLookback` was a keyword-only copy of `data.lookback.RowsLookback`, which is
@@ -87,12 +90,12 @@ def test_rows_lookback_is_frozen_slotted_and_takes_its_count_either_way() -> Non
     tree and in the research workspace already spells the keyword -- but a test asserting the
     refusal would now be pinning a difference that only existed because there were two classes.
 
-    Frozen and slotted are the properties worth keeping, and both survive the merge.
+    Frozen survives the move to pydantic; slotted did not, and was never a contract an author
+    relied on.
     """
     lookback = authoring.RowsLookback(rows=3)
-    with pytest.raises(FrozenInstanceError):
+    with pytest.raises(ValidationError, match="frozen"):
         lookback.rows = 4  # type: ignore[misc]
-    assert not hasattr(lookback, "__dict__")
     assert authoring.RowsLookback(3) == lookback
 
 
@@ -133,7 +136,7 @@ def test_dataset_input_rejects_reserved_and_duplicate_fields() -> None:
         )
     with pytest.raises(ValueError):
         authoring.DatasetInput(dataset_id="px", fields=(), lookback=authoring.RowsLookback(rows=1))
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError, match="Lookback"):
         authoring.DatasetInput(dataset_id="px", fields=("close",), lookback=object())
 
 
@@ -187,7 +190,7 @@ def test_data_model_is_a_model_and_inputs_defaults_to_empty() -> None:
             return ()
 
     model = Model()
-    assert isinstance(model, authoring.Model)
+    assert isinstance(model, authoring.Component)
     assert model.inputs() == {}
     assert model.requirements() == ()
     assert model.compute(_FakeDataCall()) == ()
@@ -226,7 +229,7 @@ def test_account_history_input_rejects_unknown_field() -> None:
         authoring.AccountHistoryInput(
             fields=("not_a_field",), lookback=authoring.RowsLookback(rows=2)
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError, match="RowsLookback"):
         authoring.AccountHistoryInput(fields=("nav",), lookback=object())
 
 
@@ -422,7 +425,7 @@ def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
     """One class, one abstract member; state is `memory` and rows go to `recorder` (record 132)."""
     with pytest.raises(TypeError):
         authoring.StrategyModel()  # type: ignore[abstract]
-    assert issubclass(authoring.StrategyModel, authoring.Model)
+    assert issubclass(authoring.StrategyModel, authoring.Component)
 
     class Model(authoring.StrategyModel):
         def decide(self, call: authoring.StrategyCall) -> authoring.Hold:
@@ -545,12 +548,12 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
     forbidden = {"account_version", "version", "recorder", "memory", "constraint_id"}
     for name in authoring.__all__:
-        if name in {"Model", "StrategyModel"}:
-            # `Model` carries `memory` on purpose: it is the small strict-JSON state both roles
-            # share (architecture 4.4), and it arrived on this surface with the base class in
-            # record `131`. `StrategyModel` carries `recorder` the same way (5.1, record
-            # `132`). What this test guards is that no VALUE type -- a call, a finding, a
-            # decision -- smuggles framework state in through an annotation.
+        if name in {"Component", "StrategyModel"}:
+            # `Component` carries `memory` on purpose: it is the small strict-JSON state every role
+            # shares (architecture 4.4; a Constraint too, owner ruling 2026-09-08), and it arrived on
+            # this surface with the base class in record `131`. `StrategyModel` carries `recorder`
+            # the same way (5.1, record `132`). What this test guards is that no VALUE type -- a call,
+            # a finding, a decision -- smuggles framework state in through an annotation.
             continue
         value = getattr(authoring, name)
         annotations = getattr(value, "__annotations__", {})

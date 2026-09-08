@@ -338,7 +338,7 @@ def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None
 def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     """Refuse a Constraint registered under an id it does not answer to.
 
-    `SimulationFlow` requires the loaded constraints to carry exactly the ids the FrozenRun
+    `StrategyEventLoop` requires the loaded constraints to carry exactly the ids the FrozenRun
     declared, and it enforced that with a bare `ValueError` at assembly. Nothing before it looked,
     so `check` returned `ok:true` on all five phases and `run` then died with `stage: unhandled`
     and an empty `failures` list -- the framework reporting itself broken when the registration was
@@ -354,7 +354,7 @@ def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     It cannot be the ONLY place, because it can only ask once per load. A `constraint_id` that
     returns a different string on each access satisfies this check at registration and again at
     `check`, and still disagrees by run assembly; `_require_constraint_identity` in
-    `flow/simulation.py` is what catches that, and red-teaming confirmed the path is live.
+    `flow/strategy/loop.py` is what catches that, and red-teaming confirmed the path is live.
     """
     declared = str(ref.component_id)
     answered = constraint.constraint_id
@@ -379,7 +379,7 @@ def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
     )
 
 
-SHIPPED_EXECUTION_PROFILES: tuple[type, ...] = (AcademicExchange, KrxExchange)
+SHIPPED_EXECUTION_PROFILES: tuple[type[Exchange], ...] = (AcademicExchange, KrxExchange)
 """The execution profiles this package implements end to end.
 
 A run may only execute through a profile whose venue semantics are implemented and documented
@@ -390,10 +390,7 @@ its own matching behaviour, because the resulting realism claim would be unverif
 
 def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) -> Exchange:
     exchange = _load(ref, kind=ComponentKind.EXCHANGE, project_root=project_root)
-    profile = next(
-        (base for base in SHIPPED_EXECUTION_PROFILES if isinstance(exchange, base)), None
-    )
-    if profile is None:
+    if not isinstance(exchange, SHIPPED_EXECUTION_PROFILES):
         names = ", ".join(base.__name__ for base in SHIPPED_EXECUTION_PROFILES)
         raise _failure(
             "component.wrong_type",
@@ -402,6 +399,7 @@ def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) 
             fix=f"subclass one of the shipped profiles ({names}) instead of Exchange directly",
             status=Status.CONTRACT,
         )
+    profile = next(base for base in SHIPPED_EXECUTION_PROFILES if isinstance(exchange, base))
     if type(exchange).execute is not profile.execute:
         raise _failure(
             "component.execution_profile_invalid",

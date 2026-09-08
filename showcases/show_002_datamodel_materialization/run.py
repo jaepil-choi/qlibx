@@ -400,7 +400,7 @@ def main() -> None:
         },
         "sha256": {name: _sha256(path) for name, path in paths.items()},
         "limitations": [
-            "No StrategyModel, execution input, venue or account participates in a datamodel run.",
+            "No StrategyModel, execution dataset, venue or account participates in a datamodel run.",
             "No orders, fills, Account mutation, valuation, or performance are claimed.",
         ],
     }

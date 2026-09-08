@@ -22,7 +22,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.declarations import apply
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
+from vqapr.flow.declaration.run import DataModelEntry, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
@@ -92,7 +92,18 @@ def test_a_run_holds_one_kind_of_model() -> None:
 @pytest.mark.parametrize(
     "override",
     [
-        {"exchange": "venue", "execution_input_id": "venue-daily"},
+        {
+            "exchange": "venue",
+            "execution": RunExecution(
+                dataset="venue-daily",
+                fill=RunFill(
+                    selector="same_day",
+                    at=time(15, 30),
+                    timezone="Asia/Seoul",
+                    trade_price="close",
+                ),
+            ),
+        },
         {
             "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {}),
             "initial_account_mode": AccountMode.LONG_ONLY,
@@ -101,7 +112,7 @@ def test_a_run_holds_one_kind_of_model() -> None:
 )
 def test_a_datamodel_run_may_not_declare_what_it_cannot_use(override: dict[str, object]) -> None:
     """A datamodel sees no account and passes through no venue; a run saying otherwise lies."""
-    with pytest.raises(ValueError, match="declares no exchange, execution_input or initial_acc"):
+    with pytest.raises(ValueError, match="declares no exchange, execution or initial_acc"):
         _definition(**override)
 
 
@@ -207,8 +218,15 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
         ({**_RUN_READY}, "exactly one of `strategies:` or `datamodels:`"),
         ({**_RUN_READY, "strategies": {}, "datamodels": {}}, "exactly one of `strategies:`"),
         (
-            {**_RUN_READY, "strategies": {"ou-k0": None}, "execution_input": "venue-daily"},
-            "exchange and execution_input_id must be declared together",
+            {
+                **_RUN_READY,
+                "strategies": {"ou-k0": None},
+                "execution": {
+                    "dataset": "venue-daily",
+                    "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+                },
+            },
+            "exchange and execution must be declared together",
         ),
         (
             {**_RUN_READY, "datamodels": _DATAMODELS, "exchange": "venue"},

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
@@ -230,7 +232,9 @@ class Account:
         ):
             raise ValueError("fill batch would create a short position in a long-only account")
 
-        next_snapshot = AccountSnapshot(
+        # Trusted: every value was derived just above from the committed snapshot's validated
+        # fields and from fills the batch already validated, and this runs once per commit.
+        next_snapshot = AccountSnapshot.trusted(
             version=current.version + 1,
             cash=next_cash,
             positions=next_positions,
@@ -251,8 +255,8 @@ class Account:
         marks: MarkBatch,
         *,
         provenance: object,
-        marked_at: object = None,
-        observed_at: object = None,
+        marked_at: datetime | None = None,
+        observed_at: Mapping[str, datetime] | None = None,
     ) -> PreparedAccountTransition:
         """Validate the required post-fill valuation before any root is published."""
         if not isinstance(fill, PreparedAccountFill):
@@ -284,8 +288,8 @@ class Account:
         *,
         expected_version: int,
         provenance: object,
-        marked_at: object = None,
-        observed_at: object = None,
+        marked_at: datetime | None = None,
+        observed_at: Mapping[str, datetime] | None = None,
     ) -> PreparedAccountValuation:
         """Validate a mark taken without any fill. The Account does not change."""
         if not isinstance(state, AccountState):

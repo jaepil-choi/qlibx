@@ -18,21 +18,15 @@ Not implemented, and therefore not claimed
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from decimal import Decimal
 
-from vqapr.account.snapshot import AccountSnapshot
+from pydantic import field_validator
+
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
 from vqapr.domain.values import Side, side_of
-from vqapr.exchange.costs import FillCost, SideCost
-from vqapr.exchange.execution_table import (
-    ExactExecutionRow,
-    ExactExecutionSnapshot,
-    accepted_requests,
-    requested_rows,
-    validate_requests,
-)
+from vqapr.exchange.costs import FREE, FillCost, SideCost
+from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.exchange.listings import (
     ExchangeRulesView,
@@ -42,7 +36,8 @@ from vqapr.exchange.listings import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.orders.batches import OrderBatch, OrderRequest
+from vqapr.exchange.venue import Exchange, ExecutionCall
+from vqapr.orders.batches import OrderRequest
 
 COMMISSION_RATE = Decimal("0.0003")
 """Brokerage commission charged on both sides."""
@@ -61,7 +56,6 @@ BASE_PRICE = "base"
 """The semantic execution price a price-limit venue requires: the session's base price."""
 
 
-@dataclass(frozen=True, slots=True)
 class KrxTradeRule(TradeRule):
     """A KRX rule, which carries one regime the base rule has no field for.
 
@@ -74,21 +68,43 @@ class KrxTradeRule(TradeRule):
     KRX applies one rate today, but a managed-issue regime narrows it for named issues, and China
     runs 10% on the main boards against 20% on ChiNext and STAR. A venue-level constant could not
     express either.
+
+    The base rule's checks are inherited with its validators; only the regime is checked here.
     """
 
     price_limit_rate: Decimal | None = None
 
-    def __post_init__(self) -> None:
-        # `slots=True` rebuilds the class, so the zero-argument `super()` closure cell points at
-        # the pre-slots class and raises. The explicit form is required for a slotted subclass.
-        TradeRule.__post_init__(self)
-        rate = self.price_limit_rate
-        if rate is None:
-            return
-        if not isinstance(rate, Decimal):
-            raise TypeError("price_limit_rate must be a Decimal or None")
-        if not rate.is_finite() or not (0 < rate < 1):
+    def __init__(
+        self,
+        instrument_id: str,
+        quantity_step: Decimal,
+        minimum_quantity: Decimal,
+        fractional_allowed: bool,
+        access: ListingAccess = ListingAccess.LONG_ONLY,
+        buy: SideCost = FREE,
+        sell: SideCost = FREE,
+        price_limit_rate: Decimal | None = None,
+    ) -> None:
+        # Spelled out rather than inherited so the regime field is a named parameter: a caller
+        # and a type checker both see it, instead of it travelling as an anonymous keyword.
+        super().__init__(
+            instrument_id,
+            quantity_step,
+            minimum_quantity,
+            fractional_allowed,
+            access,
+            buy,
+            sell,
+            price_limit_rate=price_limit_rate,
+        )
+
+    @field_validator("price_limit_rate")
+    @classmethod
+    def _fraction(cls, value: Decimal | None) -> Decimal | None:
+        # Finite is pydantic's check; the open interval is this regime's.
+        if value is not None and not (0 < value < 1):
             raise ValueError("price_limit_rate must be a finite fraction between 0 and 1")
+        return value
 
     def limit_band(self, base: Decimal) -> tuple[Decimal, Decimal] | None:
         """The inclusive ``(lower, upper)`` prices this instrument may trade at today."""
@@ -106,9 +122,12 @@ class KrxTradeRule(TradeRule):
         is no buyer, so a sell cannot. The position rule is unchanged -- this is a market fact for
         one session, not a standing venue permission.
         """
-        if self.price_limit_rate is None or base is None:
+        if base is None:
             return True
-        lower, upper = self.limit_band(base)
+        band = self.limit_band(base)
+        if band is None:
+            return True
+        lower, upper = band
         if side is Side.BUY:
             return price < upper
         return price > lower
@@ -162,7 +181,7 @@ def krx_listings(
     instrument_ids: Sequence[str],
     *,
     price_limits: bool = True,
-) -> dict[str, TradeRule]:
+) -> dict[str, KrxTradeRule]:
     """KRX's trading facts for a set of ids, needing no categories at all.
 
     A rule says how an instrument TRADES: whole shares, a minimum of one, long-only, and whether
@@ -198,7 +217,7 @@ def krx_rules(
     universe: Mapping[str, InstrumentKind | str],
     *,
     price_limits: bool = True,
-) -> tuple[dict[str, TradeRule], dict[str, Instrument]]:
+) -> tuple[dict[str, KrxTradeRule], dict[str, Instrument]]:
     """Build KRX's per-instrument terms from ``instrument_id -> kind``.
 
     The one call that gets the ETF exemption right: a stock pays the sale tax, an ETF does not,
@@ -241,7 +260,7 @@ def krx_listing(instrument_id: str) -> TradeRule:
     return KRX_TERMS[InstrumentKind.STOCK].for_instrument(instrument_id)
 
 
-class KrxExchange:
+class KrxExchange(Exchange):
     """Whole-share KRX execution with declared commission and sale tax, long positions only."""
 
     exchange_id: str
@@ -297,7 +316,7 @@ class KrxExchange:
             isinstance(rule, KrxTradeRule) and rule.price_limit_rate is not None
             for rule in self._rules.listings.values()
         ):
-            return (ExecutionFieldRequirement(BASE_PRICE, "price_limit"),)
+            return (ExecutionFieldRequirement(price=BASE_PRICE, feature="price_limit"),)
         return ()
 
     @property
@@ -309,12 +328,11 @@ class KrxExchange:
     def listings(self) -> Mapping[str, TradeRule]:
         return self._rules.listings
 
-    def execute(
-        self, orders: OrderBatch, account: AccountSnapshot, snapshot: ExactExecutionSnapshot
-    ) -> FillBatch:
+    def execute(self, call: ExecutionCall) -> FillBatch:
+        orders, account, snapshot = call.orders, call.account, call.snapshot
         requests = accepted_requests(orders, account, snapshot)
         rows = requested_rows(snapshot, requests)
-        rules = self._rules
+        rules = call.rules
         validate_requests(rules, requests, rows, account)
         # Sells settle before buys, and the cash they raise is carried across the batch. A desk
         # funds a rotation from the sleeve it is rotating out of; filling in instrument order
@@ -354,9 +372,16 @@ class KrxExchange:
                 continue
             side = side_of(request.delta_quantity)
             assert side is not None
+            price = row.price
+            if price is None:
+                # `requested_rows` refuses a tradable row without a positive finite price before
+                # any batch reaches here, so a missing one is a broken snapshot, not a market fact.
+                raise RuntimeError(
+                    f"tradable execution row for {request.instrument_id!r} carries no price"
+                )
             rule = rules.listing(request.instrument_id)
             if isinstance(rule, KrxTradeRule) and not rule.permits_side_at(
-                side, row.price, row.reference
+                side, price, row.reference
             ):
                 # Limit-up leaves no seller, limit-down no buyer. A market fact for one session,
                 # so it is typed zero-dealt evidence rather than a refusal of the batch.
@@ -369,7 +394,7 @@ class KrxExchange:
             # The notional is no longer computed here: `_affordable` decides the quantity first,
             # and charging the requested size rather than the dealt one is what a partial fill
             # must not do.
-            dealt, cost = self._affordable(request, row, side, purse, rules)
+            dealt, cost = self._affordable(request, price, side, purse, rules)
             if dealt == 0:
                 fills.append(
                     Fill.zero_dealt(
@@ -381,7 +406,7 @@ class KrxExchange:
                 request.instrument_id,
                 request.delta_quantity,
                 dealt,
-                row.price,
+                price,
                 cost=cost,
                 kind=rules.stamped_kind(request.instrument_id),
             )
@@ -405,12 +430,12 @@ class KrxExchange:
     def _affordable(
         self,
         request: OrderRequest,
-        row: ExactExecutionRow,
+        price: Decimal,
         side: Side,
         purse: Decimal,
         rules: ExchangeRulesView,
     ) -> tuple[Decimal, FillCost]:
-        """How much of this request the account can pay for, and what that costs.
+        """How much of this request the account can pay for at ``price``, and what that costs.
 
         A sale always fills in full: it RAISES cash, and its own commission and tax come out of the
         proceeds rather than out of the balance.
@@ -424,13 +449,13 @@ class KrxExchange:
         requested = abs(request.delta_quantity)
         if side is Side.SELL:
             return request.delta_quantity, rules.charge(
-                side, requested * row.price, request.instrument_id
+                side, requested * price, request.instrument_id
             )
 
-        rate = rules.charge(side, row.price, request.instrument_id).total / row.price
+        rate = rules.charge(side, price, request.instrument_id).total / price
         step = rules.listing(request.instrument_id).quantity_step
-        affordable = purse / (row.price * (Decimal(1) + rate))
+        affordable = purse / (price * (Decimal(1) + rate))
         capped = min(requested, (affordable // step) * step)
         if capped <= 0:
             return Decimal("0"), rules.charge(side, Decimal("0"), request.instrument_id)
-        return capped, rules.charge(side, capped * row.price, request.instrument_id)
+        return capped, rules.charge(side, capped * price, request.instrument_id)

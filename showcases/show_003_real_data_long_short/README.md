@@ -7,7 +7,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
 
 1. **Real ingest and registration.** `scripts/extract_dw_fixture.py` slices the vendor CSV into one
    observation parquet and one exact execution parquet, then `register_dataset` and
-   `register_execution_input` validate and persist them.
+   `register_dataset` (the venue table carries an `execution` role) validate and persist them.
 2. **DataModel → derived dataset.** A 5-session cross-sectionally demeaned reversal score is
    computed per trading session and published through `materialize` as the registered dataset
    `reversal_score`, with per-invocation lineage.

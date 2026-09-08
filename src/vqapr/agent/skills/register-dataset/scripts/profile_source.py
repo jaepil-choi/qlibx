@@ -72,16 +72,26 @@ def _quote(name: str) -> str:
     return f'"{escaped}"'
 
 
+def _one_row(cursor: duckdb.DuckDBPyConnection) -> tuple[Any, ...]:
+    """The row an aggregate query always yields; none is duckdb breaking its contract."""
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("an aggregate query returned no row")
+    return row
+
+
 def _column_facts(
     con: duckdb.DuckDBPyConnection, rel: str, columns: list[tuple[str, str]], rows: int
 ) -> dict[str, Any]:
     facts: dict[str, Any] = {}
     for name, dtype in columns:
         col = _quote(name)
-        distinct, nulls, low, high = con.execute(
-            f"SELECT count(DISTINCT {col}), count(*) - count({col}), "
-            f"min({col})::VARCHAR, max({col})::VARCHAR FROM {rel}"
-        ).fetchone()
+        distinct, nulls, low, high = _one_row(
+            con.execute(
+                f"SELECT count(DISTINCT {col}), count(*) - count({col}), "
+                f"min({col})::VARCHAR, max({col})::VARCHAR FROM {rel}"
+            )
+        )
         entry: dict[str, Any] = {
             "type": dtype,
             "distinct": distinct,
@@ -158,7 +168,7 @@ def _key_candidates(
                 continue  # a superset of a key is trivially a key
             cols = ", ".join(_quote(name) for name in combo)
             distinct = con.execute(f"SELECT count(*) FROM (SELECT DISTINCT {cols} FROM {rel})")
-            unique = distinct.fetchone()[0]
+            unique = _one_row(distinct)[0]
             if unique == rows:
                 found.append({"fields": list(combo), "unique": True})
     return found
@@ -181,15 +191,21 @@ def _orderings(
     held: list[str] = []
     for left, right in combinations(numeric, 2):
         a, b = _quote(left), _quote(right)
-        violations = con.execute(
-            f"SELECT count(*) FROM {rel} WHERE {a} IS NOT NULL AND {b} IS NOT NULL AND {a} > {b}"
-        ).fetchone()[0]
+        violations = _one_row(
+            con.execute(
+                f"SELECT count(*) FROM {rel} "
+                f"WHERE {a} IS NOT NULL AND {b} IS NOT NULL AND {a} > {b}"
+            )
+        )[0]
         if violations == 0:
             held.append(f"{left} <= {right}")
             continue
-        violations = con.execute(
-            f"SELECT count(*) FROM {rel} WHERE {a} IS NOT NULL AND {b} IS NOT NULL AND {b} > {a}"
-        ).fetchone()[0]
+        violations = _one_row(
+            con.execute(
+                f"SELECT count(*) FROM {rel} "
+                f"WHERE {a} IS NOT NULL AND {b} IS NOT NULL AND {b} > {a}"
+            )
+        )[0]
         if violations == 0:
             held.append(f"{right} <= {left}")
     return held
@@ -224,7 +240,7 @@ def profile(path: Path) -> dict[str, Any]:
     rel = _relation(path)
     con = duckdb.connect()
     columns = _columns(con, rel)
-    rows = con.execute(f"SELECT count(*) FROM {rel}").fetchone()[0]
+    rows = _one_row(con.execute(f"SELECT count(*) FROM {rel}"))[0]
     if rows == 0:
         raise SystemExit(f"{path} holds no rows; there is nothing to register")
 

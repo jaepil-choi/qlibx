@@ -112,11 +112,14 @@ class ComponentRef(BaseModel):
     ) -> ComponentRef:
         if not isinstance(kind, ComponentKind):
             raise TypeError("kind must be a ComponentKind")
-        return cls(
-            component_id=raw_component_id,
-            kind=kind,
-            path=Path(path),
-            object_name=object_name,
-            config=config or {},
-            fingerprint=fingerprint,
+        # Raw values in, the `mode="before"` validators above make them the fields' types.
+        return cls.model_validate(
+            {
+                "component_id": raw_component_id,
+                "kind": kind,
+                "path": Path(path),
+                "object_name": object_name,
+                "config": config or {},
+                "fingerprint": fingerprint,
+            }
         )

@@ -12,6 +12,8 @@ import pytest
 
 import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
+from vqapr.exchange.execution_table import validate_execution_table
+from vqapr.workspace import Workspace
 from vqapr.public import (
     QUANTUM,
     SHIPPED_CONSTRAINTS,
@@ -23,6 +25,8 @@ from vqapr.public import (
     AllocationViolation,
     Budget,
     CalendarLookback,
+    CrossSection,
+    Component,
     ComponentKind,
     ComponentRef,
     Constraint,
@@ -36,7 +40,8 @@ from vqapr.public import (
     DatasetRegistration,
     EconomicPortfolioIntent,
     EtfInstrument,
-    ExecutionInputRegistration,
+    ExecutionRole,
+    ExecutionTable,
     ExecutionTableSpec,
     FactorInstrument,
     FillConvention,
@@ -51,13 +56,13 @@ from vqapr.public import (
     ListingAccess,
     LocalInstantDeclaration,
     OperationOccurrence,
-    OperationRole,
     OptimizeRefusal,
     OptimizeResult,
     PortfolioDirection,
     PortfolioTarget,
     RowsLookback,
     RunDefinition,
+    Series,
     Side,
     SimulationFailure,
     SimulationResult,
@@ -72,7 +77,6 @@ from vqapr.public import (
     preflight_run,
     register_data_model,
     register_dataset,
-    register_execution_input,
     register_strategy_model,
     run,
     shipped_constraint_path,
@@ -103,6 +107,8 @@ def test_public_exports_are_fixed() -> None:
             AccountSnapshot,
             Budget,
             CalendarLookback,
+            CrossSection,
+            Component,
             ComponentKind,
             ComponentRef,
             Constraint,
@@ -127,7 +133,6 @@ def test_public_exports_are_fixed() -> None:
             AllocationViolation,
             Hold,
             OperationOccurrence,
-            OperationRole,
             OptimizeRefusal,
             OptimizeResult,
             PortfolioDirection,
@@ -140,6 +145,7 @@ def test_public_exports_are_fixed() -> None:
             IndexInstrument,
             FactorInstrument,
             SimulationResult,
+            Series,
             Side,
             StrategyModel,
             StrategyModelContext,
@@ -166,6 +172,7 @@ def test_public_exports_are_fixed() -> None:
         "AllocationViolation",
         "Budget",
         "CalendarLookback",
+        "Component",
         "ComponentKind",
         "ComponentRef",
         "Constraint",
@@ -173,6 +180,7 @@ def test_public_exports_are_fixed() -> None:
         "ConstraintFinding",
         "ConstraintReport",
         "ConstraintSet",
+        "CrossSection",
         "DataModel",
         "DataModelContext",
         "DataModelEntry",
@@ -184,8 +192,10 @@ def test_public_exports_are_fixed() -> None:
         "EtfInstrument",
         "ExactExecutionTarget",
         "ExchangeRulesView",
+        "ExecutionCall",
         "ExecutionFieldRequirement",
-        "ExecutionInputRegistration",
+        "ExecutionRole",
+        "ExecutionTable",
         "ExecutionTableSpec",
         "FactorInstrument",
         "FillConvention",
@@ -215,7 +225,6 @@ def test_public_exports_are_fixed() -> None:
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
         "OperationOccurrence",
-        "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
         "PanelWindow",
@@ -224,9 +233,12 @@ def test_public_exports_are_fixed() -> None:
         "Rebalance",
         "RowsLookback",
         "RunDefinition",
+        "RunExecution",
+        "RunFill",
         "RunRecordMissing",
         "RunReport",
         "RunResult",
+        "Series",
         "Side",
         "SideCost",
         "SimulationFailure",
@@ -278,7 +290,6 @@ def test_public_exports_are_fixed() -> None:
         "register_data_model",
         "register_dataset",
         "register_exchange",
-        "register_execution_input",
         "register_run",
         "register_strategy_model",
         "rescale",
@@ -294,7 +305,7 @@ def test_public_exports_are_fixed() -> None:
         "validate_allocation",
     )
     assert "Workspace" not in public.__all__
-    assert "SimulationFlow" not in public.__all__
+    assert "StrategyEventLoop" not in public.__all__
     assert "DuckDbObservationStore" not in public.__all__
     assert "RunStateRepository" not in public.__all__
     assert "AccountState" not in public.__all__
@@ -377,37 +388,37 @@ def test_source_open_failure_does_not_create_a_workspace(tmp_path: Path) -> None
 
 
 @pytest.mark.uc("UC-EXEC-001")
-def test_public_facade_registers_a_valid_execution_input(
+def test_public_facade_registers_a_venue_table_as_a_dataset(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
-    registration = ExecutionInputRegistration.of(
+    """The execution table is data (record `185`): it registers through the dataset door, with
+    an execution role; which price a run fills at is the run's, not the registration's."""
+    registration = DatasetRegistration.of(
         "krx-daily",
-        ExecutionTableSpec(
-            source=SourceSpec.of("execution", execution_parquet),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"close": "close"},
-        ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        "execution",
+        instrument_field="instrument",
+        available_at="trade_at",
+        key_fields=("trade_at", "instrument"),
+        fields={"close": "close", "is_tradable": "is_tradable"},
+        field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        grain="instrument_instant",
+        execution={"is_tradable": "is_tradable"},
     )
+    assert registration.execution == ExecutionRole("is_tradable")
+    source = SourceSpec.of("execution", execution_parquet)
 
-    assert register_execution_input(tmp_path, registration) is True
+    assert register_dataset(tmp_path, registration, source) is True
     before = (tmp_path / ".vqapr" / "workspace.yaml").read_bytes()
-    assert register_execution_input(tmp_path, registration) is False
+    assert register_dataset(tmp_path, registration, source) is False
     assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
+    assert Workspace.open(tmp_path).dataset("krx-daily").execution == ExecutionRole("is_tradable")
 
 
 def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
-    from vqapr.flow.frozen import FrozenStrategy
+    from vqapr.flow.declaration.frozen import FrozenStrategy
 
     memory = {"carry": [1]}
     layer = object.__new__(FrozenStrategy)
@@ -429,7 +440,7 @@ def test_public_run_uses_frozen_initial_model_memory(
         "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
         "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
-        "execution_input": object(),
+        "execution": object(),
         "strategies": (layer,),
         "datamodels": (),
         "datasets": (),
@@ -473,11 +484,11 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(orchestration, "load_exchange", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         orchestration,
-        "validate_execution_input",
+        "validate_execution_table",
         lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
     )
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
-    monkeypatch.setattr(orchestration, "SimulationFlow", Flow)
+    monkeypatch.setattr(orchestration, "StrategyEventLoop", Flow)
 
     outcome = public.run(tmp_path, frozen)
     assert outcome.result() == "result"
@@ -509,7 +520,7 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
         )
     finally:
         con.close()
-    registration = ExecutionInputRegistration.of(
+    registration = ExecutionTable.of(
         "krx-daily",
         ExecutionTableSpec(
             source=SourceSpec.of("execution", target),
@@ -526,9 +537,10 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
         ),
     )
 
-    with pytest.raises(VqaprError) as caught:
-        register_execution_input(tmp_path, registration)
+    # The bound table is what preflight checks (record `185`): the price the RUN chose must be
+    # finite and positive wherever the row is tradable. Nothing here touches a workspace.
+    diagnosis = validate_execution_table(registration)
 
-    assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "execution_input.price_invalid"
+    assert not diagnosis.ok
+    assert diagnosis.failures[0].code == "execution_table.price_invalid"
     assert not (tmp_path / ".vqapr").exists()

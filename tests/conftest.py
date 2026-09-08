@@ -65,7 +65,7 @@ def execution_parquet(tmp_path_factory, _con) -> Path:
     out = tmp_path_factory.mktemp("execution") / "krx_daily.parquet"
     _con.execute(
         f"""COPY (
-            SELECT * FROM (VALUES
+            SELECT trade_at, instrument, is_tradable, open::DOUBLE AS open, close::DOUBLE AS close FROM (VALUES
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true,  99.0, 100.0),
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B', true,  48.0,  50.0),
               (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 101.0, 103.0),

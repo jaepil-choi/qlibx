@@ -2,8 +2,8 @@
 
 **This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
 executes runs is not a facade. Record `139` made it a run of several strategies: the run layer is
-frozen once, and each strategy runs in its own `SimulationFlow` with its own `Account` and its own
-record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
+frozen once, and each strategy runs in its own `StrategyEventLoop` with its own `Account` and its
+own record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
 processes, each of which freezes the registered run again and runs one strategy of it.
 """
 
@@ -20,6 +20,7 @@ from types import MappingProxyType
 from vqapr.account.account import Account
 from vqapr.account.history import retained_marks
 from vqapr.account.snapshot import AccountState
+from vqapr.authoring import Component
 from vqapr.constraints.evaluation import (
     constraint_requirements as declared_constraint_requirements,
 )
@@ -30,8 +31,7 @@ from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import normalize_memory
-from vqapr.evidence.artifacts import SimulationFailure
-from vqapr.exchange.execution_table import validate_execution_input
+from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
@@ -40,23 +40,27 @@ from vqapr.extension.loading import (
     load_exchange,
     load_strategy_model,
 )
-from vqapr.flow.datamodel import DataModelFlow, DataModelOutput, DataModelResult
-from vqapr.flow.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.judgments import require_judged
-from vqapr.flow.preflight import preflight_run as _preflight_run
-from vqapr.flow.record import (
-    DATAMODEL_KIND,
-    RunRecordWriter,
+from vqapr.flow.artifacts import SimulationFailure
+from vqapr.flow.datamodel.loop import DataModelEventLoop, DataModelResult
+from vqapr.flow.datamodel.output import DataModelOutput
+from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.judgments import require_judged
+from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
+from vqapr.flow.declaration.run import RunDefinition
+from vqapr.flow.freeze import (
     freeze_datamodel_record,
     freeze_run_record,
     freeze_strategy_record,
+)
+from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
+from vqapr.flow.run_state import RunStateRepository
+from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
+from vqapr.record import (
+    DATAMODEL_KIND,
+    RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
 )
-from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_state import RunStateRepository
-from vqapr.flow.simulation import SimulationFlow, SimulationResult
 from vqapr.workspace import Workspace
 
 
@@ -245,9 +249,9 @@ def run(
         raise ValueError("public run requires frozen initial account authority")
     if frozen.exchange is None:
         raise ValueError("public run requires a frozen Exchange authority")
-    if frozen.execution_input is None:
-        raise ValueError("public run requires a frozen execution input")
-    validate_execution_input(frozen.execution_input).raise_if_failed()
+    if frozen.execution is None:
+        raise ValueError("public run requires a frozen execution dataset")
+    validate_execution_table(frozen.execution).raise_if_failed()
 
     # ONE read of the roster for the whole run, through the caller's workspace when it has one.
     # It was read once per strategy, and the CLI read it a further time for its envelope
@@ -468,7 +472,7 @@ def _run_datamodel(
             opened_writer.open(replace=replace_record)
             writer = opened_writer
         output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
-        flow = DataModelFlow(
+        flow = DataModelEventLoop(
             frozen,
             layer,
             model,
@@ -567,6 +571,14 @@ def _run_strategy(
     from it rather than from a read of this strategy's own.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
+    # `run` refused a strategy run frozen without a venue or an initial account before
+    # dispatching here; a worker process rebuilds the frozen run and re-states that.
+    if frozen.exchange is None:
+        raise RuntimeError("a frozen strategy run reached execution without an Exchange")
+    initial_snapshot = frozen.initial_account_snapshot
+    initial_mode = frozen.initial_account_mode
+    if initial_snapshot is None or initial_mode is None:
+        raise RuntimeError("a frozen strategy run reached execution without an initial account")
     exchange = load_exchange(frozen.exchange, project_root=root_path)
     constraints = tuple(
         load_constraint(ref, project_root=root_path) for ref in layer.constraints.constraints
@@ -596,7 +608,7 @@ def _run_strategy(
         constraint_requirements = declared_constraint_requirements(constraints)
         if constraint_requirements != layer.constraint_requirements:
             raise ValueError("loaded Constraint requirements drifted from FrozenRun")
-        root = AccountState(frozen.initial_account_snapshot)
+        root = AccountState(initial_snapshot)
         strategy.memory = normalize_memory(layer.initial_model_memory)
         strategy.load_payload(BytesIO(layer.initial_payload))
         if store is not None:
@@ -607,6 +619,18 @@ def _run_strategy(
             initial_account=root,
             initial_model_memory=layer.initial_model_memory,
             initial_payload=layer.initial_payload,
+            # What each constraint holds as loaded -- its constructor's doing, from the config
+            # the fingerprint already folds -- is the memory the run commits from (record `181`).
+            initial_component_memory={
+                **{constraint.constraint_id: constraint.memory for constraint in constraints},
+                # The venue too, when it is a Component (record `184`); a loader double that
+                # only offers `execute` carries no memory to commit.
+                **(
+                    {exchange.exchange_id: exchange.memory}
+                    if isinstance(exchange, Component)
+                    else {}
+                ),
+            },
             # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
             # A hard kill preserves only spilled rows. Without a store, roots retain rows.
             row_sink=None if writer is None else writer.append,
@@ -616,7 +640,7 @@ def _run_strategy(
         initial_ref = state.root.current_model_state_ref
         if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
             raise RuntimeError("initial Strategy payload does not match frozen run authority")
-        flow = SimulationFlow(
+        flow = StrategyEventLoop(
             frozen,
             strategy,
             state,
@@ -647,7 +671,7 @@ def _run_strategy(
             # DECLARATION, not the book. It retains the marks this strategy declared it would
             # read; declaring nothing keeps one.
             account=Account(
-                mode=frozen.initial_account_mode,
+                mode=initial_mode,
                 retained_marks=retained_marks(strategy.account_history()),
             ),
             exchange=exchange,
@@ -686,7 +710,7 @@ def _run_strategy(
     return result, record
 
 
-def _roster_report_or_stale(roster: RegisteredRoster | None) -> object | None:
+def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object] | None:
     """The roster block for the record, or a STALE MARKER when it cannot be built at record time.
 
     Narrow on purpose: it catches `VqaprError` only, so a bug in report construction still fails

@@ -47,12 +47,10 @@ class TickerNetting:
     """``long + short``. What survives the disagreement."""
 
     def __post_init__(self) -> None:
-        if not isinstance(self.instrument_id, str) or not self.instrument_id:
+        if not self.instrument_id:
             raise ValueError("instrument_id must be a non-empty string")
         for name in ("long_weight", "short_weight", "offset_weight", "net_weight"):
             value = getattr(self, name)
-            if not isinstance(value, Decimal):
-                raise TypeError(f"{name} must be a Decimal")
             if not value.is_finite():
                 raise ValueError(f"{name} must be finite")
 

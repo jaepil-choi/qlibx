@@ -34,12 +34,10 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow import judgments as judgments_module
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.declaration import judgments as judgments_module
+from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -88,23 +86,19 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
     with Workspace.transaction(root) as t:
-        t.register_execution_input(
-            ExecutionInputRegistration.of(
-                "my-exec",
-                ExecutionTableSpec(
-                    source=SourceSpec.of("exec-src", exec_dir),
-                    trade_at_field="trade_at",
-                    instrument_field="instrument",
-                    is_tradable_field="is_tradable",
-                    price_fields={"close": "close"},
-                ),
-                FillConvention(
-                    selector=FillSelector.NEXT_ELIGIBLE,
-                    local_time=datetime(2024, 1, 1, 15, 30).time(),
-                    timezone="Asia/Seoul",
-                    trade_price="close",
-                ),
-            )
+        t.register_dataset(
+            DatasetRegistration.of(
+                'my-exec',
+                'exec-src',
+                instrument_field="instrument",
+                available_at="trade_at",
+                grain="instrument_instant",
+                key_fields=("trade_at", "instrument"),
+                fields={"close": "close", "is_tradable": "is_tradable"},
+                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                execution={"is_tradable": "is_tradable"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("exec-src", exec_dir),
         )
     source = root / "strategy.py"
     source.write_text(
@@ -139,7 +133,10 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
                 sessions=(date(2024, 1, 2),),
                 instruments=("A",),
                 exchange="venue",
-                execution_input_id="my-exec",
+                execution=RunExecution(
+                    dataset='my-exec',
+                    fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+                ),
                 start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
                 end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),
                 initial_account_snapshot=AccountSnapshot(

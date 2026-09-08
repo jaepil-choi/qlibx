@@ -105,21 +105,16 @@ datasets:
     key_fields: [available_at, instrument]
     fields: {{close: close}}
     field_types: {{close: DOUBLE}}
-
-execution_inputs:
   venue-daily:
-    table:
-      source_id: venue-source
-      path: {execution.as_posix()}
-      trade_at_field: trade_at
-      instrument_field: instrument
-      is_tradable_field: is_tradable
-      price_fields: {{close: close}}
-    fill:
-      selector: next_eligible
-      at: "15:30"
-      timezone: Asia/Seoul
-      trade_price: close
+    source_id: venue-source
+    path: {execution.as_posix()}
+    instrument_field: instrument
+    available_at: trade_at
+    grain: instrument_instant
+    key_fields: [trade_at, instrument]
+    fields: {{close: close, is_tradable: is_tradable}}
+    field_types: {{close: DOUBLE, is_tradable: BOOLEAN}}
+    execution: {{is_tradable: is_tradable}}
 """,
         encoding="utf-8",
     )
@@ -183,7 +178,15 @@ def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Pa
         "timezone": "Asia/Seoul",
         "at": "04:00",
         "exchange": "venue",
-        "execution_input": "venue-daily",
+        "execution": {
+            "dataset": "venue-daily",
+            "fill": {
+                "selector": "next_eligible",
+                "at": "15:30",
+                "timezone": "Asia/Seoul",
+                "trade_price": "close",
+            },
+        },
         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
         "end": datetime(2024, 3, 7, 23, tzinfo=_ZONE).isoformat(),
         "initial_account": {"cash": "1000", "mode": "long_only"},
@@ -716,7 +719,7 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
     import json as _json
 
     from vqapr.domain.instruments import export_roster
-    from vqapr.flow.record import read_strategy_record
+    from vqapr.record import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)
     store = tmp_path / ".vqapr"
@@ -800,7 +803,7 @@ def test_a_run_says_where_its_time_went(
     two execution snapshots were half of it. The record now says so: `total` for the loop,
     `callback` for the model's side, `due` for the fill's, and every due stage by its name.
     """
-    from vqapr.flow.record import read_strategy_record
+    from vqapr.record import read_strategy_record
 
     _workspace_for_run(tmp_path, capsys)
     code, registered_run = _register_run(tmp_path, capsys, "timed")
@@ -826,7 +829,7 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
     """The reported crash, driven through the two verbs a user actually types.
 
     `check` used to return `ok:true` on all five phases and `run` then died inside
-    `SimulationFlow.__init__` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
+    `StrategyEventLoop.__init__` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
 
     `vqapr register` now refuses the mismatch outright, so the workspace is populated through the
     Python API here on purpose — that is precisely the route the acceptance criterion anticipates
@@ -1017,7 +1020,7 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     assert failure["code"] == "declaration.run_invalid"
     for key in (
         "strategies", "instruments", "start", "end", "exchange",
-        "execution_input", "initial_account",
+        "execution", "initial_account",
     ):
         assert key in failure["requirement"], f"{key} was not named: {failure['requirement']}"
     assert "at" in failure["observed"], "a key that stopped the read is named"
@@ -1083,7 +1086,7 @@ def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture
     The execution table normalises its target to UTC and the fill row used to carry that, so a
     reader lining a fill up against the NAV row written at that same instant converted by hand.
     """
-    from vqapr.flow.record import read_table
+    from vqapr.record import read_table
 
     _workspace_for_run(tmp_path, capsys)
     code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "r1")

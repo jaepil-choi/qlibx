@@ -4,17 +4,14 @@ from datetime import datetime, time
 from pathlib import Path
 
 import duckdb
-import pytest
 
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
-    validate_execution_input,
+    validate_execution_table,
 )
-from vqapr.workspace import Workspace
 
 
 def _write(path: Path, rows: str) -> Path:
@@ -26,8 +23,8 @@ def _write(path: Path, rows: str) -> Path:
     return path
 
 
-def _registration(path: Path, *, local_time: time = time(15, 30)) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
+def _registration(path: Path, *, local_time: time = time(15, 30)) -> ExecutionTable:
+    return ExecutionTable.of(
         "krx-daily",
         ExecutionTableSpec(
             source=SourceSpec.of("krx-execution", path),
@@ -57,7 +54,7 @@ def test_valid_execution_input_accepts_a_halted_row_with_a_retained_price(tmp_pa
         """,
     )
 
-    diagnosis = validate_execution_input(_registration(target))
+    diagnosis = validate_execution_table(_registration(target))
 
     assert diagnosis.ok
     assert diagnosis.mutation is False
@@ -72,11 +69,11 @@ def test_selected_price_does_not_fall_back_to_another_valid_price(tmp_path: Path
         """,
     )
 
-    diagnosis = validate_execution_input(_registration(target))
+    diagnosis = validate_execution_table(_registration(target))
 
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.price_invalid"
+        "execution_table.price_invalid"
     ]
     assert diagnosis.failures[0].example_total == 1
     assert "close" in diagnosis.failures[0].requirement
@@ -93,11 +90,11 @@ def test_duplicate_execution_identity_is_rejected(tmp_path: Path) -> None:
         """,
     )
 
-    diagnosis = validate_execution_input(_registration(target))
+    diagnosis = validate_execution_table(_registration(target))
 
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.key_duplicate"
+        "execution_table.key_duplicate"
     ]
 
 
@@ -110,7 +107,7 @@ def test_execution_rows_are_passive_to_fill_local_time_validation(tmp_path: Path
         """,
     )
 
-    diagnosis = validate_execution_input(_registration(target, local_time=time(9)))
+    diagnosis = validate_execution_table(_registration(target, local_time=time(9)))
 
     assert diagnosis.ok
 
@@ -142,24 +139,3 @@ def test_fill_selects_one_exact_same_day_target_with_stable_identity(tmp_path: P
         decision_time=decision_time, end_time=end_time
     )
 
-
-def test_workspace_fill_round_trip_is_idempotent_and_rejects_offset_sessions(
-    tmp_path: Path,
-) -> None:
-    registration = _registration(tmp_path / "execution.parquet")
-    workspace = Workspace.create(tmp_path)
-
-    with Workspace.transaction(workspace) as t:
-        assert t.register_execution_input(registration)
-    with Workspace.transaction(workspace) as t:
-        assert not t.register_execution_input(registration)
-    assert Workspace.open(tmp_path).execution_input("krx-daily") == registration
-
-    document = workspace.path.read_text(encoding="utf-8")
-    workspace.path.write_text(
-        document.replace("selector: SAME_DAY", "offset_sessions: 0"),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(VqaprError, match="offset_sessions is no longer supported"):
-        Workspace.open(tmp_path)

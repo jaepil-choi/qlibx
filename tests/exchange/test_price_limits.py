@@ -23,6 +23,7 @@ from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.fills import ZeroDealtReason
+from vqapr.exchange.venue import ExecutionCall
 from vqapr.exchange.venues.krx import (
     BASE_PRICE,
     PRICE_LIMIT_RATE,
@@ -71,9 +72,9 @@ def test_a_buy_at_the_upper_limit_is_typed_zero_dealt_not_a_batch_failure() -> N
     """A market fact for one session, so the rest of the rebalance still executes."""
     venue = _venue()
     account = AccountSnapshot(0, Decimal("100000000"), {})
-    fills = venue.execute(
+    fills = venue.execute(ExecutionCall.of(venue, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
-    )
+    ))
     fill = fills.fills[0]
     assert fill.dealt_quantity == 0
     assert fill.reason is ZeroDealtReason.NONTRADABLE
@@ -86,9 +87,9 @@ def test_a_sale_at_the_upper_limit_still_fills() -> None:
     venue = _venue()
     held = Decimal("100")
     account = AccountSnapshot(0, Decimal("0"), {NAME: held})
-    fills = venue.execute(
+    fills = venue.execute(ExecutionCall.of(venue, 
         _order(Decimal("-60"), Decimal("13000"), held), account, _snapshot(Decimal("13000"), BASE)
-    )
+    ))
     fill = fills.fills[0]
     assert fill.dealt_quantity == Decimal("-60")
     assert fill.reason is None
@@ -103,12 +104,12 @@ def test_switching_the_regime_off_removes_both_the_rule_and_the_requirement() ->
 
     account = AccountSnapshot(0, Decimal("100000000"), {})
     # Same order, same price, no reference available at all.
-    blocked = on.execute(
+    blocked = on.execute(ExecutionCall.of(on, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), BASE)
-    ).fills[0]
-    filled = off.execute(
+    )).fills[0]
+    filled = off.execute(ExecutionCall.of(off, 
         _order(Decimal("10"), Decimal("13000")), account, _snapshot(Decimal("13000"), None)
-    ).fills[0]
+    )).fills[0]
 
     assert blocked.dealt_quantity == 0
     assert filled.dealt_quantity == Decimal("10"), "with limits off the order fills"
@@ -131,7 +132,8 @@ def test_a_declared_rate_must_be_a_usable_fraction() -> None:
     for bad in (Decimal("0"), Decimal("1"), Decimal("-0.3")):
         with pytest.raises(ValueError, match="finite fraction"):
             KrxTradeRule(NAME, Decimal("1"), Decimal("1"), False, price_limit_rate=bad)
-    with pytest.raises(TypeError, match="Decimal or None"):
+    # Strict pydantic: a float is not a Decimal, and the refusal is a `ValidationError`.
+    with pytest.raises(ValueError, match="Decimal"):
         KrxTradeRule(NAME, Decimal("1"), Decimal("1"), False, price_limit_rate=0.3)
 
 

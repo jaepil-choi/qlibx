@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -11,8 +11,6 @@ from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.workspace import Workspace
 
@@ -45,25 +43,19 @@ def _source(**overrides) -> SourceSpec:
     return SourceSpec.of("prices", "prepared/price_daily", **kwargs)
 
 
-def _execution(
-    path: Path, raw_id: str = "krx-daily", *, trade_price: str = "close"
-) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
+def _venue(raw_id: str = "krx-daily") -> DatasetRegistration:
+    """A venue table: a dataset with an execution role (record 185). The fill is the run's."""
+    return DatasetRegistration.of(
         raw_id,
-        ExecutionTableSpec(
-            source=SourceSpec.of("krx-execution", path),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"open": "open", "close": "close"},
-        ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price=trade_price,
-        ),
-    )
+        'krx-execution',
+        instrument_field="instrument",
+        available_at="trade_at",
+        grain="instrument_instant",
+        key_fields=("trade_at", "instrument"),
+        fields={"open": "open", "close": "close", "is_tradable": "is_tradable"},
+        field_types={"open": "DOUBLE", "close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        execution={"is_tradable": "is_tradable"},
+    ).with_span(*_SPAN)
 
 
 def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
@@ -303,94 +295,39 @@ def test_source_lookup_failures_are_structured(
     assert payload["failures"][0]["code"] == code
 
 
-def test_execution_input_round_trips_through_workspace(
+def test_a_venue_dataset_round_trips_its_execution_role(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    expected = _execution(execution_parquet)
+    expected = _venue()
+    source = SourceSpec.of("krx-execution", execution_parquet)
 
     with Workspace.transaction(workspace) as t:
-        assert t.register_execution_input(expected) is True
+        assert t.register_dataset(expected, source) is True
 
     reopened = Workspace.open(tmp_path)
-    assert reopened.execution_input("krx-daily") == expected
-    assert reopened.execution_inputs == (expected,)
-    assert reopened.source("krx-execution") == expected.table.source
+    assert reopened.dataset("krx-daily") == expected
+    assert reopened.dataset("krx-daily").execution is not None
+    assert reopened.dataset("krx-daily").execution.is_tradable == "is_tradable"
+    assert reopened.source("krx-execution") == source
 
 
-def test_execution_input_round_trips_fill_dst_proof(
-    tmp_path: Path, execution_parquet: Path
+def test_a_document_still_declaring_execution_inputs_is_refused_by_name(
+    tmp_path: Path,
 ) -> None:
-    workspace = Workspace.create(tmp_path)
-    base = _execution(execution_parquet)
-    expected = ExecutionInputRegistration.of(
-        str(base.execution_input_id),
-        base.table,
-        FillConvention(
-            selector=base.fill.selector,
-            local_time=base.fill.local_time,
-            timezone=base.fill.timezone,
-            trade_price=base.fill.trade_price,
-            fold=1,
-            offset="+09:00",
-        ),
-    )
-
-    with Workspace.transaction(workspace) as t:
-        assert t.register_execution_input(expected) is True
-    assert Workspace.open(tmp_path).execution_input("krx-daily") == expected
-
-
-def test_workspace_rejects_old_fill_schema_without_dst_proof(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    with Workspace.transaction(workspace) as t:
-        t.register_execution_input(_execution(execution_parquet))
-    path = workspace.path
-    path.write_text(
-        path.read_text(encoding="utf-8")
-        .replace("      fold: null\n", "")
-        .replace("      offset: null\n", ""),
+    """`execution_inputs:` is retired (record 185); the refusal says where the fill went."""
+    workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
+    workspace_path.parent.mkdir(parents=True)
+    workspace_path.write_text(
+        "sources: {}\ndatasets: {}\nexecution_inputs:\n  krx-daily:\n    fill: {}\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(VqaprError, match="old fill schema"):
+    with pytest.raises(VqaprError, match="execution_inputs is retired"):
         Workspace.open(tmp_path)
 
 
-def test_execution_input_registration_is_idempotent(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    registration = _execution(execution_parquet)
-
-    with Workspace.transaction(workspace) as t:
-        assert t.register_execution_input(registration) is True
-    before = workspace.path.read_bytes()
-    with Workspace.transaction(workspace) as t:
-        assert t.register_execution_input(registration) is False
-    assert workspace.path.read_bytes() == before
-
-
-def test_conflicting_execution_input_fails_without_mutation(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    with Workspace.transaction(workspace) as t:
-        t.register_execution_input(_execution(execution_parquet))
-    before = workspace.path.read_bytes()
-
-    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
-        t.register_execution_input(_execution(execution_parquet, trade_price="open"))
-
-    assert caught.value.stage == "register"
-    assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "execution_input.registered"
-    assert workspace.path.read_bytes() == before
-
-
-def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -> None:
+def test_legacy_workspace_without_components_or_runs_still_opens(tmp_path: Path) -> None:
     workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
     workspace_path.parent.mkdir(parents=True)
     workspace_path.write_text("sources: {}\ndatasets: {}\n", encoding="utf-8")
@@ -398,7 +335,6 @@ def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -
     workspace = Workspace.open(tmp_path)
 
     assert workspace.datasets == ()
-    assert workspace.execution_inputs == ()
 
 
 def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> None:
@@ -421,7 +357,7 @@ def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> No
 def test_legacy_workspace_without_components_still_opens(tmp_path: Path) -> None:
     workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
     workspace_path.parent.mkdir(parents=True)
-    workspace_path.write_text("sources: {}\ndatasets: {}\nexecution_inputs: {}\n", encoding="utf-8")
+    workspace_path.write_text("sources: {}\ndatasets: {}\nruns: {}\n", encoding="utf-8")
 
     workspace = Workspace.open(tmp_path)
 

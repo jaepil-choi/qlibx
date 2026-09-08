@@ -38,7 +38,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from decimal import ROUND_HALF_EVEN, Decimal
 
-from vqapr.portfolio.optimize import QUANTUM
+from vqapr.portfolio.optimize import QUANTIZATION_EXPONENT, QUANTUM, finite_exponent
 
 Weights = dict[str, Decimal]
 
@@ -209,7 +209,7 @@ def rescale(
             raise WeightingRefusal(f"grid must be a Decimal; got {type(grid).__name__}")
         if not grid.is_finite() or grid <= 0:
             raise WeightingRefusal(f"grid must be a positive finite step; got {grid}")
-        if grid.as_tuple().exponent < QUANTUM.as_tuple().exponent:
+        if finite_exponent(grid) < QUANTIZATION_EXPONENT:
             raise WeightingRefusal(
                 f"grid {grid} is finer than the canonical grid {QUANTUM}; "
                 "coarser steps are accepted, finer ones are not"

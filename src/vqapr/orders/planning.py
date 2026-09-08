@@ -397,12 +397,8 @@ def plan_orders(
     working exactly as before; a caller that passes it stops funding buys from sales the venue is
     going to refuse.
     """
-    if not isinstance(account, AccountSnapshot):
-        raise TypeError("account must be an AccountSnapshot")
     nav = _decimal(execution_time_nav, name="execution_time_nav", positive=True)
     cash = _decimal(cash_target, name="cash_target")
-    if not isinstance(budget, Budget):
-        raise TypeError("budget must be a Budget")
     if not budget.validates_cash(cash):
         raise ValueError("cash_target is outside the declared budget")
     selected_prices = _prices(prices)

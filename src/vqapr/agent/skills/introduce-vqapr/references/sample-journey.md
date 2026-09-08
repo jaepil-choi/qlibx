@@ -31,7 +31,7 @@ panel like this one.
 vqapr register ./first-run/sample.yaml
 ```
 
-Registers the dataset, its source, the execution input, the exchange and the components — in
+Registers the two datasets (the prices and the venue table) with their sources, the exchange and the components — in
 dependency order, so the document cannot fail for the order it was typed in. Follow with
 `vqapr list datasets` and `vqapr list components` to see what arrived.
 
@@ -54,7 +54,7 @@ completed`, an `occurrences` count, an `account_version` and a `record` — `<st
 vqapr show run sample-run
 ```
 
-The configuration every strategy shared: instruments, period, venue, execution input and its fill
+The configuration every strategy shared: instruments, period, venue, the execution dataset and the fill
 convention, initial account, the datasets read and their source digests, and `recorded` — the
 records the store holds.
 

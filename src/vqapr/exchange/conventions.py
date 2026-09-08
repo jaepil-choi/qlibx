@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
@@ -12,7 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.identifiers import ExecutionInputId
+from vqapr.domain.identifiers import DatasetId
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
 _OFFSET = re.compile(r"[+-](?:0\d|1[0-4]):[0-5]\d\Z")
@@ -25,12 +26,27 @@ class FillSelector(StrEnum):
     NEXT_ELIGIBLE = "NEXT_ELIGIBLE"
 
 
+def _instants(candidates: Iterable[object]) -> tuple[datetime, ...]:
+    """The scan's candidate instants, normalised to UTC.
+
+    The scan reads a `TIMESTAMPTZ` column and hands the values back untyped; anything that is not
+    a datetime is a table whose declared trade-at field is not one, and that is refused by name
+    rather than left to fail on the first attribute read.
+    """
+    instants: list[datetime] = []
+    for candidate in candidates:
+        if not isinstance(candidate, datetime):
+            raise TypeError(f"execution instant must be a datetime, got {type(candidate).__name__}")
+        instants.append(candidate.astimezone(UTC))
+    return tuple(instants)
+
+
 @dataclass(frozen=True, slots=True)
 class ExactExecutionTarget:
     """A deterministic selected instant and its unambiguous price binding."""
 
     identity: UUID
-    execution_input_id: ExecutionInputId
+    dataset_id: DatasetId
     target_at: datetime
     selector: FillSelector
     trade_price: str
@@ -177,12 +193,12 @@ class FillConvention:
         trade_at_field: str,
         start_time: datetime,
         end_time: datetime,
-        session: object | None = None,
+        session: scan.ScanSession | None = None,
     ) -> ExecutionHorizon:
         """Read the run's candidate instants once from an execution table's source.
 
         A convention reads a source and the field that stamps a fill; it does not know the
-        registration that pairs it with a table. `ExecutionInputRegistration.build_horizon`
+        registration that pairs it with a table. `ExecutionTable.build_horizon`
         passes its own table's binding here (one-shape Step 7, record 162: this was the
         `conventions <-> execution_table` import cycle).
 
@@ -190,8 +206,6 @@ class FillConvention:
         `start_time` must not be later than the earliest decision the run will make, or the
         horizon would omit instants a callback is entitled to select.
         """
-        if not isinstance(source, SourceSpec):
-            raise TypeError("source must be a SourceSpec")
         candidates = scan.candidate_instants(
             source,
             trade_at_field=trade_at_field,
@@ -199,42 +213,39 @@ class FillConvention:
             end_time=end_time,
             session=session,
         )
-        return ExecutionHorizon(
-            tuple(sorted(candidate.astimezone(UTC) for candidate in candidates))
-        )
+        return ExecutionHorizon(tuple(sorted(_instants(candidates))))
 
     def select_target(
         self,
         source: SourceSpec,
         *,
         trade_at_field: str,
-        execution_input_id: ExecutionInputId,
+        dataset_id: DatasetId,
         decision_time: datetime,
         end_time: datetime,
         horizon: ExecutionHorizon | None = None,
     ) -> ExactExecutionTarget | None:
         """Select the first strictly-later eligible execution instant in the run horizon.
 
-        `source`/`trade_at_field` are the execution table's binding and `execution_input_id` the
-        registration the target is stamped with; a registration passes its own through
-        `ExecutionInputRegistration.select_target`.
+        `source`/`trade_at_field` are the execution table's binding and `dataset_id` the
+        dataset the target is stamped with; the bound table passes its own through
+        `ExecutionTable.select_target`.
         """
 
-        if not isinstance(source, SourceSpec):
-            raise TypeError("source must be a SourceSpec")
         if decision_time.tzinfo is None or end_time.tzinfo is None:
             raise ValueError("decision_time and end_time must be timezone-aware")
         if decision_time.astimezone(UTC) > end_time.astimezone(UTC):
             raise ValueError("decision_time must not be after end_time")
 
         if horizon is None:
-            candidates = scan.candidate_instants(
-                source,
-                trade_at_field=trade_at_field,
-                decision_time=decision_time,
-                end_time=end_time,
+            candidates = _instants(
+                scan.candidate_instants(
+                    source,
+                    trade_at_field=trade_at_field,
+                    decision_time=decision_time,
+                    end_time=end_time,
+                )
             )
-            candidates = tuple(candidate.astimezone(UTC) for candidate in candidates)
             resolve = self.resolve_local_target
         else:
             # The horizon was read once for the whole run; bisect to this decision instead of
@@ -271,7 +282,7 @@ class FillConvention:
                 _IDENTITY_NAMESPACE,
                 "|".join(
                     (
-                        str(execution_input_id),
+                        str(dataset_id),
                         *(
                             "" if value is None else str(value)
                             for value in self.declaration_identity
@@ -282,7 +293,7 @@ class FillConvention:
             )
             return ExactExecutionTarget(
                 identity=identity,
-                execution_input_id=execution_input_id,
+                dataset_id=dataset_id,
                 target_at=target_at,
                 selector=self.selector,
                 trade_price=self.trade_price,

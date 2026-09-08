@@ -48,7 +48,7 @@ to look at.
 
 Three rungs, each depending on the one before:
 
-1. **Registration** — every dataset, source, component and execution input registered and passing
+1. **Registration** — every dataset (the venue table is one too), source and component registered and passing
    validation.
 2. **Run** — a completed run producing a result per model: a record and tables per strategy, or a
    registered dataset per datamodel.

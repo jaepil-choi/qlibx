@@ -4,10 +4,10 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.identifiers import agenda_id, occurrence_id
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.loop import DueExecutionEnvelope, OperationEnvelope
+from vqapr.flow.loop import DueEvent, OccurrenceEvent
 
 
 def _local(
@@ -21,21 +21,15 @@ def _local(
     return LocalInstantDeclaration(day, wall_time, timezone, fold, offset)
 
 
-def _occurrence(
-    identifier: str,
-    *,
-    role: OperationRole = OperationRole.STRATEGY_CALLBACK,
-) -> OperationOccurrence:
-    return OperationOccurrence(occurrence_id(identifier), role, _local())
+def _occurrence(identifier: str) -> OperationOccurrence:
+    return OperationOccurrence(occurrence_id(identifier), _local())
 
 
 def _agenda(*occurrences: OperationOccurrence) -> OperationAgenda:
     return OperationAgenda(
         agenda_id=agenda_id("strategy"),
-        role=OperationRole.STRATEGY_CALLBACK,
         timezone="Asia/Seoul",
         occurrences=occurrences,
-        provenance="fixture-v1",
     )
 
 
@@ -100,10 +94,9 @@ def test_agenda_slice_is_inclusive_and_can_be_empty() -> None:
 
 
 def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
-    seoul = OperationOccurrence(occurrence_id("seoul"), OperationRole.STRATEGY_CALLBACK, _local())
+    seoul = OperationOccurrence(occurrence_id("seoul"), _local())
     new_york = OperationOccurrence(
         occurrence_id("new-york"),
-        OperationRole.STRATEGY_CALLBACK,
         _local(
             day=date(2024, 3, 5),
             wall_time=time(14, 0),
@@ -118,7 +111,7 @@ def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
 
 def test_pending_due_execution_sorts_before_same_time_static_operation() -> None:
     occurrence = _occurrence("callback")
-    operation = OperationEnvelope(occurrence)
-    due = DueExecutionEnvelope(occurrence.evaluation_time, "pending-1")
+    operation = OccurrenceEvent(occurrence)
+    due = DueEvent(occurrence.evaluation_time, "pending-1")
 
     assert sorted((operation, due), key=lambda item: item.sort_key()) == [due, operation]

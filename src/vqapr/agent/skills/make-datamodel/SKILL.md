@@ -86,7 +86,7 @@ vqapr check <run-id>
 vqapr run <run-id>
 ```
 
-No account, no venue, no execution input — those keys are **refused** on a datamodel run.
+No account, no venue, no execution dataset — those keys are **refused** on a datamodel run.
 
 Where the output lands, how to read it back, and how to retry a run whose output is already
 registered are in [references/running-a-datamodel.md](references/running-a-datamodel.md).

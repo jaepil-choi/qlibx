@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from datetime import datetime, time
+from datetime import datetime
 from typing import Any, Literal
 
 import yaml
@@ -29,25 +29,36 @@ from pydantic import (
     ConfigDict,
     SerializerFunctionWrapHandler,
     ValidationError,
-    field_validator,
     model_serializer,
     model_validator,
 )
 
-from vqapr.data.datasets import DatasetRegistration, Grain
+from vqapr.data.datasets import DatasetRegistration, ExecutionRole
 from vqapr.data.scan import ColumnType
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.identifiers import component_id, dataset_id, execution_input_id, source_id
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
+from vqapr.domain.identifiers import component_id, dataset_id
+from vqapr.domain.shapes import Grain
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition
+from vqapr.flow.declaration.run import RunDefinition
 
 
 class Document(BaseModel):
     """Every section model: frozen, and an unknown key is a refusal rather than a warning."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+
+class ExecutionRoleCodec(Document):
+    """`datasets.<id>.execution`, on disk and in a declaration: the tradable-flag field.
+
+    The one key that makes a dataset a venue table (record `185`). The price a run fills at is
+    not here; it is the run's (`runs.<id>.execution.fill.trade_price`).
+    """
+
+    is_tradable: str
+
+    def to_domain(self) -> ExecutionRole:
+        return ExecutionRole(self.is_tradable)
 
 
 class DatasetCodec(Document):
@@ -82,6 +93,7 @@ class DatasetCodec(Document):
     aggregated: bool | None = None
     span: tuple[datetime, datetime] | None = None
     produced_by: str | None = None
+    execution: ExecutionRoleCodec | None = None
 
     @model_validator(mode="after")
     def _types_cover_fields(self) -> DatasetCodec:
@@ -94,7 +106,7 @@ class DatasetCodec(Document):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         body = handler(self)
-        for measured in ("grain", "field_types", "aggregated", "span", "produced_by"):
+        for measured in ("grain", "field_types", "aggregated", "span", "produced_by", "execution"):
             if body.get(measured) is None:
                 del body[measured]
         if "span" in body:
@@ -102,29 +114,31 @@ class DatasetCodec(Document):
         return body
 
     def to_domain(self, dataset_id: str) -> DatasetRegistration:
-        declared = dict(
-            instrument_field=self.instrument_field,
-            available_at=self.available_at,
-            key_fields=self.key_fields,
-            fields=self.fields,
-        )
-        registration = (
-            DatasetRegistration.undeclared(
+        execution = None if self.execution is None else self.execution.to_domain()
+        if self.grain is None or self.field_types is None:
+            registration = DatasetRegistration.undeclared(
                 dataset_id,
                 self.source,
+                instrument_field=self.instrument_field,
+                available_at=self.available_at,
+                key_fields=self.key_fields,
+                fields=self.fields,
                 field_types=self.field_types,
                 grain=self.grain,
-                **declared,
+                execution=execution,
             )
-            if self.grain is None or self.field_types is None
-            else DatasetRegistration.of(
+        else:
+            registration = DatasetRegistration.of(
                 dataset_id,
                 self.source,
+                instrument_field=self.instrument_field,
+                available_at=self.available_at,
+                key_fields=self.key_fields,
+                fields=self.fields,
                 field_types=self.field_types,
                 grain=self.grain,
-                **declared,
+                execution=execution,
             )
-        )
         if self.aggregated is not None:
             registration = registration.with_aggregation(self.aggregated)
         if self.span is not None:
@@ -148,100 +162,27 @@ class DatasetCodec(Document):
             aggregated=registration.aggregated,
             span=registration.span,
             produced_by=registration.produced_by,
-        )
-
-
-class FillCodec(Document):
-    """`execution_inputs.<id>.fill`: which session instant, which price, and the DST proof."""
-
-    selector: FillSelector
-    local_time: time
-    timezone: str
-    trade_price: str
-    fold: int | None = None
-    offset: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _the_two_shapes_this_is_not(cls, raw: object) -> object:
-        # Named refusals for the two shapes an old document can carry, kept from the codec they
-        # replace: `Workspace._read` surfaces these sentences as the requirement itself.
-        if isinstance(raw, dict):
-            if "offset_sessions" in raw:
-                raise ValueError("fill offset_sessions is no longer supported")
-            if set(raw) == {"selector", "local_time", "timezone", "trade_price"}:
-                raise ValueError("uses the old fill schema without fold and offset proof")
-        return raw
-
-    def to_domain(self) -> FillConvention:
-        return FillConvention(
-            selector=self.selector,
-            local_time=self.local_time,
-            timezone=self.timezone,
-            trade_price=self.trade_price,
-            fold=self.fold,
-            offset=self.offset,
-        )
-
-    @classmethod
-    def from_domain(cls, fill: FillConvention) -> FillCodec:
-        return cls(
-            selector=fill.selector,
-            local_time=fill.local_time,
-            timezone=fill.timezone,
-            trade_price=fill.trade_price,
-            fold=fill.fold,
-            offset=fill.offset,
-        )
-
-
-class ExecutionInputCodec(Document):
-    """`execution_inputs.<execution_input_id>` on disk."""
-
-    source: str
-    trade_at_field: str
-    instrument_field: str
-    is_tradable_field: str
-    price_fields: dict[str, str]
-    fill: FillCodec
-
-    def to_domain(self, execution_input_id: str, source: SourceSpec) -> ExecutionInputRegistration:
-        return ExecutionInputRegistration.of(
-            execution_input_id,
-            ExecutionTableSpec(
-                source=source,
-                trade_at_field=self.trade_at_field,
-                instrument_field=self.instrument_field,
-                is_tradable_field=self.is_tradable_field,
-                price_fields=self.price_fields,
+            execution=(
+                None
+                if registration.execution is None
+                else ExecutionRoleCodec(is_tradable=registration.execution.is_tradable)
             ),
-            self.fill.to_domain(),
         )
 
-    @classmethod
-    def from_domain(cls, registration: ExecutionInputRegistration) -> ExecutionInputCodec:
-        table = registration.table
-        return cls(
-            source=str(table.source.source_id),
-            trade_at_field=table.trade_at_field,
-            instrument_field=table.instrument_field,
-            is_tradable_field=table.is_tradable_field,
-            price_fields=dict(table.price_fields),
-            fill=FillCodec.from_domain(registration.fill),
-        )
+
+# `execution_inputs:` and its `fill` codec are retired (record `185`): the venue table is a
+# dataset with an `execution:` role, and the fill is declared on the run (`RunExecution`).
 
 
 # ---------------------------------------------------------------------------------------------
 # The declaration document: what an author writes and `vqapr register` reads. Same sections,
-# fewer keys (nothing measured, nothing derived) and, for a dataset and an execution input, the
-# source written inline because the two register as a pair. Enum values are the lower-case names
-# the templates show; `Literal` here so a wrong one is refused with the permitted set, and the
-# domain enum is looked up by name in `to_domain`.
+# fewer keys (nothing measured, nothing derived) and, for a dataset, the source written inline
+# because the two register as a pair. Enum values are the lower-case names the templates show;
+# `Literal` here so a wrong one is refused with the permitted set, and the domain enum is looked
+# up by name in `to_domain`.
 # ---------------------------------------------------------------------------------------------
 
 
-def _lowered(value: object) -> object:
-    return value.lower() if isinstance(value, str) else value
 
 
 class DatasetDeclaration(Document):
@@ -262,34 +203,8 @@ class DatasetDeclaration(Document):
     grain: Grain | None = None
     """Optional on the model only so that `declarations._require_grain_key` can refuse its
     absence with the sentence that says what changed (design §7-3), before the model is asked."""
-
-
-class TableDeclaration(Document):
-    """`execution_inputs.<id>.table`: the venue table and its file, inline."""
-
-    source_id: str
-    path: str
-    hive_partitioned: bool = False
-    trade_at_field: str
-    instrument_field: str
-    is_tradable_field: str
-    price_fields: dict[str, str]
-
-
-class FillDeclaration(Document):
-    """`execution_inputs.<id>.fill` as declared: no DST proof yet, `at` for the wall time."""
-
-    selector: Literal["same_day", "next_eligible"]
-    at: time
-    timezone: str
-    trade_price: str
-
-    _lower = field_validator("selector", mode="before")(_lowered)
-
-
-class ExecutionInputDeclaration(Document):
-    table: TableDeclaration
-    fill: FillDeclaration
+    execution: ExecutionRoleCodec | None = None
+    """The execution role, when this table is a venue table a run may fill against."""
 
 
 class InstrumentsDeclaration(Document):
@@ -359,7 +274,9 @@ class WorkspaceDocument(Document):
     sources: dict[str, dict[str, Any]]
     """Each entry is a `SourceSpec` read under its own key by `_linked` (one-shape Step 5)."""
     datasets: dict[str, DatasetCodec]
-    execution_inputs: dict[str, ExecutionInputCodec] = {}
+    execution_inputs: Any = None
+    """Retired (record `185`). A document that still carries one is refused at open with the
+    sentence that says where the table and the fill went."""
     components: dict[str, dict[str, Any]] = {}
     """Each entry is a `ComponentRef` read under its own key by `_linked` (one-shape Step 5)."""
     runs: dict[str, dict[str, Any]] = {}
@@ -413,10 +330,14 @@ def _linked(raw: object) -> tuple[dict, ...]:
     """
     if not isinstance(raw, dict):
         raise ValueError(
-            "workspace root must contain sources and datasets, with optional execution_inputs, "
-            "components and runs"
+            "workspace root must contain sources and datasets, with optional components and runs"
         )
     document = _decoded("workspace", "root", WorkspaceDocument, raw)
+    if document.execution_inputs is not None:
+        raise ValueError(
+            "execution_inputs is retired (record 185): register the venue table as a dataset "
+            "with an `execution:` role and declare `execution: {dataset, fill}` on each run"
+        )
 
     sources = {}
     for raw_id, entry in document.sources.items():
@@ -431,16 +352,6 @@ def _linked(raw: object) -> tuple[dict, ...]:
                 f"dataset {raw_id!r} references unregistered source {registration.source!r}"
             )
         datasets[registration.dataset_id] = registration
-
-    execution_inputs = {}
-    for raw_id, entry in document.execution_inputs.items():
-        source_key = source_id(entry.source)
-        if source_key not in sources:
-            raise ValueError(
-                f"execution input {raw_id!r} references unregistered source {source_key!r}"
-            )
-        registration = entry.to_domain(raw_id, sources[source_key])
-        execution_inputs[registration.execution_input_id] = registration
 
     components = {}
     for raw_id, entry in document.components.items():
@@ -466,11 +377,15 @@ def _linked(raw: object) -> tuple[dict, ...]:
             venue = components.get(component_id(definition.exchange))
             if venue is None or venue.kind is not ComponentKind.EXCHANGE:
                 raise ValueError(f"run {raw_id!r} names an unregistered exchange")
-        if (
-            definition.execution_input_id is not None
-            and execution_input_id(definition.execution_input_id) not in execution_inputs
-        ):
-            raise ValueError(f"run {raw_id!r} names an unregistered execution input")
+        if definition.execution is not None:
+            venue_table = datasets.get(dataset_id(definition.execution.dataset))
+            if venue_table is None:
+                raise ValueError(f"run {raw_id!r} fills against an unregistered dataset")
+            if venue_table.execution is None:
+                raise ValueError(
+                    f"run {raw_id!r} fills against dataset {definition.execution.dataset!r}, "
+                    "which declares no execution role"
+                )
         if (
             definition.sessions_from is not None
             and dataset_id(definition.sessions_from) not in datasets
@@ -478,13 +393,12 @@ def _linked(raw: object) -> tuple[dict, ...]:
             raise ValueError(f"run {raw_id!r} takes its sessions from an unregistered dataset")
         runs[raw_id] = definition
 
-    return (datasets, sources, execution_inputs, components, runs)
+    return (datasets, sources, components, runs)
 
 
 def write_workspace(
     datasets: Mapping[Any, DatasetRegistration],
     sources: Mapping[Any, SourceSpec],
-    execution_inputs: Mapping[Any, ExecutionInputRegistration],
     components: Mapping[Any, ComponentRef],
     runs: Mapping[str, RunDefinition] | None = None,
 ) -> str:
@@ -499,10 +413,6 @@ def write_workspace(
             for k, v in by_id(sources.items())
         },
         datasets={str(k): DatasetCodec.from_domain(v) for k, v in by_id(datasets.items())},
-        execution_inputs={
-            str(k): ExecutionInputCodec.from_domain(v)
-            for k, v in by_id(execution_inputs.items())
-        },
         components={
             str(k): v.model_dump(mode="json", exclude={"component_id"})
             for k, v in by_id(components.items())
@@ -511,7 +421,13 @@ def write_workspace(
     )
     body = document.model_dump(
         mode="json",
-        exclude={"valuation_configs", "monitoring_policies", "agendas", "strategy_configs"},
+        exclude={
+            "valuation_configs",
+            "monitoring_policies",
+            "agendas",
+            "strategy_configs",
+            "execution_inputs",
+        },
     )
     if not body["runs"]:
         del body["runs"]
@@ -524,11 +440,7 @@ __all__ = [
     "DatasetCodec",
     "DatasetDeclaration",
     "Document",
-    "ExecutionInputCodec",
-    "ExecutionInputDeclaration",
-    "FillCodec",
-    "FillDeclaration",
-    "TableDeclaration",
+    "ExecutionRoleCodec",
     "WorkspaceDocument",
     "read_workspace",
     "write_workspace",

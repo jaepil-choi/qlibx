@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.flow.record import (
+from vqapr.record import (
     RUN_KIND,
     STRATEGY_KIND,
     RunRecordWriter,

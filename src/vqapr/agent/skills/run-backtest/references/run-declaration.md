@@ -40,11 +40,11 @@ A strategy's entry may carry a `constraints:` list naming registered components 
 ## What a datamodel run must not carry
 
 A datamodel is a run too. Its declaration names `datamodels:` instead of `strategies:`, and
-`account`, `venue` and `execution_input` are **refused** on it — there is nothing to execute.
+`account`, `venue` and `execution` are **refused** on it — there is nothing to execute.
 
 ## What a run needs registered before it
 
-Four declarations, each with its own `vqapr new` scaffold: a dataset, an execution input, an
+Three declaration kinds, each with its own `vqapr new` scaffold: datasets (the venue table a run fills against is a dataset with an `execution:` role, and the run picks its `trade_price`), an
 exchange, and at least one component.
 
 **And it wants a fifth: the instrument roster.** Not required — a run without one completes. But

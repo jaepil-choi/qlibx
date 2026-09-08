@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-import vqapr.flow.execution as execution_phase
+import vqapr.flow.strategy.execution as execution_phase
 from vqapr.account.account import Account, AccountMode
 from vqapr.account.snapshot import AccountSnapshot, AccountState
 from vqapr.authoring import (
@@ -29,10 +29,10 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.evidence.artifacts import (
+from vqapr.flow.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
     DueExecutionEvidence,
@@ -44,18 +44,18 @@ from vqapr.evidence.artifacts import (
 )
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
+    ExecutionTable,
     ExecutionTableSpec,
     exact_execution_snapshot,
-    validate_execution_input,
+    validate_execution_table,
 )
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.run import ConstraintSet, StrategyConfig
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.run import ConstraintSet, StrategyConfig
 from vqapr.flow.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.simulation import AcceptedIntent, DueExecutionTrace, SimulationFlow
+from vqapr.flow.strategy.loop import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -117,21 +117,19 @@ def _component(identifier: str, kind: ComponentKind) -> ComponentRef:
     )
 
 
-def _occurrence(identifier: str, role: OperationRole, at: datetime) -> OperationOccurrence:
+def _occurrence(identifier: str, at: datetime) -> OperationOccurrence:
     return OperationOccurrence(
         identifier,
-        role,
         LocalInstantDeclaration(
             at.date(), at.timetz().replace(tzinfo=None), "Asia/Seoul", 0, "+09:00"
         ),
     )
 
 
-def _agenda(identifier: str, role: OperationRole, *times: datetime) -> FrozenAgenda:
+def _agenda(identifier: str, *times: datetime) -> FrozenAgenda:
     return FrozenAgenda(
         identifier,
-        role,
-        tuple(_occurrence(f"{identifier}-{i}", role, at) for i, at in enumerate(times)),
+        tuple(_occurrence(f"{identifier}-{i}", at) for i, at in enumerate(times)),
     )
 
 
@@ -167,8 +165,13 @@ class _Constraint(Constraint):
 _ACCOUNT = AccountSnapshot(0, Decimal("100"), {})
 
 
-def _state(account: AccountSnapshot = _ACCOUNT) -> RunStateRepository:
-    return RunStateRepository(initial_account=AccountState(account))
+def _state(
+    account: AccountSnapshot = _ACCOUNT, constraint_ids: tuple[str, ...] = ("risk", "academic")
+) -> RunStateRepository:
+    return RunStateRepository(
+        initial_account=AccountState(account),
+        initial_component_memory={constraint_id: None for constraint_id in constraint_ids},
+    )
 
 
 def _exchange() -> AcademicExchange:
@@ -190,7 +193,7 @@ def _frozen(
     callbacks: tuple[datetime, ...],
     *,
     end: datetime | None = None,
-    execution: ExecutionInputRegistration | None = None,
+    execution: ExecutionTable | None = None,
     account: AccountSnapshot = _ACCOUNT,
     datasets: tuple[DatasetRegistration, ...] = (),
     sources: tuple[SourceSpec, ...] = (),
@@ -205,7 +208,6 @@ def _frozen(
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
         "strategy",
-        OperationRole.STRATEGY_CALLBACK,
     )
     bounds = {"start": callbacks[0], "end": end} if end is not None else {}
     layer = FrozenStrategy(
@@ -215,7 +217,7 @@ def _frozen(
             if constraints is not None
             else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),))
         ),
-        agenda=_agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
+        agenda=_agenda("strategy", *callbacks),
         requirements=strategy_requirements,
         constraint_requirements=(
             (_requirement(),) if constraints is None or constraints.constraints else ()
@@ -225,7 +227,7 @@ def _frozen(
         run_id="test",
         strategies=(layer,),
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
-        execution_input=execution,
+        execution=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A", "B"),
@@ -243,8 +245,8 @@ def _flow(
     constraints: tuple[Constraint, ...] = (_Constraint(),),
     constraint_window_for_occurrence: object = None,
     strategy_window_for_occurrence: object = None,
-) -> SimulationFlow:
-    return SimulationFlow(
+) -> StrategyEventLoop:
+    return StrategyEventLoop(
         frozen,
         strategy,
         state,
@@ -285,8 +287,8 @@ def _parquet(path: Path, rows: str) -> Path:
 
 def _execution(
     path: Path, selector: FillSelector = FillSelector.SAME_DAY
-) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
+) -> ExecutionTable:
+    return ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
             SourceSpec.of("execution-source", path),
@@ -434,7 +436,7 @@ def test_empty_constraint_set_needs_no_constraint_window() -> None:
     result = _flow(
         frozen,
         _Strategy((Hold(reason="unconstrained"),)),
-        _state(),
+        _state(constraint_ids=("academic",)),
         (),
         unexpected_constraint_window,
     ).run()
@@ -537,7 +539,7 @@ def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurr
     )
     assert validate_economic_intent(payload) is payload
     accepted = AcceptedIntent(
-        payload, _occurrence("current", OperationRole.STRATEGY_CALLBACK, at), at, target
+        payload, _occurrence("current", at), at, target
     )
     assert accepted.decision_time == at
 
@@ -609,7 +611,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         strategy_requirements=(requirement,),
     )
 
-    result = SimulationFlow(
+    result = StrategyEventLoop(
         frozen,
         ReadingStrategy(),
         _state(),
@@ -818,6 +820,7 @@ def test_callback_publication_failure_is_not_classified_as_intent() -> None:
     callback = datetime(2024, 3, 5, 9, tzinfo=KST)
     state = RunStateRepository(
         initial_account=AccountState(_ACCOUNT),
+        initial_component_memory={"risk": None, "academic": None},
         before_swap=lambda _candidate: (_ for _ in ()).throw(
             RuntimeError("callback publication fault")
         ),
@@ -919,6 +922,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     prior = type("PriorPending", (), {"pending_id": "prior"})()
     state = RunStateRepository(
         initial_account=AccountState(_ACCOUNT),
+        initial_component_memory={"risk": None, "academic": None},
         pending_accepted_intent=prior,
     )
     frozen = _frozen((callback,), end=end, execution=registration)
@@ -930,7 +934,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_INTENT
-    assert failure.failed_requirement is frozen.execution_input
+    assert failure.failed_requirement is frozen.execution
     assert failure.mutation is False
     assert state.current is before
     assert state.current.pending_accepted_intent is prior
@@ -966,26 +970,21 @@ def test_execution_snapshot_never_silently_omits_held_values_or_falls_back_for_n
 @pytest.mark.uc("UC-TIME-002")
 def test_operation_agenda_normalizes_cross_zone_order_and_rejects_unresolved_dst() -> None:
     same_utc = datetime(2024, 3, 5, 4, tzinfo=UTC)
-    seoul = _occurrence("seoul", OperationRole.STRATEGY_CALLBACK, same_utc.astimezone(KST))
+    seoul = _occurrence("seoul", same_utc.astimezone(KST))
     new_york = OperationOccurrence(
         "new-york",
-        OperationRole.STRATEGY_CALLBACK,
         LocalInstantDeclaration(date(2024, 3, 4), time(23), "America/New_York", 0, "-05:00"),
     )
 
     seoul_agenda = OperationAgenda(
         agenda_id="seoul",
-        role=OperationRole.STRATEGY_CALLBACK,
         timezone="Asia/Seoul",
         occurrences=(seoul,),
-        provenance="fixture",
     )
     new_york_agenda = OperationAgenda(
         agenda_id="new-york",
-        role=OperationRole.STRATEGY_CALLBACK,
         timezone="America/New_York",
         occurrences=(new_york,),
-        provenance="fixture",
     )
     assert [
         item.evaluation_time.astimezone(UTC)
@@ -1011,10 +1010,10 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
         )
     )
 
-    diagnosis = validate_execution_input(registration)
+    diagnosis = validate_execution_table(registration)
     assert not diagnosis.ok
     assert [failure.code for failure in diagnosis.failures] == [
-        "execution_input.key_duplicate"
+        "execution_table.key_duplicate"
     ]
 
 
@@ -1030,10 +1029,7 @@ def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> Non
 
     assert first.identity == second.identity
     order = first.dispatch_order(first.strategies[0])
-    assert [(item.role, item.occurrence_id) for item in order] == [
-        (OperationRole.STRATEGY_CALLBACK, "strategy-0"),
-        (OperationRole.STRATEGY_CALLBACK, "strategy-1"),
-    ]
+    assert [item.occurrence_id for item in order] == ["strategy-0", "strategy-1"]
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -1049,7 +1045,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # body, so it surfaced through the CLI as `stage: "unhandled"` with an empty `failures` list --
     # the framework announcing its own breakage when a component was registered under the wrong id.
     with pytest.raises(VqaprError) as caught:
-        SimulationFlow(
+        StrategyEventLoop(
             frozen,
             _Strategy((Hold(reason="x"),)),
             _state(),
@@ -1160,7 +1156,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
         if row["instrument"] == "_ACCOUNT"
     ]
     assert [(row["event_time"], row["observed_at"], row["stage"]) for row in nav_rows] == [
-        (target, target, OperationRole.VALUATION.value)
+        (target, target, "VALUATION")
     ]
     assert nav_rows[0]["nav"] == Decimal("100")
 

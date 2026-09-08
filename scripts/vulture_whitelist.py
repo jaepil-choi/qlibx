@@ -44,7 +44,7 @@ account_version_committed
 # src/vqapr/evidence/artifacts.py, class MarkEvidence
 limitations
 
-# src/vqapr/flow/simulation.py, class DueExecutionResult; built in `_execute_due`.
+# src/vqapr/flow/strategy/loop.py, class DueExecutionResult; built in `_execute_due`.
 post_account_result
 
 
@@ -65,6 +65,6 @@ _.monitoring_policies  # src/vqapr/workspace_document.py
 _.strategy_configs  # src/vqapr/workspace_document.py
 # The run record's identity field: set by `freeze_run_record`, read back BY KEY from the dumped
 # `run.json` in `_write_run_json`, where a second run under the same id is compared against it.
-_.declared_digest  # src/vqapr/flow/record.py
+_.declared_digest  # src/vqapr/record/schema.py
 # The adapter test's throwaway model: pydantic reads its fields from a payload by key.
 _.when  # tests/test_a_validation_error_is_a_refusal.py

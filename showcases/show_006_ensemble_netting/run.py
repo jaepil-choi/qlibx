@@ -60,11 +60,9 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
@@ -73,7 +71,6 @@ from vqapr.public import (
     register_constraint,
     register_dataset,
     register_exchange,
-    register_execution_input,
     register_strategy_model,
     run,
     shipped_constraint_path,
@@ -688,7 +685,15 @@ def _member_run(
         timezone=VENUE,
         at=at,
         exchange=academic_ref.component_id,
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            fill=RunFill(
+                selector="same_day",
+                at=time(15, 30),
+                timezone=VENUE,
+                trade_price="close",
+            ),
+        ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
@@ -744,19 +749,23 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ),
         SourceSpec.of("krx-benchmark", benchmark_path),
     )
-    register_execution_input(
+    register_dataset(
         project,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     # The project declares what each id IS, once, before anything trades. `KrxExchange` resolves
@@ -922,7 +931,15 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         timezone=VENUE,
         at=time(9, 0),
         exchange="show006-krx",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            fill=RunFill(
+                selector="same_day",
+                at=time(15, 30),
+                timezone=VENUE,
+                trade_price="close",
+            ),
+        ),
         start=ensemble_start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),

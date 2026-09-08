@@ -6,6 +6,8 @@ Every price used here is a real KRX close from ``tests/fixtures/real``. The decl
 
 from __future__ import annotations
 
+from vqapr.exchange.venue import ExecutionCall
+
 import json
 from datetime import datetime, time
 from decimal import Decimal
@@ -121,7 +123,7 @@ def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> Non
         assert request.delta_quantity == request.delta_quantity.to_integral_value()
         assert request.delta_quantity > 0
 
-    fills = exchange.execute(batch, account, _snapshot(at, prices))
+    fills = exchange.execute(ExecutionCall.of(exchange, batch, account, _snapshot(at, prices)))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
     prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
@@ -155,7 +157,7 @@ def test_sells_pay_commission_and_sale_tax_on_real_prices(real_close) -> None:
     request = batch.requests[0]
     assert request.delta_quantity == Decimal("-60")
 
-    fills = exchange.execute(batch, account, _snapshot(at, {instrument: price}))
+    fills = exchange.execute(ExecutionCall.of(exchange, batch, account, _snapshot(at, {instrument: price})))
     fill = fills.fills[0]
     notional = Decimal("60") * price
     assert fill.cost.commission == notional * COMMISSION_RATE
@@ -186,7 +188,7 @@ def test_krx_refuses_to_open_a_short_position(real_close) -> None:
         rules=exchange.rules,
     )
     with pytest.raises(ValueError, match="does not support short selling"):
-        exchange.execute(batch, account, _snapshot(at, {instrument: price}))
+        exchange.execute(ExecutionCall.of(exchange, batch, account, _snapshot(at, {instrument: price})))
 
 
 def test_halted_real_instrument_is_zero_dealt_and_free(real_close) -> None:
@@ -205,9 +207,9 @@ def test_halted_real_instrument_is_zero_dealt_and_free(real_close) -> None:
         budget=LONG_ONLY,
         rules=exchange.rules,
     )
-    fills = exchange.execute(
+    fills = exchange.execute(ExecutionCall.of(exchange, 
         batch, account, _snapshot(at, {instrument: price}, halted=frozenset({instrument}))
-    )
+    ))
     fill = fills.fills[0]
     assert fill.dealt_quantity == 0
     assert fill.reason is ZeroDealtReason.NONTRADABLE
@@ -236,7 +238,7 @@ def test_rounding_residual_stays_visible_against_the_intended_position(real_clos
     assert dealt < intended, "a whole-share venue can only round toward zero"
     assert intended - dealt < Decimal("1")
 
-    fills = exchange.execute(batch, account, _snapshot(at, {instrument: price}))
+    fills = exchange.execute(ExecutionCall.of(exchange, batch, account, _snapshot(at, {instrument: price})))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
     prepared = committed.prepare_fill(committed.state, fills, expected_version=0)

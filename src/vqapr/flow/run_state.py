@@ -11,14 +11,15 @@ from itertools import chain
 from types import MappingProxyType
 
 from vqapr.account.account import (
+    JournalEntry,
     PreparedAccountFill,
     PreparedAccountTransition,
     PreparedAccountValuation,
 )
 from vqapr.account.snapshot import AccountState
+from vqapr.authoring_records import InvocationRecorder, RecorderManifest
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
-from vqapr.evidence.recorder import InvocationRecorder, RecorderManifest
 
 
 class LifecycleKind(StrEnum):
@@ -43,8 +44,6 @@ class PreparedModelState:
 
 def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
     """Detach one exact memory/payload envelope without making it visible."""
-    if not isinstance(payload, bytes):
-        raise TypeError("payload must be bytes")
     normalized = normalize_memory(memory)
     memory_bytes = json.dumps(
         normalized,
@@ -70,10 +69,6 @@ def prepare_model_state(memory: object, payload: bytes) -> PreparedModelState:
 class LifecycleTrace:
     kind: LifecycleKind
     detail: object = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, LifecycleKind):
-            raise TypeError("kind must be a LifecycleKind")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,8 +97,12 @@ class AcceptedRunState:
         {}
     )
     feedback: tuple[object, ...] = ()
-    finalization: object = None
+    finalization: RunFinalization | None = None
     model_state_commit_count: int = 0
+    # Every Component carries memory (records `181`, `184`): a Constraint's and the venue's are
+    # committed here beside the Strategy's: one ref per component id, into the same map, proved the
+    # same way. `current_model_state_ref` stays the Strategy's own; it is the one with a payload.
+    component_state_refs: Mapping[str, ModelStateRef] = MappingProxyType({})
     # Refs a previous root already proved. A ModelStateRef is only ever minted by
     # prepare_model_state, so re-deriving it for an already-proved ref re-proves nothing; it just
     # re-serialises and re-hashes the entire accumulated history on every root. Defaulting to
@@ -113,15 +112,19 @@ class AcceptedRunState:
     def __post_init__(self) -> None:
         if isinstance(self.version, bool) or not isinstance(self.version, int) or self.version < 0:
             raise ValueError("version must be a non-negative integer")
-        if self.account is not None and not isinstance(self.account, AccountState):
-            raise TypeError("account must be an AccountState or None")
-        if self.finalization is not None and not isinstance(self.finalization, RunFinalization):
-            raise TypeError("finalization must be a RunFinalization or None")
         if (
             self.current_model_state_ref is not None
             and self.current_model_state_ref not in self._model_states
         ):
             raise ValueError("current_model_state_ref must be visible in this root")
+        for component_id, ref in self.component_state_refs.items():
+            if not component_id:
+                raise ValueError("component_state_refs keys must be non-empty component ids")
+            if ref not in self._model_states:
+                raise ValueError(f"component state for {component_id!r} must be visible here")
+        object.__setattr__(
+            self, "component_state_refs", MappingProxyType(dict(self.component_state_refs))
+        )
         # Key views compare as sets without building two of them. The visible refs grow by one
         # per callback and are never pruned, so anything that allocates per root here is a term
         # that grows with run length.
@@ -131,8 +134,6 @@ class AcceptedRunState:
         for ref in unverified:
             memory = self._model_states[ref]
             payload = self._payloads[ref]
-            if not isinstance(payload, bytes):
-                _invalid_payload(ref)
             if prepare_model_state(memory, payload).ref != ref:
                 raise ValueError("ModelStateRef must identify its exact memory and payload")
         # Detach by copying -- an externally supplied mapping must not stay reachable for
@@ -172,20 +173,53 @@ class AcceptedRunState:
         )
 
     def load_model_state(self, ref: ModelStateRef) -> ModelMemory:
-        if not isinstance(ref, ModelStateRef):
-            raise TypeError("ref must be a ModelStateRef")
         try:
             return normalize_memory(self._model_states[ref])
         except KeyError as exc:
             raise KeyError(f"unknown visible ModelStateRef: {ref.digest}") from exc
 
     def load_payload(self, ref: ModelStateRef) -> bytes:
-        if not isinstance(ref, ModelStateRef):
-            raise TypeError("ref must be a ModelStateRef")
         try:
             return bytes(self._payloads[ref])
         except KeyError as exc:
             raise KeyError(f"unknown visible ModelStateRef: {ref.digest}") from exc
+
+    def component_memory(self) -> dict[str, ModelMemory]:
+        """Every stateful component's visible memory, by id: what a callback restores."""
+        return {
+            constraint_id: normalize_memory(self._model_states[ref])
+            for constraint_id, ref in self.component_state_refs.items()
+        }
+
+
+def _component_states(
+    root: AcceptedRunState,
+    component_memory: Mapping[str, object] | None,
+    states: dict[ModelStateRef, ModelMemory],
+    payloads: dict[ModelStateRef, bytes],
+) -> tuple[dict[str, ModelStateRef], frozenset[ModelStateRef]]:
+    """Detach what each stateful component's callback left, into the maps the next root carries.
+
+    `None` means the occurrence did not run these components, so their refs are carried over
+    unchanged. A mapping must name exactly the components the root already knows: one that
+    appears from nowhere, or one that vanished, is an assembly error rather than a state change.
+    """
+    if component_memory is None:
+        return dict(root.component_state_refs), frozenset()
+    if set(component_memory) != set(root.component_state_refs):
+        raise ValueError(
+            "component_memory must name exactly the components this run state carries: "
+            f"got {sorted(component_memory)!r}, carrying {sorted(root.component_state_refs)!r}"
+        )
+    refs: dict[str, ModelStateRef] = {}
+    proved: set[ModelStateRef] = set()
+    for constraint_id, memory in component_memory.items():
+        candidate = prepare_model_state(memory, b"")
+        states[candidate.ref] = candidate.memory
+        payloads[candidate.ref] = candidate.payload
+        refs[constraint_id] = candidate.ref
+        proved.add(candidate.ref)
+    return refs, frozenset(proved)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +252,7 @@ fill journal can be published and then dropped from memory rather than carried f
 
 
 def _fill_rows(
-    entries: tuple[object, ...], *, envelope: Mapping[str, object] | None = None
+    entries: tuple[JournalEntry, ...], *, envelope: Mapping[str, object] | None = None
 ) -> tuple[Mapping[str, object], ...]:
     """One row per committed fill, including zero-dealt ones.
 
@@ -274,10 +308,6 @@ def _fill_rows(
     return tuple(rows)
 
 
-def _invalid_payload(ref: ModelStateRef) -> bytes:
-    raise TypeError(f"payload for {ref.digest} must be bytes")
-
-
 class RunStateRepository:
     """Prepare complete immutable roots and publish them with one pointer swap."""
 
@@ -290,15 +320,24 @@ class RunStateRepository:
         pending_accepted_intent: object = None,
         before_swap: Callable[[PreparedRunState], None] | None = None,
         row_sink: Callable[[str, Sequence[Mapping[str, object]]], None] | None = None,
+        initial_component_memory: Mapping[str, object] | None = None,
     ) -> None:
-        if not isinstance(initial_payload, bytes):
-            raise TypeError("initial_payload must be bytes")
+        """`initial_component_memory` is each loaded constraint's memory as assembled, by id;
+        the run commits what every constraint callback leaves from there (record `181`)."""
         if row_sink is not None and not callable(row_sink):
             raise TypeError("row_sink must be callable")
         prepared = prepare_model_state(initial_model_memory, initial_payload)
         states = {prepared.ref: prepared.memory}
         payloads = {prepared.ref: prepared.payload}
         current_ref = prepared.ref
+        constraint_refs: dict[str, ModelStateRef] = {}
+        for constraint_id, memory in dict(initial_component_memory or {}).items():
+            if not constraint_id:
+                raise ValueError("initial_component_memory keys must be constraint ids")
+            seed = prepare_model_state(memory, b"")
+            states[seed.ref] = seed.memory
+            payloads[seed.ref] = seed.payload
+            constraint_refs[constraint_id] = seed.ref
         self._root = AcceptedRunState(
             version=0,
             _model_states=states,
@@ -307,6 +346,7 @@ class RunStateRepository:
             account=initial_account,
             pending_accepted_intent=pending_accepted_intent,
             model_state_commit_count=0,
+            component_state_refs=constraint_refs,
         )
         self._before_swap = before_swap
         # Where accepted recorder rows go, when they go anywhere but the root. `orchestration.run`
@@ -371,12 +411,13 @@ class RunStateRepository:
         recorder: InvocationRecorder | None = None,
         pending_accepted_intent: object = _UNSET,
         expected_version: int | None = None,
+        component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Validate and serialize all callback effects without changing visibility."""
-        if not isinstance(lifecycle, LifecycleTrace):
-            raise TypeError("lifecycle must be a LifecycleTrace")
-        if not isinstance(payload, bytes):
-            raise TypeError("payload must be bytes")
+        """Validate and serialize all callback effects without changing visibility.
+
+        `component_memory` is what each constraint's `project` left, by id, committed in the
+        same root as the Strategy's memory; `None` carries the constraints' refs over unchanged.
+        """
         root = self._root
         if root.finalization is not None:
             raise RuntimeError("cannot publish a callback after finalization")
@@ -388,12 +429,11 @@ class RunStateRepository:
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
+        constraint_refs, proved = _component_states(root, component_memory, states, payloads)
         chunks = dict(root._recorder_chunks)
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
         if recorder is not None:
-            if not isinstance(recorder, InvocationRecorder):
-                raise TypeError("recorder must be an InvocationRecorder")
             new_rows = self._stage_rows(chunks, recorder.staged_rows())
             manifests = manifests + recorder.manifests()
         next_root = AcceptedRunState(
@@ -402,8 +442,9 @@ class RunStateRepository:
             _payloads=payloads,
             # `candidate` came straight out of prepare_model_state, so its ref is proved by
             # construction; the rest were proved by the root we are extending.
-            _verified=root._verified | {candidate.ref},
+            _verified=root._verified | {candidate.ref} | proved,
             current_model_state_ref=candidate.ref,
+            component_state_refs=constraint_refs,
             account=root.account,
             pending_accepted_intent=(
                 root.pending_accepted_intent
@@ -421,8 +462,6 @@ class RunStateRepository:
 
     def publish(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Perform the sole mutable action after all fallible work is complete."""
-        if not isinstance(prepared, PreparedRunState):
-            raise TypeError("prepared must be a PreparedRunState")
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
         if self._before_swap is not None:
@@ -433,8 +472,6 @@ class RunStateRepository:
 
     def _publish_infallible(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Publish a prevalidated post-Account candidate without callback hooks."""
-        if not isinstance(prepared, PreparedRunState):
-            raise TypeError("prepared must be a PreparedRunState")
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
         self._deliver(prepared)
@@ -449,13 +486,22 @@ class RunStateRepository:
         fill: object,
         evidence: object = None,
         envelope: Mapping[str, object] | None = None,
+        component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Prepare the root which consumes pending and mirrors the fill commit."""
+        """Prepare the root which consumes pending and mirrors the fill commit.
+
+        `component_memory` is what the venue's `execute` -- and any other stateful component
+        this due item called -- left in memory (record `184`), committed with the fills it
+        produced; `None` carries every ref over unchanged.
+        """
         root = self._root
         if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
             raise RuntimeError("due completion pending identity does not match current pending")
         if root.account != account.source or fill != account.fill_batch:
             raise RuntimeError("prepared Account fill does not match current root")
+        states = dict(root._model_states)
+        payloads = dict(root._payloads)
+        component_refs, proved = _component_states(root, component_memory, states, payloads)
         committed = AccountState(
             snapshot=account.next_snapshot,
             # Published, not retained. The journal entries this commit produced go into the
@@ -472,10 +518,11 @@ class RunStateRepository:
             root.version,
             AcceptedRunState(
                 version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
+                _model_states=states,
+                _payloads=payloads,
+                _verified=root._verified | proved,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=component_refs,
                 account=committed,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -502,8 +549,6 @@ class RunStateRepository:
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
         if recorder is not None:
-            if not isinstance(recorder, InvocationRecorder):
-                raise TypeError("recorder must be an InvocationRecorder")
             new_rows = self._stage_rows(chunks, recorder.staged_rows())
             manifests = manifests + recorder.manifests()
         return chunks, manifests, new_rows
@@ -536,6 +581,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=root.component_state_refs,
                 account=account.next_state,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -585,6 +631,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=root.component_state_refs,
                 account=account.next_state,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -604,7 +651,11 @@ class RunStateRepository:
         return self._publish_infallible(prepared)
 
     def prepare_monitoring(
-        self, *, recorder: InvocationRecorder, evidence: object = None
+        self,
+        *,
+        recorder: InvocationRecorder,
+        evidence: object = None,
+        component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
         """Publish the findings monitoring made over the account one commit left.
 
@@ -616,20 +667,25 @@ class RunStateRepository:
         on the occurrence trace, the record counted it (`contract`), and the values themselves
         never reached disk: a run whose book breached a limit could say *that* it did, and not
         *by how much*.
+
+        `component_memory` is what each constraint's `monitor` left (record `181`): a rule that
+        counts its breaches commits the count here, with the findings it counted.
         """
-        if not isinstance(recorder, InvocationRecorder):
-            raise TypeError("recorder must be an InvocationRecorder")
         root = self._root
         chunks = dict(root._recorder_chunks)
         new_rows = self._stage_rows(chunks, recorder.staged_rows())
+        states = dict(root._model_states)
+        payloads = dict(root._payloads)
+        constraint_refs, proved = _component_states(root, component_memory, states, payloads)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
                 version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
+                _model_states=states,
+                _payloads=payloads,
+                _verified=root._verified | proved,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=constraint_refs,
                 account=root.account,
                 pending_accepted_intent=root.pending_accepted_intent,
                 lifecycle_trace=(
@@ -651,8 +707,6 @@ class RunStateRepository:
     def prepare_feedback(
         self, feedback: tuple[object, ...], *, evidence: object = None
     ) -> PreparedRunState:
-        if not isinstance(feedback, tuple):
-            raise TypeError("feedback must be a tuple")
         root = self._root
         return PreparedRunState(
             root.version,
@@ -662,6 +716,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=root.component_state_refs,
                 account=root.account,
                 pending_accepted_intent=None,
                 lifecycle_trace=(
@@ -682,8 +737,6 @@ class RunStateRepository:
 
     def prepare_finalization(self, finalization: RunFinalization) -> PreparedRunState:
         """Prepare a typed terminal transition after all pending work is consumed."""
-        if not isinstance(finalization, RunFinalization):
-            raise TypeError("finalization must be a RunFinalization")
         root = self._root
         if root.pending_accepted_intent is not None:
             raise RuntimeError("cannot finalize with a pending accepted intent")
@@ -697,6 +750,7 @@ class RunStateRepository:
                 _payloads=root._payloads,
                 _verified=root._verified,
                 current_model_state_ref=root.current_model_state_ref,
+                component_state_refs=root.component_state_refs,
                 account=root.account,
                 pending_accepted_intent=None,
                 lifecycle_trace=root.lifecycle_trace,

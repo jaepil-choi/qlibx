@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import Grain, lookback_fits_grain, require_declared
+from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
@@ -23,11 +23,12 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
-from vqapr.domain.values import Rows, normalize_rows, require_tz_aware
+from vqapr.domain.shapes import Grain, Rows, normalize_rows
+from vqapr.domain.values import require_tz_aware
 
 
 class DatasetCatalog(Protocol):
-    def dataset(self, raw_dataset_id: str): ...
+    def dataset(self, raw_dataset_id: str) -> DatasetRegistration: ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
 
@@ -116,8 +117,6 @@ class ObservationBatch:
 
     def __init__(self, rows: object, access: AccessRecord) -> None:
         object.__setattr__(self, "rows", normalize_rows(rows))
-        if not isinstance(access, AccessRecord):
-            raise TypeError("access must be an AccessRecord")
         object.__setattr__(self, "access", access)
 
     @classmethod
@@ -145,7 +144,7 @@ class DuckDbObservationStore:
         # unaffected. public.run() passes a run-lifetime session.
         self.__session = session
         # One store instance lives for exactly one run, and a run's sources are frozen for its
-        # whole duration. SimulationFlow._actual_source_refs already refuses a callback that
+        # whole duration. StrategyEventLoop._actual_source_refs already refuses a callback that
         # observes two digests for one source, so caching per instance does not weaken that
         # contract -- it makes violating it impossible instead of merely detected.
         self.__digests: dict[Path, str] = {}
@@ -252,7 +251,12 @@ class DuckDbObservationStore:
                 identity=identity,
                 source_digest=source_digest,
             )
-        window = panel.window(field, evaluation_time=evaluation_time, lookback=first.lookback)
+        # `lookback_fits_grain` already refused the one kind a panel cannot take; this only lets
+        # the window's signature see it.
+        lookback = first.lookback
+        if isinstance(lookback, InstantsLookback):
+            raise RuntimeError("lookback_fits_grain admitted an InstantsLookback on a panel grain")
+        window = panel.window(field, evaluation_time=evaluation_time, lookback=lookback)
         access = AccessRecord(
             consumer_id=consumer_id,
             dataset_id=first.dataset_id,

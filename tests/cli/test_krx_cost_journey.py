@@ -27,7 +27,7 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.record import read_table, strategy_refs
+from vqapr.record import read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")
 STOCK = "A005930"
@@ -129,21 +129,16 @@ datasets:
     key_fields: [available_at, instrument]
     fields: {{close: close}}
     field_types: {{close: DOUBLE}}
-
-execution_inputs:
   venue-daily:
-    table:
-      source_id: venue-source
-      path: {execution.as_posix()}
-      trade_at_field: trade_at
-      instrument_field: instrument
-      is_tradable_field: is_tradable
-      price_fields: {{close: close}}
-    fill:
-      selector: next_eligible
-      at: "15:30"
-      timezone: Asia/Seoul
-      trade_price: close
+    source_id: venue-source
+    path: {execution.as_posix()}
+    instrument_field: instrument
+    available_at: trade_at
+    grain: instrument_instant
+    key_fields: [trade_at, instrument]
+    fields: {{close: close, is_tradable: is_tradable}}
+    field_types: {{close: DOUBLE, is_tradable: BOOLEAN}}
+    execution: {{is_tradable: is_tradable}}
 """,
         encoding="utf-8",
     )
@@ -239,7 +234,15 @@ components:
                         "timezone": "Asia/Seoul",
                         "at": "04:00",
                         "exchange": "krx-venue",
-                        "execution_input": "venue-daily",
+                        "execution": {
+                            "dataset": "venue-daily",
+                            "fill": {
+                                "selector": "next_eligible",
+                                "at": "15:30",
+                                "timezone": "Asia/Seoul",
+                                "trade_price": "close",
+                            },
+                        },
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
                         "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
                         "initial_account": {"cash": "1000000", "mode": "long_only"},

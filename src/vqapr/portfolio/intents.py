@@ -65,31 +65,17 @@ class EconomicPortfolioIntent:
     model_state_ref: ModelStateRef | None
 
 
-def validate_economic_intent(intent: object) -> EconomicPortfolioIntent:
+def validate_economic_intent(intent: EconomicPortfolioIntent) -> EconomicPortfolioIntent:
     """Reject timing authority and incomplete economic target declarations."""
-    if not isinstance(intent, EconomicPortfolioIntent):
-        raise TypeError("intent must be an EconomicPortfolioIntent")
     for field in ("decision_time", "effective_after"):
         if hasattr(intent, field):
             raise ValueError(f"economic intent must not declare {field}")
-    if not isinstance(intent.intent_id, UUID):
-        raise TypeError("intent_id must be a UUID")
-    if (
-        not isinstance(intent.strategy_id, str)
-        or not intent.strategy_id
-        or any(character.isspace() for character in intent.strategy_id)
-    ):
+    if not intent.strategy_id or any(character.isspace() for character in intent.strategy_id):
         raise ValueError("strategy_id must be a non-empty identifier without whitespace")
-    if not isinstance(intent.targets, tuple):
-        raise TypeError("targets must be a tuple")
-    if not all(isinstance(target, PortfolioTarget) for target in intent.targets):
-        raise TypeError("targets must contain PortfolioTarget values")
     if len({target.instrument_id for target in intent.targets}) != len(intent.targets):
         raise ValueError("targets must contain each instrument at most once")
-    if not isinstance(intent.cash_target, Decimal) or not intent.cash_target.is_finite():
-        raise TypeError("cash_target must be a finite Decimal")
-    if not isinstance(intent.budget, Budget):
-        raise TypeError("budget must be a Budget")
+    if not intent.cash_target.is_finite():
+        raise ValueError("cash_target must be a finite Decimal")
     if not intent.budget.validates_cash(intent.cash_target):
         raise ValueError("cash_target is outside the declared budget")
     if intent.targets:
@@ -100,10 +86,6 @@ def validate_economic_intent(intent: object) -> EconomicPortfolioIntent:
             raise ValueError("weight targets plus cash_target must equal one")
     elif intent.cash_target != 1:
         raise ValueError("an empty complete position set requires cash_target equal to one")
-    if not isinstance(intent.source_refs, tuple) or not all(
-        isinstance(source, IntentSourceRef) for source in intent.source_refs
-    ):
-        raise TypeError("source_refs must be a tuple of IntentSourceRef values")
     if len({source.source_id for source in intent.source_refs}) != len(intent.source_refs):
         raise ValueError("source_refs must not contain duplicate provenance")
     if isinstance(intent.account_version_seen, bool) or not isinstance(
@@ -112,8 +94,6 @@ def validate_economic_intent(intent: object) -> EconomicPortfolioIntent:
         raise TypeError("account_version_seen must be an integer")
     if intent.account_version_seen < 0:
         raise ValueError("account_version_seen must be non-negative")
-    if intent.model_state_ref is not None and not isinstance(intent.model_state_ref, ModelStateRef):
-        raise TypeError("model_state_ref must be a ModelStateRef or None")
     return intent
 
 

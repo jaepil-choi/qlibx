@@ -25,6 +25,8 @@ from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from vqapr.account.snapshot import AccountMark
+
 if TYPE_CHECKING:
     # The declaration is `authoring`'s, and `authoring` imports this module for the field
     # names and the projection type, so the type lives here as an annotation only.
@@ -61,7 +63,7 @@ class AccountHistory:
     __slots__ = ("_declaration", "_marks")
 
     def __init__(
-        self, marks: Sequence[object], declaration: AccountHistoryInput | None
+        self, marks: Sequence[AccountMark], declaration: AccountHistoryInput | None
     ) -> None:
         self._declaration = declaration
         rows = declaration.lookback.rows if declaration is not None else 0

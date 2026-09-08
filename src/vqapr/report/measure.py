@@ -49,7 +49,8 @@ from vqapr.report.document import (
 )
 
 ACCOUNT_ROW = "_ACCOUNT"
-"""The cash-and-NAV row's `instrument` in `vqapr.account` (`flow/context._ACCOUNT_IDENTITY`)."""
+"""The cash-and-NAV row's `instrument` in `vqapr.account`
+(`flow/strategy/context._ACCOUNT_IDENTITY`)."""
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -346,7 +347,7 @@ def performance(
         initial_nav=initial_nav,
         nav=Series(instants=instants, values=list(nav)),
         returns=Series(instants=return_instants, values=list(rets)),
-        drawdown=Series(instants=instants, values=dd),
+        drawdown=Series(instants=instants, values=list(dd)),
         periods=count,
         total_return=total,
         annualized_return=annualized,

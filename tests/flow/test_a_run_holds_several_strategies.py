@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 import tests.sample.journey as journey
-from vqapr.flow.record import (
+from vqapr.record import (
     RUN_FILENAME,
     STRATEGY_FILENAME,
     RunRecordConflict,
@@ -133,8 +133,8 @@ def test_three_strategies_in_one_run_leave_three_nav_series(tmp_path: Path) -> N
     # run.json: what record.json could not answer (architecture §17.3.1).
     run_record = read_run_record(store, "comparison")
     assert run_record["instruments"] == list(frozen.instruments)
-    assert run_record["execution_input"]["execution_input_id"] == journey.EXECUTION_ID
-    assert run_record["execution_input"]["fill"]["selector"], "which convention (034)"
+    assert run_record["execution"]["dataset_id"] == journey.EXECUTION_ID
+    assert run_record["execution"]["fill"]["selector"], "which convention (034)"
     assert run_record["exchange"]["component_id"] == journey.EXCHANGE_ID
     assert [entry["component_id"] for entry in run_record["strategies"]] == list(STRATEGIES)
     assert all(entry["source_digest"] for entry in run_record["datasets"]), "A7"

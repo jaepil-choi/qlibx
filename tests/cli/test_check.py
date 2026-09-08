@@ -38,12 +38,10 @@ from vqapr.cli.check import CODES, check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.errors import FailureSource
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.judgments import JUDGMENT_CODES
-from vqapr.flow.run import RunDefinition, StrategyEntry
+from vqapr.flow.declaration.judgments import JUDGMENT_CODES
+from vqapr.flow.declaration.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -116,29 +114,38 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
     _register_component(root, component_id, ComponentKind.EXCHANGE, source)
 
 
-def _execution_input(root: Path, fill_at: str = "15:30") -> None:
+def _venue_dataset(root: Path) -> None:
+    """The venue table as a dataset with an execution role (record 185); the fill is the run's."""
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
     (exec_dir / "placeholder").write_text("x", encoding="utf-8")
     with Workspace.transaction(root) as t:
-        t.register_execution_input(
-            ExecutionInputRegistration.of(
-                "my-exec",
-                ExecutionTableSpec(
-                    source=SourceSpec.of("exec-src", exec_dir),
-                    trade_at_field="trade_at",
-                    instrument_field="instrument",
-                    is_tradable_field="is_tradable",
-                    price_fields={"close": "close"},
-                ),
-                FillConvention(
-                    selector=FillSelector.NEXT_ELIGIBLE,
-                    local_time=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-                    timezone="UTC",
-                    trade_price="close",
-                ),
-            )
+        t.register_dataset(
+            DatasetRegistration.of(
+                'my-exec',
+                'exec-src',
+                instrument_field="instrument",
+                available_at="trade_at",
+                grain="instrument_instant",
+                key_fields=("trade_at", "instrument"),
+                fields={"close": "close", "is_tradable": "is_tradable"},
+                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                execution={"is_tradable": "is_tradable"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("exec-src", exec_dir),
         )
+
+
+def _fill(fill_at: str = "15:30") -> RunExecution:
+    return RunExecution(
+        dataset="my-exec",
+        fill=RunFill(
+            selector="next_eligible",
+            at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
+            timezone="UTC",
+            trade_price="close",
+        ),
+    )
 
 
 def _definition(**overrides: object) -> RunDefinition:
@@ -151,7 +158,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "at": time(15, 30),
         "instruments": ("A",),
         "exchange": "venue",
-        "execution_input_id": "my-exec",
+        "execution": _fill(),
         "start": datetime(2023, 12, 1, tzinfo=UTC),
         "end": _SPAN[1],
         "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {"A": Decimal("-5")}),
@@ -189,7 +196,7 @@ def workspace(tmp_path: Path) -> Path:
         )
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
-    _execution_input(tmp_path)
+    _venue_dataset(tmp_path)
     with Workspace.transaction(tmp_path) as t:
         t.register_run(_definition())
     return tmp_path
@@ -305,7 +312,7 @@ def test_a_period_that_is_a_point_is_reported_and_a_real_one_across_offsets_is_a
     a gate contradicting the thing it gates. A registered run cannot be reversed (the definition
     refuses it) but it can be a point, and a point has no room to decide in.
     """
-    from vqapr.flow.judgments import _judge_period
+    from vqapr.flow.declaration.judgments import _judge_period
 
     at = FailureSource(key_path="runs.x")
     point = datetime(2024, 1, 2, tzinfo=UTC)
@@ -328,7 +335,7 @@ def test_a_blocked_judgment_carries_its_cause_separately(workspace: Path) -> Non
     whose fault it is. Without them a `KeyError` -- which almost certainly means this verb is
     wrong -- looks exactly like a `VqaprError`, which means the framework declined to answer.
     """
-    import vqapr.flow.judgments as judgments_module
+    import vqapr.flow.declaration.judgments as judgments_module
 
     original = judgments_module._judge_universe
     judgments_module._judge_universe = lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -358,7 +365,7 @@ def _judge(root: Path, definition: RunDefinition) -> list[str]:
     `_agenda_once` is a CALL, not a value: an agenda that cannot be derived raises to the judge
     that asked, which is what makes the judgment block instead of reading as passed.
     """
-    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.flow.declaration.judgments import _agenda_once, _judge_member_datasets, _members
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
@@ -399,7 +406,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     registration is one problem: the fields it wanted ride along as examples.
     """
     from vqapr.extension.scaffold import render
-    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.flow.declaration.judgments import _agenda_once, _judge_member_datasets, _members
 
     Workspace.create(tmp_path)
     source = tmp_path / "wide.py"
@@ -538,7 +545,7 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
     assert "absent" in str(refused.value), refused.value
 
     # And end to end, through the verb: blocked, not passed, and `ok` is false.
-    from vqapr.flow.judgments import judgments
+    from vqapr.flow.declaration.judgments import judgments
 
     found, blocked = judgments(unanswerable, Workspace.open(tmp_path))
     assert blocked, found
@@ -555,7 +562,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
     found nothing -- indistinguishable from a pass. The second read `listings` as a sequence, which
     is Academic's shape; Krx keys a Mapping by instrument id, so it silently found nothing again.
     """
-    from vqapr.flow.judgments import _judge_weights
+    from vqapr.flow.declaration.judgments import _judge_weights
 
     Workspace.create(tmp_path)
     source = tmp_path / "limited.py"
@@ -633,11 +640,11 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
     import re
 
     from vqapr.cli.check import SIMULATION_CODES
-    from vqapr.flow import judgments as judgments_module
-    from vqapr.flow.judgments import JUDGMENT_BLOCKED, JUDGMENT_CODES
+    from vqapr.flow.declaration import judgments as judgments_module
+    from vqapr.flow.declaration.judgments import JUDGMENT_BLOCKED, JUDGMENT_CODES
 
     # One set, owned by the judges. `check` used to hold a hand-written copy of the codes
-    # `flow/judgments.py` raises and pin its length here; the copy drifted when a judge was added
+    # `flow/declaration/judgments.py` raises and pin its length here; the copy drifted when a judge was added
     # (`datamodel.output_registered`) and the pin kept certifying the stale count. Record
     # 148 closed the spec-file door: a datamodel is a `runs:` entry and its judgments
     # (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
@@ -669,7 +676,7 @@ def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path)
     assert spelled, "the regex found no codes, so it proves nothing about drift"
     published = set(JUDGMENT_CODES)
     assert spelled == published, (
-        f"spelled in flow/judgments.py but not published: {sorted(spelled - published)}; "
+        f"spelled in flow/declaration/judgments.py but not published: {sorted(spelled - published)}; "
         f"published but not spelled: {sorted(published - spelled)}"
     )
 

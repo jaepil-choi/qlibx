@@ -20,13 +20,16 @@ import sys
 import pytest
 
 # Canon's own list of what a leaf must not reach for, plus the two this milestone adds
-# deliberately: `evidence` because a leaf that could write provenance is no longer a leaf, and
+# deliberately: the recorder because a leaf that could write provenance is no longer a leaf, and
 # `duckdb` because reaching a store directly is the exact bypass the point-in-time boundary exists
 # to prevent. The two additions are a departure recorded here rather than folded into the citation.
+# The recorder was `vqapr.evidence` until record `188` dissolved that package: `TableSpec` and
+# `InvocationRecorder` are the authoring contract's, and the failure envelope moved into `flow`
+# (already listed), so one name covers what two did.
 FORBIDDEN = (
     "vqapr.account",
     "vqapr.data",
-    "vqapr.evidence",
+    "vqapr.authoring_records",
     "vqapr.exchange",
     "vqapr.flow",
     "vqapr.calls",

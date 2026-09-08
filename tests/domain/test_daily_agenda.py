@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from vqapr.domain.agendas import OperationAgenda, OperationRole
+from vqapr.domain.agendas import OperationAgenda
 
 SEOUL = "Asia/Seoul"
 NEW_YORK = "America/New_York"
@@ -25,7 +25,6 @@ AT = time(8, 0)
 def _daily(sessions, timezone=SEOUL, at=AT, agenda_id="alpha") -> OperationAgenda:
     return OperationAgenda.daily(
         agenda_id=agenda_id,
-        role=OperationRole.STRATEGY_CALLBACK,
         sessions=sessions,
         at=at,
         timezone=timezone,
@@ -113,20 +112,10 @@ def test_a_wall_time_that_happens_twice_is_refused() -> None:
         _daily([date(2024, 11, 3)], timezone=NEW_YORK, at=time(1, 30))
 
 
-def test_provenance_records_what_the_agenda_was_built_from() -> None:
-    agenda = _daily([date(2024, 3, 5), date(2024, 3, 6)])
+def test_an_agenda_carries_no_role_and_no_provenance() -> None:
+    """Record `182`: both were the clothes of a registered declaration; nothing read them."""
+    agenda = _daily([date(2024, 3, 5)])
 
-    assert agenda.provenance == f"2 sessions at {AT.isoformat()} {SEOUL}"
-
-
-def test_an_explicit_provenance_survives() -> None:
-    agenda = OperationAgenda.daily(
-        agenda_id="alpha",
-        role=OperationRole.STRATEGY_CALLBACK,
-        sessions=[date(2024, 3, 5)],
-        at=AT,
-        timezone=SEOUL,
-        provenance="k200 sessions from the registered price panel",
-    )
-
-    assert agenda.provenance == "k200 sessions from the registered price panel"
+    assert not hasattr(agenda, "role")
+    assert not hasattr(agenda, "provenance")
+    assert not hasattr(agenda.occurrences[0], "role")

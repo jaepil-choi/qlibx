@@ -109,7 +109,7 @@ def test_values_converts_one_column_per_name_asked_for(
     assert window.values["A"] == (103.0, 105.0)
     assert set(window._values) == {"A"}, "B was not asked for, so B was not converted"
     assert "B" in window.values and len(window.values) == 2
-    assert dict(window.values) == {"A": (103.0, 105.0), "B": window.series("B")}
+    assert dict(window.values) == {"A": (103.0, 105.0), "B": window.series("B").cells}
     # `latest()` and `counts()` do not convert columns either.
     fresh = _context(store, 7).read("prices", "close")
     assert fresh.latest()["A"] == 105.0

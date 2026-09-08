@@ -103,8 +103,17 @@ if a record is removed, its number stays retired.
 Do not create implementation records for harness-only, documentation-only, experiment-only, or
 showcase-only changes.
 
-Keep commit messages concise. Keep detailed reasoning in the implementation record. Never stage,
-commit, push, or publish unless the task or user explicitly authorizes that action.
+Keep commit messages concise. Keep detailed reasoning in the implementation record.
+
+Commit each unit of work as it completes. Do not accumulate several units and commit them
+together at the end: a large commit hides which change caused which effect, cannot be reverted
+without taking unrelated work with it, and leaves the user unable to see progress until the whole
+thing lands. A unit is one milestone, one fix, or one coherent change with its own validation —
+the same boundary the implementation record draws. Committing needs no approval.
+
+Push and publish still do. A commit is local history the user can rewrite; a push is not. Never
+push, open a pull request, publish a package, or otherwise send work outward unless the task or
+user explicitly authorizes that action.
 
 Do not mix unrelated user changes into a commit. Stage by naming the paths the task actually
 touched. Never use `git add -A`, `git add .`, `git commit -a`, or any other blanket stage: the

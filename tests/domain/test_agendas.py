@@ -7,7 +7,7 @@ import pytest
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.identifiers import agenda_id, occurrence_id
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.loop import DueEvent, OccurrenceEvent
+from vqapr.flow.engine.loop import DueEvent, OccurrenceEvent
 
 
 def _local(

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.run_state import LifecycleKind
+from vqapr.flow.engine.run_state import LifecycleKind
 from vqapr.flow.strategy.loop import SimulationResult
 from vqapr.record import (
     DATAMODEL_KIND,

@@ -26,7 +26,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.flow.datamodel.compute import ComputeHandler, DataModelTrace
 from vqapr.flow.datamodel.output import DataModelOutput
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
-from vqapr.flow.loop import EventLoop, OccurrenceEvent
+from vqapr.flow.engine.loop import EventLoop, OccurrenceEvent
 
 
 @dataclass(frozen=True, slots=True)

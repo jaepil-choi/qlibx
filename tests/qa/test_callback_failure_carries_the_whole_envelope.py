@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vqapr.flow.artifacts import SimulationFailure, SimulationStage
+from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage
 
 _FIELDS = ("code", "status", "source", "requirement", "observed", "fix", "cause")
 

@@ -42,7 +42,7 @@ from vqapr.exchange.execution_table import (
 from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.artifacts import (
+from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
     DueExecutionEvidence,
@@ -54,7 +54,7 @@ from vqapr.flow.artifacts import (
 )
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ConstraintSet, StrategyConfig
-from vqapr.flow.run_state import LifecycleKind, RunStateRepository
+from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.strategy.loop import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (

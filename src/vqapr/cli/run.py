@@ -28,8 +28,8 @@ from vqapr.domain.errors import (
     status_of,
 )
 from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.flow.engine.run_state import FILL_TABLE
 from vqapr.flow.orchestration import COMPLETED, FAILED
-from vqapr.flow.run_state import FILL_TABLE
 from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.public import RunDefinition, Workspace, preflight_run
 from vqapr.public import run as execute_run

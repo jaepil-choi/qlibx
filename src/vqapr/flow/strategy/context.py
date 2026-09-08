@@ -36,7 +36,8 @@ from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
-from vqapr.flow.artifacts import (
+from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
+from vqapr.flow.engine.artifacts import (
     CallbackEvidence,
     DueExecutionEvidence,
     FailureObservation,
@@ -47,9 +48,8 @@ from vqapr.flow.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
-from vqapr.flow.loop import DueEvent
-from vqapr.flow.run_state import (
+from vqapr.flow.engine.loop import DueEvent
+from vqapr.flow.engine.run_state import (
     FILL_TABLE,
     AcceptedRunState,
     RunStateRepository,

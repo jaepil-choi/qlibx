@@ -32,13 +32,13 @@ from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.execution_table import ExecutionTable
-from vqapr.flow.artifacts import (
+from vqapr.flow.engine.artifacts import (
     CallbackEvidence,
     SimulationFailure,
     SimulationFailureKind,
     SimulationStage,
 )
-from vqapr.flow.run_state import (
+from vqapr.flow.engine.run_state import (
     LifecycleKind,
     LifecycleTrace,
     PreparedRunState,

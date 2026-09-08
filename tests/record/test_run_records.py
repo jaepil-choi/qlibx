@@ -304,7 +304,7 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     let a peer delete a live run's tables. This pins the same wiring in milliseconds: the callback
     fires once per occurrence, so a run that records no rows still proves it is alive.
     """
-    from vqapr.flow.loop import EventLoop
+    from vqapr.flow.engine.loop import EventLoop
     from vqapr.flow.strategy.loop import StrategyEventLoop
 
     signature = inspect.signature(StrategyEventLoop.__init__)

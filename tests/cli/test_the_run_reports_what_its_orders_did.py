@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 from vqapr.analysis.execution import fill_summary
 from vqapr.flow.strategy.context import FRAMEWORK_TABLES
-from vqapr.flow.run_state import AcceptedRunState
+from vqapr.flow.engine.run_state import AcceptedRunState
 from vqapr.flow.strategy.loop import SimulationResult
 
 

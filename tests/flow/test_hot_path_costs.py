@@ -24,7 +24,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.authoring.records import InvocationRecorder
 from vqapr.authoring.records import TableSpec
-from vqapr.flow.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
+from vqapr.flow.engine.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.public import (
     DatasetRegistration,
     RowsLookback,
@@ -226,7 +226,7 @@ def test_model_state_verification_is_linear_in_callback_count(
     earlier root already proved re-proves nothing. The bound here is deliberately loose: it only
     has to be tight enough that a return to quadratic behaviour fails it.
     """
-    import vqapr.flow.run_state as run_state_module
+    import vqapr.flow.engine.run_state as run_state_module
 
     calls = 0
     original = run_state_module.prepare_model_state
@@ -285,7 +285,7 @@ def test_an_externally_built_root_is_still_verified_in_full() -> None:
     `_verified` defaults to empty, so a root built from outside `run_state.py` pays full
     verification. Anything else would let a caller skip the proof by omission.
     """
-    from vqapr.flow.run_state import AcceptedRunState, prepare_model_state
+    from vqapr.flow.engine.run_state import AcceptedRunState, prepare_model_state
 
     prepared = prepare_model_state({"count": 1}, b"before")
 

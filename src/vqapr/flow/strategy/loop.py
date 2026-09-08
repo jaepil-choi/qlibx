@@ -24,13 +24,13 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.exchange.venue import Exchange
-from vqapr.flow.artifacts import (
+from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
+from vqapr.flow.engine.artifacts import (
     FinalizationEvidence,
     SimulationStage,
 )
-from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
-from vqapr.flow.loop import DueEvent, EventLoop, OccurrenceEvent
-from vqapr.flow.run_state import (
+from vqapr.flow.engine.loop import DueEvent, EventLoop, OccurrenceEvent
+from vqapr.flow.engine.run_state import (
     RunFinalization,
     RunStateRepository,
 )

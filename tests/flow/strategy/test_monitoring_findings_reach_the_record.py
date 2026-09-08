@@ -52,7 +52,7 @@ from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ConstraintSet, StrategyConfig
-from vqapr.flow.run_state import LifecycleKind, RunStateRepository
+from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.strategy.loop import DueExecutionTrace, StrategyEventLoop
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
 

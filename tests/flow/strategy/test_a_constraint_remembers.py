@@ -44,10 +44,10 @@ from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.artifacts import SimulationFailure
+from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ConstraintSet, StrategyConfig
-from vqapr.flow.run_state import RunStateRepository
+from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
 
 KST = ZoneInfo("Asia/Seoul")

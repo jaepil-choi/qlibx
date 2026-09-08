@@ -93,14 +93,20 @@ LAYERS: dict[str, int] = {
 (`engine`) and the assembly that drives them. Every other package is one node.
 """
 
-OPEN: dict[tuple[str, str], str] = {
-    # Closed by M6 -- the substrate the phases read moves out of the assembly layer.
-    ("flow.strategy", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
-    ("flow.datamodel", "flow"): "M6: loop/artifacts/run_state move to flow/engine/",
-}
-"""Violations measured at `develop @ 7c804ddc`, each with the milestone that closes it.
+OPEN: dict[tuple[str, str], str] = {}
+"""Declared-legal violations. **Empty, and that is the point.**
 
-May shrink, may not grow. The campaign is `docs/refactoring/2026-09-08-the-layering-campaign.md`.
+It held eleven edges when this file was armed at `develop @ 7c804ddc`, each naming the milestone
+that would close it, and the layering campaign closed all eleven
+(`docs/refactoring/2026-09-08-the-layering-campaign.md`, records `190`-`197`). The graph is a DAG.
+
+It stays here rather than being deleted with the last entry. A campaign that needs to open an edge
+for a step should say so in the table and close it in the commit that closes it, which is what this
+dict is for; deleting it would leave the next such campaign with `assert not violations` and no way
+to express a bounded exception except by deleting the assertion.
+
+May shrink, may not grow. An entry needs the milestone that closes it, and
+`test_the_open_set_is_not_slack` fails the moment one stops describing reality.
 """
 
 

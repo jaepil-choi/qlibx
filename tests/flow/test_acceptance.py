@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-import vqapr.flow.run_state as model_state
+import vqapr.flow.engine.run_state as model_state
 from vqapr.domain.values import normalize_memory
 from vqapr.authoring.records import InvocationRecorder
 from vqapr.authoring.records import TableSpec
-from vqapr.flow.run_state import (
+from vqapr.flow.engine.run_state import (
     AcceptedRunState,
     LifecycleKind,
     LifecycleTrace,

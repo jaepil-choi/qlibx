@@ -265,6 +265,13 @@ _ACCOUNT_IDENTITY = "_ACCOUNT"
 DEFAULT_TABLE_PREFIX = "vqapr."
 """Table ids the package owns. A Strategy declaring one is refused when the recorder is built."""
 
+CALLBACK_STAGE = "STRATEGY_CALLBACK"
+VALUATION_STAGE = "VALUATION"
+MONITORING_STAGE = "MONITORING"
+"""The `stage` label every package row carries: which handler wrote it. These were the values
+of an `OperationRole` an occurrence used to carry (record `182` removed it: the one agenda has
+no role); the labels stay so a record written before reads the same as one written after."""
+
 DEFAULT_TABLES = (
     TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),
     TableSpec(

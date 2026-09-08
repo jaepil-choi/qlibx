@@ -52,7 +52,6 @@ from vqapr.public import (
     ListingAccess,
     LocalInstantDeclaration,
     OperationOccurrence,
-    OperationRole,
     OptimizeRefusal,
     OptimizeResult,
     PortfolioDirection,
@@ -129,7 +128,6 @@ def test_public_exports_are_fixed() -> None:
             AllocationViolation,
             Hold,
             OperationOccurrence,
-            OperationRole,
             OptimizeRefusal,
             OptimizeResult,
             PortfolioDirection,
@@ -218,7 +216,6 @@ def test_public_exports_are_fixed() -> None:
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
         "OperationOccurrence",
-        "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
         "PanelWindow",

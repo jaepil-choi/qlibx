@@ -14,7 +14,7 @@ from vqapr.authoring import Constraint, StrategyModel
 from vqapr.data.datasets import lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.agendas import OperationAgenda, OperationRole
+from vqapr.domain.agendas import OperationAgenda
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.execution_table import (
@@ -78,39 +78,25 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
         )
     return OperationAgenda.daily(
         agenda_id=definition.agenda_id,
-        role=OperationRole.STRATEGY_CALLBACK,
         sessions=sessions,
         at=definition.at,
         timezone=definition.timezone,
-        provenance=f"run {definition.run_id}",
     )
 
 
-def _freeze_agenda(
-    agenda: OperationAgenda,
-    *,
-    expected_role: OperationRole,
-    start: datetime,
-    end: datetime,
-) -> FrozenAgenda:
-    agenda_id = agenda.agenda_id
-    if agenda.role is not expected_role:
-        raise ValueError(
-            f"agenda {agenda_id!r} role {agenda.role!s} does not match owner role {expected_role!s}"
-        )
-    # OperationAgenda construction retains and proves every local fold/offset. Calling this
-    # method additionally makes malformed externally supplied agendas fail before a run exists.
-    for occurrence in agenda.occurrences:
-        proof = occurrence.local_instant
-        if proof.instant.utcoffset() is None:
-            raise ValueError(f"agenda {agenda_id!r} occurrence lacks an offset proof")
+def _freeze_agenda(agenda: OperationAgenda, *, start: datetime, end: datetime) -> FrozenAgenda:
+    """The run's agenda, sliced to `[start, end]`, with its identity carried over.
+
+    The agenda is derived by `derived_agenda` above and nowhere else, and `OperationAgenda.daily`
+    already refuses a session whose wall time does not exist or happens twice; the role check
+    and the offset re-proof this used to make guarded an external supply path that does not
+    exist (record `182`).
+    """
     return FrozenAgenda(
         agenda_id=agenda.agenda_id,
-        agenda_role=agenda.role,
         occurrences=agenda.inclusive_slice(start, end),
         timezone=agenda.timezone,
         content_identity=agenda.content_identity,
-        provenance_identity=agenda.provenance_identity,
     )
 
 
@@ -551,7 +537,7 @@ def _freeze_strategy(
             f"strategy {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a strategy"
         )
-    config = StrategyConfig(registered, decide.agenda_id, OperationRole.STRATEGY_CALLBACK)
+    config = StrategyConfig(registered, decide.agenda_id)
     loaded_strategy = load_strategy_model(config.component, project_root=workspace.project_root)
     initial_payload = _validate_initial_model_state(
         workspace, config.component, loaded_strategy, entry.initial_model_memory
@@ -567,7 +553,7 @@ def _freeze_strategy(
         for constraint in loaded_constraints
         for requirement in constraint.requirements()
     )
-    agenda = _freeze_agenda(decide, expected_role=config.agenda_role, start=start, end=end)
+    agenda = _freeze_agenda(decide, start=start, end=end)
     _validate_execution_targets(execution_input, agenda, start=start, end=end)
     return FrozenStrategy(
         config=config,
@@ -619,9 +605,7 @@ def _freeze_datamodel(
             retry_precondition="choose a new output dataset_id, then retry",
         )
     model = load_data_model(registered, project_root=workspace.project_root)
-    agenda = _freeze_agenda(
-        decide, expected_role=OperationRole.STRATEGY_CALLBACK, start=start, end=end
-    )
+    agenda = _freeze_agenda(decide, start=start, end=end)
     return FrozenDataModel(
         component=registered,
         agenda=agenda,

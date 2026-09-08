@@ -36,7 +36,6 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.agendas import OperationRole
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
 from vqapr.extension.component import ComponentKind, ComponentRef
@@ -159,7 +158,6 @@ class StrategyConfig:
 
     component: ComponentRef
     agenda_id: AgendaId
-    agenda_role: OperationRole
 
     def __post_init__(self) -> None:
         if not isinstance(self.component, ComponentRef):
@@ -168,10 +166,6 @@ class StrategyConfig:
             raise ValueError("component must identify a STRATEGY_MODEL")
         if not isinstance(self.agenda_id, str) or not self.agenda_id:
             raise TypeError("agenda_id must be an AgendaId")
-        if not isinstance(self.agenda_role, OperationRole):
-            raise TypeError("agenda_role must be an OperationRole")
-        if self.agenda_role is not OperationRole.STRATEGY_CALLBACK:
-            raise ValueError("strategy agenda_role must be STRATEGY_CALLBACK")
 
 
 # ---------------------------------------------------------------------------------------------

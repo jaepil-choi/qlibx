@@ -40,7 +40,7 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
@@ -112,7 +112,6 @@ def _occurrences(count: int) -> tuple[OperationOccurrence, ...]:
     return tuple(
         OperationOccurrence(
             f"strategy-{number}",
-            OperationRole.STRATEGY_CALLBACK,
             LocalInstantDeclaration(
                 first + timedelta(days=number), time(4, 0), "Asia/Seoul", 0, "+09:00"
             ),
@@ -140,10 +139,9 @@ def _flow(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
-                    OperationRole.STRATEGY_CALLBACK,
                 ),
                 constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
-                agenda=FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences),
+                agenda=FrozenAgenda("strategy", occurrences),
             ),
         ),
         start=occurrences[0].evaluation_time,

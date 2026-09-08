@@ -21,6 +21,7 @@ from vqapr.evidence.artifacts import (
 )
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.context import (
+    CALLBACK_STAGE,
     AcceptedIntent,
     DueExecutionResult,
     FlowContext,
@@ -166,7 +167,7 @@ class ExecutionHandler:
                 envelope={
                     "run_id": self._context.frozen_run.identity,
                     "producer_id": str(self._context.layer.config.component.component_id),
-                    "stage": pending.occurrence.role.value,
+                    "stage": CALLBACK_STAGE,
                     "event_time": self._context.in_agenda_zone(pending.target.target_at),
                 },
             )

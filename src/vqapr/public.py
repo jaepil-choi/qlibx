@@ -42,7 +42,6 @@ from vqapr.declarations import register_dataset as register_dataset
 from vqapr.declarations import register_execution_input as register_execution_input
 from vqapr.domain.agendas import (
     OperationOccurrence,
-    OperationRole,
 )
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.instruments import (
@@ -212,7 +211,6 @@ __all__ = (
     # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
     "OperationOccurrence",
-    "OperationRole",
     "OptimizeRefusal",
     "OptimizeResult",
     "PanelWindow",

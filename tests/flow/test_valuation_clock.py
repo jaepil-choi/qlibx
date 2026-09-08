@@ -36,7 +36,7 @@ from vqapr.account.snapshot import AccountMark, AccountSnapshot, AccountState
 from vqapr.authoring import Hold, StrategyModel
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
@@ -448,7 +448,6 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     )
     occurrence = OperationOccurrence(
         "strategy-1",
-        OperationRole.STRATEGY_CALLBACK,
         LocalInstantDeclaration(date(2024, 3, 4), time(8, 0), "Asia/Seoul", 0, "+09:00"),
     )
     frozen = FrozenRun(
@@ -458,10 +457,9 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
-                    OperationRole.STRATEGY_CALLBACK,
                 ),
                 constraints=ConstraintSet(()),
-                agenda=FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, (occurrence,)),
+                agenda=FrozenAgenda("strategy", (occurrence,)),
             ),
         ),
         start=occurrence.evaluation_time,
@@ -499,7 +497,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     ]
     assert len(rows) == 1
     (row,) = rows
-    assert row["stage"] == OperationRole.STRATEGY_CALLBACK.value
+    assert row["stage"] == "STRATEGY_CALLBACK"
     assert row["event_time"] == occurrence.evaluation_time
     assert row["observed_at"] == marked_at, "dated by when the nav was measured, not written"
     assert row["nav"] == Decimal("120")

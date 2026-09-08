@@ -19,7 +19,7 @@ from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.execution_table import ExecutionInputRegistration
@@ -45,48 +45,39 @@ class FrozenAgenda:
     """A resolved owner agenda identity and its inclusive run slice."""
 
     agenda_id: AgendaId
-    agenda_role: OperationRole
     occurrences: tuple[OperationOccurrence, ...]
     timezone: str = ""
     content_identity: str = ""
-    provenance_identity: str = ""
 
     def __post_init__(self) -> None:
         if not isinstance(self.agenda_id, str) or not self.agenda_id:
             raise TypeError("agenda_id must be an AgendaId")
-        if not isinstance(self.agenda_role, OperationRole):
-            raise TypeError("agenda_role must be an OperationRole")
         if not isinstance(self.occurrences, tuple):
             raise TypeError("occurrences must be a tuple of OperationOccurrence values")
         if not isinstance(self.timezone, str):
             raise TypeError("timezone must be an IANA timezone name")
-        if not self.timezone and (self.content_identity or self.provenance_identity):
-            raise ValueError("agenda identities require a timezone")
-        for name, value in (
-            ("content_identity", self.content_identity),
-            ("provenance_identity", self.provenance_identity),
+        if not self.timezone and self.content_identity:
+            raise ValueError("an agenda identity requires a timezone")
+        if not isinstance(self.content_identity, str) or (
+            self.content_identity and len(self.content_identity) != 64
         ):
-            if not isinstance(value, str) or (value and len(value) != 64):
-                raise TypeError(f"{name} must be a SHA-256 identity")
-        if bool(self.content_identity) != bool(self.provenance_identity):
-            raise ValueError("agenda identities must be supplied together")
+            raise TypeError("content_identity must be a SHA-256 identity")
         for occurrence in self.occurrences:
             if not isinstance(occurrence, OperationOccurrence):
                 raise TypeError("occurrences must contain OperationOccurrence values")
-            if occurrence.role is not self.agenda_role:
-                raise ValueError("occurrence role must match agenda_role")
 
-    def encoded(self) -> tuple[str, str, list[str]]:
+    def encoded(self) -> tuple[str, list[str]]:
         """What a model's identity folds of its agenda: the sessions' CONTENT, not their name.
 
-        The role, the zone and each occurrence's local instant. Not the agenda id, its
-        provenance or the occurrence ids: since record `148` the agenda is derived from the run
-        (`<run_id>.sessions`, occurrences `<run_id>.sessions-<date>`), so folding those would
-        make the same strategy on the same sessions a different identity under every run id --
-        which is the run's identity, not the strategy's (owner ruling, 2026-09-03).
+        The zone and each occurrence's local instant. Not the agenda id or the occurrence ids:
+        since record `148` the agenda is derived from the run (`<run_id>.sessions`, occurrences
+        `<run_id>.sessions-<date>`), so folding those would make the same strategy on the same
+        sessions a different identity under every run id -- which is the run's identity, not
+        the strategy's (owner ruling, 2026-09-03). Not a role either (record `182`): the one
+        agenda has none, and the `STRATEGY_CALLBACK` a datamodel run's identity used to fold
+        named a role that run never had.
         """
         return (
-            self.agenda_role.value,
             self.timezone,
             [occurrence.local_instant.identity() for occurrence in self.occurrences],
         )
@@ -134,8 +125,6 @@ class FrozenStrategy:
             raise TypeError("agenda must be a FrozenAgenda")
         if self.agenda.agenda_id != self.config.agenda_id:
             raise ValueError("agenda must match the strategy config's agenda_id")
-        if self.agenda.agenda_role is not self.config.agenda_role:
-            raise ValueError("agenda must match the strategy config's agenda_role")
         _require_requirements("requirements", self.requirements)
         _require_requirements("constraint_requirements", self.constraint_requirements)
         memory = normalize_memory(self.initial_model_memory)
@@ -216,8 +205,6 @@ class FrozenDataModel:
             raise ValueError("component must identify a DATA_MODEL")
         if not isinstance(self.agenda, FrozenAgenda):
             raise TypeError("agenda must be a FrozenAgenda")
-        if self.agenda.agenda_role is not OperationRole.STRATEGY_CALLBACK:
-            raise ValueError("a datamodel is called on the run's sessions, the callback role")
         _require_id(self.dataset_id, "dataset_id")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)

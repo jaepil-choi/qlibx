@@ -29,7 +29,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationAgenda, OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.evidence.artifacts import (
@@ -117,21 +117,19 @@ def _component(identifier: str, kind: ComponentKind) -> ComponentRef:
     )
 
 
-def _occurrence(identifier: str, role: OperationRole, at: datetime) -> OperationOccurrence:
+def _occurrence(identifier: str, at: datetime) -> OperationOccurrence:
     return OperationOccurrence(
         identifier,
-        role,
         LocalInstantDeclaration(
             at.date(), at.timetz().replace(tzinfo=None), "Asia/Seoul", 0, "+09:00"
         ),
     )
 
 
-def _agenda(identifier: str, role: OperationRole, *times: datetime) -> FrozenAgenda:
+def _agenda(identifier: str, *times: datetime) -> FrozenAgenda:
     return FrozenAgenda(
         identifier,
-        role,
-        tuple(_occurrence(f"{identifier}-{i}", role, at) for i, at in enumerate(times)),
+        tuple(_occurrence(f"{identifier}-{i}", at) for i, at in enumerate(times)),
     )
 
 
@@ -210,7 +208,6 @@ def _frozen(
     strategy = StrategyConfig(
         _component("strategy", ComponentKind.STRATEGY_MODEL),
         "strategy",
-        OperationRole.STRATEGY_CALLBACK,
     )
     bounds = {"start": callbacks[0], "end": end} if end is not None else {}
     layer = FrozenStrategy(
@@ -220,7 +217,7 @@ def _frozen(
             if constraints is not None
             else ConstraintSet((_component("risk", ComponentKind.CONSTRAINT),))
         ),
-        agenda=_agenda("strategy", OperationRole.STRATEGY_CALLBACK, *callbacks),
+        agenda=_agenda("strategy", *callbacks),
         requirements=strategy_requirements,
         constraint_requirements=(
             (_requirement(),) if constraints is None or constraints.constraints else ()
@@ -542,7 +539,7 @@ def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurr
     )
     assert validate_economic_intent(payload) is payload
     accepted = AcceptedIntent(
-        payload, _occurrence("current", OperationRole.STRATEGY_CALLBACK, at), at, target
+        payload, _occurrence("current", at), at, target
     )
     assert accepted.decision_time == at
 
@@ -973,26 +970,21 @@ def test_execution_snapshot_never_silently_omits_held_values_or_falls_back_for_n
 @pytest.mark.uc("UC-TIME-002")
 def test_operation_agenda_normalizes_cross_zone_order_and_rejects_unresolved_dst() -> None:
     same_utc = datetime(2024, 3, 5, 4, tzinfo=UTC)
-    seoul = _occurrence("seoul", OperationRole.STRATEGY_CALLBACK, same_utc.astimezone(KST))
+    seoul = _occurrence("seoul", same_utc.astimezone(KST))
     new_york = OperationOccurrence(
         "new-york",
-        OperationRole.STRATEGY_CALLBACK,
         LocalInstantDeclaration(date(2024, 3, 4), time(23), "America/New_York", 0, "-05:00"),
     )
 
     seoul_agenda = OperationAgenda(
         agenda_id="seoul",
-        role=OperationRole.STRATEGY_CALLBACK,
         timezone="Asia/Seoul",
         occurrences=(seoul,),
-        provenance="fixture",
     )
     new_york_agenda = OperationAgenda(
         agenda_id="new-york",
-        role=OperationRole.STRATEGY_CALLBACK,
         timezone="America/New_York",
         occurrences=(new_york,),
-        provenance="fixture",
     )
     assert [
         item.evaluation_time.astimezone(UTC)
@@ -1037,10 +1029,7 @@ def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> Non
 
     assert first.identity == second.identity
     order = first.dispatch_order(first.strategies[0])
-    assert [(item.role, item.occurrence_id) for item in order] == [
-        (OperationRole.STRATEGY_CALLBACK, "strategy-0"),
-        (OperationRole.STRATEGY_CALLBACK, "strategy-1"),
-    ]
+    assert [item.occurrence_id for item in order] == ["strategy-0", "strategy-1"]
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -1167,7 +1156,7 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
         if row["instrument"] == "_ACCOUNT"
     ]
     assert [(row["event_time"], row["observed_at"], row["stage"]) for row in nav_rows] == [
-        (target, target, OperationRole.VALUATION.value)
+        (target, target, "VALUATION")
     ]
     assert nav_rows[0]["nav"] == Decimal("100")
 

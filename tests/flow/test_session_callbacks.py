@@ -22,7 +22,7 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
@@ -51,7 +51,6 @@ class EveryThreeOccurrences(StrategyModel):
         assert not hasattr(context, "sessions")
         assert not hasattr(context, "future_occurrences")
         assert not hasattr(context, "execution_table")
-        assert context.occurrence.role is OperationRole.STRATEGY_CALLBACK
         memory = dict(self.memory or {})
         count = int(memory.get("occurrence_count", 0)) + 1
         self.memory = {**memory, "occurrence_count": count}
@@ -100,7 +99,6 @@ class _Constraint(Constraint):
 def _occurrence(number: int) -> OperationOccurrence:
     return OperationOccurrence(
         f"strategy-{number}",
-        OperationRole.STRATEGY_CALLBACK,
         LocalInstantDeclaration(date(2024, 3, number + 4), time(4, 0), "Asia/Seoul", 0, "+09:00"),
     )
 
@@ -120,7 +118,7 @@ def _flow(
     state: RunStateRepository,
     occurrences: tuple[OperationOccurrence, ...],
 ) -> StrategyEventLoop:
-    strategy_agenda = FrozenAgenda("strategy", OperationRole.STRATEGY_CALLBACK, occurrences)
+    strategy_agenda = FrozenAgenda("strategy", occurrences)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
@@ -129,7 +127,6 @@ def _flow(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
-                    OperationRole.STRATEGY_CALLBACK,
                 ),
                 constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
                 agenda=strategy_agenda,

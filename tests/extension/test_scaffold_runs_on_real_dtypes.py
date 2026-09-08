@@ -43,7 +43,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
@@ -176,7 +176,6 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     context = StrategyModelContext(
         occurrence=OperationOccurrence(
             "cb-1",
-            OperationRole.STRATEGY_CALLBACK,
             LocalInstantDeclaration(
                 EVALUATION_TIME.date(),
                 EVALUATION_TIME.timetz().replace(tzinfo=None),

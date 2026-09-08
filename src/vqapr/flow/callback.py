@@ -38,6 +38,7 @@ from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.flow.context import (
     _ACCOUNT_IDENTITY,
     _VALUATION_NAMESPACE,
+    CALLBACK_STAGE,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     AcceptedIntent,
@@ -493,7 +494,7 @@ class CallbackHandler:
             tables + DEFAULT_TABLES,
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
-            stage=occurrence.role.value,
+            stage=CALLBACK_STAGE,
             event_time=occurrence.evaluation_time,
         )
 
@@ -716,7 +717,7 @@ class CallbackHandler:
             decision_time=occurrence.evaluation_time,
             target=target,
             valuation_id=self._pending_valuation_key(
-                self._context.frozen_run.identity, occurrence.role.value, occurrence.evaluation_time
+                self._context.frozen_run.identity, CALLBACK_STAGE, occurrence.evaluation_time
             ),
         )
 

@@ -16,7 +16,6 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from vqapr.domain.agendas import OperationRole
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.run import ConstraintSet, RunDefinition, StrategyConfig, StrategyEntry
 
@@ -46,20 +45,18 @@ def _definition(**overrides: object) -> RunDefinition:
     return RunDefinition(**declared)  # type: ignore[arg-type]
 
 
-def test_a_strategy_config_binds_a_strategy_to_a_callback_agenda_only() -> None:
-    """Preflight's product, not a user declaration; the role it carries is fixed."""
+def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
+    """Preflight's product, not a user declaration; it carries no role (record `182`)."""
     strategy = _component(ComponentKind.STRATEGY_MODEL, "strategy")
 
-    config = StrategyConfig(strategy, "r.sessions", OperationRole.STRATEGY_CALLBACK)
+    config = StrategyConfig(strategy, "r.sessions")
 
-    assert config.agenda_role is OperationRole.STRATEGY_CALLBACK
-    with pytest.raises(ValueError, match="strategy agenda_role"):
-        StrategyConfig(strategy, "r.sessions", OperationRole.VALUATION)
+    assert config.agenda_id == "r.sessions"
+    assert not hasattr(config, "agenda_role")
     with pytest.raises(ValueError, match="STRATEGY_MODEL"):
         StrategyConfig(
             _component(ComponentKind.CONSTRAINT, "limit"),
             "r.sessions",
-            OperationRole.STRATEGY_CALLBACK,
         )
 
 

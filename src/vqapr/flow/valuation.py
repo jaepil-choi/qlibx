@@ -17,7 +17,7 @@ from vqapr.constraints.evaluation import (
     project_constraints,
 )
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import MarkBatch
 from vqapr.evidence.artifacts import (
     MonitoringEvidence,
@@ -31,6 +31,8 @@ from vqapr.flow.context import (
     _ACCOUNT_IDENTITY,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
+    MONITORING_STAGE,
+    VALUATION_STAGE,
     AcceptedIntent,
     FlowContext,
     HeldResult,
@@ -228,7 +230,7 @@ class ValuationHandler:
             DEFAULT_TABLES,
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
-            stage=OperationRole.VALUATION.value,
+            stage=VALUATION_STAGE,
             event_time=self._context.in_agenda_zone(cutoff),
         )
         priced = {selection.instrument_id: selection for selection in selected}
@@ -370,7 +372,7 @@ class ValuationHandler:
             DEFAULT_TABLES,
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
-            stage=OperationRole.MONITORING.value,
+            stage=MONITORING_STAGE,
             event_time=self._context.in_agenda_zone(cutoff),
         )
         for finding in report.findings:

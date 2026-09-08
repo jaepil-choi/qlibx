@@ -45,7 +45,7 @@ from vqapr.authoring import (
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence, OperationRole
+from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
@@ -133,7 +133,6 @@ def _callbacks(sessions: tuple[date, ...]) -> tuple[OperationOccurrence, ...]:
     return tuple(
         OperationOccurrence(
             f"strategy-{session.isoformat()}",
-            OperationRole.STRATEGY_CALLBACK,
             LocalInstantDeclaration(session, time(8, 0), "Asia/Seoul", 0, "+09:00"),
         )
         for session in sessions
@@ -189,7 +188,6 @@ def _flow(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
-                    OperationRole.STRATEGY_CALLBACK,
                 ),
                 constraints=ConstraintSet(
                     tuple(
@@ -197,7 +195,7 @@ def _flow(
                     )
                 ),
                 agenda=FrozenAgenda(
-                    "strategy", OperationRole.STRATEGY_CALLBACK, occurrences, timezone="Asia/Seoul"
+                    "strategy", occurrences, timezone="Asia/Seoul"
                 ),
             ),
         ),

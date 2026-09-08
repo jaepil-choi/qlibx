@@ -13,7 +13,6 @@ from vqapr.account.account import AccountMode
 from vqapr.account.snapshot import AccountSnapshot
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.agendas import OperationRole
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.exchange.conventions import FillConvention, FillSelector
 from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
@@ -226,7 +225,6 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     (layer,) = frozen.strategies
     assert layer.config.agenda_id == definition.agenda_id == "preflight.sessions"
     assert layer.agenda.agenda_id == definition.agenda_id
-    assert layer.agenda.agenda_role is OperationRole.STRATEGY_CALLBACK
     assert layer.agenda.timezone == "Asia/Seoul"
     assert [item.occurrence_id for item in layer.agenda.occurrences] == [
         "preflight.sessions-2024-03-05"
@@ -746,7 +744,6 @@ def test_the_derived_agenda_fires_once_per_session_at_the_declared_wall_time(
     agenda = derived_agenda(workspace, listed)
 
     assert agenda.agenda_id == listed.agenda_id == "preflight.sessions"
-    assert agenda.role is OperationRole.STRATEGY_CALLBACK
     assert agenda.timezone == "Asia/Seoul"
     assert [occurrence.occurrence_id for occurrence in agenda.occurrences] == [
         "preflight.sessions-2024-03-05",

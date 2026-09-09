@@ -150,6 +150,7 @@ def _definition(
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes=f"{exchange.component_id}-weights",
     )
 
 
@@ -385,12 +386,13 @@ def main() -> None:
     score_definition = RunDefinition(
         run_id="momentum-score",
         instruments=universe,
-        datamodel=DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),
+        datamodel=DataModelEntry("momentum-model", ("score", "eligible")),
         timezone=VENUE,
         at=time(16, 0),
         sessions=tuple(score_days),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        writes="momentum_score",
     )
     run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 

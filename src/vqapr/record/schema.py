@@ -178,6 +178,7 @@ class RunRecord(_Record):
     source digests (A7), and which strategies the run names."""
 
     run_id: str
+    writes: str
     declared_digest: str
     instruments: list[str]
     period: dict[str, Any]

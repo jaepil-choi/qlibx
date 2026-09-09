@@ -152,6 +152,7 @@ def _definition(**overrides: object) -> RunDefinition:
     """The probe run: one strategy deciding on 2023-12-01 at 15:30 UTC, unless overridden."""
     declared: dict[str, object] = {
         "run_id": RUN,
+        "writes": f"{RUN}-weights",
         "strategies": (StrategyEntry("model"),),
         "sessions": (date(2023, 12, 1),),
         "timezone": "UTC",

@@ -243,6 +243,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
         return success(
             "run.complete",
             run_id=frozen.run_id,
+            writes=frozen.writes,
             store_root=str(store_root),
             datamodels={
                 component_id: _datamodel_envelope(record)
@@ -268,6 +269,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
     return success(
         "run.complete",
         run_id=frozen.run_id,
+        writes=frozen.writes,
         store_root=str(store_root),
         strategies=strategies,
         # What this run knew each instrument to be, or that it knew nothing. Reported on the

@@ -23,12 +23,12 @@ from types import SimpleNamespace
 import pytest
 
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.datamodel.output import DataModelOutput
+from vqapr.flow.datamodel.output import RunOutput
 
 
-def _output(root: Path) -> DataModelOutput:
-    # `DataModelOutput` reads `dataset_id` and `value_fields` off its layer and nothing else.
-    return DataModelOutput(root, SimpleNamespace(dataset_id="ratios", value_fields=("ratio",)))
+def _output(root: Path) -> RunOutput:
+    # `RunOutput` takes the name the run writes and the fields each row carries (M2).
+    return RunOutput(root, writes="ratios", value_fields=("ratio",))
 
 
 def test_the_refusal_quotes_pyarrow_and_the_established_schema_and_guesses_no_further(

@@ -46,6 +46,7 @@
     "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0"
   },
   "make-constraint/SKILL.md": {
+    "735e289c8505f4b202161ed05fe092e057c03acfe539d976156f5ac15533ef10": "0.9.0.dev1",
     "d969395d752d64957741bc2507e5fe375045552b22992df9de1d1f0040c378af": "0.8.0"
   },
   "make-constraint/references/declaring-data.md": {
@@ -58,6 +59,7 @@
     "3b7f8892b5a0b9a3f95f2361ca7debab80c489217a50707c38caa95e94cbed9b": "0.8.0"
   },
   "make-datamodel/SKILL.md": {
+    "5752b61165140d42bfe7cd259608f40b8ec4ce27bc58ac3c09b1ea548ab4aaf4": "0.9.0.dev1",
     "c00c898a8bd66724b6ce2abab0821df99a258ffe18bd9a84c4882472f90e1f46": "0.8.0"
   },
   "make-datamodel/references/datamodel-or-strategy.md": {
@@ -70,6 +72,7 @@
     "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0"
   },
   "make-datamodel/references/running-a-datamodel.md": {
+    "63fe7350c19a458029af7598290d6e528c86b2f86b034ddb54c9dd7ae7a9b4cb": "0.9.0.dev1",
     "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
   },
   "make-exchange/SKILL.md": {
@@ -154,7 +157,8 @@
     "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0"
   },
   "run-backtest/references/run-declaration.md": {
-    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0"
+    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "930a7e3e6ca4b0ec150470bba4dd06a9b36e410b7b0472f78c9a05ab3bb1b1cc": "0.9.0.dev1"
   },
   "run-backtest/references/watching-and-failures.md": {
     "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0"

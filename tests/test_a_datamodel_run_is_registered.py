@@ -33,7 +33,7 @@ from vqapr.project.store import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 SESSIONS = (date(2024, 3, 6), date(2024, 3, 7))
-ENTRY = DataModelEntry("reversal", "reversal_2d", ("score",))
+ENTRY = DataModelEntry("reversal", ("score",))
 _RUN_READY: dict[str, object] = {
     "instruments": ["A", "B"],
     "start": "2024-03-06T00:00:00+09:00",
@@ -41,6 +41,7 @@ _RUN_READY: dict[str, object] = {
     "timezone": "Asia/Seoul",
     "at": "16:00",
     "sessions": ["2024-03-06", "2024-03-07"],
+    "writes": "reversal_2d",
 }
 """A `runs.<id>` body with everything but its models, for each test to add one kind to."""
 _DATAMODELS = {"reversal": {"dataset_id": "reversal_2d", "value_fields": ["score"]}}
@@ -49,6 +50,7 @@ _DATAMODELS = {"reversal": {"dataset_id": "reversal_2d", "value_fields": ["score
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "factors",
+        "writes": "reversal_2d",
         "datamodel": ENTRY,
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
@@ -144,20 +146,18 @@ def test_the_entry_refuses_a_value_field_the_output_cannot_carry(
 ) -> None:
     """`available_at` and `instrument` are the package's columns; a value field is the model's."""
     with pytest.raises(error, match=said):
-        DataModelEntry("reversal", "reversal_2d", value_fields)
+        DataModelEntry("reversal", value_fields)
 
 
 def test_the_entry_normalizes_its_opening_memory() -> None:
-    assert DataModelEntry("reversal", "out", ("score",)).initial_model_memory is None
-    assert DataModelEntry(
-        "reversal", "out", ("score",), initial_model_memory={"calls": 10}
-    ).initial_model_memory == {"calls": 10}
+    assert DataModelEntry("reversal", ("score",)).initial_model_memory is None
+    assert DataModelEntry("reversal", ("score",), initial_model_memory={"calls": 10}).initial_model_memory == {"calls": 10}
 
 
 def test_a_datamodel_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> None:
     """Written in the shape an author writes, and read back as the same value."""
     definition = _definition(
-        datamodel=DataModelEntry("reversal", "reversal_2d", ("score",), initial_model_memory={"k": 1})
+        datamodel=DataModelEntry("reversal", ("score",), initial_model_memory={"k": 1}), writes="reversal_2d"
     )
 
     with Workspace.transaction(workspace) as t:
@@ -169,14 +169,14 @@ def test_a_datamodel_run_registers_reads_back_and_is_idempotent(workspace: Works
     assert reopened.run_definition("factors") == definition
     assert reopened.run_definition("factors").kind == "datamodel"
     written = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))["runs"]["factors"]
-    assert written["datamodels"] == {
-        "reversal": {
-            "dataset_id": "reversal_2d",
-            "value_fields": ["score"],
-            "initial_model_memory": {"k": 1},
-        }
+    # The stored spelling since 2026-09-09: `writes` on the run, the one model as a block.
+    assert written["writes"] == "reversal_2d"
+    assert written["datamodel"] == {
+        "component": "reversal",
+        "value_fields": ["score"],
+        "initial_model_memory": {"k": 1},
     }
-    assert "strategies" not in written
+    assert "strategy" not in written and "datamodels" not in written
     assert "initial_account" not in written
 
 
@@ -204,7 +204,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
     cannot freeze, so registration refuses it first."""
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
         t.register_run(
-            _definition(datamodel=DataModelEntry(component_id, "out", ("score",)))
+            _definition(datamodel=DataModelEntry(component_id, ("score",)), writes="out")
         )
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "run.reference_invalid"

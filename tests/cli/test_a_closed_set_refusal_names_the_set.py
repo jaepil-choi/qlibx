@@ -56,6 +56,7 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                     "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
                 },
                 "initial_account": {"cash": "1000", "mode": mode, "positions": {}},
+                "writes": "r-weights",
                 "strategies": {"alpha": {}},
             }
         }

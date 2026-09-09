@@ -437,10 +437,12 @@ def test_public_run_uses_frozen_initial_model_memory(
     frozen = object.__new__(FrozenRun)
     for name, value in {
         "run_id": "facade",
+        "writes": "facade-weights",
         "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
         "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
         "execution": object(),
+        "writes": "public-weights",
         "strategy": layer,
         "datamodel": None,
         "datasets": (),
@@ -457,6 +459,11 @@ def test_public_run_uses_frozen_initial_model_memory(
     )
     observed: dict[str, object] = {}
 
+    # What `public.run` reads off a finished run and nothing more: the recorder rows it
+    # publishes under `writes` (none here, so nothing is published). One object, so the
+    # assertions below can check identity: the outcome carries what the flow returned.
+    finished = SimpleNamespace(final_state=SimpleNamespace(recorder_rows={}))
+
     class Flow:
         def __init__(self, _frozen, loaded_strategy, state, **_kwargs) -> None:
             observed["frozen"] = _frozen
@@ -464,7 +471,7 @@ def test_public_run_uses_frozen_initial_model_memory(
             observed["ref"] = state.root.current_model_state_ref
 
         def run(self) -> object:
-            return "result"
+            return finished
 
     class State:
         def __init__(self, **_kwargs) -> None:
@@ -491,8 +498,8 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(orchestration, "StrategyEventLoop", Flow)
 
     outcome = public.run(tmp_path, frozen)
-    assert outcome.result() == "result"
-    assert outcome.results == {"s": "result"}
+    assert outcome.result() is finished
+    assert outcome.results == {"s": finished}
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,

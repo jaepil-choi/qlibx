@@ -410,12 +410,13 @@ def main() -> None:
     score_definition = RunDefinition(
         run_id="showcase-score",
         instruments=tuple(universe),
-        datamodel=DataModelEntry("showcase-model", "reversal_score", ("score",)),
+        datamodel=DataModelEntry("showcase-model", ("score",)),
         timezone=VENUE,
         at=time(16, 0),
         sessions=tuple(score_days),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        writes="reversal_score",
     )
     materialization = run(
         PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
@@ -447,6 +448,7 @@ def main() -> None:
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000000000"), {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=tuple(universe),
+        writes="show003-weights",
     )
 
     frozen = preflight_run(PROJECT, definition)

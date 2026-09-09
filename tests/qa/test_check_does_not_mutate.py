@@ -181,6 +181,7 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
                 end=datetime(2024, 1, 5, tzinfo=UTC),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="probe-weights",
             )
         )
     return "probe"

@@ -183,7 +183,8 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                     },
                 },
                 "initial_account": {"cash": OPENING_CASH, "mode": "LONG_ONLY", "positions": {}},
-                "strategies": {STRATEGY_ID: {}},
+                "writes": f"{STRATEGY_ID}-weights",
+                "strategy": {"component": STRATEGY_ID},
             }
         },
     }

@@ -71,6 +71,7 @@ def _run(run_id: str, strategy: str) -> RunDefinition:
         sessions=(date(2024, 1, 2),),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        writes=f"{run_id}-weights",
     )
 
 

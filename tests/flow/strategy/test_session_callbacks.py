@@ -135,6 +135,7 @@ def _flow(
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
+        writes="test-weights",
     )
     account = Account(mode=AccountMode.LONG_ONLY)
 

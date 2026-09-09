@@ -78,6 +78,7 @@ def _run_naming_alpha() -> RunDefinition:
         sessions=(date(2026, 4, 1),),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        writes="cadence-weights",
     )
 
 

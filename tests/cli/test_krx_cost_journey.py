@@ -227,6 +227,7 @@ components:
             {
                 "runs": {
                     "krx": {
+                        "writes": "krx-weights",
                         "strategies": {"rotate": {}},
                         # Decide at 04:00 on every session the prices have a row for; the book
                         # is valued at the 15:30 fill it lands on (record 148).

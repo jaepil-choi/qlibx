@@ -19,7 +19,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.shapes import Row
 from vqapr.flow.datamodel.output import (
-    DataModelOutput,
+    RunOutput,
     derived_available_at,
     refusal,
     validated_output,
@@ -48,7 +48,7 @@ class ComputeHandler:
         layer: FrozenDataModel,
         model: DataModel,
         window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
-        output: DataModelOutput,
+        output: RunOutput,
     ) -> None:
         self._frozen_run = frozen_run
         self._layer = layer

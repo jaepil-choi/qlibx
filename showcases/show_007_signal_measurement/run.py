@@ -591,6 +591,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes="show007-weights",
     )
     run_result = run(project, preflight_run(project, definition), store_root=project / ".vqapr")
     result = run_result.result()

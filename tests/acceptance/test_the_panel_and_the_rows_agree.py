@@ -134,13 +134,14 @@ def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datase
     def _definition(run_id: str, component: str, dataset: str) -> RunDefinition:
         return RunDefinition(
             run_id=run_id,
-            datamodel=DataModelEntry(component, dataset, ("score",)),
+            datamodel=DataModelEntry(component, ("score",)),
             instruments=("A", "B", "C"),
             timezone="Asia/Seoul",
             at=time(16, 0),
             sessions=tuple(date(2024, 3, day) for day in (4, 6, 8)),
             start=datetime(2024, 3, 4, tzinfo=KST),
             end=datetime(2024, 3, 9, tzinfo=KST),
+            writes=dataset,
         )
 
     definitions = (

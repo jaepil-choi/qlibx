@@ -21,8 +21,8 @@ is simply not activated. Apply the same prefix to every command below.
 Not a precondition for research. Only a workflow that chose constraint adjustment or actual-account
 monitoring has to supply a metric, a bound, an evaluation scope and the data behind them.
 
-A strategy names its constraints in a `constraints:` list under its entry in the run's
-`strategies:`, pointing at registered components of kind `constraint`.
+A strategy names its constraints in a `constraints:` list under the run's `strategy:` block,
+pointing at registered components of kind `constraint`.
 
 ## Start from the scaffold
 

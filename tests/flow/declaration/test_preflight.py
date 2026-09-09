@@ -152,6 +152,7 @@ def _setup(
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("ABC",),
+        writes="preflight-weights",
     )
 
 

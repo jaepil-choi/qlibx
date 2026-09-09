@@ -143,6 +143,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
                     0, Decimal("1000"), {"A": Decimal("-5")} if short else {}
                 ),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="probe-weights",
             )
         )
     return "probe"

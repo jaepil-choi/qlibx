@@ -24,7 +24,7 @@ from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.flow.datamodel.compute import ComputeHandler, DataModelTrace
-from vqapr.flow.datamodel.output import DataModelOutput
+from vqapr.flow.datamodel.output import RunOutput
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.engine.loop import EventLoop, OccurrenceEvent
 
@@ -53,7 +53,7 @@ class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelRes
         model: DataModel,
         *,
         window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
-        output: DataModelOutput,
+        output: RunOutput,
         on_progress: Callable[[], None] | None = None,
     ) -> None:
         if layer is not frozen_run.datamodel:

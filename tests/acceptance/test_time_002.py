@@ -235,6 +235,7 @@ def _frozen(
         datasets=datasets,
         sources=sources,
         **bounds,
+        writes="test-weights",
     )
 
 

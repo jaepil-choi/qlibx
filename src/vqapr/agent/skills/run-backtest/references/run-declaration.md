@@ -25,21 +25,33 @@ strategy's file does not show.
 The book is valued at the instant the venue fills, and declared constraints judge it right after
 each commit. There is nothing to schedule.
 
-## One run, several strategies
+## One run, one model, one `writes`
 
-Every strategy under `strategies:` runs with **its own account** from the run's
-`initial_account` declaration, and writes **its own record**.
+A run executes **one** model, named under `strategy:` (or `datamodel:`), and puts **one** dataset
+in the project under `writes:`. `writes` is required: the project is a graph of datasets and a run
+is one arrow of it, and an arrow that makes nothing is not a rule of the graph.
 
-Three factor models on one cadence are one run with three strategies. Splitting them into three
-runs gives three declarations to keep in step and no shared basis for comparing them — the
-`run_report` correlation and the `relative` block both need the strategies to be in one run.
+```yaml
+runs:
+  my-alpha:
+    writes: my-alpha-weights       # the allocation, one row per instrument per decision
+    strategy:
+      component: my-alpha
+      # constraints: [no-short]
+```
 
-A strategy's entry may carry a `constraints:` list naming registered components of kind
-`constraint`.
+Three factor models on one cadence are **three runs** with the same period, venue and account.
+That is not three declarations to keep in step: two runs declaring the same inputs freeze
+identically, so the comparison is exactly as sound as it was in one run — and now it holds across
+runs made on different days, which one run never could. `--jobs` spreads runs, and a strategy that
+wants another's allocation reads its `writes` like any other dataset.
+
+`vqapr check` reads the graph: a run whose model reads a dataset that another registered run
+`writes` is told to run that one first, rather than to register something.
 
 ## What a datamodel run must not carry
 
-A datamodel is a run too. Its declaration names `datamodels:` instead of `strategies:`, and
+A datamodel is a run too. Its declaration names `datamodel:` instead of `strategy:`, and
 `account`, `venue` and `execution` are **refused** on it — there is nothing to execute.
 
 ## What a run needs registered before it

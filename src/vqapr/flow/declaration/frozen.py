@@ -174,7 +174,6 @@ class FrozenDataModel:
 
     component: ComponentRef
     agenda: FrozenAgenda
-    dataset_id: str
     value_fields: tuple[str, ...]
     requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = None
@@ -183,7 +182,6 @@ class FrozenDataModel:
     def __post_init__(self) -> None:
         if self.component.kind is not ComponentKind.DATA_MODEL:
             raise ValueError("component must identify a DATA_MODEL")
-        _require_id(self.dataset_id, "dataset_id")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
         object.__setattr__(
@@ -209,7 +207,7 @@ class FrozenDataModel:
                     {
                         "datamodel": (self.component_id, self.component.fingerprint),
                         "agenda": self.agenda.encoded(),
-                        "output": (self.dataset_id, list(self.value_fields)),
+                        "output": list(self.value_fields),
                         "initial_model_memory": self.initial_model_memory,
                         "requirements": _encoded_requirements(self.requirements),
                     }
@@ -229,6 +227,10 @@ class FrozenRun:
     """
 
     run_id: str
+    writes: str
+    """The dataset this run publishes -- the run layer's, shared by no one
+    (design §2): identity folds it, because two runs writing different names are two
+    arrows even when everything else about them is the same."""
     strategy: FrozenStrategy | None = None
     datamodel: FrozenDataModel | None = field(default=None, kw_only=True)
     exchange: ComponentRef | None = None
@@ -252,6 +254,7 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
+        _require_id(self.writes, "writes")
         if (self.strategy is None) == (self.datamodel is None):
             raise ValueError("a frozen run holds one strategy or one datamodel, not both")
         if self.datamodel is not None and (
@@ -347,6 +350,7 @@ class FrozenRun:
             raise RuntimeError("initial account snapshot and mode were frozen apart")
         return _identity(
             {
+                        "writes": self.writes,
                 "run_id": self.run_id,
                 "exchange": (
                     (self.exchange.component_id, self.exchange.fingerprint)

@@ -418,6 +418,18 @@ class Workspace:
         """Every registered run, ordered by run id."""
         return tuple(self._runs[key] for key in sorted(self._runs))
 
+    def producer_of(self, raw_dataset_id: str) -> str | None:
+        """The registered run whose `writes` is this dataset, or `None`: the graph's one edge.
+
+        Answered from the document, so it says who WILL write the dataset whether or not that
+        run has run yet; `DatasetRegistration.produced_by` says who DID. The two together are
+        what `check` needs to tell "not registered" from "not made yet" (design §2).
+        """
+        for definition in self.run_definitions:
+            if definition.writes == raw_dataset_id:
+                return definition.run_id
+        return None
+
     def run_definition(self, raw_run_id: str) -> RunDefinition:
         """One registered run by id: what `vqapr run <run-id>` freezes and executes."""
         return config_lookup(raw_run_id, self._runs, "run", noun="run_id")

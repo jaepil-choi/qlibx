@@ -181,6 +181,7 @@ runs:
         timezone: Asia/Seoul
         trade_price: close
     initial_account: {{cash: "1000", mode: long_only, positions: {{}}}}
+    writes: beta-weights
     strategies: {{holds: {{}}}}
 """,
         encoding="utf-8",

@@ -44,6 +44,7 @@ _RUN_READY: dict[str, object] = {
     "exchange": None,
     "execution": None,
     "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
+    "writes": "krx-2024-weights",
     "strategies": {"ou-k0": None},
 }
 """A `runs.<id>` body every model rule accepts, for the malformed cases to break one key of."""
@@ -56,6 +57,7 @@ def _component(name: str, kind: ComponentKind, root: Path) -> ComponentRef:
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "krx-2024",
+        "writes": "krx-2024-weights",
         "strategy": StrategyEntry("ou-k0", ("no-short",)),
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
@@ -124,8 +126,9 @@ def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> N
     assert [run.run_id for run in reopened.run_definitions] == ["krx-2024"]
     document = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))
     written = document["runs"]["krx-2024"]
-    assert set(written["strategies"]) == {"ou-k0"}
-    assert written["strategies"]["ou-k0"] == {"constraints": ["no-short"]}
+    assert written["writes"] == "krx-2024-weights"
+    assert written["strategy"] == {"component": "ou-k0", "constraints": ["no-short"]}
+    assert "strategies" not in written, "the singular block replaced the keyed mapping"
     # The sessions and the one wall time are the run's own keys, in the shape an author writes.
     assert written["timezone"] == "Asia/Seoul"
     assert written["at"] == "15:29:00"
@@ -253,6 +256,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                     },
                 },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
+                "writes": "krx-2024-weights",
                 "strategies": {"ou-k0": {"constraints": ["no-short"]}},
             }
         }

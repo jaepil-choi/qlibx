@@ -35,6 +35,7 @@ def _component(kind: ComponentKind, name: str) -> ComponentRef:
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "r",
+        "writes": "r-weights",
         "strategy": StrategyEntry("strategy", ("no-short",)),
         "instruments": ("ABC",),
         "timezone": "Asia/Seoul",
@@ -161,6 +162,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
     """Record `148` pins the surface: valued where it fills, judged after each commit."""
     assert set(RunDefinition.model_fields) == {
         "run_id",
+        "writes",
         "strategy",
         "instruments",
         "datamodel",

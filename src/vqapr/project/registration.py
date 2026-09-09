@@ -914,8 +914,8 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     status=Status.INVALID,
                     cause=invalid,
                     requirement=(
-                        "a run declares strategies (with exchange, execution and "
-                        "initial_account) or datamodels, plus instruments, start, end, "
+                        "a run declares writes, and one strategy (with exchange, execution "
+                        "and initial_account) or one datamodel, plus instruments, start, end, "
                         "sessions_from or sessions, timezone and at, each in the shape "
                         "`vqapr new run` emits"
                     ),
@@ -952,8 +952,8 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
     """
     produced: dict[str, str] = {}
     for run_id, definition in definitions:
-        if definition.datamodel is not None:
-            produced.setdefault(str(definition.datamodel.dataset_id), run_id)
+        # Either kind: a strategy publishes its allocation under `writes` too (design §2).
+        produced.setdefault(str(definition.writes), run_id)
     found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
         wanted = definition.sessions_from

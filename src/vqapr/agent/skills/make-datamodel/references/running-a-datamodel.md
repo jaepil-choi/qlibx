@@ -12,10 +12,10 @@ runs:
     sessions_from: prices            # every session that registered dataset has (or `sessions:`)
     timezone: Asia/Seoul
     at: "16:00"                      # when compute() is called, each session
-    datamodels:
-      my-derived:                    # the registered DataModel component
-        dataset_id: my-derived-values  # must NOT already be registered
-        value_fields: [value]          # the columns each row carries beside `instrument`
+    writes: my-derived-values        # the dataset it makes; must NOT already be registered
+    datamodel:
+      component: my-derived          # the registered DataModel component
+      value_fields: [value]          # the columns each row carries beside `instrument`
 ```
 
 `vqapr new datamodel <id> --dataset <d>` emits this block beside the component.

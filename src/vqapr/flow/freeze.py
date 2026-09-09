@@ -93,6 +93,7 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
             }
             for dataset in frozen.datasets
         ],
+        writes=frozen.writes,
         strategies=[
             {"component_id": layer.component_id, "record": layer.record_ref}
             for layer in ((frozen.strategy,) if frozen.strategy is not None else ())
@@ -103,7 +104,7 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
             {
                 "component_id": layer.component_id,
                 "record": layer.record_ref,
-                "dataset_id": layer.dataset_id,
+                "dataset_id": frozen.writes,
             }
             for layer in ((frozen.datamodel,) if frozen.datamodel is not None else ())
         ],
@@ -236,7 +237,7 @@ def freeze_datamodel_record(
             "content_identity": layer.agenda.content_identity,
             "occurrences": len(layer.agenda.occurrences),
         },
-        dataset_id=layer.dataset_id,
+        dataset_id=frozen.writes,
         value_fields=list(layer.value_fields),
         rows=result.rows,
         sessions=[

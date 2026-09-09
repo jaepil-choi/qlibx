@@ -191,6 +191,7 @@ RUNNER = textwrap.dedent(
         end=datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000000"), {}),
         initial_account_mode=AccountMode.SIGNED,
+        writes="clock-weights",
     )
 
     result = run(root, preflight_run(root, definition)).result()
@@ -468,6 +469,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         initial_account_snapshot=snapshot,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
+        writes="fallback-weights",
     )
 
     def window_for_occurrence(item: OperationOccurrence) -> ModelWindow:

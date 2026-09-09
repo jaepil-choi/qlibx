@@ -21,7 +21,7 @@ def member(request, tmp_path: Path, model_price_parquet: Path):
     else:
         _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
         frozen = runtime.preflight_run(
-            tmp_path, _definition("review", DataModelEntry("reversal", "scores", ("score",)))
+            tmp_path, _definition("review", DataModelEntry("reversal", ("score",)), writes="scores")
         )
         layer = frozen.datamodel
     store = tmp_path / "records"

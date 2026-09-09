@@ -77,8 +77,9 @@ having passed session one. [references/output-schema.md](references/output-schem
 
 ## A DataModel is a run
 
-Not a script and not a build step. It is declared in `runs:` with `datamodels:` instead of
-`strategies:`, and executed with the same three commands a strategy run takes:
+Not a script and not a build step. It is declared in `runs:` with `datamodel:` instead of
+`strategy:`, names the dataset it makes under `writes:`, and is executed with the same three
+commands a strategy run takes:
 
 ```bash
 vqapr register <file.yaml>

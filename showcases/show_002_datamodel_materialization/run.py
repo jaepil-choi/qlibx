@@ -238,12 +238,13 @@ def _datamodel_run(
     definition = RunDefinition(
         run_id=run_id,
         instruments=INSTRUMENTS,
-        datamodel=DataModelEntry(component_id, dataset_id, value_fields),
+        datamodel=DataModelEntry(component_id, value_fields),
         timezone="Asia/Seoul",
         at=time(16, 0),
         sessions=sessions,
         start=datetime.combine(sessions[0], time(0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23), tzinfo=KST),
+        writes=dataset_id,
     )
     frozen = preflight_run(PROJECT, definition)
     outcome = run(PROJECT, frozen, store_root=PROJECT / ".vqapr")

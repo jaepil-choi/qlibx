@@ -86,6 +86,7 @@ runs:
     sessions_from: price_daily
     timezone: Asia/Seoul
     at: "09:00"
+    writes: daily-weights
     strategies:
       never: {{}}
 """,

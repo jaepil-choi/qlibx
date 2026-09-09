@@ -1048,6 +1048,7 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
     # (`agendas:` is no longer a section), so the two malformed-document scenarios that used to
     # be agendas are runs: one missing what a run must declare, one with the wrong shape for it.
     run = {
+        "writes": "alpha-weights",
         "strategies": {"alpha": {}},
         "instruments": ["A"],
         "start": "2024-03-05T00:00:00+09:00",
@@ -1181,6 +1182,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
                     timezone="Asia/Seoul",
                     at=time(15, 30),
                     sessions_from="does-not-exist",
+                    writes="unsourced-weights",
                 )
             )
     except VqaprError as error:
@@ -1253,11 +1255,11 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     from types import SimpleNamespace
 
     from vqapr.domain.errors import VqaprError
-    from vqapr.flow.datamodel.output import DataModelOutput
+    from vqapr.flow.datamodel.output import RunOutput
 
     codes: list[str] = []
-    output = DataModelOutput(
-        tmp_path, SimpleNamespace(dataset_id="scores", value_fields=("score",))
+    output = RunOutput(
+        tmp_path, writes="scores", value_fields=("score",)
     )
     output.open()
     try:

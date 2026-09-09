@@ -699,6 +699,7 @@ def _member_run(
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes=f"{str(strategy_ref.component_id)}-weights",
     )
     return run(project, preflight_run(project, definition), store_root=project / ".vqapr")
 
@@ -945,6 +946,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes="show006-ensemble-weights",
     )
     ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
 

@@ -17,6 +17,7 @@ import multiprocessing
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
@@ -33,7 +34,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
@@ -45,7 +46,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.datamodel.loop import DataModelEventLoop, DataModelResult
-from vqapr.flow.datamodel.output import DataModelOutput
+from vqapr.flow.datamodel.output import RunOutput
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.judgments import require_judged
 from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
@@ -56,7 +57,13 @@ from vqapr.flow.freeze import (
     freeze_run_record,
     freeze_strategy_record,
 )
-from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
+from vqapr.flow.roster import (
+    RegisteredRoster,
+    absent_workspace,
+    registered_roster,
+    roster_report,
+)
+from vqapr.flow.strategy.context import DEFAULT_TABLE_PREFIX
 from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
@@ -236,6 +243,9 @@ def run(
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
     root_path = Path(project_root)
     frozen = frozen_run
+    _own_output_or_refuse(
+        workspace if workspace is not None else root_path, frozen, replace_record=replace_record
+    )
     if frozen.datamodel is not None:
         return _run_datamodels(
             root_path,
@@ -434,7 +444,12 @@ def _run_datamodel(
             )
             opened_writer.open(replace=replace_record)
             writer = opened_writer
-        output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
+        output = RunOutput(
+            root_path,
+            writes=frozen.writes,
+            value_fields=layer.value_fields,
+            run_id=frozen.run_id,
+        )
         flow = DataModelEventLoop(
             frozen,
             layer,
@@ -660,6 +675,9 @@ def _run_strategy(
             freeze_strategy_record(
                 writer, result, frozen, layer, as_loaded, _roster_report_or_stale(roster)
             )
+        # The record first -- it is the run -- and then the warehouse: what the run promised
+        # under `writes` (design §2), through the same door a datamodel's rows take.
+        _publish_allocation(root_path, frozen, result)
     except BaseException:
         # A strategy that died still holds its record's lock. Releasing here turns a crash into
         # an ordinary retry instead of stranding the directory until the lock goes stale.
@@ -674,6 +692,97 @@ def _run_strategy(
         else read_strategy_record(writer.root, frozen.run_id, layer.record_ref)
     )
     return result, record
+
+
+def _own_output_or_refuse(
+    workspace_or_root: Workspace | Path, frozen: FrozenRun, *, replace_record: bool
+) -> None:
+    """A run whose published output stands is run again the way its record is: deliberately.
+
+    Preflight lets the run's own `writes` through (it is this run's product, not a taken name);
+    the decision to replace it is made here, beside the record's, under the same flag. Without
+    `replace_record` the run is refused with the two ways forward; with it the earlier output is
+    withdrawn and the run publishes afresh. An authored dataset, or another run's, never reaches
+    this branch -- preflight refused it by name.
+
+    Read through the caller's `Workspace` when it holds one (`docs/issues/archive/070`: one
+    command, one open). A frozen run executed outside any workspace has nothing published to
+    stand in its way, so an ABSENT document is not a refusal here -- the same narrow tolerance
+    `registered_roster` keeps, and for the same reason: a damaged document still raises.
+    """
+    if isinstance(workspace_or_root, Workspace):
+        workspace = workspace_or_root
+    else:
+        try:
+            workspace = Workspace.open(workspace_or_root)
+        except VqaprError as unopened:
+            if not absent_workspace(unopened):
+                raise
+            return
+    existing = next(
+        (item for item in workspace.datasets if str(item.dataset_id) == frozen.writes), None
+    )
+    if existing is None or existing.produced_by != frozen.run_id:
+        return
+    if not replace_record:
+        raise VqaprError(
+            stage=Stage.RUN,
+            failures=[
+                Failure.bounded(
+                    code="run.output_registered",
+                    status=Status.CONFLICT,
+                    requirement="a run publishes its output once unless told to replace it",
+                    observed=(
+                        f"{frozen.writes!r} was published by an earlier run of {frozen.run_id!r}"
+                    ),
+                    fix=(
+                        f"vqapr run {frozen.run_id} --force to replace it, or "
+                        f"vqapr rm dataset {frozen.writes} to withdraw it first"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="pass --force, or withdraw the dataset, then retry",
+        )
+    workspace.remove("dataset", frozen.writes)
+
+
+def _publish_allocation(
+    root_path: Path, frozen: FrozenRun, result: SimulationResult
+) -> str | None:
+    """Put the strategy's allocation in the warehouse under the run's `writes` (design §2).
+
+    The rows are the `vqapr.weight` table the callback recorded -- one per instrument per
+    decision, the weight as the exact string the intent carried -- stamped `available_at` at the
+    decision's own `event_time`, which is when that weight was knowable and not a second earlier.
+    Published as DOUBLE: the data plane carries one numeric type per kind
+    (`docs/issues/archive/088`), and the exact value stays in the record. This is what makes a
+    published allocation and a registered benchmark the same kind of input
+    (`portfolio/allocation.py`): a later strategy reads either through a `DataRequirement`.
+
+    A strategy that held on every session has nothing to publish and publishes nothing: an empty
+    dataset cannot be typed, and a typed nothing would be a lie. The run still completes; `writes`
+    then names a dataset that does not appear, and `vqapr list runs` beside `list datasets` shows
+    exactly that.
+    """
+    table = f"{DEFAULT_TABLE_PREFIX}weight"
+    rows = [
+        {
+            "available_at": row["event_time"],
+            "instrument": row["instrument"],
+            "weight": float(Decimal(str(row["weight"]))),
+        }
+        for row in result.final_state.recorder_rows.get(table, ())
+    ]
+    if not rows:
+        return None
+    output = RunOutput(
+        root_path, writes=frozen.writes, value_fields=("weight",), run_id=frozen.run_id
+    )
+    output.open()
+    output.append(rows)
+    output.register(Workspace.open(root_path))
+    return frozen.writes
 
 
 def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object] | None:

@@ -62,6 +62,7 @@ def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
                 sessions=(date(2026, 4, 1),),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
             )
         )
 
@@ -204,6 +205,7 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
                 sessions=(date(2026, 4, 1),),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
             )
         )
     assert workspace.references_to("dataset", "prices") == ()

@@ -90,6 +90,7 @@ def _strategy_record(strategy_ref: str, constraints: list[dict[str, str]]) -> di
     values.update(
         {
             "run_id": RUN,
+            "writes": f"{RUN}-weights",
             "strategy_ref": strategy_ref,
             "strategy_id": strategy_id,
             "fingerprint": strategy_ref.split("@")[1] * 8,

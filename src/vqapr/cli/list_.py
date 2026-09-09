@@ -94,6 +94,7 @@ def _summarize(item: object) -> dict[str, Any]:
         summary[field] = cli_kind(value) if field == "kind" else str(value)
     if isinstance(item, RunDefinition):
         summary["model"] = item.member.component_id
+        summary["writes"] = item.writes
         summary["start"] = None if item.start is None else item.start.isoformat()
         summary["end"] = None if item.end is None else item.end.isoformat()
         summary["exchange"] = item.exchange

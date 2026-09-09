@@ -31,7 +31,6 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.shapes import Grain, Row, Rows, normalize_rows
 from vqapr.domain.values import require_tz_aware
-from vqapr.flow.declaration.frozen import FrozenDataModel
 from vqapr.project.store import Workspace
 from vqapr.record import COMPACT_FILENAME, SPILL_BYTES
 
@@ -266,7 +265,7 @@ def output_source_id(dataset_id: str) -> str:
     return f"materialized-{dataset_id}"
 
 
-class DataModelOutput:
+class RunOutput:
     """One output dataset, typed a session at a time in memory and written once at the end.
 
     The directory is the source: `SourceSpec` reads every parquet beneath a directory. Sessions
@@ -282,15 +281,19 @@ class DataModelOutput:
     def __init__(
         self,
         project_root: str | Path,
-        layer: FrozenDataModel,
         *,
+        writes: str,
+        value_fields: Sequence[str],
         run_id: str | None = None,
         spill_bytes: int = SPILL_BYTES,
     ) -> None:
+        # Not a `FrozenDataModel`: a strategy publishes through this door too (design §2), and
+        # what both hand over is the name the run writes and the fields each row carries.
         self._root = Path(project_root)
-        self._layer = layer
+        self._writes = writes
+        self._value_fields = tuple(value_fields)
         self._run_id = run_id
-        self._directory = output_directory(project_root, layer.dataset_id)
+        self._directory = output_directory(project_root, writes)
         self._schema: pa.Schema | None = None
         self._field_types: dict[str, ColumnType] = {}
         self._parts = 0
@@ -318,7 +321,7 @@ class DataModelOutput:
         """
         declared: dict[str, ColumnType] = {}
         offending: list[str] = []
-        for name in self._layer.value_fields:
+        for name in self._value_fields:
             column_type = column_type_of_arrow(schema.field(name).type)
             if column_type not in DECLARABLE_FIELD_TYPES:
                 offending.append(f"{name}: {schema.field(name).type} ({column_type.value})")
@@ -466,14 +469,14 @@ class DataModelOutput:
                 ),
                 retry="fix input coverage or DataModel output, then retry",
             )
-        source_id = output_source_id(self._layer.dataset_id)
+        source_id = output_source_id(self._writes)
         registration = DatasetRegistration.of(
-            self._layer.dataset_id,
+            self._writes,
             source_id,
             instrument_field="instrument",
             available_at="available_at",
             key_fields=("available_at", "instrument"),
-            fields={field: field for field in self._layer.value_fields},
+            fields={field: field for field in self._value_fields},
             # Stated by the producer from what it wrote (`_declarable`), as the grain below is.
             field_types=self._field_types,
             # Stated by the producer, not derived: one row per instrument per session is what
@@ -504,8 +507,8 @@ class DataModelOutput:
 __all__ = [
     "MATERIALIZED_DIRECTORY",
     "OUTPUT_CODES",
-    "DataModelOutput",
     "LookAheadDetected",
+    "RunOutput",
     "derived_available_at",
     "output_directory",
     "output_source_id",

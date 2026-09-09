@@ -304,7 +304,8 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
 
 
 _RUN_KEYS = (
-    "strategies",
+    "writes",
+    "strategy",
     "instruments",
     "start",
     "end",
@@ -352,7 +353,8 @@ def test_an_emitted_run_declares_every_key_run_requires(
     (run,) = document["runs"].values()
     for key in _RUN_KEYS:
         assert key in run, f"the emitted template does not declare {key}"
-    assert run["strategies"], "a run names at least one strategy"
+    assert run["strategy"]["component"], "a run names the one strategy it executes"
+    assert run["writes"], "a run declares what it writes"
 
 
 def test_an_emitted_run_explains_each_key(tmp_path: Path) -> None:

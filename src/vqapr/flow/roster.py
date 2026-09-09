@@ -83,7 +83,7 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
         # one that never had one: the run continued and every fill recorded `kind: None`, which on a
         # KRX-shaped venue charges the ETF sleeve at the share rate. `docs/issues/archive/007`
         # through a `try/except` written for a different case.
-        if not _absent_workspace(unopened):
+        if not absent_workspace(unopened):
             raise
         return None
     # OUTSIDE the guard above, deliberately. `registered_instruments()` raises a typed
@@ -173,7 +173,7 @@ def roster_report(read: RegisteredRoster | None) -> dict[str, object] | None:
     return report
 
 
-def _absent_workspace(refusal: VqaprError) -> bool:
+def absent_workspace(refusal: VqaprError) -> bool:
     """Whether this refusal says the workspace is not there, as opposed to not readable."""
     return bool(refusal.failures) and all(
         failure.code == WORKSPACE_ABSENT for failure in refusal.failures

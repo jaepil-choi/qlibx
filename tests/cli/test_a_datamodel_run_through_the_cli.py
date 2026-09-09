@@ -210,21 +210,25 @@ def test_a_datamodel_run_is_registered_checked_run_listed_and_shown(
     assert {item["record"] for item in shown["datamodels"]} == {lines["reversal"]["record"]}
     assert shown["exchange"] is None and shown["execution"] is None
 
-    # The names are taken now: `check` says so for each output, and preflight agrees.
+    # The names are this run's own now (design §2.1): `check` still passes -- a run's earlier
+    # product is state, not a defect of the declaration -- and running again without `--force`
+    # is refused before anything is computed, the way a standing record is.
     code, again = _cli(capsys, *project, "check", "factors-reversal")
-    assert code == 1, again
-    assert again["ok"] is False
-    codes = [failure["code"] for failure in again["failures"]]
-    # One code for the one fact (record `171`): the judgments say it once for the run's model,
-    # and the freeze says it again.
-    assert codes.count("datamodel.output_registered") == 2, codes
-    assert {
-        failure["source"]["key_path"]
-        for failure in again["failures"]
-        if failure["code"] == "datamodel.output_registered"
-    } >= {"runs.factors-reversal.datamodels.reversal.dataset_id"}
-    assert all(failure["status"] == 409 for failure in again["failures"]), again["failures"]
+    assert code == 0, again
+    assert again["ok"] is True and again["passed"] == again["checked"]
 
+    code, refused = _cli(capsys, *project, "run", "factors-reversal")
+    assert code == 1, refused
+    assert refused["ok"] is False
+    codes = [failure["code"] for failure in refused["failures"]]
+    assert codes == ["run.output_registered"], codes
+    assert all(failure["status"] == 409 for failure in refused["failures"]), refused["failures"]
+    assert "--force" in refused["failures"][0]["fix"]
+    assert _scores(tmp_path, "reversal_2d") == reversal, "refused before it wrote anything"
+
+    code, replaced = _cli(capsys, *project, "run", "factors-reversal", "--force")
+    assert code == 0, replaced
+    assert _scores(tmp_path, "reversal_2d") == reversal, "withdrawn and published afresh"
 
 def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]

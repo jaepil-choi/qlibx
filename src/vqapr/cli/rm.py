@@ -249,7 +249,7 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
         return success("workspace.removed", kind="run", identifier=run_id, cascade=True,
                        removed=removed, kept=kept)
     removed["run_definition"] = bool(workspace.remove("run", run_id))
-    outputs = [] if definition.datamodel is None else [str(definition.datamodel.dataset_id)]
+    outputs = [str(definition.writes)]
     for dataset_id in outputs:
         blockers = workspace.references_to("dataset", dataset_id)
         if blockers:

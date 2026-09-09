@@ -239,15 +239,16 @@ def _require_value_fields(value: object) -> tuple[str, ...]:
 
 @pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
 class DataModelEntry:
-    """One datamodel a run computes: the component, the dataset it writes, its opening memory.
+    """One datamodel a run computes: the component, its output fields, its opening memory.
 
     The output's shape is declared here and not by the model (architecture 4.4): the model
-    computes rows, and what dataset those rows become -- its id and its value fields -- is
-    configuration of the run that produces it (record `148`).
+    computes rows, and what fields those rows carry is configuration of the run that produces it
+    (record `148`). **Which dataset they become is the run's `writes`**, not this entry's: what a
+    run puts in the warehouse is a property of the run, the same for a strategy as for a
+    datamodel (`docs/design/two-clocks-and-the-wiring-table.md` §2).
     """
 
     component_id: Annotated[str, Field(min_length=1)]
-    dataset_id: Annotated[str, Field(min_length=1)]
     value_fields: tuple[str, ...]
     initial_model_memory: Any = None
 
@@ -366,6 +367,24 @@ def _naive_wall_time(value: object) -> time:
     return value
 
 
+def _singular_block(body: dict[str, Any], singular: str, plural: str) -> object:
+    """The member block under either spelling, normalised to `{component_id: fields}`.
+
+    Stored today as `strategy: {component: id, ...}` / `datamodel: {component: id, ...}` -- one
+    model, named as a block. Read yesterday's `strategies: {id: {...}}` too, so a workspace written
+    before 2026-09-09 opens; `_the_one_member` refuses it if it named two.
+    """
+    if plural in body:
+        return body.pop(plural)
+    block = body.get(singular)
+    if isinstance(block, Mapping) and ("component" in block or "component_id" in block):
+        fields = dict(block)
+        name = fields.pop("component", None) or fields.pop("component_id")
+        fields.pop("component_id", None)
+        return {str(name): fields}
+    return block
+
+
 def _the_one_member[Entry](
     declared: object,
     *,
@@ -426,10 +445,11 @@ class RunDefinition(BaseModel):
     This is also the `runs.<run_id>` entry of `workspace.yaml` and of a declaration, read and
     written through `model_validate` / `model_dump(mode="json")`. The stored spelling differs
     from the field names in four places, and the before-validator and serializer below are the
-    one place that difference is written: `strategies`/`datamodels` are keyed by component id on
-    disk and are tuples of entries here; `execution` on disk is a `RunExecution`; one
-    `initial_account` block is a snapshot and a mode; and `run_id` is the key the entry sits
-    under, not a field of it.
+    one place that difference is written: `strategy`/`datamodel` are a block naming its
+    `component` on disk and an entry here (the pre-2026-09-09 `strategies: {id: {...}}` mapping
+    is still read); `execution` on disk is a `RunExecution`; one `initial_account` block is a
+    snapshot and a mode; and `run_id` is the key the entry sits under, not a field of it.
+    `writes` is spelled the same in both.
     """
 
     model_config = ConfigDict(
@@ -437,6 +457,11 @@ class RunDefinition(BaseModel):
     )
 
     run_id: Annotated[str, Field(min_length=1)]
+    writes: Annotated[str, Field(min_length=1)]
+    """The dataset this run puts in the warehouse. Required: a run is one arrow of the project's
+    dataset graph, and an arrow that makes nothing is not a rule of it. A strategy publishes its
+    allocation under this name; a datamodel its computed rows. The name only -- the schema is
+    what the consumer declares (`DataRequirement`), and saying it twice would let it disagree."""
     strategy: StrategyEntry | None = None
     """The one strategy this run executes, when it is a strategy run. Never beside `datamodel`."""
     instruments: tuple[Annotated[str, Field(min_length=1)], ...]
@@ -471,13 +496,33 @@ class RunDefinition(BaseModel):
         if not isinstance(raw, Mapping):
             return raw
         body = dict(raw)
+        strategy = _singular_block(body, "strategy", "strategies")
+        datamodel = _singular_block(body, "datamodel", "datamodels")
+        # A datamodel block written before `writes` moved to the run carried `dataset_id`
+        # inside the entry. Hoist it, so a workspace from then reads back unchanged.
+        if isinstance(datamodel, Mapping):
+            for name, entry in datamodel.items():
+                if isinstance(entry, Mapping) and "dataset_id" in entry:
+                    entry = dict(entry)
+                    hoisted = entry.pop("dataset_id")
+                    declared = body.get("writes")
+                    if declared is not None and declared != hoisted:
+                        raise ValueError(
+                            f"writes {declared!r} and the datamodel's dataset_id {hoisted!r} "
+                            "disagree; `dataset_id` moved to the run as `writes` -- declare it once"
+                        )
+                    body["writes"] = hoisted
+                    # Replace this entry only. Collapsing the mapping to it would hide a second
+                    # member from the one-model rule below.
+                    datamodel = {**datamodel, name: entry}
+                    break
         body["strategy"] = _the_one_member(
-            body.pop("strategies", None) if "strategies" in body else body.get("strategy"),
+            strategy,
             build=lambda name, fields: StrategyEntry(component_id=name, **fields),
             plural="strategies",
         )
         body["datamodel"] = _the_one_member(
-            body.pop("datamodels", None) if "datamodels" in body else body.get("datamodel"),
+            datamodel,
             build=lambda name, fields: DataModelEntry(component_id=name, **fields),
             plural="datamodels",
         )
@@ -517,6 +562,7 @@ class RunDefinition(BaseModel):
             "end": None if self.end is None else self.end.isoformat(),
             "timezone": self.timezone,
             "at": None if self.at is None else self.at.isoformat(),
+            "writes": self.writes,
             "exchange": self.exchange,
             "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
         }
@@ -528,16 +574,14 @@ class RunDefinition(BaseModel):
                 version=self.initial_account_snapshot.version,
             ).model_dump(mode="json")
         if self.strategy is not None:
-            ordered["strategies"] = {
-                self.strategy.component_id: _entry_body(
-                    self.strategy, ("constraints", "initial_model_memory")
-                )
+            ordered["strategy"] = {
+                "component": self.strategy.component_id,
+                **_entry_body(self.strategy, ("constraints", "initial_model_memory")),
             }
         if self.datamodel is not None:
-            ordered["datamodels"] = {
-                self.datamodel.component_id: _entry_body(
-                    self.datamodel, ("dataset_id", "value_fields", "initial_model_memory")
-                )
+            ordered["datamodel"] = {
+                "component": self.datamodel.component_id,
+                **_entry_body(self.datamodel, ("value_fields", "initial_model_memory")),
             }
         if self.sessions_from is not None:
             ordered["sessions_from"] = self.sessions_from
@@ -588,6 +632,16 @@ class RunDefinition(BaseModel):
                 "must name one model under exactly one of `strategies:` or `datamodels:` -- a "
                 "run runs one strategy or one datamodel, not both and not neither "
                 "(record 148: a run holds one kind; a run is one arrow of the graph)"
+            )
+        if self.sessions_from is not None and self.writes == self.sessions_from:
+            raise ValueError(
+                f"writes {self.writes!r} is also sessions_from: a run cannot take its sessions "
+                "from the dataset it is about to write"
+            )
+        if self.execution is not None and self.writes == self.execution.dataset:
+            raise ValueError(
+                f"writes {self.writes!r} is also the execution dataset: a run cannot fill "
+                "against the dataset it is about to write"
             )
         if self.datamodel is not None:
             declared = [

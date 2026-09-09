@@ -173,6 +173,8 @@ def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Pa
     """
     constraints = overrides.pop("constraints", None)
     body: dict[str, object] = {
+        # A run declares what it writes (design §2); a test that cares overrides it.
+        "writes": f"{run_id}-weights",
         "strategies": {"my-alpha": {} if constraints is None else {"constraints": constraints}},
         "sessions_from": "prices",
         "timezone": "Asia/Seoul",
@@ -1019,11 +1021,13 @@ def test_an_incomplete_run_declaration_names_every_key_a_run_declares(
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.run_invalid"
     for key in (
-        "strategies", "instruments", "start", "end", "exchange",
+        "writes", "strategy", "instruments", "start", "end", "exchange",
         "execution", "initial_account",
     ):
         assert key in failure["requirement"], f"{key} was not named: {failure['requirement']}"
-    assert "at" in failure["observed"], "a key that stopped the read is named"
+    # `writes` is declared before `at` on the model, so it is the first key pydantic names;
+    # what the assertion pins is that SOME missing key is named, not which comes first.
+    assert "writes" in failure["observed"], "a key that stopped the read is named"
     assert "vqapr new run" in failure["requirement"]
 
 

@@ -147,6 +147,7 @@ def _flow(
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
+        writes="test-weights",
     )
 
     def window_for_occurrence(occurrence: OperationOccurrence) -> ModelWindow:

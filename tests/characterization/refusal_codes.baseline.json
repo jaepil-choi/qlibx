@@ -27,7 +27,6 @@
     "datamodel.output.instrument_unrequested",
     "datamodel.output.rows_invalid",
     "datamodel.output.schema_mismatch",
-    "datamodel.output_registered",
     "dataset.available_at_not_a_timestamp",
     "dataset.execution_no_price",
     "dataset.execution_tradable_not_boolean",
@@ -60,6 +59,7 @@
     "roster.unreadable",
     "run.declaration_invalid",
     "run.invalid",
+    "run.output_registered",
     "run.registered",
     "run.unregistered",
     "source.conditional_positive_unreadable",
@@ -179,11 +179,11 @@
     ],
     "409": [
       "constraint.identity_mismatch",
-      "datamodel.output_registered",
       "dataset.registered",
       "dataset.source_conflict",
       "dataset.source_mismatch",
       "remove.referenced",
+      "run.output_registered",
       "run.registered"
     ],
     "412": [

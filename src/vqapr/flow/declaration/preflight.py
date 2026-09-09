@@ -648,6 +648,39 @@ def _freeze_strategy(
     )
 
 
+def _refuse_taken_output(workspace: Workspace, *, run_id: str, writes: str) -> None:
+    """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
+
+    Asked here rather than after the last session: a run that computed for an hour and then found
+    its name taken would have wasted the hour, and `check` asks the same question for the same
+    reason (`_judge_outputs`). Re-running a run whose output stands is done by withdrawing the
+    output first (`vqapr rm dataset`), which is how a produced dataset is told from an authored
+    one: only the former names a producer.
+    """
+    taken = next((item for item in workspace.datasets if str(item.dataset_id) == writes), None)
+    # The run's own product is not a taken name: it stands from an earlier run of THIS run,
+    # and whether to replace it is `run`'s question (`replace_record`), the same as its record.
+    # What is refused here is a name that belongs to someone else -- authored, or another run's.
+    if taken is not None and taken.produced_by != run_id:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="run.output_registered",
+                    status=Status.CONFLICT,
+                    requirement="a run writes a dataset that does not exist yet",
+                    observed=f"{writes!r} is already registered",
+                    fix=(
+                        f"declare a new `writes` for run {run_id!r}, or withdraw the existing "
+                        f"{writes} first: vqapr rm dataset {writes}"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="choose a new `writes`, or withdraw the dataset, then retry",
+        )
+
+
 def _freeze_datamodel(
     workspace: Workspace,
     entry: DataModelEntry,
@@ -668,30 +701,11 @@ def _freeze_datamodel(
             f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a datamodel"
         )
-    if any(str(item.dataset_id) == entry.dataset_id for item in workspace.datasets):
-        raise VqaprError(
-            stage=Stage.FREEZE,
-            failures=[
-                Failure.bounded(
-                    code="datamodel.output_registered",
-                    status=Status.CONFLICT,
-                    requirement="a datamodel run writes a dataset that does not exist yet",
-                    observed=f"{entry.dataset_id!r} is already registered",
-                    fix=(
-                        f"declare a new dataset_id for {entry.component_id!r}, or remove the "
-                        f"existing {entry.dataset_id} registration from the workspace first"
-                    ),
-                )
-            ],
-            mutation=False,
-            retry_precondition="choose a new output dataset_id, then retry",
-        )
     model = load_data_model(registered, project_root=workspace.project_root)
     agenda = _freeze_agenda(decide, start=start, end=end)
     return FrozenDataModel(
         component=registered,
         agenda=agenda,
-        dataset_id=entry.dataset_id,
         value_fields=entry.value_fields,
         requirements=tuple(model.requirements()),
         initial_model_memory=entry.initial_model_memory,
@@ -762,6 +776,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
     if definition.strategy is None:  # pragma: no cover -- `RunDefinition` refuses this
         raise ValueError("a strategy run declares no strategy")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
     strategies = (
         _freeze_strategy(
             workspace,
@@ -789,6 +804,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
     return FrozenRun(
         run_id=definition.run_id,
+        writes=definition.writes,
         strategy=strategies[0],
         exchange=exchange,
         execution=execution_table,
@@ -819,6 +835,7 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     decide = derived_agenda(workspace, definition)
     if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
         raise ValueError("a datamodel run declares no datamodel")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
     datamodels = (
         _freeze_datamodel(workspace, definition.datamodel, decide=decide, start=start, end=end),
     )
@@ -835,6 +852,7 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
     return FrozenRun(
         run_id=definition.run_id,
+        writes=definition.writes,
         datamodel=datamodels[0],
         start=start,
         end=end,

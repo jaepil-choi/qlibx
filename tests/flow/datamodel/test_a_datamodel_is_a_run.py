@@ -196,9 +196,11 @@ def _definition(
     instruments: tuple[str, ...] = ("A", "B"),
     sessions_from: str = "price_daily",
     at: time = time(16, 0),
+    writes: str = "",
 ) -> RunDefinition:
     return RunDefinition(
         run_id=run_id,
+        writes=writes or f"{run_id}-values",
         datamodel=entry,
         instruments=instruments,
         timezone="Asia/Seoul",
@@ -270,7 +272,7 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("echo", "EchoModel"))
 
     outcome = _run(
-        tmp_path, _definition("factors", DataModelEntry("reversal", "reversal_2d", ("score",)))
+        tmp_path, _definition("factors", DataModelEntry("reversal", ("score",)), writes="reversal_2d")
     )
 
     result = outcome.result("reversal")
@@ -297,9 +299,10 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
         tmp_path,
         _definition(
             "echoes",
-            DataModelEntry("echo", "echo_2d", ("echo",)),
+            DataModelEntry("echo", ("echo",)),
             sessions_from="reversal_2d",
             at=time(16, 30),
+            writes="echo_2d",
         ),
     )
 
@@ -320,7 +323,7 @@ def test_the_output_lands_as_one_file_when_the_dataset_registers(
     """
     _prepared(tmp_path, model_price_parquet, ("watcher", "ChunkWatcherModel"))
 
-    _run(tmp_path, _definition("watch", DataModelEntry("watcher", "watched", ("chunks",))))
+    _run(tmp_path, _definition("watch", DataModelEntry("watcher", ("chunks",)), writes="watched"))
 
     assert [path.name for path in _chunks(tmp_path, "watched")] == ["all.parquet"]
     assert not list(output_directory(tmp_path, "watched").glob(".*.tmp")), "staging is moved away"
@@ -341,7 +344,7 @@ def test_a_compute_failure_leaves_no_output_and_registers_nothing(
     before = Workspace.open(tmp_path).path.read_bytes()
 
     with pytest.raises(VqaprError) as caught:
-        _run(tmp_path, _definition("partial", DataModelEntry("failing", "partial", ("score",))))
+        _run(tmp_path, _definition("partial", DataModelEntry("failing", ("score",)), writes="partial"))
 
     assert caught.value.stage is Stage.RUN
     assert caught.value.mutation is False
@@ -415,8 +418,9 @@ def test_an_output_breach_is_refused_by_its_code_and_registers_nothing(
             tmp_path,
             _definition(
                 "breach",
-                DataModelEntry(component, "breached", ("score",)),
+                DataModelEntry(component, ("score",)),
                 instruments=instruments,
+                writes="breached",
             ),
         )
 
@@ -443,7 +447,7 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
     strategy side of the same run is empty.
     """
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
-    definition = _definition("factors", DataModelEntry("reversal", "reversal_2d", ("score",)))
+    definition = _definition("factors", DataModelEntry("reversal", ("score",)), writes="reversal_2d")
     ref = preflight_run(tmp_path, definition).datamodel.record_ref
 
     outcome = _run(tmp_path, definition)
@@ -482,27 +486,38 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
 def test_a_second_run_is_refused_before_it_computes(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """The output's name is taken; preflight says so, and `check` asks the same question."""
+    """A run's own published output stands; running again is deliberate, like its record.
+
+    Preflight and `check` let the name through -- it is this run's product, not a taken name
+    (a name that is someone else's is what `run.output_registered` refuses there). The decision
+    to replace it is `run`'s, under the same flag as the record: without `replace_record` the
+    run is refused before it computes and touches no chunk; with it the earlier output is
+    withdrawn and the run publishes afresh (design §2; record 202).
+    """
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
-    definition = _definition("factors", DataModelEntry("reversal", "reversal_2d", ("score",)))
+    definition = _definition("factors", DataModelEntry("reversal", ("score",)), writes="reversal_2d")
     _run(tmp_path, definition)
     chunks_before = _chunks(tmp_path, "reversal_2d")
 
-    with pytest.raises(VqaprError) as refused:
-        preflight_run(tmp_path, definition)
+    frozen = preflight_run(tmp_path, definition)
+    found, blocked = judgments(definition, Workspace.open(tmp_path))
+    assert blocked == [] and found == [], "the run's own output is not a defect of its declaration"
 
-    assert refused.value.stage is Stage.FREEZE
+    with pytest.raises(VqaprError) as refused:
+        run(tmp_path, frozen, store_root=_store(tmp_path))
+
+    assert refused.value.stage is Stage.RUN
     assert refused.value.mutation is False
     (failure,) = refused.value.failures
-    assert failure.code == "datamodel.output_registered"
+    assert failure.code == "run.output_registered"
     assert failure.status is Status.CONFLICT
-    assert "reversal_2d" in failure.observed
-    found, blocked = judgments(definition, Workspace.open(tmp_path))
-    assert blocked == []
-    assert [item.code for item in found] == ["datamodel.output_registered"]
-    assert found[0].source is not None
-    assert found[0].source.key_path == "runs.factors.datamodels.reversal.dataset_id"
+    assert "reversal_2d" in failure.observed and "factors" in failure.observed
+    assert "--force" in failure.fix and "rm dataset" in failure.fix
     assert _chunks(tmp_path, "reversal_2d") == chunks_before, "the refusal touches no chunk"
+
+    again = run(tmp_path, frozen, store_root=_store(tmp_path), replace_record=True)
+    assert set(again.records) == {"reversal"}
+    assert "reversal_2d" in _dataset_ids(tmp_path), "replaced, and standing again"
 
 
 def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
@@ -523,7 +538,7 @@ def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
     ):
         assert (
             register_run(
-                tmp_path, _definition(run_id, DataModelEntry(component_id, dataset_id, ("score",)))
+                tmp_path, _definition(run_id, DataModelEntry(component_id, ("score",)), writes=dataset_id)
             )
             is True
         )
@@ -574,7 +589,7 @@ def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raise
     ):
         assert (
             register_run(
-                tmp_path, _definition(run_id, DataModelEntry(component_id, dataset_id, ("score",)))
+                tmp_path, _definition(run_id, DataModelEntry(component_id, ("score",)), writes=dataset_id)
             )
             is True
         )
@@ -605,12 +620,13 @@ def test_memory_persists_across_the_sessions_of_one_run(
     """
     _prepared(tmp_path, model_price_parquet, ("counter", "CountingModel"))
 
-    _run(tmp_path, _definition("counted", DataModelEntry("counter", "counted", ("calls",))))
+    _run(tmp_path, _definition("counted", DataModelEntry("counter", ("calls",)), writes="counted"))
     _run(
         tmp_path,
         _definition(
             "resumed",
-            DataModelEntry("counter", "resumed", ("calls",), initial_model_memory={"calls": 10}),
+            DataModelEntry("counter", ("calls",), initial_model_memory={"calls": 10}),
+            writes="resumed",
         ),
     )
 
@@ -640,7 +656,7 @@ def test_an_edited_component_computes_and_the_record_says_what_loaded(
     source.write_text(source.read_text(encoding="utf-8") + "\n# drift\n", encoding="utf-8")
 
     outcome = _run(
-        tmp_path, _definition("drifted", DataModelEntry("reversal", "drifted", ("score",)))
+        tmp_path, _definition("drifted", DataModelEntry("reversal", ("score",)), writes="drifted")
     )
 
     after = Workspace.open(tmp_path)

@@ -272,6 +272,7 @@ def main() -> None:
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
+        writes="show001-weights",
     )
 
     # --- One real run -------------------------------------------------------------------
@@ -284,8 +285,10 @@ def main() -> None:
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
+        # The same run again, deliberately: its first pass published `show001-weights`, and a
+        # run replaces its own output the way it replaces its own record (design §2).
         canonical_summary = _signature(
-            run(PROJECT, preflight_run(PROJECT, definition)).result()
+            run(PROJECT, preflight_run(PROJECT, definition), replace_record=True).result()
         )
     finally:
         execution_path.write_bytes(dense_bytes)

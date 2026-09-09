@@ -89,6 +89,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
             {
                 "runs": {
                     "scaffold": {
+                        "writes": "scaffold-weights",
                         "strategies": {"alpha": {}},
                         "sessions_from": journey.DATASET_ID,
                         "timezone": journey.VENUE,

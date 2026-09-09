@@ -200,6 +200,7 @@ def _flow(
         initial_account_snapshot=AccountSnapshot(0, Decimal(100), {"A": Decimal(1)}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A", "B"),
+        writes="remembered-weights",
     )
 
     def window_for_occurrence(occurrence: object) -> ModelWindow:

@@ -78,7 +78,7 @@ LOOKBACK_UNCOVERED = "lookback.uncovered"
 DATASET_UNREGISTERED = "dataset.unregistered"
 WEIGHTS_MODE_CONFLICT = "weights.mode_conflict"
 WEIGHTS_VENUE_CONFLICT = "weights.venue_conflict"
-DATAMODEL_OUTPUT_REGISTERED = "datamodel.output_registered"
+RUN_OUTPUT_REGISTERED = "run.output_registered"
 
 JUDGMENT_CODES = (
     UNIVERSE_ABSENT,
@@ -89,7 +89,7 @@ JUDGMENT_CODES = (
     DATASET_UNREGISTERED,
     WEIGHTS_MODE_CONFLICT,
     WEIGHTS_VENUE_CONFLICT,
-    DATAMODEL_OUTPUT_REGISTERED,
+    RUN_OUTPUT_REGISTERED,
 )
 """Every code `judgments` can emit, in the order the judges run and raise them.
 
@@ -496,6 +496,16 @@ def _judge_member_datasets(
             )
     for dataset_id, fields in unregistered.items():
         close = get_close_matches(dataset_id, sorted(registered), n=1)
+        # The graph's answer first (design §2): if a registered run declares this name as its
+        # `writes`, the dataset is not missing, it is not made yet -- and the repair is to run
+        # that run, not to register anything.
+        producer = workspace.producer_of(dataset_id)
+        if producer is not None and producer != definition.run_id:
+            fix = f"run {producer!r} writes {dataset_id!r}: vqapr run {producer}, then this run"
+        elif close:
+            fix = f"register {dataset_id!r}, or point the component at {close[0]!r}"
+        else:
+            fix = f"register {dataset_id!r} with `vqapr register <declaration>`"
         found.append(
             Failure.bounded(
                 DATASET_UNREGISTERED,
@@ -503,14 +513,15 @@ def _judge_member_datasets(
                 observed=(
                     f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
                     f"registered: {', '.join(sorted(registered)) or '(none)'}"
+                    + (
+                        f"; run {producer!r} declares it as its writes and has not run"
+                        if producer is not None and producer != definition.run_id
+                        else ""
+                    )
                 ),
                 examples=tuple(fields),
                 example_total=len(fields),
-                fix=(
-                    f"register {dataset_id!r}, or point the component at {close[0]!r}"
-                    if close
-                    else f"register {dataset_id!r} with `vqapr register <declaration>`"
-                ),
+                fix=fix,
                 status=Status.MISSING,
                 source=source,
             )
@@ -521,29 +532,29 @@ def _judge_member_datasets(
 def _judge_outputs(
     definition: RunDefinition, registered: dict[str, Any], at: FailureSource
 ) -> list[Failure]:
-    """A datamodel run writes a dataset that does not exist yet (record `148`).
+    """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
 
-    The refusal preflight raises as `datamodel.output_registered` under `freeze`, asked here so
-    `check` cannot certify a run that `run` then refuses.
+    The refusal preflight raises as `run.output_registered` under `freeze`, asked here so `check`
+    cannot certify a run that `run` then refuses. It was a datamodel-only question (record `148`)
+    while only datamodels wrote; a strategy publishes its allocation now, so both do.
     """
-    found: list[Failure] = []
-    for entry in ((definition.datamodel,) if definition.datamodel is not None else ()):
-        if entry.dataset_id not in registered:
-            continue
-        found.append(
-            Failure.bounded(
-                DATAMODEL_OUTPUT_REGISTERED,
-                "a datamodel run writes a dataset that does not exist yet",
-                observed=f"{entry.dataset_id!r} is already registered",
-                fix=(
-                    f"declare a new dataset_id for {entry.component_id!r}, or remove the "
-                    f"existing {entry.dataset_id} registration from the workspace first"
-                ),
-                status=Status.CONFLICT,
-                source=_key(at, "datamodels", entry.component_id, "dataset_id"),
-            )
+    taken = registered.get(definition.writes)
+    # The run's own earlier output is not a defect of the declaration (see preflight).
+    if taken is None or getattr(taken, "produced_by", None) == definition.run_id:
+        return []
+    return [
+        Failure.bounded(
+            RUN_OUTPUT_REGISTERED,
+            "a run writes a dataset that does not exist yet",
+            observed=f"{definition.writes!r} is already registered",
+            fix=(
+                f"declare a new `writes` for run {definition.run_id!r}, or withdraw the "
+                f"existing {definition.writes} first: vqapr rm dataset {definition.writes}"
+            ),
+            status=Status.CONFLICT,
+            source=_key(at, "writes"),
         )
-    return found
+    ]
 
 
 def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> datetime | None:

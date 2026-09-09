@@ -178,11 +178,12 @@ runs:
       # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
       mode: LONG_ONLY                # {_ACCOUNT_MODES}
       positions: {{}}                  # mapping of instrument -> quantity, or empty
-    strategies:                      # one entry per registered StrategyModel to try
-      my-alpha: {{}}
-      # my-other-alpha:
-      #   constraints: [constraint-component-id]
-      #   initial_model_memory: {{}}
+    writes: my-alpha-weights         # the dataset this run puts in the warehouse: its allocation,
+                                     #   one row per instrument per decision. Other runs read it
+    strategy:                        # the ONE registered StrategyModel this run executes
+      component: my-alpha
+      # constraints: [constraint-component-id]
+      # initial_model_memory: {{}}
 """
 
 
@@ -237,11 +238,10 @@ def _declaration(
                 "sessions_from": dataset_id,
                 "timezone": "Asia/Seoul",
                 "at": "16:00",
-                "datamodels": {
-                    component_id: {
-                        "dataset_id": f"{component_id}-values",
-                        "value_fields": ["value"],
-                    }
+                "writes": f"{component_id}-values",
+                "datamodel": {
+                    "component": component_id,
+                    "value_fields": ["value"],
                 },
             }
         }

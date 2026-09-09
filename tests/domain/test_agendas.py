@@ -7,7 +7,7 @@ import pytest
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.identifiers import agenda_id, occurrence_id
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.flow.engine.loop import DueEvent, OccurrenceEvent
+from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
 
 
 def _local(
@@ -109,9 +109,10 @@ def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
     assert seoul.sort_key()[0] == new_york.sort_key()[0]
 
 
-def test_pending_due_execution_sorts_before_same_time_static_operation() -> None:
+def test_a_market_instant_sorts_before_a_same_time_decision() -> None:
+    """Design §3.1: what was decided earlier fills and is valued before anything new decides."""
     occurrence = _occurrence("callback")
     operation = OccurrenceEvent(occurrence)
-    due = DueEvent(occurrence.evaluation_time, "pending-1")
+    market = MarketEvent(occurrence.evaluation_time)
 
-    assert sorted((operation, due), key=lambda item: item.sort_key()) == [due, operation]
+    assert sorted((operation, market), key=lambda item: item.sort_key()) == [market, operation]

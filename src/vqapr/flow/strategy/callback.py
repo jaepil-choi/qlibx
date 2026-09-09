@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 from typing import NoReturn
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, uuid5
 
 from vqapr.authoring import EconomicAccountView, Hold, Rebalance
 from vqapr.authoring.context import StrategyModelContext
@@ -45,14 +44,12 @@ from vqapr.flow.engine.run_state import (
 )
 from vqapr.flow.strategy.context import (
     _ACCOUNT_IDENTITY,
-    _VALUATION_NAMESPACE,
     CALLBACK_STAGE,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     AcceptedIntent,
     FlowContext,
     OccurrenceTrace,
-    PendingValuation,
     _raise_callback_return_type,
     _shadows_package_table,
 )
@@ -168,15 +165,11 @@ class CallbackHandler:
                 with self._callback_intent_boundary(occurrence, self._context.layer.config):
                     result = self._stamp_intent(result, occurrence, account, window)
 
-            pending_valuation: PendingValuation | None = None
             if isinstance(result, Hold):
+                # A Hold reserves nothing (design §3.1): the book is valued at every market-
+                # clock instant whether or not a decision was made, so there is nothing to carry
+                # to the venue's next print.
                 accepted: Hold | AcceptedIntent = result
-                # A Hold still reaches the execution instant, because the book is still
-                # worth something there and the venue still publishes prices for it.
-                with self._callback_intent_boundary(
-                    occurrence, self._context.frozen_run.execution
-                ):
-                    pending_valuation = self._accept_valuation(occurrence)
             else:
                 with self._callback_intent_boundary(occurrence, result):
                     intent = validate_economic_intent(result)
@@ -219,7 +212,6 @@ class CallbackHandler:
                     lifecycle,
                     recorder,
                     accepted,
-                    pending_valuation,
                     component_memory=component_candidate,
                 )
             with self._context.guard(
@@ -305,28 +297,16 @@ class CallbackHandler:
         lifecycle: LifecycleTrace,
         recorder: InvocationRecorder,
         accepted: Hold | AcceptedIntent,
-        pending_valuation: PendingValuation | None = None,
         *,
         component_memory: Mapping[str, ModelMemory] | None = None,
     ) -> PreparedRunState:
         if isinstance(accepted, Hold):
-            if pending_valuation is None:
-                # Nothing to take: leave whatever the root already had pending untouched.
-                return self._context.state.prepare_callback(
-                    memory,
-                    payload,
-                    lifecycle=lifecycle,
-                    recorder=recorder,
-                    component_memory=component_memory,
-                )
-            # A Hold still carries a pending identity when an execution instant remains,
-            # so the occurrence reaches the venue's prices and values the book there.
+            # Nothing to take: leave whatever the root already had pending untouched.
             return self._context.state.prepare_callback(
                 memory,
                 payload,
                 lifecycle=lifecycle,
                 recorder=recorder,
-                pending_accepted_intent=pending_valuation,
                 component_memory=component_memory,
             )
         return self._context.state.prepare_callback(
@@ -681,56 +661,6 @@ class CallbackHandler:
             )
             self._context.horizon = horizon
         return horizon
-
-    def _accept_valuation(self, occurrence: OperationOccurrence) -> PendingValuation | None:
-        """Bind a no-order occurrence to the execution instant it would have traded at.
-
-        Returns None when this occurrence must not take one, in which case the root's existing
-        pending is left exactly as it was:
-
-        - **An accepted intent is already pending.** It is waiting for its own due execution, and
-          that execution will value the book. Replacing it here would silently discard a decision
-          the Strategy already made and a fill that was going to happen.
-        - **The run declared no execution authority.** A research run that only exercises
-          callbacks never values against venue prices, so a Hold in it stays what it was.
-        - **No execution instant remains in the horizon.** There is nothing left to value
-          against, and a run ending on a Hold must still finalize.
-        """
-        if self._context.state.current.pending_accepted_intent is not None:
-            return None
-        frozen = self._context.frozen_run
-        execution_table = frozen.execution
-        if execution_table is None or frozen.end is None or frozen.start is None:
-            # A run declared without execution authority never values against venue prices. That
-            # is a legitimate configuration -- a research run that only exercises callbacks -- and
-            # a Hold in it stays exactly what it was.
-            return None
-        target = execution_table.select_target(
-            decision_time=occurrence.evaluation_time,
-            end_time=frozen.end,
-            horizon=self.execution_horizon(execution_table),
-        )
-        if target is None:
-            return None
-        return PendingValuation(
-            occurrence=occurrence,
-            decision_time=occurrence.evaluation_time,
-            target=target,
-            valuation_id=self._pending_valuation_key(
-                self._context.frozen_run.identity, CALLBACK_STAGE, occurrence.evaluation_time
-            ),
-        )
-
-    @staticmethod
-    def _pending_valuation_key(identity: object, role: str, instant: datetime) -> UUID:
-        """The pending identity for a valuation, discriminated by role as well as instant.
-
-        The role belongs in the key. Without it, occurrences differing only in role mint the SAME
-        uuid5 at one instant in one run, and `pending_id` is the token that proves a completion
-        matches its own preparation (`run_state.py:346-348`, `:434-436`). Two identical ids would
-        degrade that invariant from a proof to a coincidence.
-        """
-        return uuid5(_VALUATION_NAMESPACE, f"{identity}|{role}|{instant.isoformat()}")
 
     def _accept_intent(
         self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence

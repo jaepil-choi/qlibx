@@ -18,7 +18,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account
@@ -48,7 +47,7 @@ from vqapr.flow.engine.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.engine.loop import DueEvent
+from vqapr.flow.engine.loop import MarketEvent
 from vqapr.flow.engine.run_state import (
     FILL_TABLE,
     AcceptedRunState,
@@ -83,34 +82,6 @@ class AcceptedIntent:
 
 
 @dataclass(frozen=True, slots=True)
-class PendingValuation:
-    """An occurrence that requested no orders but still values the book.
-
-    A `Hold` is not "nothing happened". The venue still publishes prices at the execution
-    instant, and the book is still worth something there. This carries the selected target so the
-    occurrence reaches the execution snapshot, without carrying an intent -- an empty
-    `EconomicPortfolioIntent` would mean "hold no positions", which is the opposite of holding.
-    """
-
-    occurrence: OperationOccurrence
-    decision_time: datetime
-    target: ExactExecutionTarget
-    valuation_id: UUID
-
-    def __post_init__(self) -> None:
-        if self.decision_time != self.occurrence.evaluation_time:
-            raise ValueError("decision_time must be the current occurrence evaluation_time")
-        if self.decision_time.tzinfo is None:
-            raise ValueError("decision_time must be timezone-aware")
-        if self.target.target_at.astimezone(UTC) <= self.decision_time.astimezone(UTC):
-            raise ValueError("execution target must be strictly later than decision_time")
-
-    @property
-    def pending_id(self) -> str:
-        return str(self.valuation_id)
-
-
-@dataclass(frozen=True, slots=True)
 class OccurrenceTrace:
     occurrence: OperationOccurrence
     result: Hold | EconomicPortfolioIntent
@@ -121,7 +92,10 @@ class OccurrenceTrace:
 
 @dataclass(frozen=True, slots=True)
 class DueExecutionTrace:
-    due: DueEvent
+    """What one market-clock instant did: a fill (with its valuation and monitoring) when the
+    pending intent was due here, or a valuation of the held book (and its monitoring)."""
+
+    due: MarketEvent
     result: DueExecutionResult | HeldResult
     state: AcceptedRunState
 
@@ -198,7 +172,8 @@ class ValuationResult:
 
 @dataclass(frozen=True, slots=True)
 class HeldResult:
-    """A held book valued at its execution instant, and what monitoring found there."""
+    """The book valued at a market-clock instant no fill was due at, and what monitoring found
+    there (design §3.1: VALUATION and COMPLIANCE happen at every point of the market clock)."""
 
     valuation: ValuationEvidence
     monitoring: MonitoringResult | None = None
@@ -244,8 +219,6 @@ def _shadows_package_table(table_id: str) -> bool:
     return folded.startswith(DEFAULT_TABLE_PREFIX)
 
 
-_VALUATION_NAMESPACE = UUID("3f1c9a7e-1d4b-4f52-9c8a-6b2e7d0a5f31")
-"""Namespace for the pending identity a no-order occurrence carries into execution."""
 
 _ACCOUNT_IDENTITY = "_ACCOUNT"
 """Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""

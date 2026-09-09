@@ -34,11 +34,9 @@ from vqapr.flow.strategy.context import (
     DEFAULT_TABLES,
     MONITORING_STAGE,
     VALUATION_STAGE,
-    AcceptedIntent,
     FlowContext,
     HeldResult,
     MonitoringResult,
-    PendingValuation,
     ValuationResult,
 )
 
@@ -94,57 +92,58 @@ def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
 
 
 class ValuationHandler:
-    """Values the book at each execution instant from the venue snapshot, commits the mark with
-    the NAV it measured, and judges the committed account right after each commit (record `148`:
-    valuation and monitoring have no clock of their own)."""
+    """Values the book at every market-clock instant from the venue snapshot, commits the mark
+    with the NAV it measured, and judges the committed account right after (design §3.1:
+    VALUATION and COMPLIANCE are stages of the market clock, with no clock of their own)."""
 
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
-    def value_due(self, pending: PendingValuation) -> HeldResult:
-        """Value the book at an execution instant that carried no orders.
+    def value_at(self, instant: datetime) -> HeldResult:
+        """Value the held book at a market-clock instant no fill was due at.
 
         Same instant, same snapshot, same prices an order would have been filled at -- only
-        without an order. The Account is not changed, so no version is consumed.
+        without an order. The Account is not changed, so no version is consumed, and a pending
+        intent whose target is a later instant stays pending.
         """
         execution_table = self._context.frozen_run.execution
         if execution_table is None:
-            raise RuntimeError("due valuation requires frozen execution dataset")
+            raise RuntimeError("valuation requires frozen execution dataset")
         account_state = self._context.state.current.account
         if account_state is None:
-            raise RuntimeError("due valuation requires an AccountState root")
+            raise RuntimeError("valuation requires an AccountState root")
         before = account_state.snapshot
         held_instruments = tuple(before.positions)
 
         with self._context.due_boundary(
             stage=SimulationStage.DUE_SNAPSHOT,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=execution_table,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             snapshot = exact_execution_snapshot(
                 execution_table.table,
-                target_at=pending.target.target_at,
+                target_at=instant,
                 target_instruments=(),
                 held_instruments=held_instruments,
-                trade_price=pending.target.trade_price,
+                trade_price=execution_table.fill.trade_price,
                 session=self._context.scan_session,
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             selected_marks = _marks_from_execution_snapshot(
                 snapshot,
-                pending.target.target_at,
+                instant,
                 previous=account_state.latest_mark,
                 held=before.positions,
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_MARK,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
@@ -152,8 +151,8 @@ class ValuationHandler:
         evidence = ValuationEvidence(
             run_identity=self._context.frozen_run.identity,
             agenda=self._context.layer.agenda,
-            occurrence=pending.occurrence,
-            cutoff=pending.target.target_at,
+            occurrence=None,
+            cutoff=instant,
             account=before,
             marks=mark,
             root_version=self._context.state.current.version,
@@ -161,7 +160,7 @@ class ValuationHandler:
         )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
@@ -170,14 +169,14 @@ class ValuationHandler:
                 mark,
                 expected_version=before.version,
                 provenance=evidence,
-                marked_at=pending.target.target_at,
+                marked_at=instant,
                 observed_at={
                     selected.instrument_id: selected.observed_at for selected in selected_marks
                 },
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
@@ -185,12 +184,11 @@ class ValuationHandler:
             if committed_mark is None:
                 raise RuntimeError("a prepared Account valuation must carry the mark it appends")
             prepared_root = self._context.state.prepare_valuation_only(
-                pending_id=pending.pending_id,
                 account=prepared_account,
                 mark=mark,
                 evidence=evidence,
                 recorder=self.measurement_recorder(
-                    cutoff=pending.target.target_at,
+                    cutoff=instant,
                     account=before,
                     mark=committed_mark,
                     selected=selected_marks,
@@ -198,19 +196,19 @@ class ValuationHandler:
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=account_state,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             self._context.account.commit_valuation(prepared_account)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
+            cutoff=instant,
             owner=account_state,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             self._context.state.publish_valuation_only(prepared_root)
-        return HeldResult(evidence, self.monitor_after_commit(pending))
+        return HeldResult(evidence, self.monitor_at(instant, occurrence=None))
 
     def measurement_recorder(
         self,
@@ -291,20 +289,19 @@ class ValuationHandler:
             return self._context.valuation_service.mark(state.snapshot, ())
         return latest.marks
 
-    def monitor_after_commit(
-        self, pending: AcceptedIntent | PendingValuation
+    def monitor_at(
+        self, cutoff: datetime, *, occurrence: OperationOccurrence | None
     ) -> MonitoringResult | None:
-        """Judge the committed, marked book at the execution instant it was just marked at.
+        """Judge the committed, marked book at the market-clock instant it was just marked at.
 
-        Record `148`: monitoring has no occurrence of its own. It runs right after each commit
-        -- a fill's or a held book's -- reading the committed mark rather than valuing the book a
-        second time, and the constraints read their data as of the fill instant. A run that
-        declared no constraint has nothing to judge and records nothing.
+        Design §3.1 (COMPLIANCE): monitoring has no occurrence of its own. It runs right after
+        each mark -- a fill's or a held book's -- reading the committed mark rather than valuing
+        the book a second time, and the constraints read their data as of that instant. A run
+        that declared no constraint has nothing to judge and records nothing. `occurrence` is
+        the decision a fill settled, when there was one, for the evidence.
         """
         if not self._context.constraints:
             return None
-        occurrence = pending.occurrence
-        cutoff = pending.target.target_at
         with self._context.due_boundary(
             stage=SimulationStage.MONITORING,
             cutoff=cutoff,
@@ -313,7 +310,9 @@ class ValuationHandler:
         ):
             return self._monitor(occurrence, cutoff)
 
-    def _monitor(self, occurrence: OperationOccurrence, cutoff: datetime) -> MonitoringResult:
+    def _monitor(
+        self, occurrence: OperationOccurrence | None, cutoff: datetime
+    ) -> MonitoringResult:
         state = self._context.state.current.account
         if state is None:
             raise RuntimeError("monitoring requires an AccountState root")
@@ -356,7 +355,7 @@ class ValuationHandler:
 
     def _record_findings(
         self,
-        occurrence: OperationOccurrence,
+        occurrence: OperationOccurrence | None,
         report: ConstraintReport,
         cutoff: datetime,
         component_memory: Mapping[str, object],

@@ -570,21 +570,18 @@ class RunStateRepository:
     def prepare_valuation_only(
         self,
         *,
-        pending_id: str,
         account: PreparedAccountValuation,
         mark: MarkBatch,
         evidence: object = None,
         recorder: InvocationRecorder | None = None,
     ) -> PreparedRunState:
-        """Publish a mark taken by an occurrence that requested no orders.
+        """Publish a mark taken at a market-clock instant no fill was due at (design §3.1).
 
-        The Account did not change, so this consumes the pending identity and appends a mark
-        without an ACCOUNT_COMMITTED step. There is no fill to commit. The NAV measured rides
-        along as `recorder` rows, exactly as it does on `prepare_marked`.
+        The Account did not change, so this appends a mark without an ACCOUNT_COMMITTED step,
+        and it leaves the pending intent -- whose target is a LATER instant -- exactly where it
+        was. The NAV measured rides along as `recorder` rows, as it does on `prepare_marked`.
         """
         root = self._root
-        if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
-            raise RuntimeError("due completion pending identity does not match current pending")
         if root.account is None or root.account != account.source:
             raise RuntimeError("prepared Account valuation does not match current root")
         if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
@@ -600,7 +597,7 @@ class RunStateRepository:
                 current_model_state_ref=root.current_model_state_ref,
                 component_state_refs=root.component_state_refs,
                 account=account.next_state,
-                pending_accepted_intent=None,
+                pending_accepted_intent=root.pending_accepted_intent,
                 lifecycle_trace=(
                     *root.lifecycle_trace,
                     LifecycleTrace(LifecycleKind.MARKED, evidence),

@@ -29,7 +29,7 @@ from vqapr.flow.engine.artifacts import (
     FinalizationEvidence,
     SimulationStage,
 )
-from vqapr.flow.engine.loop import DueEvent, EventLoop, OccurrenceEvent
+from vqapr.flow.engine.loop import EventLoop, MarketEvent, OccurrenceEvent
 from vqapr.flow.engine.run_state import (
     RunFinalization,
     RunStateRepository,
@@ -46,7 +46,6 @@ from vqapr.flow.strategy.context import (
     HeldResult,
     MonitoringResult,
     OccurrenceTrace,
-    PendingValuation,
     SimulationResult,
     ValuationResult,
     _require_constraint_identity,
@@ -70,7 +69,6 @@ __all__ = [
     "FailedAfterCommit",
     "MonitoringResult",
     "OccurrenceTrace",
-    "PendingValuation",
     "SimulationResult",
     "StrategyEventLoop",
     "ValuationResult",
@@ -88,13 +86,17 @@ class _InstantOccurrence:
 
 
 class StrategyEventLoop(
-    EventLoop[OccurrenceEvent | DueEvent, OccurrenceTrace | DueExecutionTrace, SimulationResult]
+    EventLoop[
+        OccurrenceEvent | MarketEvent, OccurrenceTrace | DueExecutionTrace, SimulationResult
+    ]
 ):
-    """Dispatch frozen occurrences and one latest accepted pending intent.
+    """Walk the strategy clock and the market clock, merged (design §3).
 
     The Flow owns timestamp stamping, exact execution, account mutation, and marking. The walk
-    itself is `EventLoop`'s, shared with a datamodel run (record `148`); what this adds is
-    the three handlers a scheduled event and a due event are routed to.
+    itself is `EventLoop`'s, shared with a datamodel run (record `148`); what this adds is the
+    market clock -- every instant the execution table has inside the run -- and the three
+    handlers: a market instant fills the pending intent due there or values the held book, and
+    judges the result; an occurrence asks the strategy to decide.
     """
 
     def __init__(
@@ -212,27 +214,63 @@ class StrategyEventLoop(
         ):
             self._callback.load_visible_state()
 
-    def handle(self, event: OccurrenceEvent | DueEvent) -> OccurrenceTrace | DueExecutionTrace:
-        if isinstance(event, DueEvent):
-            return self._handle_due(event)
-        # A scheduled event is a callback, always (record `148`: valuation happens at the execution
-        # instant and monitoring right after each commit, inside the due path; record `182`: an
-        # occurrence carries no role to branch on). `callback` is the whole scheduled side: the
-        # window built for the model and the model's own `decide` (`docs/issues/archive/068`: a user
-        # learns their strategy is 5% of the wall clock from the record, not from cProfile).
+    def events(self) -> tuple[OccurrenceEvent | MarketEvent, ...]:
+        """The strategy clock merged with the market clock (design §3).
+
+        The market clock is every instant the execution table has inside `[start, end]`, read
+        once through the run's horizon -- the same read the fill rule bisects, so the instants a
+        decision can fill at and the instants the book is valued at are one set. A run declared
+        without execution authority has no market clock and is the plain sequence of decisions.
+        """
+        occurrences: tuple[OccurrenceEvent | MarketEvent, ...] = tuple(
+            OccurrenceEvent(item) for item in self.schedule
+        )
+        execution_table = self._context.frozen_run.execution
+        if execution_table is None:
+            return occurrences
+        horizon = self._callback.execution_horizon(execution_table)
+        return (*occurrences, *(MarketEvent(instant) for instant in horizon.instants))
+
+    def handle(
+        self, event: OccurrenceEvent | MarketEvent
+    ) -> OccurrenceTrace | DueExecutionTrace:
+        if isinstance(event, MarketEvent):
+            return self._handle_market(event)
+        # A scheduled event is a callback, always (record `182`: an occurrence carries no role to
+        # branch on). `callback` is the whole scheduled side: the window built for the model and
+        # the model's own `decide` (`docs/issues/archive/068`: a user learns their strategy is 5%
+        # of the wall clock from the record, not from cProfile).
         with self._context.timed("callback"):
             return self._callback.dispatch(event.occurrence)
 
-    def _handle_due(self, due: DueEvent) -> DueExecutionTrace:
+    def _handle_market(self, event: MarketEvent) -> DueExecutionTrace:
+        """One instant of the market clock, in the order design §3.1 fixes.
+
+        EXECUTE when the pending intent's target is this instant, which values and judges the
+        book as part of the fill; otherwise VALUATION of the held book and COMPLIANCE on it. A
+        pending intent whose target has already passed is a broken invariant, not a late fill:
+        targets are selected from this same clock, so the instant was walked.
+        """
         with (
             self._context.timed("due"),
             self._context.guard(
                 SimulationStage.DUE_SNAPSHOT,
-                due.due_time,
+                event.instant,
                 owner=self._context.frozen_run.execution,
             ),
         ):
-            return self._dispatch_pending(due)
+            pending = self._context.state.current.pending_accepted_intent
+            if pending is not None and not isinstance(pending, AcceptedIntent):
+                raise TypeError("run state pending must be an AcceptedIntent")
+            if pending is not None and pending.target.target_at == event.instant:
+                result: DueExecutionResult | HeldResult = self._execution.execute_due(pending)
+                if self._context.state.current.pending_accepted_intent is not None:
+                    raise RuntimeError("due execution failed to consume its pending identity")
+            else:
+                if pending is not None and pending.target.target_at < event.instant:
+                    raise RuntimeError("a pending intent's target instant was never walked")
+                result = self._valuation.value_at(event.instant)
+            return DueExecutionTrace(event, result, self._context.state.current)
 
     def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:
@@ -254,26 +292,3 @@ class StrategyEventLoop(
         ):
             root = self._context.state.finalize(RunFinalization(finalization))
         return SimulationResult(tuple(traces), root)
-
-    def pending(self) -> DueEvent | None:
-        pending = self._context.state.current.pending_accepted_intent
-        if pending is None:
-            return None
-        if not isinstance(pending, (AcceptedIntent, PendingValuation)):
-            raise TypeError("run state pending must be an AcceptedIntent or PendingValuation")
-        return DueEvent(pending.target.target_at, pending.pending_id)
-
-    def _dispatch_pending(self, due: DueEvent) -> DueExecutionTrace:
-        pending = self._context.state.current.pending_accepted_intent
-        if (
-            not isinstance(pending, (AcceptedIntent, PendingValuation))
-            or pending.pending_id != due.pending_id
-        ):
-            raise RuntimeError("pending intent changed while dispatching due execution")
-        if isinstance(pending, PendingValuation):
-            result: DueExecutionResult | HeldResult = self._valuation.value_due(pending)
-        else:
-            result = self._execution.execute_due(pending)
-        if self._context.state.current.pending_accepted_intent is not None:
-            raise RuntimeError("due execution failed to consume its pending identity")
-        return DueExecutionTrace(due, result, self._context.state.current)

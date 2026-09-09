@@ -164,24 +164,45 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+MARKET_CLOCK_KINDS = ("MARKED", "MONITORED")
+"""Lifecycle kinds the MARKET clock writes (design §3.1): one per execution instant, so their
+count is the table's density -- exactly what `UC-TIME-002` lets vary."""
+
+
 def _signature(result: Any) -> dict[str, Any]:
     """What a run is, reduced to values two runs can be compared on.
 
     `SimulationResult` carries object identity - occurrence ids minted per run, trace objects -
-    so comparing the results themselves would report a difference that means nothing. These are
-    the economic facts: how the account ended and how many of each lifecycle event happened.
+    so comparing the results themselves would report a difference that means nothing. Two
+    halves (design §3): `outcome` is what the STRATEGY clock and the account say -- how the
+    account ended, how many decisions were made and settled -- and must not move with the
+    execution table's density (`UC-TIME-002`); `market_clock` is how many instants the book was
+    valued at, which IS the table's density and moves with it on purpose (record `206`).
     """
     final_state = result.final_state
     snapshot = final_state.account.snapshot
     lifecycle: dict[str, int] = {}
     for entry in final_state.lifecycle_trace:
         lifecycle[entry.kind.value] = lifecycle.get(entry.kind.value, 0) + 1
+    decisions = sum(1 for trace in result.occurrences if type(trace).__name__ == "OccurrenceTrace")
     return {
-        "account_version": snapshot.version,
-        "cash": str(snapshot.cash),
-        "positions": {str(key): str(value) for key, value in sorted(snapshot.positions.items())},
-        "lifecycle": dict(sorted(lifecycle.items())),
-        "occurrences": len(result.occurrences),
+        "outcome": {
+            "account_version": snapshot.version,
+            "cash": str(snapshot.cash),
+            "positions": {
+                str(key): str(value) for key, value in sorted(snapshot.positions.items())
+            },
+            "lifecycle": {
+                kind: count
+                for kind, count in sorted(lifecycle.items())
+                if kind not in MARKET_CLOCK_KINDS
+            },
+            "decisions": decisions,
+        },
+        "market_clock": {
+            "valuations": lifecycle.get("MARKED", 0),
+            "instants": len(result.occurrences) - decisions,
+        },
     }
 
 
@@ -299,10 +320,17 @@ def main() -> None:
 
     dense_signature = _json_value(dense_summary)
     canonical_signature = _json_value(canonical_summary)
-    if dense_signature != canonical_signature:
+    if dense_signature["outcome"] != canonical_signature["outcome"]:
         raise AssertionError(
             "non-selected execution row density changed outcome: "
-            f"{dense_signature} != {canonical_signature}"
+            f"{dense_signature['outcome']} != {canonical_signature['outcome']}"
+        )
+    # The other half moves BY DESIGN (§3, record `206`): the extra 10:00 rows are extra points
+    # of the market clock, and the book is valued at each of them.
+    if dense_signature["market_clock"]["valuations"] <= canonical_signature["market_clock"]["valuations"]:
+        raise AssertionError(
+            "a denser execution table must value the book at more instants: "
+            f"{dense_signature['market_clock']} vs {canonical_signature['market_clock']}"
         )
 
     # --- An invalid venue table is refused at registration, without workspace mutation --

@@ -327,7 +327,9 @@ class ExecutionHandler:
             )
         # Monitoring judges the committed, marked book right here (record `148`): there is no
         # later occurrence for it, and nothing later could see more than the fill instant did.
-        monitoring = self._valuation.monitor_after_commit(pending)
+        monitoring = self._valuation.monitor_at(
+            pending.target.target_at, occurrence=pending.occurrence
+        )
         due_evidence = DueExecutionEvidence(commit_evidence, mark_evidence, feedback_evidence)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,

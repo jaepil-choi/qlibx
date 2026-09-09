@@ -15,13 +15,18 @@ itself, so the dependency is visible on the strategy where it belongs rather tha
 component's own `inputs()`. Observing whether the committed book actually respected a limit is a
 different question with a different clock, and `vqapr.compliance` answers it (design §7.2).
 
+Every bound returned lands on the canonical grid `optimize` enforces, rounded inward
+(`docs/issues/092`): a box built here is a box the optimiser accepts.
+
 Record `208`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from decimal import Decimal
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+
+from vqapr.portfolio.optimize import QUANTUM
 
 __all__ = ["WeightBox", "intersect", "no_short", "single_name_cap"]
 
@@ -51,6 +56,34 @@ def _finite(value: object, *, name: str) -> Decimal:
     if isinstance(value, bool) or not isinstance(value, Decimal) or not value.is_finite():
         raise TypeError(f"{name} must be a finite Decimal; got {value!r}")
     return value
+
+
+def _ceiling(value: Decimal) -> Decimal:
+    """An upper bound on the canonical grid, rounded DOWN: tighter, never looser."""
+    return value.quantize(QUANTUM, rounding=ROUND_FLOOR)
+
+
+def _floor(value: Decimal) -> Decimal:
+    """A lower bound on the canonical grid, rounded UP: tighter, never looser."""
+    return value.quantize(QUANTUM, rounding=ROUND_CEILING)
+
+
+def _on_grid(lower: dict[str, Decimal], upper: dict[str, Decimal]) -> WeightBox:
+    """Every bound the kit returns lands on `optimize`'s grid, each side rounded inward.
+
+    A benchmark weight arrives from a DOUBLE field as a Decimal with an exponent of -16 or so,
+    and `optimize` refuses any bound finer than 1E-12 rather than round it -- so the box the kit
+    produced could not be handed to the optimiser it exists to feed (`docs/issues/092`). The
+    rounding DIRECTION is a compliance question: an upper bound rounded up or a lower bound
+    rounded down would let a book through that the mandate forbids, and nothing downstream would
+    notice, because the book would be inside the box it was given. So the direction is decided
+    here, once, inside the package that owns the meaning of "bound", rather than left to every
+    caller. Coarser bounds are unchanged by quantising.
+    """
+    return (
+        {name: _floor(value) for name, value in lower.items()},
+        {name: _ceiling(value) for name, value in upper.items()},
+    )
 
 
 def no_short(instruments: Iterable[str]) -> WeightBox:
@@ -90,7 +123,7 @@ def single_name_cap(
     for name in names:
         weight = benchmark.get(name, FLOOR)
         ceilings[name] = max(limit, _finite(weight, name=f"benchmark[{name!r}]"))
-    return {name: -ceiling for name, ceiling in ceilings.items()}, ceilings
+    return _on_grid({name: -ceiling for name, ceiling in ceilings.items()}, ceilings)
 
 
 def intersect(*boxes: WeightBox) -> WeightBox:
@@ -122,4 +155,4 @@ def intersect(*boxes: WeightBox) -> WeightBox:
                 f"the boxes do not intersect on {name!r}: lower {lower[name]} exceeds upper "
                 f"{upper[name]}"
             )
-    return lower, upper
+    return _on_grid(lower, upper)

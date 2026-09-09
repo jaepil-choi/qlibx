@@ -21,6 +21,13 @@ Each box is a pair of `{name: Decimal}` mappings covering the same names, which 
 `optimize(lower=..., upper=...)` takes. A box that misses a name is refused, because a missing
 bound would silently widen the feasible set rather than fail.
 
+Every bound the kit returns is on the canonical `1E-12` grid `optimize` enforces, **rounded inward**
+— ceilings down, floors up — so a benchmark weight read from a DOUBLE field (sixteen decimals)
+becomes a bound the optimiser accepts without the caller choosing a rounding direction. The
+direction matters: rounding a ceiling up is a mandate breach nothing would report. If you build a
+bound by hand, quantize it the same way before passing it to `optimize`; a finer bound is refused
+by name.
+
 Long-only is **emergent**: `no_short` floors at zero, `single_name_cap` mirrors its ceiling on
 the short side, and only their intersection is long-only-with-a-cap. Neither alone is.
 

@@ -110,7 +110,11 @@ def _on_grid(value: Decimal, *, name: str) -> Decimal:
     if finite_exponent(value) < QUANTIZATION_EXPONENT:
         raise OptimizeRefusal(
             f"{name} has exponent finer than the canonical grid {QUANTUM}; "
-            "coarser bounds are accepted, finer ones are not"
+            "coarser bounds are accepted, finer ones are not. Build the box with "
+            "vqapr.portfolio.bounds (no_short, single_name_cap, intersect), which rounds inward "
+            f"onto the grid; or quantize yourself, an upper bound with ROUND_FLOOR and a lower "
+            f"bound with ROUND_CEILING to {QUANTUM}, so rounding tightens a mandate and never "
+            "loosens it"
         )
     return value
 

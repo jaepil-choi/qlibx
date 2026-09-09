@@ -46,6 +46,7 @@ from vqapr.public import (
     register_data_model,
     register_dataset,
     register_exchange,
+    register_instruments,
     register_strategy_model,
     run,
 )
@@ -423,6 +424,9 @@ def main() -> None:
     ).result()
 
     register_strategy_model(PROJECT, "showcase-strategy", paths["strategy"], "ReversalLongShort")
+    # What each id IS, declared by the project before anything orders it (design §6.2). The
+    # universe is index constituents, so every name is a share.
+    register_instruments(PROJECT, {name: "stock" for name in universe})
     register_exchange(PROJECT, "showcase-exchange", paths["exchange"], "ShowcaseExchange")
     register_constraint(PROJECT, "showcase-constraint", paths["constraint"], "SingleNameCap")
 

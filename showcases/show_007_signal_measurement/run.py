@@ -67,6 +67,7 @@ from vqapr.public import (
     preflight_run,
     register_dataset,
     register_exchange,
+    register_instruments,
     register_strategy_model,
     run,
 )
@@ -564,6 +565,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     paths = _write_components(project, universe)
     register_strategy_model(project, "show007-signal", paths["signal"], "ReversalSignalStrategy")
+    # Benchmark constituents are shares; the project says so before the run orders them.
+    register_instruments(project, {name: "stock" for name in universe})
     register_exchange(project, "show007-academic", paths["academic"], "ShowcaseAcademicExchange")
 
 

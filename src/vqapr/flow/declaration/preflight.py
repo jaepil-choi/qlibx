@@ -33,6 +33,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.roster import require_declared_roster
 from vqapr.project.run import (
     ConstraintSet,
     DataModelEntry,
@@ -765,6 +766,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.
     exchange = _registered_exchange(workspace, definition.exchange or "")
+    # The venue needs to know what every ordered id IS (design §6.2). Which ids get ordered is
+    # the strategy's to decide at run time; that NOTHING is declared is knowable now.
+    require_declared_roster(workspace, run_id=definition.run_id)
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_table = bound_execution_table(workspace, definition)
     validate_execution_table(execution_table).raise_if_failed()

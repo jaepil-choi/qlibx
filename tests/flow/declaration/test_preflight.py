@@ -23,7 +23,7 @@ from vqapr.extension.loading import load_exchange
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.domain.model_state import prepare_model_state
-from vqapr.public import register_dataset
+from vqapr.public import register_dataset, register_instruments
 from vqapr.project.store import Workspace
 
 _ZONE = ZoneInfo("Asia/Seoul")
@@ -111,6 +111,9 @@ def _setup(
         ),
         SourceSpec.of("prices-source", model_price_parquet),
     )
+    # A strategy run needs the project to have declared what its instruments ARE (design
+    # §6.2); preflight refuses `roster.absent` otherwise.
+    register_instruments(root, {"ABC": "stock"})
     workspace = Workspace.open(root)
     # Same root as the tests' own `_execution_exchange` calls, so the shared
     # `execution-source` declaration stays byte-identical rather than conflicting.

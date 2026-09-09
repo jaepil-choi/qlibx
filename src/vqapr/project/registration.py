@@ -40,6 +40,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
+from vqapr.domain.instruments import export_roster
 from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.prepare import prepare_component
@@ -122,6 +123,35 @@ def register_dataset(
     # a full read can establish, and the next reader would have to read the file again to get it.
     with Workspace.transaction(project_root) as transaction:
         return transaction.register_dataset(measured, source)
+
+def register_instruments(
+    project_root: str | Path,
+    universe: Mapping[str, str],
+    *,
+    directory: str | Path | None = None,
+) -> dict[str, Any]:
+    """Declare what each instrument IS and register the roster, in one call (design §6.2).
+
+    `universe` is the flat `{instrument_id: kind}` an author naturally builds. The per-kind
+    tables are exported under `directory` (default `<project_root>/instruments`) and registered
+    through the same door `vqapr register instruments.yaml` uses, so an in-process caller and a
+    CLI user land on one roster slot with one receipt. Returns that receipt: `instruments`,
+    `by_kind`, `digest`.
+
+    Re-registering is ordinary -- a roster grows -- and replaces the whole slot.
+    """
+    root = Path(project_root)
+    target = Path(directory) if directory is not None else root / "instruments"
+    written = export_roster(universe, target)
+    document = {
+        "instruments": {"tables": {kind: path.name for kind, path in sorted(written.items())}}
+    }
+    registered = apply(document, root, base=target)
+    (receipt,) = registered["instruments"]
+    if not isinstance(receipt, dict):
+        raise RuntimeError("apply registered a roster without its receipt")
+    return receipt
+
 
 def _mapping(value: object, *, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):

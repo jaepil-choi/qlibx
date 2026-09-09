@@ -36,9 +36,10 @@ Every listing gets `access=ListingAccess.LONG_ONLY`. See
 [access-and-account.md](access-and-account.md) before pairing it with an account.
 
 **A venue names no categories at all.** `KrxExchange` takes instrument ids; what each one *is*
-comes from the registered roster at fill time. A KRX venue run without a roster **refuses to
-charge** rather than assuming everything is a share — which is the right refusal, and a reason to
-register the roster before the first costed run.
+comes from the registered roster at fill time. No strategy run starts without a roster
+(`roster.absent`), and an order for an id the roster never described fails the run
+(`instrument.undeclared`) rather than charging it as a share — the roster names what is ordered,
+not the whole execution table.
 
 ## The name is not the claim
 

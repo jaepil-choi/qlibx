@@ -34,6 +34,7 @@ from vqapr.public import (
     preflight_run,
     register_dataset,
     register_exchange,
+    register_instruments,
     register_strategy_model,
     run,
 )
@@ -250,6 +251,8 @@ def main() -> None:
     )
 
     register_strategy_model(PROJECT, "showcase-strategy", strategy_path, "ShowcaseStrategy")
+    # What the one name IS, declared before the run that orders it (design §6.2).
+    register_instruments(PROJECT, {"A": "stock"})
     register_exchange(
         PROJECT, "showcase-exchange", ROOT / "show001_exchange.py", "ShowcaseExchange",
     )

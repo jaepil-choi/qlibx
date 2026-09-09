@@ -130,6 +130,7 @@ from vqapr.project.registration import (
     register_constraint,
     register_data_model,
     register_exchange,
+    register_instruments,
     register_strategy_model,
 )
 from vqapr.project.registration import register_dataset as register_dataset
@@ -288,6 +289,7 @@ __all__ = (
     "register_data_model",
     "register_dataset",
     "register_exchange",
+    "register_instruments",
     "register_run",
     "register_strategy_model",
     "rescale",

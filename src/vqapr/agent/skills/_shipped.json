@@ -15,6 +15,7 @@
     "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0"
   },
   "analyze-result/references/result-tables.md": {
+    "916f0e913aac429c94b450d2c17f606aa064c41c58ef4f99caa6dd394547f1c8": "0.9.0.dev1",
     "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0"
   },
   "analyze-result/scripts/check_plotting_env.py": {
@@ -85,6 +86,7 @@
     "bf0cabc109fad25075dde886859608648b3f3ada6573a15cbca267264e555a7e": "0.8.0"
   },
   "make-exchange/references/execution-profiles.md": {
+    "9fdbf4e8ee9366ca6e65cee5c6c914ace9b2dbf0e53c61793a928980d6528a8f": "0.9.0.dev1",
     "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0"
   },
   "make-exchange/references/fill-timing.md": {
@@ -158,6 +160,7 @@
   },
   "run-backtest/references/run-declaration.md": {
     "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "77061b8a63ff07034ffe44c8d55a7604fd2da4909ccf42ee4ec984bf6477dae8": "0.9.0.dev1",
     "930a7e3e6ca4b0ec150470bba4dd06a9b36e410b7b0472f78c9a05ab3bb1b1cc": "0.9.0.dev1"
   },
   "run-backtest/references/watching-and-failures.md": {

@@ -178,3 +178,4 @@ def absent_workspace(refusal: VqaprError) -> bool:
     return bool(refusal.failures) and all(
         failure.code == WORKSPACE_ABSENT for failure in refusal.failures
     )
+

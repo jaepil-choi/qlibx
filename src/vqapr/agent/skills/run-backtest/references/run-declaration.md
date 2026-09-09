@@ -59,10 +59,13 @@ A datamodel is a run too. Its declaration names `datamodel:` instead of `strateg
 Three declaration kinds, each with its own `vqapr new` scaffold: datasets (the venue table a run fills against is a dataset with an `execution:` role, and the run picks its `trade_price`), an
 exchange, and at least one component.
 
-**And it wants a fifth: the instrument roster.** Not required — a run without one completes. But
-every fill then records `kind: None`, cost by kind collapses into one `unknown` bucket, and on a
-costed venue every name is charged as if it were the same thing. `vqapr run` states which roster it
-read, or that it read none.
+**And a strategy run requires a fifth: the instrument roster.** The venue must know what every
+ordered id *is* before it can size or charge it, so a project that has declared no instrument is
+refused at `check` and at `run` (`roster.absent`, 412) — `vqapr new instruments <ids...>` writes the
+tables and the declaration, `vqapr register instruments.yaml` registers them. The roster does not
+have to cover the whole execution table: only what the strategy orders. An order for an id the
+roster never described fails the run at the fill instant (`instrument.undeclared`), naming every
+undeclared id at once. `vqapr run` states which roster it read.
 
 ## Editing a run declaration
 

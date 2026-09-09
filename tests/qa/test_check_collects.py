@@ -39,6 +39,7 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration import judgments as judgments_module
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
+from vqapr.public import register_instruments
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 
@@ -123,6 +124,9 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         encoding="utf-8",
     )
     _register_component(root, "venue", ComponentKind.EXCHANGE, venue)
+    # Declared, so preflight reaches the refusal this fixture is built for rather than stopping
+    # at `roster.absent` -- which is a judgment code, and this test counts the non-judgment one.
+    register_instruments(root, {"A": "stock"})
     with Workspace.transaction(root) as t:
         t.register_run(
             RunDefinition(

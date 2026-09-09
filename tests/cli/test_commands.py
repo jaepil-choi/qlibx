@@ -121,9 +121,38 @@ datasets:
     return path
 
 
-def _workspace_for_run(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Everything `run` needs, reached through the CLI alone."""
+def _register_roster(
+    root: Path, capsys: pytest.CaptureFixture[str], universe: dict[str, str]
+) -> dict:
+    """Declare what each id IS, through `vqapr register` -- the way a user does."""
+    from vqapr.domain.instruments import export_roster
+
+    written = export_roster(universe, root / "roster")
+    declaration = root / "roster.yaml"
+    declaration.write_text(
+        "instruments:\n  tables:\n"
+        + "".join(
+            f"    {kind}: {path.relative_to(root).as_posix()}\n"
+            for kind, path in sorted(written.items())
+        ),
+        encoding="utf-8",
+    )
+    code, registered = _cli(capsys, "--project-root", str(root), "register", str(declaration))
+    assert code == 0, registered
+    return registered
+
+
+def _workspace_for_run(
+    root: Path, capsys: pytest.CaptureFixture[str], *, roster: bool = True
+) -> None:
+    """Everything `run` needs, reached through the CLI alone.
+
+    `roster=False` leaves the instruments undeclared, for the tests that assert what a strategy
+    run says about that (design §6.3: preflight refuses it).
+    """
     observation, execution = _parquets(root)
+    if roster:
+        _register_roster(root, capsys, {"A": "stock"})
 
     code, payload = _cli(
         capsys, "--project-root", str(root),
@@ -661,7 +690,7 @@ def test_list_instruments_answers_without_opening_the_sidecar_by_hand(
     assert code == 0, empty
     assert empty["count"] == 0 and empty["items"] == []
 
-    _workspace_for_run(tmp_path, capsys)
+    _workspace_for_run(tmp_path, capsys, roster=False)
     code, still_empty = _cli(capsys, "--project-root", str(tmp_path), "list", "instruments")
     assert code == 0 and still_empty["count"] == 0
 
@@ -707,50 +736,38 @@ def test_list_instruments_answers_without_opening_the_sidecar_by_hand(
 def test_a_run_says_whether_it_knew_what_its_instruments_were(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A run with no roster completes with every fill `kind: None`, and used to say nothing.
+    """A strategy run over a project that declared no instrument is refused before it freezes.
 
-    No refusal, no warning, nothing in the success envelope distinguished it from a run whose
-    categories were known. On an academic venue that is harmless. On a KRX-shaped venue every name
-    is charged identically while the record says the categories were never known, and
-    the report's cost by kind collapses to one "unknown" bucket -- the report that would expose it is the
-    one the gap erases.
-
-    Reported on the SUCCESS path, because the run is legitimate. What was missing was not a
-    refusal but a statement of what the run was computed against.
+    It used to complete with every fill `kind: None` and say so on the success path. Design §6.3
+    turned that into a precondition: the venue must know what every ordered id IS, and zero
+    declarations means no order can succeed, so `check` and `run` both refuse `roster.absent`
+    and name the two commands that declare one. Once a roster is registered the run completes
+    and the envelope and the frozen record both state which roster it read.
     """
     import json as _json
 
-    from vqapr.domain.instruments import export_roster
     from vqapr.record import read_strategy_record
 
-    _workspace_for_run(tmp_path, capsys)
+    _workspace_for_run(tmp_path, capsys, roster=False)
     store = tmp_path / ".vqapr"
-    for run_id in ("bare", "categorised"):
-        code, registered_run = _register_run(tmp_path, capsys, run_id)
-        assert code == 0, registered_run
+    code, registered_run = _register_run(tmp_path, capsys, "categorised")
+    assert code == 0, registered_run
 
-    code, without = _cli(capsys, "--project-root", str(tmp_path), "run", "bare")
+    code, judged = _cli(capsys, "--project-root", str(tmp_path), "check", "categorised")
+    assert code == 1, judged
+    codes = [failure["code"] for failure in judged["failures"]]
+    # Once by the judge, once by the freeze (record `171`): one fact, two doors.
+    assert codes.count("roster.absent") == 2, codes
+    assert all(failure["status"] == 412 for failure in judged["failures"]), judged["failures"]
+    assert "vqapr register" in judged["failures"][0]["fix"]
 
-    assert code == 0, without
-    assert without["roster"]["known"] is False
-    # The note names the consequence and the remedy, not merely the absence.
-    assert "kind: None" in without["roster"]["note"]
-    assert "vqapr register" in without["roster"]["note"]
-    bare_ref = _strategy_ref(tmp_path, capsys, "bare")
-    assert read_strategy_record(store, "bare", bare_ref)["roster"] is None
+    code, refused = _cli(capsys, "--project-root", str(tmp_path), "run", "categorised")
+    assert code == 1, refused
+    assert refused["ok"] is False
+    assert "roster.absent" in {failure["code"] for failure in refused["failures"]}
+    assert not (store / "runs" / "categorised").exists(), "refused before anything was written"
 
-    written = export_roster({"A": "stock"}, tmp_path / "roster")
-    declaration = tmp_path / "roster.yaml"
-    declaration.write_text(
-        "instruments:\n  tables:\n"
-        + "".join(
-            f"    {kind}: {path.relative_to(tmp_path).as_posix()}\n"
-            for kind, path in sorted(written.items())
-        ),
-        encoding="utf-8",
-    )
-    code, registered = _cli(capsys, "--project-root", str(tmp_path), "register", str(declaration))
-    assert code == 0, registered
+    registered = _register_roster(tmp_path, capsys, {"A": "stock"})
     digest = registered["registered"]["instruments"][0]["digest"]
 
     code, with_roster = _cli(capsys, "--project-root", str(tmp_path), "run", "categorised")
@@ -793,7 +810,7 @@ def test_one_run_command_opens_the_workspace_document_once(
 
     assert code == 0, payload
     assert len(opened) == 1, f"`run` opened the workspace {len(opened)} times: {opened}"
-    assert payload["roster"]["known"] is False, "the envelope's roster came from the run's read"
+    assert payload["roster"]["known"] is True, "the envelope's roster came from the run's read"
 
 
 def test_a_run_says_where_its_time_went(

@@ -438,7 +438,7 @@
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "02c62b6f254cb265",
+    "digest": "c96a62eb6bdacc19",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -493,7 +493,7 @@
       "stage",
       "tax"
     ],
-    "digest": "227d5efd27e8d7ac",
+    "digest": "e785459ea610822c",
     "kind": "table",
     "rows": 64
   },
@@ -516,7 +516,7 @@
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "8196db9d1c5bf11f",
+    "digest": "80bfb8d7187771e6",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -571,7 +571,7 @@
       "stage",
       "tax"
     ],
-    "digest": "227d5efd27e8d7ac",
+    "digest": "e785459ea610822c",
     "kind": "table",
     "rows": 64
   },

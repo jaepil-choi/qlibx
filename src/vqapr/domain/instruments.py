@@ -64,6 +64,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar
 
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
+
 
 class InstrumentKind(StrEnum):
     """The closed vocabulary a cost band is allowed to select on.
@@ -494,3 +496,66 @@ def read_roster_table(path: Path | str) -> dict[str, str]:
             )
         resolved[instrument_id] = kind
     return resolved
+
+
+INSTRUMENT_UNDECLARED = "instrument.undeclared"
+"""An order names an id the roster never described (design §6.3).
+
+A configuration error, not an economic fact, so the run fails rather than recording a typed
+zero-dealt fill. Here, in `domain/`, because two packages consume it -- the engine raises it and
+the CLI's readers name it -- and a value two packages exchange lives at layer 0.
+"""
+
+
+def undeclared_instruments(
+    registry: InstrumentRoster | None, instruments: Iterable[str]
+) -> tuple[str, ...]:
+    """The ids among `instruments` the roster never described, in order, each once.
+
+    `None` for the roster means nothing was declared, so every id is undeclared: a run assembled
+    without a workspace has no roster to consult and the gate says so rather than guessing.
+    """
+    seen: dict[str, None] = {}
+    for instrument_id in instruments:
+        if registry is None or not registry.declares(instrument_id):
+            seen.setdefault(instrument_id, None)
+    return tuple(seen)
+
+
+def require_declared(
+    registry: InstrumentRoster | None, instruments: Iterable[str], *, exchange_id: str
+) -> None:
+    """Refuse an order batch that names an undeclared instrument -- ALL of them, in one refusal.
+
+    Design §6.3: which ids a strategy orders is known only once it has decided, so this is the
+    runtime half of the gate preflight opens. It runs on the instruments the planner may order --
+    the intent's targets and the book's holdings -- before planning, because planning itself
+    charges through the roster and would stop at the first unknown id; the reader is owed the
+    whole list, not the alphabetically first name.
+    """
+    missing = undeclared_instruments(registry, instruments)
+    if not missing:
+        return
+    raise VqaprError(
+        stage=Stage.RUN,
+        failures=[
+            Failure.bounded(
+                INSTRUMENT_UNDECLARED,
+                (
+                    "every instrument an order names must be declared in the project's roster; "
+                    "the venue sizes and charges by what the roster says an id is"
+                ),
+                status=Status.PRECONDITION,
+                observed=(
+                    f"{len(missing)} undeclared instrument(s) reached {exchange_id!r}: "
+                    f"{', '.join(missing)}"
+                ),
+                fix=(
+                    "add each id above to the roster tables and re-register them "
+                    "(`vqapr register instruments.yaml`), or stop the strategy from ordering it"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition="declare the instruments named above, then retry",
+    )

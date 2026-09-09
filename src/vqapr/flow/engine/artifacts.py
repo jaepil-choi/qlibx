@@ -77,6 +77,7 @@ class SimulationStage(StrEnum):
     CALLBACK_INTENT = "simulation.callback.intent"
     CALLBACK_PUBLICATION = "simulation.callback.publication"
     DUE_SNAPSHOT = "simulation.due.snapshot"
+    DUE_INSTRUMENT_DECLARATION = "simulation.due.instrument_declaration"
     DUE_ORDER_PLANNING = "simulation.due.order_planning"
     DUE_EXCHANGE_EXECUTION = "simulation.due.exchange_execution"
     DUE_ACCOUNT_PREPARATION = "simulation.due.account_preparation"

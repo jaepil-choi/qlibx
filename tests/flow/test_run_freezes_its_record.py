@@ -125,7 +125,7 @@ def test_the_records_and_show_cannot_drift_apart(tmp_path: Path) -> None:
     for field in STRATEGY_FIELDS:
         if field not in ("contract", "roster"):
             assert record[field] is not None, field
-    assert record["roster"] is None, "the sample registers no roster, and the record says so"
+    assert record["roster"]["by_kind"] == {"stock": 10}, "the sample declares its ten names"
     assert record["period"]["occurrences"] > 0
     # The pre-139 run record's field set is still what `show` projects for a record.json run.
     assert "declared_digest" in RECORD_FIELDS

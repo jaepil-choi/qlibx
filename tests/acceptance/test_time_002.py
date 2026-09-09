@@ -31,6 +31,8 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.instruments import InstrumentRoster
+from vqapr.domain.instruments import instruments as _instruments
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
 from vqapr.exchange.execution_table import (
@@ -274,6 +276,8 @@ def _flow(
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_exchange(),
         constraints=constraints,
+        # What the two names ARE (design §6.2): an order for an undeclared id fails the run.
+        registry=InstrumentRoster(_instruments({"A": "stock", "B": "stock"})),
     )
 
 

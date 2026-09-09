@@ -43,6 +43,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.declaration.preflight import derived_agenda
+from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import RunDefinition
 
 # `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
@@ -71,6 +72,7 @@ JUDGMENT_STAGE = Stage.CHECK
 # a line here fails the suite rather than the reader. Record `171`: the codes lost their `check.`
 # prefix; `status` says who must act and `stage` (CHECK) says which operation was under way.
 UNIVERSE_ABSENT = "universe.absent"
+ROSTER_ABSENT = "roster.absent"
 PERIOD_UNCOVERED = "period.uncovered"
 EXECUTION_NOT_AFTER_DECISION = "execution.not_after_decision"
 FIELD_ABSENT = "field.absent"
@@ -82,6 +84,7 @@ RUN_OUTPUT_REGISTERED = "run.output_registered"
 
 JUDGMENT_CODES = (
     UNIVERSE_ABSENT,
+    ROSTER_ABSENT,
     PERIOD_UNCOVERED,
     EXECUTION_NOT_AFTER_DECISION,
     FIELD_ABSENT,
@@ -163,6 +166,7 @@ def judgments(
 
     judges: tuple[tuple[str, Callable[[], list[Failure]]], ...] = (
         ("universe", lambda: _judge_universe(definition, at)),
+        ("roster", lambda: _judge_roster(definition, workspace, at)),
         ("period", lambda: _judge_period(definition, at)),
         (
             "execution_ordering",
@@ -242,6 +246,21 @@ def _judge_universe(definition: RunDefinition, at: FailureSource) -> list[Failur
             source=_key(at, "instruments"),
         )
     ]
+
+
+def _judge_roster(
+    definition: RunDefinition, workspace: Workspace, at: FailureSource
+) -> list[Failure]:
+    """A strategy run over a project that has declared no instrument cannot fill an order.
+
+    Design §6.3, the preflight half asked here so `check` reports it beside the run's other
+    defects: zero declarations means no order can succeed, so there is no reason to run. A
+    datamodel run orders nothing and is not asked. Only the pointer is read; the tables are read
+    once, at run start.
+    """
+    if definition.strategy is None or workspace.registered_instruments() is not None:
+        return []
+    return [absent_roster_failure(definition.run_id, source=_key(at, "exchange"))]
 
 
 def _instant(value: object) -> datetime | None:

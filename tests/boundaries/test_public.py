@@ -290,6 +290,7 @@ def test_public_exports_are_fixed() -> None:
         "register_data_model",
         "register_dataset",
         "register_exchange",
+        "register_instruments",
         "register_run",
         "register_strategy_model",
         "rescale",

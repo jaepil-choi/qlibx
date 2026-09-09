@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from vqapr.domain.instruments import require_declared
 from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.planning import plan_orders
@@ -102,6 +103,20 @@ class ExecutionHandler:
             Decimal("0"),
         )
         weights = {target.instrument_id: target.weight for target in targets}
+        # Orders are a subset of the declared instruments (design §6.2), checked on everything
+        # the planner may order -- the targets and the holdings -- before planning charges through
+        # the roster and stops at the first unknown id. Every undeclared id, in one refusal.
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_INSTRUMENT_DECLARATION,
+            cutoff=pending.target.target_at,
+            owner=self._context.frozen_run.exchange,
+            kind=SimulationFailureKind.PRE_COMMIT,
+        ):
+            require_declared(
+                self._context.registry,
+                (*target_instruments, *held_instruments),
+                exchange_id=self._context.exchange.rules.exchange_id,
+            )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ORDER_PLANNING,
             cutoff=pending.target.target_at,

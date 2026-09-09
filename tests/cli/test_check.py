@@ -43,6 +43,7 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
+from vqapr.public import register_instruments
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 RUN = "probe"
@@ -198,6 +199,9 @@ def workspace(tmp_path: Path) -> Path:
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
     _venue_dataset(tmp_path)
+    # Declared so the four defects above are the ONLY findings: an undeclared roster is a fifth
+    # (`roster.absent`), asked by its own judge, and tested on its own.
+    register_instruments(tmp_path, {"A": "stock"})
     with Workspace.transaction(tmp_path) as t:
         t.register_run(_definition())
     return tmp_path

@@ -127,7 +127,7 @@ RUNNER = textwrap.dedent(
     from vqapr.public import (
         AccountMode, AccountSnapshot, DatasetRegistration,
         RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
-        register_dataset, register_exchange, register_strategy_model, run,
+        register_dataset, register_exchange, register_instruments, register_strategy_model, run,
     )
 
     import authored_strategies
@@ -171,6 +171,7 @@ RUNNER = textwrap.dedent(
     source = Path(authored_strategies.__file__).resolve()
     register_strategy_model(root, "clock-strategy", source, "MonthlyDecider")
     register_exchange(root, "clock-exchange", source, "ClockExchange")
+    register_instruments(root, {"A005930": "stock"})
 
     # By id, not by ref: a run is a registered document and the workspace resolves what it names
     # at preflight (record 139). The run declares its sessions and wall time itself (record 148):

@@ -26,8 +26,9 @@ a category's true cost is a sum over this table — not a rate read off a venue.
 
 `kind` is what the **roster** said. What the fill was **charged** as comes from the venue's own
 terms. Those are two statements and nothing compares them, so a venue's declared categories and
-the registered roster have to be kept in step by hand. `kind` is null when no roster was
-registered, and then cost by kind collapses into one `unknown` bucket.
+the registered roster have to be kept in step by hand. Every filled id was declared — a run
+refuses to start without a roster and fails on an order for an undeclared id — so `kind` is never
+null in a record written since the two-clocks campaign.
 
 ## `vqapr.weight` — the intended allocation
 

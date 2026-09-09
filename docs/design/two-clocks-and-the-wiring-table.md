@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **작성 시각** | 2026-09-09 KST (+09:00) |
-| **상태** | **확정.** 소유자 결정이 났고 이 문서가 그것을 기록한다. `src/`는 이 문서로 인해 아직 움직이지 않았다 |
+| **상태** | **흡수됨 (2026-09-10).** 캠페인이 records `201`-`214`로 구현을 끝냈고, §8의 표가 가리키는 PRD·아키텍처 절이 본문을 이 계약으로 다시 썼다. 이 문서는 설계 결정의 근거 기록으로 남는다 — 현행 계약은 `docs/vqapr-prd.md`와 `docs/vqapr-architecture.md`가 authority다 |
 | **근거** | 소유자와의 설계 토론 (2026-09-09). `docs/vqapr-prd.md` §1~§7, `docs/vqapr-architecture.md` §1~§3·§10, `references/nautilus_trader`(actor·backtest engine)와 `references/qlib`(workflow·recorder)의 구조 대조 |
 | **캠페인** | `docs/refactoring/2026-09-09-the-two-clocks-campaign.md` |
 | **선례** | `docs/design/agent-first-surface.md` · `docs/design/the-panel-the-surface-and-the-run.md`. 두 문서처럼, 승인되면 architecture가 이것을 흡수한다 |
@@ -498,8 +498,9 @@ live                    아키텍처 §15-5 그대로
 
 ## 10. 아직 안 정한 것
 
-1. **패키지 이름과 배치.** 무엇을 하는지가 아직 안 끝났으므로 이름부터 정하지 않는다. 캠페인
-   Stage 4가 끝난 시점에 결정한다.
-2. **배선표의 코드 모양.** 표를 데이터로 둘 것인가, 타입으로 둘 것인가.
+1. **패키지 이름과 배치.** ~~무엇을 하는지가 아직 안 끝났으므로 이름부터 정하지 않는다.~~ **정했다** (M14,
+   record `214`): `flow/strategy/` + `flow/datamodel/` → `flow/run/`, 시계로 배열. `engine/`(걸음)은 그대로.
+2. **배선표의 코드 모양.** ~~표를 데이터로 둘 것인가, 타입으로 둘 것인가.~~ **둘 다, 각자 하나씩** (M13,
+   record `213`): 표는 데이터(`domain/wiring.py`의 `WIRING`), 타입은 부품/도구 하나만(`Part` · `Tool`).
 3. **`writes`가 하나인가 리스트인가.** run이 전략 하나가 되면서 하나로 충분해 보이나, DataModel이
-   한 번의 계산으로 여러 dataset을 내는 경우가 남는다.
+   한 번의 계산으로 여러 dataset을 내는 경우가 남는다. **열려 있다** — M2가 하나로 갔고 아무것도 되묻지 않았다.

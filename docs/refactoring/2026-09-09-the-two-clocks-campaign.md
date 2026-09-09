@@ -1,11 +1,14 @@
 # 두 시계 캠페인 — 배선표를 문서에서 코드로 옮긴다
 
+> **완료 (2026-09-10).** Stage 0-5 전부, records `201`-`214`. 설계 §8이 PRD·아키텍처에 흡수됐다. ExecPlan은
+> `.agent/plans/completed/two-clocks-campaign.md`에 있다.
+
 레이어링 캠페인(records `190`-`198`)이 트리를 DAG으로 만들었다. 이 캠페인은 그 위에서 **경계가
 옳은지**를 묻는다. 무엇을 어떤 순서로 할 것인가.
 
 **설계 근거는 이 문서가 아니라 [`docs/design/two-clocks-and-the-wiring-table.md`](../design/two-clocks-and-the-wiring-table.md)에 있다.**
 왜 그렇게 정했는가는 거기, 무엇을 어떤 순서로 하는가는 여기, 어디까지 갔는가는
-[`.agent/plans/active/two-clocks-campaign.md`](../../.agent/plans/active/two-clocks-campaign.md)에.
+[`.agent/plans/completed/two-clocks-campaign.md`](../../.agent/plans/completed/two-clocks-campaign.md)에.
 
 ---
 
@@ -53,7 +56,7 @@ FillConvention    selector(SAME_DAY | NEXT_ELIGIBLE) + local_time + timezone
 | 0a | 설계 문서 확정 — 완료 (`docs/design/two-clocks-and-the-wiring-table.md`) |
 | 0b | 캠페인 문서 확정 — 이 문서 |
 | 0c | 뒤집히는 PRD·아키텍처 절을 설계 문서 §8에 기록 — 완료 |
-| 0d | ExecPlan 작성 — 완료 (`.agent/plans/active/two-clocks-campaign.md`) |
+| 0d | ExecPlan 작성 — 완료 (`.agent/plans/completed/two-clocks-campaign.md`) |
 | 0e | showcase 8개의 record를 회귀 기준선으로 캡처 |
 
 **착수 전 측정은 하지 않는다** (소유자 결정 2026-09-09). Stage 4의 근거는 *"불변식이 세 벌에서 한

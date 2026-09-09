@@ -15,10 +15,10 @@ Two modes:
 
 `register` understands four sections, and a run needs three of them: a dataset (the venue table a
 run fills against is a dataset with an `execution:` role), an exchange and the run itself. There
-is no agenda to declare (record `148`): the run
-says which sessions it fires on and at what wall time, every strategy is called on every
-session and decides for itself, the book is valued at the instant the venue fills, and the
-declared Compliance rules observe it at every instant of the market clock.
+is no agenda artifact to register (record `148`, then `204`): the run declares its own `agenda` --
+a trading-day filter and a within-day rule -- and its one model is called at every instant of it
+and decides for itself; the book is valued at every instant of the market clock, and the declared
+Compliance rules observe it right after.
 """
 
 from __future__ import annotations

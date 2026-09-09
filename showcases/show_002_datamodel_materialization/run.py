@@ -28,8 +28,8 @@ ROOT = Path(__file__).resolve().parent
 MODELS = ROOT / "show002_models.py"
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-LAST_VERIFIED_AT = "2026-09-08"
-VERIFIED_AGAINST = "vqapr-0.8.0"
+LAST_VERIFIED_AT = "2026-09-10"
+VERIFIED_AGAINST = "vqapr-0.10.0"
 KST = ZoneInfo("Asia/Seoul")
 
 

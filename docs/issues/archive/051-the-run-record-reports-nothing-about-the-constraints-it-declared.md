@@ -1,7 +1,7 @@
 # 051 — The run record's constraint block has always been empty, and the only test on it asserts the key rather than the value
 
 **Status: CLOSED 2026-09-02 by
-[`130-a-declaration-two-consumers-and-a-block-that-was-always-empty.md`](../implementations/130-a-declaration-two-consumers-and-a-block-that-was-always-empty.md).**
+[`130-one-declaration-two-consumers.md`](../../implementations/130-one-declaration-two-consumers.md).**
 Found while repointing the block at monitoring findings for the constraint convergence, not by a
 user — which is itself part of the finding.
 
@@ -59,7 +59,7 @@ assert "contract" in record
 assertion forever. `record_fields` excludes `contract` from its own value comparison too
 (`set(RECORD_FIELDS) - {"contract", "roster"}`), so nothing else looked either.
 
-This is the same shape as `docs/issues/024` — *"a run that declared a table reports none"* — one
+This is the same shape as `docs/issues/archive/024` — *"a run that declared a table reports none"* — one
 layer over. That one was found by a user reading a record and asking why it was empty; this one was
 not found, because the block it emptied is the one a user is least likely to read first.
 

@@ -179,7 +179,7 @@ def freeze_strategy_record(
         # What ran, not what was registered -- PER COMPONENT rather than folded (design §4.2).
         # `fingerprint` above is what was registered; this is the fingerprint of the bytes on disk
         # when they were loaded. They agree unless the component was edited after registration,
-        # and that difference is the whole signal (`docs/issues/009`, `023`): a strategy that ran
+        # and that difference is the whole signal (`docs/issues/archive/009`, `023`): a strategy that ran
         # 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
         # overfitting tell that a new component_id per edit would have scattered.
         source_digest=dict(as_loaded),
@@ -194,7 +194,7 @@ def freeze_strategy_record(
             "end": frozen.end,
             "occurrences": len(result.occurrences),
         },
-        # Where the wall clock went, by phase (`docs/issues/068`): the loop's `total`, the
+        # Where the wall clock went, by phase (`docs/issues/archive/068`): the loop's `total`, the
         # `callback` side (window and decide), the `due` side, and each due stage by name.
         # Seconds, rounded to the microsecond so the record is not a float's full expansion.
         timing={phase: round(seconds, 6) for phase, seconds in result.timing.items()},
@@ -276,14 +276,14 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     **And they used to count nothing at all.** This walked the run's lifecycle entries asking each
     for an `evidence` attribute, but a lifecycle entry carries `kind` and `detail` and the evidence
     is the `detail` -- so the lookup returned `None` every time and the loop never ran
-    (`docs/issues/051`).
+    (`docs/issues/archive/051`).
 
     Scope, stated rather than implied: this reports the CONSTRAINTS a strategy declared. AC-R6 also
     names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
     not exist yet, and inventing entries for them here would report a promise nobody made.
     """
 
-    # Three populations, not one (`docs/issues/086`): what the author's own comparison held,
+    # Three populations, not one (`docs/issues/archive/086`): what the author's own comparison held,
     # what it failed inside the framework's tolerance, and what it failed beyond it. The run that
     # filed the issue had 40 quantisation residues (worst 0.01%p) and one real breach (4.89%p),
     # and `held 42/82` reported them as one fact. `ok` turns on `breached` alone; the other two

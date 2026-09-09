@@ -1,6 +1,6 @@
 # 090 — `invested` states its ceiling, and what the ceiling costs
 
-**Closes:** `docs/issues/018-a-gross-exposure-parameter-cannot-reach-textbook-scale.md`.
+**Closes:** `docs/issues/archive/018-a-gross-exposure-parameter-cannot-reach-textbook-scale.md`.
 **Branch:** `fix/018-invested-bound`.
 
 ## Why this change exists

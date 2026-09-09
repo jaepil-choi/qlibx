@@ -5,7 +5,7 @@ this boundary: the count of modules under `src/` containing a **real import** of
 excluding occurrences inside string literals. It records a verified value of 12 and names all
 twelve. It also gives the AST command to re-measure it.
 
-What it did not have was a test. `docs/issues/028` is what that cost: `fix/015a-extract-judgments`
+What it did not have was a test. `docs/issues/archive/028` is what that cost: `fix/015a-extract-judgments`
 moved the judgments below the CLI and let them keep importing the facade, taking the count to 13,
 and the whole 1,400-test suite stayed green, because the tripwire lived in a document nobody
 executes.

@@ -406,7 +406,7 @@ grain은 등록한 표의 한 행이 무엇인가이지 읽는 방식이 아니�
 run은 close, 어떤 run은 open으로 체결한다. 오늘은 `trade_price`가 `FillConvention` 안에 있어 실행
 입력 등록의 일부이므로(§17.7) 가격을 바꾸면 다른 `execution_input_id`를 등록해야 한다. 판정에 따르면
 그 바인딩은 run 정의로 올라오고 `ExecutionInputRegistration`은 dataset 등록의 실행 역할로 흡수된다.
-run이 자기 체결 규약을 들면 `docs/issues/034`(바꾼 결과가 record에 안 남는다)도 그 자리에서 닫힌다.
+run이 자기 체결 규약을 들면 `docs/issues/archive/034`(바꾼 결과가 record에 안 남는다)도 그 자리에서 닫힌다.
 Model은 이 표를 보통의 PIT 데이터(`available_at ≤ ts`)로만 읽을 수 있고, 정확히-ts 읽기는 due
 이벤트를 받는 Exchange와 valuation만 한다 — §10.1의 *"Model이 체결 테이블에 닿지 못한다"*는 그
 형태로 유지된다.
@@ -421,7 +421,7 @@ run state가 컴포넌트마다 memory를 원자적으로 커밋한다.
 **8-3. Cross-section의 dtype.** `Decimal` 정확성은 optimizer·account에서 오너 판정이다. `CrossSection`
 을 `Mapping[str, Decimal]` 위의 얇은 타입으로 시작할지, Arrow decimal128로 갈지. **이 리뷰의 제안은
 전자로 시작**한다 — 모양이 먼저, dtype은 측정 뒤. 3,000 종목에서 dict 루프가 실제로 병목인지는
-`docs/issues/049`식으로 재야 한다.
+`docs/issues/archive/049`식으로 재야 한다.
 
 **8-4. 검증 체계.** pydantic frozen(문서·설정)으로 수렴 vs dataclass+validator로 수렴 vs 오늘처럼 둘.
 메모리의 `model_copy` 함정과 `object.__setattr__` 62곳이 각각의 비용이다. 이 리뷰는 판정하지 않는다.

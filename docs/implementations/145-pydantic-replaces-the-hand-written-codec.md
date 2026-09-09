@@ -40,7 +40,7 @@ imported it. Removing an unused dependency was right; declaring one and using it
   `strategy_configs` / `runs` loops read through the declaration models. Gone: `_require_keys`,
   `_required`, `_time`, `_role`, `_source`, `_DATASET_KEYS`, `_AGENDA_KEYS`,
   `_require_agenda_keys`. Kept, on purpose: `_require_grain_key` (design §7-3's sentence about
-  what `RowsLookback` now means), `_enum` (the closed-set refusal `docs/issues/017` asked for,
+  what `RowsLookback` now means), `_enum` (the closed-set refusal `docs/issues/archive/017` asked for,
   still judging a run's `initial_account.mode` before the model so the reader gets the whole
   set and the nearest member), the agenda's from_dataset/sessions pair (no required-key list
   can say "exactly one of"), path resolution against the declaration file, and the `ast` walk

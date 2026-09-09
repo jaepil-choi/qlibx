@@ -1,7 +1,7 @@
 # 050 — A damaged workspace reads as "no roster", and the report that describes the roster reads the pointer a second time
 
 **Status:** **CLOSED 2026-09-01** by
-[`122-the-roster-is-read-once-and-a-damaged-workspace-is-a-refusal.md`](../implementations/122-the-roster-is-read-once-and-a-damaged-workspace-is-a-refusal.md).
+[`122-the-roster-is-read-once-and-a-damaged-workspace-is-a-refusal.md`](../../implementations/122-the-roster-is-read-once-and-a-damaged-workspace-is-a-refusal.md).
 Both halves in one commit. The guard around `Workspace.open` now lets everything but
 `workspace.open.missing` through, and `roster_report` takes the read rather than the project root,
 so the second read is gone rather than narrowed. Each half had a test that failed on the pre-fix

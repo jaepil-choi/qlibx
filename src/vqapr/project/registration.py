@@ -8,7 +8,7 @@ surface over this logic; it *was* this logic.
 `docs/vqapr-architecture.md` §10.2 defines the CLI as a product surface rather than a layer, and a
 surface that owns rules costs twice. The rules cannot be tested without driving argparse, and they
 cannot be reached from another entry point -- so a second entry point grows its own copy and the two
-diverge. `docs/issues/012` is exactly that: `check` refused a spec `run` completed, because each
+diverge. `docs/issues/archive/012` is exactly that: `check` refused a spec `run` completed, because each
 verb decided for itself.
 
 `cli/register.py` keeps argparse wiring, one call into this module, and envelope rendering.
@@ -781,7 +781,7 @@ def _component(
 class Registered(dict[str, list[str | dict[str, Any]]]):
     """What one declaration registered, by section -- a plain mapping to every caller that
     indexes it -- plus `spoken`, the point-in-time meaning of what was just declared, one
-    sentence per PIT-bearing concept (`docs/issues/027`). Rendered by `vqapr register` as
+    sentence per PIT-bearing concept (`docs/issues/archive/027`). Rendered by `vqapr register` as
     `spoken`, beside `registered`. Every section lists ids; `instruments` lists the roster's
     per-category receipt instead."""
 
@@ -882,14 +882,14 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
         if isinstance(account, dict) and "mode" in account:
             # A closed set is the one case where a refusal can always be complete: the mode is
             # judged here so the refusal names every member and the nearest spelling
-            # (`docs/issues/017`), rather than surfacing from the model as one line of many.
+            # (`docs/issues/archive/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
         execution = declared_run.get("execution")
         if isinstance(execution, dict) and isinstance(execution.get("fill"), dict):
             fill = execution["fill"]
             if "selector" in fill:
                 # The same closed-set treatment as the account mode: `selector` reads as
-                # "which price" while its members are scheduling words (`docs/issues/017`),
+                # "which price" while its members are scheduling words (`docs/issues/archive/017`),
                 # so the refusal has to carry the list rather than a one-line pydantic error.
                 _enum(
                     FillSelector, fill["selector"], name=f"{name}.execution.fill.selector"
@@ -947,7 +947,7 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
     dataset does not exist until the first has run, and the first cannot run until the document is
     registered. The workspace refusal says only that the dataset is unregistered, and
     `vqapr new run --out` scaffolds a `runs:` block that holds several runs and invites exactly
-    this. The reporter of `docs/issues/084` split one file per run and lost ten minutes. This
+    this. The reporter of `docs/issues/archive/084` split one file per run and lost ten minutes. This
     refusal can see the producer -- it is in the same document -- and names it.
     """
     produced: dict[str, str] = {}
@@ -1016,7 +1016,7 @@ def register_authored(
     # that, rather than surfacing as whatever the loader happens to say about an ambiguous import.
     object_name = _sole_subclass(path, expected, component_id)
     # What held the id before this command, so the payload can say an edit REPLACED it
-    # (`docs/issues/067`): a plain re-register is the edit loop and refuses nothing, and the
+    # (`docs/issues/archive/067`): a plain re-register is the edit loop and refuses nothing, and the
     # old fingerprint is how the user learns which past run records are pinned to the code
     # they just moved away from. Read before the write; `Workspace.create` is what
     # `register_component` opens anyway, so this adds no state on a first registration.

@@ -137,7 +137,7 @@ def test_an_unclassified_exception_is_one_real_failure_with_its_cause_whole(
 
     The exception nobody classified is a failure like any other -- `code: "unhandled"`, a status
     by whose frame raised it, and the WHOLE traceback in `cause` -- so an agent can tell the
-    framework's bug from its own (`docs/issues/076`). The stage is the command's, because the
+    framework's bug from its own (`docs/issues/archive/076`). The stage is the command's, because the
     exception does not know it and the command does.
     """
     error = _raised(40)

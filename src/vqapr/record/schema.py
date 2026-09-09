@@ -49,7 +49,7 @@ value stored as text -- exact and unbounded, where a parquet decimal would need 
 and a weight of one third has twenty-eight places -- and the column's field metadata says so
 (`vqapr.type: decimal`), so `read_table` restores it and a duckdb reader casts it knowingly.
 
-**Written once, at the end (`docs/issues/087`).** Record `146` wrote one complete file per
+**Written once, at the end (`docs/issues/archive/087`).** Record `146` wrote one complete file per
 accepted occurrence, because a parquet file is readable only once its footer is written and a
 killed run was to leave every chunk that landed (record `135`). Measured, that was a physical
 write per occurrence per table -- about a fifth of a real strategy's wall clock -- and a
@@ -65,7 +65,7 @@ write and the parts' removal cannot double-count.
 COMPACT_FILENAME = "all.parquet"
 """The one file a finished table or dataset is: written when the run ends, after which any spill
 part beside it is stale input. Shared with `vqapr.flow.datamodel.output`, which writes an output
-dataset the same way (`docs/issues/087`).
+dataset the same way (`docs/issues/archive/087`).
 
 Here rather than beside that writer -- where both lived until campaign M6 Step 3 -- because a
 compaction filename and a spill threshold are facts about how bytes reach the disk, not about the
@@ -173,7 +173,7 @@ class _Record(BaseModel):
 class RunRecord(_Record):
     """`run.json`: the configuration every strategy of this run shares (record `139`) --
     architecture §17.3.1's missing rows: the universe, the venue and the execution dataset with its
-    fill convention (`docs/issues/034`), the initial account declaration, the datasets and their
+    fill convention (`docs/issues/archive/034`), the initial account declaration, the datasets and their
     source digests (A7), and which strategies the run names."""
 
     run_id: str
@@ -214,7 +214,7 @@ class StrategyRecord(_Record):
 class DatamodelRecord(_Record):
     """`datamodel.json`: what one datamodel's record answers (record `148`) -- the component that
     ran, registered and as loaded; the dataset it wrote and the fields it declared; one row per
-    session and no per-instrument lineage (`docs/issues/059`)."""
+    session and no per-instrument lineage (`docs/issues/archive/059`)."""
 
     run_id: str
     datamodel_ref: str

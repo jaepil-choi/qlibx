@@ -1,4 +1,4 @@
-"""`docs/issues/060`: `vqapr rm dataset <id>` exists, and does what the skill promised.
+"""`docs/issues/archive/060`: `vqapr rm dataset <id>` exists, and does what the skill promised.
 
 The skill told the user to remove a dataset registration to replace a materialization's output;
 `rm` had eight kinds and a dataset was not one of them. Three throw-away outputs (1.3 GB) stayed

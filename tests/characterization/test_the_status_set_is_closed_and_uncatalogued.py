@@ -9,7 +9,7 @@ in both directions so neither could drift into a pointer aimed at empty space.
 PRD §11.2 retired the co-ownership. A refusal now carries `status` (who must act), `stage` (where
 it closed) and `cause` (what happened), beside `fix`, `requirement`, `observed` and `source`; prose
 restating those duplicates what the envelope already says and goes stale every release, which
-`docs/issues/025`, `030` and `067` each are. The 219 lines of catalogue were deleted with the
+`docs/issues/archive/025`, `030` and `067` each are. The 219 lines of catalogue were deleted with the
 split, having moved the four things the envelope genuinely cannot carry into the skills that own
 them.
 
@@ -77,7 +77,7 @@ def test_no_shipped_skill_carries_a_per_status_catalogue() -> None:
     assert offenders == [], (
         f"per-status recovery sections are back in {offenders}. The envelope carries status, "
         "stage, cause, fix, requirement, observed and source; prose restating them goes stale "
-        "every release (docs/issues/025, 030, 067)."
+        "every release (docs/issues/archive/025, 030, 067)."
     )
 
 

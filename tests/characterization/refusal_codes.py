@@ -837,7 +837,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
     diagnosis, _, _measured = validate(clean_registration, SourceSpec.of("s", dup))
     codes.extend(failure.code for failure in diagnosis.failures)
 
-    # `docs/issues/088`: a declared type is compared with what the file evaluates to. A
+    # `docs/issues/archive/088`: a declared type is compared with what the file evaluates to. A
     # DECIMAL column is refused whatever it is declared as (duckdb types a bare `100.0`
     # literal as DECIMAL(4,1)), and an INTEGER column declared DOUBLE is a mismatch.
     decimal_close = _write_parquet(
@@ -1242,7 +1242,7 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
 def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     """A datamodel's first non-empty session states the output's field types.
 
-    `docs/issues/088`: a value field pyarrow types as decimal is one no dataset can declare, so
+    `docs/issues/archive/088`: a value field pyarrow types as decimal is one no dataset can declare, so
     the output refuses it at the first append rather than after every session has run. The
     layer is stood in for by the two attributes the output reads from it -- constructing a
     `FrozenDataModel` needs a fingerprinted component and a frozen agenda, none of which

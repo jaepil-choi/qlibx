@@ -5,24 +5,24 @@
 | **작성 시각** | 2026-09-01 KST (+09:00) |
 | **기준 커밋** | `develop @ 4dd85975`. 이 문서의 모든 행 번호는 그 커밋 기준이다 |
 | **트리 상태** | `develop@602e1b3c`에서 **1515 passed, 0 skipped, 14 deselected** · `uv run ruff check src/` → clean. **작성 당시 1497이었고 레인 A가 올렸다 — §4를 보라** |
-| **앵커 이슈** | `docs/issues/049` — **오너 ruling이 거기 있고, 이 문서는 그것을 재론하지 않는다** |
-| **판정 기준** | `docs/vqapr-prd.md` → `docs/vqapr-architecture.md` → `docs/issues/049`의 ruling |
+| **앵커 이슈** | `docs/issues/archive/049` — **오너 ruling이 거기 있고, 이 문서는 그것을 재론하지 않는다** |
+| **판정 기준** | `docs/vqapr-prd.md` → `docs/vqapr-architecture.md` → `docs/issues/archive/049`의 ruling |
 | **진행 상태 추적** | `.agent/plans/active/the-read-path-delivers-what-the-model-keeps.md` (gitignored, 메인 트리에만 있음) |
 
 > **레인은 각자 worktree에서 돈다.** ExecPlan은 추적되지 않으므로 **이 문서가 레인의 계약이다.**
-> 레인을 시작하는 사람은 `docs/issues/049`의 ruling과 이 문서를 읽으면 충분해야 한다.
+> 레인을 시작하는 사람은 `docs/issues/archive/049`의 ruling과 이 문서를 읽으면 충분해야 한다.
 
 ---
 
 ## 0. 왜
 
-`docs/issues/049`: 같은 모델이 같은 출력을 내면서 **806.61s 대 1.31s**, 614x. `DataModel.compute`는
+`docs/issues/archive/049`: 같은 모델이 같은 출력을 내면서 **806.61s 대 1.31s**, 614x. `DataModel.compute`는
 양쪽 모두 0.36s다. **연산이 1.9%이고 데이터를 옮기는 것이 98%다.**
 
 셋으로 갈라지고, 각각이 곱해진다 — 술어를 밀어넣을 수 없어 버릴 행을 읽고(153x), 그 행마다
 식별 컬럼이 값 옆에 실려 오고(8.6x), 파일 자체가 100배 크다.
 
-## 1. 오너 ruling — 요약만, 근거는 `docs/issues/049`
+## 1. 오너 ruling — 요약만, 근거는 `docs/issues/archive/049`
 
 - **field는 표현식이고, dataset이 등록되는 자리에 선언된다.** `fields:`는 이미
   `id → 물리 컬럼`이었고 맨 컬럼은 축퇴된 표현식이므로, **오늘 존재하는 모든 등록이 그대로 유효**하다.
@@ -30,7 +30,7 @@
   component가 곧 consumer이므로 프레임워크가 찍는다).
 
   > **정정 — 오너가 2026-09-01에 유일성 절반을 뒤집었다.** 원래 이 줄은 *"field id와 lookback,
-  > `dataset_id` 없음(field id가 id다)"*였고, `docs/issues/049`의 ruling도 *"a field id is an id,
+  > `dataset_id` 없음(field id가 id다)"*였고, `docs/issues/archive/049`의 ruling도 *"a field id is an id,
   > **unique in the workspace**"*라고 박혀 있었다. **실환경에서 거짓이다** — 레인 C가 재보니
   > dataset 27개 중 **field id 21개가 겹치고**, 대부분은 병렬 계열이 아니라 평범한 도메인 어휘다
   > (`fiscal_yyyymm`이 6개 dataset에 있는 것은 그냥 그 컬럼 이름이 그거라서다).
@@ -223,7 +223,7 @@ C:/Users/chlje/DevProjects/qlibx-wt-046a     레인 D — C 병합 시점에 생
 
 | 위험 | 가장 이른 신호 | 대응 |
 |---|---|---|
-| **green tree, 옮겨진 지표, 틀린 숫자.** 이 repo에 두 번 기록돼 있고(`docs/issues/041`; `cli/run.py:170`) 직전 캠페인 안에서 한 번 더 났다(기록 `115` erratum) | 인수조건 tolerance가 느슨해지거나, 구조 작업 중 numeric baseline이 재생성됨 | 어떤 레인도 `settle_contract_hml.fixture.json`이나 showcase baseline을 재생성하지 않는다. 필요해 보이면 멈추고 escalate |
+| **green tree, 옮겨진 지표, 틀린 숫자.** 이 repo에 두 번 기록돼 있고(`docs/issues/archive/041`; `cli/run.py:170`) 직전 캠페인 안에서 한 번 더 났다(기록 `115` erratum) | 인수조건 tolerance가 느슨해지거나, 구조 작업 중 numeric baseline이 재생성됨 | 어떤 레인도 `settle_contract_hml.fixture.json`이나 showcase baseline을 재생성하지 않는다. 필요해 보이면 멈추고 escalate |
 | **열리지 않는 workspace.** 레인 C가 문서를 마이그레이션하고 `_decode`는 forward reference를 검증하므로, 마이그레이션 후 revert하면 모든 명령이 실패한다 | 마이그레이션이 copy가 아니라 move | write-forward, 이전 shape 한 릴리스 decode 가능, copy |
 | **표현식이 실제 데이터에 대해 너무 약함** | 레인 C 진행 중 저자가 막힘 | 문법을 넓히기 **전에** 막힌 사례를 `049`에 기록한다. 넓히면 look-ahead 성질을 잃으므로 ruling 변경이다 |
 | **읽기 경로 검증 제거가 NaN을 조용히 통과시킴** — `035` addendum이 정확히 이걸 지목한다 | 레인 A가 등록 쪽 검사 없이 병합됨 | 레인 A의 인수조건은 제거가 아니라 **이동**이고, 등록 거절 테스트가 그것을 닫는다 |

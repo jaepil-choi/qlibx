@@ -123,7 +123,7 @@ from vqapr.portfolio.weighting import (
 # four files removed and imports breaking loudly, while one reached by two paths has to be found
 # by grep. `as_loaded_fingerprint` was the exception that proved it: this file imported it from
 # `_internal` and the three names below from the adapter, and two later modules copied the
-# bypass without the reasoning (`docs/issues/029`; the rule is in
+# bypass without the reasoning (`docs/issues/archive/029`; the rule is in
 # `docs/design/agent-first-surface.md`, and `tests/boundaries/test_internal_has_one_door.py`
 # enforces it).
 from vqapr.project.registration import (
@@ -219,7 +219,7 @@ __all__ = (
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
     # method a DataModel author can call, and it was reachable only by opening installed source:
     # not in `__all__`, absent from the skill, and with no docstring naming its row keys or
-    # ordering (`docs/issues/031`). `ModelWindow` was importable but undeclared, while the
+    # ordering (`docs/issues/archive/031`). `ModelWindow` was importable but undeclared, while the
     # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
     "OperationOccurrence",

@@ -49,7 +49,7 @@ DEFAULT_RELATIVE_TOLERANCE = Decimal("0.01")
 DEFAULT_ABSOLUTE_TOLERANCE = Decimal("0.001")
 """The framework's default tolerance: ``max(bound * 1%, 10bp of NAV)``.
 
-Owner ruling, 2026-09-05 (`docs/issues/086`). A book executes in whole lots and is marked after
+Owner ruling, 2026-09-05 (`docs/issues/archive/086`). A book executes in whole lots and is marked after
 its fills, so the realised weight lands a little off the target the optimiser put on the grid; a
 strict comparison then files that residue as a violation, in the same counter as a real one. The
 run that filed the issue measured the two populations: the worst residue was 1bp, the real breach
@@ -77,7 +77,7 @@ class StampedConstraintFinding:
     """One author's measurement under the id the framework registered it as, and the framework's
     verdict on it.
 
-    **The tolerance is judged here, once, for every constraint** (`docs/issues/086`). Not on the
+    **The tolerance is judged here, once, for every constraint** (`docs/issues/archive/086`). Not on the
     author's `ConstraintFinding` -- every author would re-derive the same distinction, and the
     shipped `single_name_cap` and the scaffold both compare strictly -- and not on
     `ConstraintBounds`, the one place it could leak into `project` and widen the feasible set the
@@ -359,7 +359,7 @@ def _tolerance_override(constraint: Constraint) -> Decimal | None:
     """The author's tolerance, if they declared one; `None` leaves the framework default.
 
     Read here so the verdict is judged in one place for every constraint and the author's only
-    lever is the number (`docs/issues/086`). Refused rather than defaulted when it is not a
+    lever is the number (`docs/issues/archive/086`). Refused rather than defaulted when it is not a
     finite non-negative Decimal: a tolerance that silently became "the default" would hide the
     typo the author is about to run 82 rebalances under.
     """
@@ -383,7 +383,7 @@ def build_account_view(
     `AccountSnapshot` and a `MarkBatch`: `nav = marks.total_value + account.cash` and
     `weight = value / nav` are the two derivations every weight rule needs and neither is a
     judgement, so a rule that got either subtly different from its neighbour would report a
-    breach its neighbour permitted. `docs/issues/014` is that defect measured on one constraint
+    breach its neighbour permitted. `docs/issues/archive/014` is that defect measured on one constraint
     disagreeing with itself.
 
     `observed_at` is this monitoring occurrence's own cutoff, which is the instant these marks

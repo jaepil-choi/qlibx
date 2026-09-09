@@ -133,7 +133,7 @@ def _window(
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         # The committed vendor slice carries DECIMAL(18,8) weights, which no dataset may declare
-        # (`docs/issues/088`): the field evaluates to the DOUBLE it declares, and `SingleNameCap`
+        # (`docs/issues/archive/088`): the field evaluates to the DOUBLE it declares, and `SingleNameCap`
         # crosses to Decimal once on its side.
         fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
         field_types={"benchmark_weight": "DOUBLE"},

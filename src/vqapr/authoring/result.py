@@ -127,7 +127,7 @@ class Rebalance(BaseModel):
     one exactly, and a value off by a single ulp is refused by the same invariant that catches a
     real mistake. That is why the two constructors exist, and why anyone building this directly
     should quantise and settle through `vqapr.portfolio.weighting.rescale` on the canonical grid
-    `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/075`).
+    `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/archive/075`).
 
     `target_weights` takes any `Mapping[str, Decimal]` and is held as the read-only
     `CrossSection` it validates into.
@@ -198,7 +198,7 @@ class Rebalance(BaseModel):
         being 2 because selling short raises cash.
 
         Quantising and settling belong to `vqapr.portfolio.weighting.rescale`, which this calls
-        (`docs/issues/075`). Each side lands EXACTLY on its target, on the canonical grid
+        (`docs/issues/archive/075`). Each side lands EXACTLY on its target, on the canonical grid
         `QUANTUM`, with the rounding residual on that side's largest position.
         """
         longs = _relative_side(long, name="long")
@@ -247,7 +247,7 @@ class Rebalance(BaseModel):
                 weights[instrument] = sign * per_side * conviction / total
 
         # `rescale` owns quantising and settling, and this constructor stopped owning a second
-        # copy of it (`docs/issues/075`). It quantises onto the grid FIRST and settles each side's
+        # copy of it (`docs/issues/archive/075`). It quantises onto the grid FIRST and settles each side's
         # rounding residual afterwards, on that side's largest position by absolute size -- where
         # the crumb is proportionally smallest, and where it cannot move cash across a bound.
         #
@@ -314,9 +314,9 @@ class Rebalance(BaseModel):
     ) -> Rebalance:
         """Build a signed book from signed weights, split exactly as the signal produced them.
 
-        This is the market-neutral residual book `docs/issues/075` was filed on, and the thing
+        This is the market-neutral residual book `docs/issues/archive/075` was filed on, and the thing
         `of` structurally cannot say. `of` takes two mappings and splits `invested` EVENLY between
-        them, so it tops out at half a textbook $1-long/$1-short book (`docs/issues/018`) and can
+        them, so it tops out at half a textbook $1-long/$1-short book (`docs/issues/archive/018`) and can
         never express a 130/30 or a book whose signal happened to find more shorts than longs.
         Here the ratio is the signal's: pass what the signal produced, say how large the book
         should be, and the long/short split falls out of the weights themselves.
@@ -412,7 +412,7 @@ class Rebalance(BaseModel):
         # Every refusal here names the value it saw and the bound it crossed. These five said
         # only the rule -- `cash_weight is outside the declared budget` -- and an author whose
         # quantised shorts summed to -1.000000000001 had to reason the cash of 2.000000000001 and
-        # the bound of 2 out by hand, in a run of eight strategies (`docs/issues/071`).
+        # the bound of 2 out by hand, in a run of eight strategies (`docs/issues/archive/071`).
         if not budget.validates_cash(cash):
             raise ValueError(
                 f"cash_weight {cash} is outside the declared budget "

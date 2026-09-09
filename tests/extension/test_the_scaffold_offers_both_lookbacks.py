@@ -1,6 +1,6 @@
 """Both members of the lookback pair are reachable from the scaffold, and both run.
 
-`docs/issues/033`. `RowsLookback` and `CalendarLookback` are a deliberate pair -- one indexed by
+`docs/issues/archive/033`. `RowsLookback` and `CalendarLookback` are a deliberate pair -- one indexed by
 rows per name, one by calendar time -- and only the first was reachable by following the package:
 
 * `RowsLookback` had no docstring, `CalendarLookback` documented only `lower_bound`;

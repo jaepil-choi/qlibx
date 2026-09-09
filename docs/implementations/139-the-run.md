@@ -1,6 +1,6 @@
 # 139 — the Run: configuration is registered, and each strategy's record is its own output
 
-**Closes:** `docs/issues/034`; testbed findings A7 and C4/E1 (ledger §1, never filed). **Step:** 7
+**Closes:** `docs/issues/archive/034`; testbed findings A7 and C4/E1 (ledger §1, never filed). **Step:** 7
 of `docs/refactoring/2026-09-02-the-convergence-campaign.md` (M7, the last).
 **Authority:** `docs/design/the-panel-the-surface-and-the-run.md` §4 (the contract) and §7-4
 (RESOLVED: one Account per strategy); the owner's decisions of 2026-09-02 on §7-2 (no panel

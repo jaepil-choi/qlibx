@@ -89,7 +89,7 @@ class ExecutionTable:
     fill: FillConvention
 
     def spoken(self) -> list[str]:
-        """The point-in-time meaning of this binding, in two sentences (`docs/issues/027`).
+        """The point-in-time meaning of this binding, in two sentences (`docs/issues/archive/027`).
 
         One for the table's clock, one for the fill -- the fill's four fields (selector, wall
         time, zone, price) mean nothing apart, so they are one sentence rather than four.
@@ -182,7 +182,7 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
                     source=FailureSource(file=str(spec.source.path), key_path=field),
                 )
             )
-    # DECIMAL is admitted here and refused on a dataset (`docs/issues/088`): an execution price
+    # DECIMAL is admitted here and refused on a dataset (`docs/issues/archive/088`): an execution price
     # never reaches a model, it is read once at the boundary and converted explicitly
     # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the
     # venue table carries.

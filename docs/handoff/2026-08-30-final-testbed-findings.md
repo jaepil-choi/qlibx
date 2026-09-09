@@ -67,14 +67,14 @@ writing a note about a number that is about to change.
 and has the largest payoff of anything in this list relative to its cost — four of this journey's
 findings were resolved by `dir(vqapr.public)`, which the skill never mentions.
 
-**Held for a decision, not scheduled: 023 and 027.** 023 must be read against `docs/issues/009`
+**Held for a decision, not scheduled: 023 and 027.** 023 must be read against `docs/issues/archive/009`
 first — the behaviour it reports is the behaviour 009 deliberately created, and only its docs half
 is unambiguous. 027 is a proposal about `register`'s envelope that the reporter themselves marked
 not-attributable.
 
 ## Two cross-references worth not rediscovering
 
-**015 is not 012.** `docs/issues/012` was `check` refusing a spec `run` completes, and the answer
+**015 is not 012.** `docs/issues/archive/012` was `check` refusing a spec `run` completes, and the answer
 was that the judgment was wrong. Here the judgment is right and `run` never asks it. Same observable
 shape, opposite cause.
 

@@ -1,6 +1,6 @@
 """`run.complete` says what the orders did, not only that the simulation executed.
 
-`docs/issues/039`. A market-neutral run returned `{"ok": true, "occurrences": 732,
+`docs/issues/archive/039`. A market-neutral run returned `{"ok": true, "occurrences": 732,
 "account_version": 244}`. Its long side landed on 0.500 at every rebalance; its short side never
 did, and by December the book carried **+9.1% of NAV in unintended net long exposure** -- a strategy
 whose whole premise is neutrality running a material directional bet.
@@ -98,7 +98,7 @@ def test_reasons_stay_separate_because_they_are_not_one_fact() -> None:
 
 
 def test_a_name_that_never_filled_once_is_named_rather_than_folded_into_absent() -> None:
-    """`docs/issues/085`. A 20% ETF sleeve was in the run's instruments, the listing and the
+    """`docs/issues/archive/085`. A 20% ETF sleeve was in the run's instruments, the listing and the
     roster, and missing from the execution input's price table. Every one of 82 rebalances
     ordered it and every fill dealt zero -- correct -- and the summary said `absent: 82` beside
     `ok: true`, a number that cannot be told apart from one missing row on each of 82 names.
@@ -140,7 +140,7 @@ def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
     """The bug this file's helper was written to stop repeating.
 
     The envelope's table readers used to read `result.tables`. `SimulationResult` has no such attribute -- it
-    has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/024`
+    has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/archive/024`
     reported nothing in production, while its unit test passed a `SimpleNamespace(tables=...)` and
     stayed green for a week. Both envelope fields now read one helper, and this pins the path that
     helper walks against the real types.
@@ -158,7 +158,7 @@ def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
 
 
 def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
-    """`docs/issues/024`'s own case, now driven through the attribute the real object has."""
+    """`docs/issues/archive/024`'s own case, now driven through the attribute the real object has."""
     result = _result(
         ("vqapr.account", ()),
         ("vqapr.fill", ()),

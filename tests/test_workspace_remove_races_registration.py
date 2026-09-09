@@ -1,6 +1,6 @@
 """`Workspace.remove()` checked its references outside the lock it then took.
 
-`docs/issues/043`. The sequence was:
+`docs/issues/archive/043`. The sequence was:
 
     blockers = self.references_to(kind, identity)   # its own _read(), no lock
     if blockers:

@@ -1,6 +1,6 @@
 # 157 — enumerate, then cascade: `080` and `081`
 
-**Closes:** `docs/issues/080`, `081`. **Branch:** `fix/080-081-enumerate-then-cascade`, off
+**Closes:** `docs/issues/archive/080`, `081`. **Branch:** `fix/080-081-enumerate-then-cascade`, off
 `develop @ a244260e`. **Campaign:** none — these touch `flow/run_records.py` and `cli/rm.py`,
 which one-shape campaign Step 6 will reshape; done first, as small additions, because the owner
 ruled deletion must be easy and the cascade cannot stand on an enumeration that misses what a

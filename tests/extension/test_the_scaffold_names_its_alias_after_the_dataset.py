@@ -1,4 +1,4 @@
-"""`docs/issues/063`: the scaffold's alias and docstring follow `--dataset` and `--field`.
+"""`docs/issues/archive/063`: the scaffold's alias and docstring follow `--dataset` and `--field`.
 
 `vqapr new strategy ou --dataset residuals --field resid` emitted `{"prices": read}`,
 `call.read("prices", "resid")` and a docstring describing a long-only momentum ranker. The dataset

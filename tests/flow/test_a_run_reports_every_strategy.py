@@ -1,10 +1,10 @@
 """A run reports every strategy it was asked to run, and a worker's refusal comes back.
 
-`docs/issues/073`: under `--jobs` a strategy's `SimulationFailure` could not be pickled back to
+`docs/issues/archive/073`: under `--jobs` a strategy's `SimulationFailure` could not be pickled back to
 the parent (its keyword-only constructor and the `Rebalance` it kept on itself), so the run ended
 `stage: unhandled` with `failures: []` and named none of the seven strategies that had finished.
 In a single process the loop stopped at the first exception and the strategies after it never
-ran. `docs/issues/071`: the failure named no strategy and its `source` was three nulls.
+ran. `docs/issues/archive/071`: the failure named no strategy and its `source` was three nulls.
 
 The run here is the shipped sample journey with the sample strategy registered twice and a
 strategy that raises from its own file between them.

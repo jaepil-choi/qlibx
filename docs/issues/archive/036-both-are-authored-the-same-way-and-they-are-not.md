@@ -10,7 +10,7 @@ sentence at `SKILL.md:73` is what the product should be made to mean, rather tha
 edited to match the product.
 
 The table below is therefore a work list, not an explanation. The timestamp row leads, because it is
-the one with a correctness consequence (`docs/issues/033`).
+the one with a correctness consequence (`docs/issues/archive/033`).
 
 > **Status update 2026-09-02, later — records `131` and `132`.** Rows 1-4 and 10 are closed.
 > `public.DataModel is authoring.DataModel` (131) and `public.StrategyModel is

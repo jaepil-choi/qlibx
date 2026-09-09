@@ -1,6 +1,6 @@
 """`invested` says what it is bounded to, and what that bound costs.
 
-`docs/issues/018`. The docstring frames `invested` as GROSS exposure and points out that cash can
+`docs/issues/archive/018`. The docstring frames `invested` as GROSS exposure and points out that cash can
 exceed 1 and is never `1 - invested` -- a fair reading of which is that it is not capped at 1. It
 is, and the two sides split it evenly on top, so `invested=1` on a signed book is 0.5 long and 0.5
 short. Every number in the reporting journey therefore carried a caveat: the factor return it

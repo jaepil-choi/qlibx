@@ -46,7 +46,7 @@ project-local extension references"* becomes *"Validate and fingerprint a projec
 reference; write nothing."*
 
 **`vqapr.public` imports the four from `project/registration.py`.** Same names, same `__all__`, no
-user-visible change. The comment above that import — the one-door rule from `docs/issues/029` — is
+user-visible change. The comment above that import — the one-door rule from `docs/issues/archive/029` — is
 kept and annotated rather than moved: the rule is that these are reached by one path, and they still
 are.
 

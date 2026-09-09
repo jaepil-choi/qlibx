@@ -116,7 +116,7 @@ the same data. That is the next convergence, and when it lands this file has not
 ### 2.2 층 2 — 데이터가 evaluation마다 파일에서 다시 온다 (명사 1 · Panel)
 
 **측정된 값 하나가 이 층 전체를 말한다: 같은 모델, 같은 출력, 806.61s 대 1.31s. `compute`는
-양쪽 다 0.36s.** 연산이 1.9%이고 데이터를 옮기는 것이 98%다 (`docs/issues/049`).
+양쪽 다 0.36s.** 연산이 1.9%이고 데이터를 옮기는 것이 98%다 (`docs/issues/archive/049`).
 
 캠페인이 레인 A·B·C를 병합해 세 곱셈 인자 중 둘을 걷어냈다. **남은 것은 구조다** — 선언과 창
 사이에 **표가 없다.** `ScanSession`은 커넥션·footer·instant grid·증명된 하한을 run 수명 동안
@@ -394,7 +394,7 @@ scope가 `G010`으로 합쳐지며 superseded됐다. **그 `G010`이 지금까�
 > *"Settle the agent-first surface design before migrating further callers — 세 개의 열린 질문을
 > 오너와 답한 뒤 남은 6개 src legacy consumer와 5개 showcase를 확정된 설계에 맞춰 옮긴다."*
 
-status: `pending`. **이것이 명사 2이고 `docs/issues/036`이다.** 오너가 `G010`을 멈추고 만든
+status: `pending`. **이것이 명사 2이고 `docs/issues/archive/036`이다.** 오너가 `G010`을 멈추고 만든
 goal이며, 그 이유가 steering에 그대로 적혀 있다: *"The owner stopped this work to redesign the
 surface from the caller inward rather than keep migrating callers onto a shape under active
 reconsideration."* 표면이 재고 중인데 소비자를 여섯 개 더 옮기지 말라는 것.
@@ -411,7 +411,7 @@ reconsideration."* 표면이 재고 중인데 소비자를 여섯 개 더 옮기
 | **7.1 scaffold 마이그레이션** (increment 24) | authoring contract 위로 다시 쓰자 **테스트 10개가 깨져 revert.** 원인: *"scaffold + CLI 등록 경로 + loader conformance check가 한 단위"* | **커플링은 그대로다.** 다만 동기의 절반은 사라졌다 — record `125`가 callback에서 intent 주조를 걷어내 strategy 템플릿에 `EconomicPortfolioIntent`가 없다. **대신 constraint 템플릿에 그대로 남아 있다** (`scaffold.py:176`이 `EconomicPortfolioIntent`를 import하고 `:238`의 `validate_intended`가 `intent.targets`를 순회한다). **없애려던 ceremony가 strategy에서 constraint로 옮겨 살아남았다** |
 | **7.2 `agent/sample` 마이그레이션** (increment 41) | 7.1과 **똑같은 구조적 커플링**으로 깨끗이 revert | `reversal_5d.py`는 `vqapr.authoring`으로 옮겨졌다. `journey.py`는 여전히 `fingerprint_component(...)`를 손으로 계산하고 `RunDefinition`을 손으로 조립한다 — **그런데 record 104 이후 그게 옳은 방향이다.** 이 목표도 뒤집힌 전제 위에 있었다 |
 | **7.3 showcase 병렬 배치** (increments 16–19, 29) | 두 번 revert. 워커 "완료" 보고 4건이 전부 거짓, showcase 6개가 각자 bare `models.py`를 만들어 **sys.path 선점 회귀**를 유발 | **교훈 셋 다 반영됐다.** bare `models.py` 없음 (`show001_models.py`, `show002_models.py`, `show004_models.py`로 접두), showcase 9개 전부 `vqapr.public` 위에 있고 (record 124가 001·002·004를 **G010이 원하던 것과 정반대로** 옮겼다), `show_009_authoring_contract`가 추가됐다 |
-| **7.4 goal 기계가 `G010`을 놓지 않음** | `pause` 4회 + `drop` 1회 전부 거부 — *"an active story still has resolvable work"*. 원인: `G010`이 **증명 완료된 절반**(testbed parity)과 **차단된 절반**(dogfooding)을 한 goal에 묶고 있었다 | 같은 결함이 오늘 다른 규모로 있었다 — `docs/issues/036`의 헤더가 *"not yet implemented"*라고 적혀 있었는데 절반은 이미 구현돼 있었다. §정리 항목에서 고쳤다 |
+| **7.4 goal 기계가 `G010`을 놓지 않음** | `pause` 4회 + `drop` 1회 전부 거부 — *"an active story still has resolvable work"*. 원인: `G010`이 **증명 완료된 절반**(testbed parity)과 **차단된 절반**(dogfooding)을 한 goal에 묶고 있었다 | 같은 결함이 오늘 다른 규모로 있었다 — `docs/issues/archive/036`의 헤더가 *"not yet implemented"*라고 적혀 있었는데 절반은 이미 구현돼 있었다. §정리 항목에서 고쳤다 |
 
 ### 8.5 이 실패들에서 가져갈 규칙 셋
 

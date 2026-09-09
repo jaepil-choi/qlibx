@@ -373,7 +373,7 @@ class CallbackHandler:
         # That one carried `nav=None` and competed with a real value in the same table, which is
         # the null-pairing 056 measured as HML 0.9726 -> 0.6877. A row with nothing to add is now
         # simply not written here; the decision-time facts it also carried moved to their own
-        # table below, where no measurement claim competes with them. See `docs/issues/010`.
+        # table below, where no measurement claim competes with them. See `docs/issues/archive/010`.
         account_state = self._context.state.current.account
         mark = None if account_state is None else account_state.latest_mark
         marked_at = getattr(mark, "marked_at", None)

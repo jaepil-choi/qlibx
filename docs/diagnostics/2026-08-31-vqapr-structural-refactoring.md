@@ -102,7 +102,7 @@ lines**, 경제 규칙을 소유한 `portfolio/`(1,088) + `orders/`(583)를 합�
 **왜 문제인가.** DRY 위반이 아니라 **authority 위반**이다. architecture §2.7이 "변경 이유가 같은
 것"을 공유 대상으로 정의하는데, `authoring.DataModel`과 `models.DataModel`은 변경 이유가 정확히
 같다 — "DataModel이 무엇을 읽고 무엇을 내놓는가"가 바뀌면 둘 다 바뀐다. 지금은 **셋이 바뀐다**:
-두 정의와 그 사이의 bridge. 그리고 bridge는 조용히 틀릴 수 있다. `docs/issues/041`
+두 정의와 그 사이의 bridge. 그리고 bridge는 조용히 틀릴 수 있다. `docs/issues/archive/041`
 ("a fix was verified against a double the real object does not match")과 `cli/run.py:170`의
 `_recorded()` docstring이 기록한 실패 — `SimulationResult`에 없는 `.tables`를 읽으면서 테스트는
 stand-in을 통과했다 — 가 정확히 이 형태다.
@@ -177,7 +177,7 @@ grep -n "    def " src/vqapr/flow/simulation.py | wc -l          # 60
   `_validate_callback_intended_constraints`, `_execution_horizon`, `_standalone_marks` 같은
   이름이 그 안에 있다. **규칙을 소유하지 않는 층이 2,116 lines일 수 없다.**
 - `public.py`의 132개 재수출은 fan-in을 만든다. `flow/judgments.py`, `data/windows.py`,
-  `workspace.py` — **아래 층이 최상위 facade를 import한다.** `docs/issues/028`이 이미 한 건
+  `workspace.py` — **아래 층이 최상위 facade를 import한다.** `docs/issues/archive/028`이 이미 한 건
   잡았고, 구조가 그대로면 계속 생긴다.
 
 **목표.**
@@ -230,7 +230,7 @@ grep -rn "O_CREAT | os.O_EXCL\|os.replace" --include=*.py src/vqapr
 `as_loaded_fingerprint`를 `_internal`에서 직접 가져오던 것을 shim 경유로 되돌리고,
 `tests/boundaries/test_internal_has_one_door.py`로 그 규칙을 강제했다.
 
-**판정.** 그 결정 자체는 옳다(`docs/issues/029`의 근거가 타당하다 — 문 하나짜리 삭제가 문 둘짜리
+**판정.** 그 결정 자체는 옳다(`docs/issues/archive/029`의 근거가 타당하다 — 문 하나짜리 삭제가 문 둘짜리
 삭제보다 싸다). **문제는 삭제 조건이 아직 문서에만 있고 코드에 없다는 것이다.** "temporary"라고
 쓰인 파일이 6개월째 살아 있고, 이제 테스트가 그 존재를 고정한다.
 
@@ -288,8 +288,8 @@ docstring이 그 이유를 명시한다. 나머지 100여 개에는 그런 근�
 
 **왜 문제인가.** architecture §10.2가 CLI를 "층이 아니라 제품 표면"으로 정의한다. 표면이 규칙을
 소유하면 **그 규칙은 CLI 없이 테스트할 수 없고, `Project` API로는 도달할 수 없다.**
-`docs/issues/030`(skill이 CLI가 거부하는 명령을 stop condition으로 안내)과
-`docs/issues/012`(`check`가 거부하는 spec을 `run`이 통과시킨다)가 같은 뿌리다 — 두 진입점이
+`docs/issues/archive/030`(skill이 CLI가 거부하는 명령을 stop condition으로 안내)과
+`docs/issues/archive/012`(`check`가 거부하는 spec을 `run`이 통과시킨다)가 같은 뿌리다 — 두 진입점이
 각자 규칙을 들고 있으면 서로 어긋난다.
 
 **목표.** `cli/*`는 (1) argparse 배선, (2) 도메인 호출, (3) envelope 렌더 **셋만** 한다.
@@ -543,7 +543,7 @@ except Exception:
 **재현 시나리오.** roster를 등록한 프로젝트에서 `.vqapr/instruments.json`이 중간에 잘린다
 (쓰기 중 크래시, 손편집). `vqapr run`은 `ok: true`, `roster: null`로 완주하고, 모든 fill이
 `kind: None`을 기록하며, KRX 형태 venue에서는 ETF 면세 sleeve까지 주식 세율로 과금된다 —
-`docs/issues/007`이 닫은 결함이 그대로 되살아난다. 사용자에게는 "roster를 등록하지 않은 프로젝트"와
+`docs/issues/archive/007`이 닫은 결함이 그대로 되살아난다. 사용자에게는 "roster를 등록하지 않은 프로젝트"와
 구별되지 않는다.
 
 **수정.** `except Exception` → `Workspace.open`만 감싸고(`VqaprError` 제외), 

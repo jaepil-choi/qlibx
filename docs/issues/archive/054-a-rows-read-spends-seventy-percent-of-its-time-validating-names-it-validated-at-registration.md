@@ -37,7 +37,7 @@ with no whitespace and is not a reserved name. The names are the registration's 
 validated by `DatasetRegistration.of` at registration and again by `check_schema`, and the read
 selects exactly those names. The `available_at` is a tz-aware timestamp the scan's own
 `TIMESTAMPTZ` column guarantees. So the per-row checks re-prove per row what the declaration
-proved once, which is the shape `docs/issues/044` closed on the other read path (*"the read path
+proved once, which is the shape `docs/issues/archive/044` closed on the other read path (*"the read path
 revalidates eight column names once per row"*, record `119`).
 
 The `pytz` share is separate: duckdb hands back tz-aware datetimes carrying `pytz` zones and each

@@ -53,7 +53,7 @@ nothing at all on its neighbour.
 
 ## Worth noting for the next stale-skill fix
 
-An installed skill silently going stale has cost this project a measurement before — `docs/issues/009`
+An installed skill silently going stale has cost this project a measurement before — `docs/issues/archive/009`
 records that the skill fingerprint (case E in its audit) was added *"after a stale installed skill
 silently invalidated an agent-journey measurement"*. The detection works. This is only the sentence
 it prints.

@@ -38,7 +38,7 @@ before the CLI would accept it. That fixed the sample and left the structure.
   `blocked` and once as a failure. `--jobs` workers likewise freeze alone: the parent judged
   before it spawned them.
 - **Tests.** `test_the_python_door_refuses_what_check_refuses` registers the look-ahead run of
-  `docs/issues/015` and proves `preflight_run` from `vqapr.public` refuses it under
+  `docs/issues/archive/015` and proves `preflight_run` from `vqapr.public` refuses it under
   `run.judgments` with a code `check` published, leaving no record;
   `test_the_python_door_freezes_what_check_passes` proves the gate is not a wall. The sample test
   from record `167` now asks the public door instead of the judgments directly, because the

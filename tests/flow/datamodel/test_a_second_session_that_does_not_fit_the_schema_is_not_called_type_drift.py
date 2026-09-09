@@ -1,4 +1,4 @@
-"""`docs/issues/079`. A datamodel returning `Decimal` died eight sessions in, and the refusal
+"""`docs/issues/archive/079`. A datamodel returning `Decimal` died eight sessions in, and the refusal
 said `type_drift`: "return the same scalar type for each field on every session". The type was
 `Decimal` in every session. What moved was its scale -- pyarrow inferred `decimal128(28, 27)`
 from one session's ratios and the next session's needed 28 -- and the one accurate sentence in
@@ -7,7 +7,7 @@ the envelope was pyarrow's own, wrapped under a diagnosis that contradicted it.
 Owner ruling, 2026-09-05: the data and its types are the author's. The framework declares no
 schema, casts nothing, and asserts no cause it did not measure.
 
-Since `docs/issues/088` a `Decimal` value field never reaches a second session: a dataset cannot
+Since `docs/issues/archive/088` a `Decimal` value field never reaches a second session: a dataset cannot
 declare DECIMAL, so the producer refuses it at the first session as `datamodel.output.field_type`.
 The scale drift that filed `079` is therefore unreachable, and `schema_mismatch` is pinned here
 with a drift that is still possible -- an `int` on one session and a `str` on the next -- because
@@ -56,7 +56,7 @@ def test_a_decimal_value_field_is_refused_at_the_first_session(tmp_path: Path) -
     """The run that filed `079` now stops at session one, naming the field and its type.
 
     A dataset declares one numeric type per field and DECIMAL is not among them
-    (`docs/issues/088`), so the producer, which states the types from what the first session
+    (`docs/issues/archive/088`), so the producer, which states the types from what the first session
     wrote, refuses before a second session can disagree about scale.
     """
     output = _output(tmp_path)

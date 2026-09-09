@@ -111,7 +111,7 @@ class SingleNameCap(Constraint):
         # `latest()` is exactly the cross-section a one-row lookback means.
         latest: dict[str, Decimal] = {}
         for instrument, weight in call.read(BENCHMARK_ALIAS, self._weight_field).latest().items():
-            # A DOUBLE field arrives as `float`, as its dataset declared (`docs/issues/088`);
+            # A DOUBLE field arrives as `float`, as its dataset declared (`docs/issues/archive/088`);
             # the bound is stated in Decimal, so cross once here, through `str`.
             if isinstance(weight, bool) or not isinstance(weight, int | float | Decimal):
                 raise TypeError(
@@ -167,7 +167,7 @@ class SingleNameCap(Constraint):
         `abs`, matching the symmetric box `project` returns. This once read the signed weight in
         one member and the absolute one in another, so a proposed `-0.30` passed the check before
         execution and was reported as a violation by the check after it, while the projection had
-        forbidden it outright -- one rule, one book, three answers (`docs/issues/014`). There is
+        forbidden it outright -- one rule, one book, three answers (`docs/issues/archive/014`). There is
         one member that measures now, so that shape has no room to recur.
         """
         measured = Decimal(0)
@@ -193,7 +193,7 @@ class SingleNameCap(Constraint):
         `account.weights()` is `value / nav` per name, and `nav` is `cash` plus the marked total
         -- the same arithmetic this used to do inline out of a `MarkBatch` and an
         `AccountSnapshot`. Doing it in one place is what keeps this member agreeing with
-        `validate` above, and `docs/issues/014` is what disagreement costs: this constraint
+        `validate` above, and `docs/issues/archive/014` is what disagreement costs: this constraint
         reporting a breach after execution that the check before execution had permitted.
 
         An account with no NAV has no weights. An empty book measures zero against the cap, which

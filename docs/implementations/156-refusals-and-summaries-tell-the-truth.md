@@ -1,6 +1,6 @@
 # 156 — refusals and summaries tell the truth: `079`, `083`, `084`, `085`
 
-**Closes:** `docs/issues/079`, `083`, `084`, `085`; the `--kind` half of `082`. **Branch:**
+**Closes:** `docs/issues/archive/079`, `083`, `084`, `085`; the `--kind` half of `082`. **Branch:**
 `fix/refusals-and-summaries-tell-the-truth`, off `develop @ 6bfa85aa`. **Campaign:** none — four
 message-and-payload defects from the 2026-09-04 real session, none in a file the one-shape
 campaign's Steps 4–7 rewrite. **Authority:** the owner's rulings of 2026-09-05 (`079` option C;

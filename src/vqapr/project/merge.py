@@ -185,7 +185,7 @@ def _merge_declaration(
     """One keyed declaration folded into its section: idempotent, conflict, or new.
 
     `noun` is what the key IS -- `agenda_id` for the agenda-keyed sections, `component_id`
-    for strategy configs -- so a refusal names the thing the author wrote (`docs/issues/040`
+    for strategy configs -- so a refusal names the thing the author wrote (`docs/issues/archive/040`
     measured a refusal that named an agenda the author never touched).
     """
     declarations: Mapping[str, object] = getattr(state, section)
@@ -209,7 +209,7 @@ def _merge_declaration(
             # for both. The author who edits a run during setup (start date, universe, the
             # strategy list) hits this refusal, and its two options were the two things they
             # did not want. The third option ships, and the refusal now names it
-            # (`docs/issues/084`).
+            # (`docs/issues/archive/084`).
             fix += (
                 f", or withdraw it first with `vqapr rm run-definition {key}` and register "
                 "the edited declaration again"

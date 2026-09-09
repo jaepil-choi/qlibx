@@ -1,4 +1,4 @@
-"""`docs/issues/086`. A book executes in whole lots and is marked after its fills, so the
+"""`docs/issues/archive/086`. A book executes in whole lots and is marked after its fills, so the
 realised weight lands a little off the target the optimiser put on the grid. The shipped
 `single_name_cap` compares strictly, so 40 of 82 rebalances in the run that filed the issue were
 recorded as violations of a cap the optimiser had respected -- worst excess 0.01%p -- in the same

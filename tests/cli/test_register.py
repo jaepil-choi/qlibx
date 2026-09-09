@@ -137,7 +137,7 @@ def test_a_naive_available_at_is_refused(
 def test_a_dataset_that_omits_field_types_is_refused_naming_the_missing_key(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`field_types` is the author's statement since `docs/issues/088`, not a measurement.
+    """`field_types` is the author's statement since `docs/issues/archive/088`, not a measurement.
 
     A dataset that leaves it out is refused by the declaration model the way any missing key
     is: the key is named, the entry's own keys are listed beside it, and nothing is written.
@@ -167,7 +167,7 @@ def test_a_dataset_that_omits_field_types_is_refused_naming_the_missing_key(
 def test_a_field_typed_decimal_is_refused_at_field_types_with_the_permitted_types(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`DECIMAL` is a type a file can hold and a declaration cannot (`docs/issues/088`).
+    """`DECIMAL` is a type a file can hold and a declaration cannot (`docs/issues/archive/088`).
 
     The refusal is the declaration's own -- `value_invalid`, sourced at `field_types` rather
     than at `grain`, which is the other key that can object at the same point -- and it names

@@ -662,8 +662,8 @@ def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -
 
     assert "uv run vqapr --help" in text
     # Rewritten twice: `fix/023-narrow-the-provenance-promise` stopped it claiming re-registering
-    # CHANGED CONTENT under the same id is refused (`docs/issues/009` made that false), and
-    # `docs/issues/067` stopped it promising a `register --force` the CLI never had. It still
+    # CHANGED CONTENT under the same id is refused (`docs/issues/archive/009` made that false), and
+    # `docs/issues/archive/067` stopped it promising a `register --force` the CLI never had. It still
     # says one id means one declaration, and now says the edit loop is the same command again.
     assert "one id means one declaration" in text
     assert "register a *different* declaration" not in text

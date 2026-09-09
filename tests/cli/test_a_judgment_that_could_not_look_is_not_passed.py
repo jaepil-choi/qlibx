@@ -1,6 +1,6 @@
 """A judgment that could not answer is reported as blocked, never as passed.
 
-`docs/issues/077`. `judgments()` has the right mechanism -- each judge runs inside a wrapper that
+`docs/issues/archive/077`. `judgments()` has the right mechanism -- each judge runs inside a wrapper that
 turns an exception into a BLOCKED entry, and its own comment says why: "the judgment did not find
 nothing, it could not look, and a run nothing was proven about would then report as clean and
 ready." Five helpers caught INSIDE that wrapper and returned an empty result, which is
@@ -8,7 +8,7 @@ indistinguishable from "asked the question, found nothing wrong". `check` theref
 
     {"passed": ["workspace", "run", "judgments"], "blocked": []}
 
-on a run whose look-ahead judgment -- AC-C5, the one `docs/issues/015` exists for -- never ran.
+on a run whose look-ahead judgment -- AC-C5, the one `docs/issues/archive/015` exists for -- never ran.
 
 Two reproductions, from unrelated causes, both of which used to produce exactly that report. The
 run was still refused in both, but only because preflight happens to reach the same doors, and
@@ -85,7 +85,7 @@ def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
 ) -> None:
     """One derivation, one failure, and every judge that asked for it hears the same thing.
 
-    `_agenda_once` derives at most once (`docs/issues/069`) and re-raises the stored exception to
+    `_agenda_once` derives at most once (`docs/issues/archive/069`) and re-raises the stored exception to
     each asker. Blocking one dependent judgment and passing the other would be a report that
     contradicts itself.
     """

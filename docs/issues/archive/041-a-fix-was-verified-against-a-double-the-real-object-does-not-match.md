@@ -4,7 +4,7 @@
 Both envelope fields now read one helper, and the new test pins its attribute path against the real
 types rather than against a stand-in.
 
-**Status when filed:** open. Found 2026-08-31 while wiring `docs/issues/039`'s fill summary into the
+**Status when filed:** open. Found 2026-08-31 while wiring `docs/issues/archive/039`'s fill summary into the
 same envelope, on `develop`. Not a journey finding: it was found because the new field needed the
 same rows the broken one was already claiming to read.
 **Touches:** `src/vqapr/cli/run.py` (`_tables_declared`);
@@ -13,7 +13,7 @@ same rows the broken one was already claiming to read.
 
 ## What shipped
 
-`docs/issues/024` reported `tables_declared: []` for a run that declared `ff3.formation` through
+`docs/issues/archive/024` reported `tables_declared: []` for a run that declared `ff3.formation` through
 `StrategyModel.diagnostics()` and wrote 42 rows to it. Record `094` fixed it by reading both
 declaration surfaces — the run spec's `store.tables`, and the tables the model actually formed:
 
@@ -63,7 +63,7 @@ nobody is checking."* This is the third variant of that family in two weeks, and
 
 | instance | the verification that did not verify |
 |---|---|
-| `docs/issues/028` | a tripwire in prose, run by hand |
+| `docs/issues/archive/028` | a tripwire in prose, run by hand |
 | the materialization refusal (record `097`) | an invariant asserted in a docstring; deleting the code left 1,419 tests green |
 | this | a unit test against a double the production object does not match |
 

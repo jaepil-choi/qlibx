@@ -221,7 +221,7 @@ def test_public_exports_are_fixed() -> None:
         "MarkBatch",
         "ModelWindow",
         "NeutralizationRefusal",
-        # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
+        # `docs/issues/archive/031`: the return type of `ModelWindow.observations`, which is the only
         # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
         "OperationOccurrence",

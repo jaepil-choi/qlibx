@@ -36,7 +36,7 @@ carries -- because there the annotation is a hope and the check is the thing tha
 - `authoring.py`: `DatasetInput`, `AccountHistoryInput`, `ConstraintBounds`, `Hold`,
   `Rebalance`, `ConstraintFinding`. `Rebalance.of()` and `.signed()` are untouched, and every
   invariant of the old `__post_init__` is an after-validator with its message intact -- the
-  budget refusals that name their numbers (`docs/issues/071`) are asserted sentence for
+  budget refusals that name their numbers (`docs/issues/archive/071`) are asserted sentence for
   sentence by `tests/qa/test_a_budget_refusal_names_its_numbers.py`.
 - `portfolio/budgets.py`: `Budget`. `account/snapshot.py`: `AccountSnapshot`.
   `exchange/listings.py`: `TradeRule` (with a `replace()` that re-validates through
@@ -98,7 +98,7 @@ record encoder, and the loader that returns a user's own instance.
   | `AccountSnapshot.trusted` | 0.01 ms |
 
   Cross-section arithmetic at the same width is ~10 ms per callback and a real run's time is
-  data movement (`docs/issues/068`), so these are the same order as work already being done and
+  data movement (`docs/issues/archive/068`), so these are the same order as work already being done and
   not a new bottleneck. The 41x gap on the snapshot is why the trusted door exists and why it is
   used at the one place that runs per commit rather than per callback.
 - **Positional construction is kept** with an explicit `__init__` that forwards to pydantic's,

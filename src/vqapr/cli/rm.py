@@ -13,7 +13,7 @@ leaves its records readable (a finished run pins what it used inside its own rec
 records leaves the run registered to run again.
 
 **`rm run <id> --cascade` is the one gesture that says *remove all of it*** (owner ruling,
-2026-09-05, `docs/issues/081`: deletion must be easy). Records first -- the only step that can
+2026-09-05, `docs/issues/archive/081`: deletion must be easy). Records first -- the only step that can
 refuse, on a live lock, and it refuses before anything is touched -- then the run definition, then
 the materialized outputs its datamodels wrote, then the components it named. A dataset or a
 component that another registered run still names is kept and reported as kept, with the run that
@@ -49,7 +49,7 @@ RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {
     "component": "component",
     "run-definition": "run",
-    # `docs/issues/060`: the skill told the user to withdraw a dataset registration and the CLI
+    # `docs/issues/archive/060`: the skill told the user to withdraw a dataset registration and the CLI
     # had no kind for it, so three throw-away materializations (1.3 GB) stayed registered and a
     # half-finished one could only be retried under a new id.
     "dataset": "dataset",
@@ -133,7 +133,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             # The record only. The dataset it registered stays registered: a record is what a
             # run wrote about itself, and a dataset is what other runs may already read. A
             # directory WITHOUT a record -- what a crashed datamodel run leaves -- is precisely
-            # the one a reader wants to remove, and this could not name it (`docs/issues/080`).
+            # the one a reader wants to remove, and this could not name it (`docs/issues/archive/080`).
             run_id, datamodel_ref = resolve_member(
                 root, identifier, kind="datamodel", unfinished=True
             )
@@ -178,7 +178,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     if kind == "run-definition":
         # What the withdrawal left behind, and the verb that removes it. The refusals on the
         # way here name the next step; this names the last one, which otherwise had to be
-        # performed from memory once `list runs` stopped showing the id (`docs/issues/081`).
+        # performed from memory once `list runs` stopped showing the id (`docs/issues/archive/081`).
         remaining = _records_of(root, identifier)
         payload["records_remaining"] = remaining
         if remaining:

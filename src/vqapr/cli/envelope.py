@@ -56,7 +56,7 @@ class UsageError(BoundedRefusal):
 
     Stage `usage`, status 400 (record `171`): the submission -- the command line -- is wrong,
     and the operation under way was parsing it. Rendered through a real `Failure` like every
-    other refusal; `docs/issues/030` (record `114`) ruled that the first refusal a new user ever
+    other refusal; `docs/issues/archive/030` (record `114`) ruled that the first refusal a new user ever
     sees is INSIDE the one documented shape, and now nothing spells that shape by hand.
     """
 

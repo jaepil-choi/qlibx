@@ -240,7 +240,7 @@ def _nearest_workspace_above(start: Path) -> Path | None:
 def _resolve_project_root(explicit: Path | None) -> Path:
     """The root every command works in, refusing an implicit one that would shadow an ancestor.
 
-    `docs/issues/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
+    `docs/issues/archive/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
     the project's real workspace and the next `check` refused for datasets registered five
     minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written
     to, and silently choosing the parent would put the caller's files in a directory they did
@@ -286,7 +286,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = handler(args, project_root=project_root)
     except Exception as error:  # every failure leaves through the same envelope
         payload = failure(error, project_root=project_root, stage=_STAGES[args.command])
-    # Every envelope says WHICH workspace it is about (`docs/issues/066`): a refusal about
+    # Every envelope says WHICH workspace it is about (`docs/issues/archive/066`): a refusal about
     # registration state that names the cure but not the place it looked is correct and not
     # enough to act on. Absolute, so a reader comparing two commands' answers can see when
     # they were about different directories.

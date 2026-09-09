@@ -3,7 +3,7 @@
 **Status:** **closed** by `docs/implementations/093-the-fill-table-has-a-clock.md`
 (branch `fix/022-fill-envelope`). Fill rows now carry all five envelope fields. The cause was
 structural: these rows stage straight into the run-state chunks and never pass through the
-`InvocationRecorder` that stamps every other table. This also resolves `docs/issues/024`'s
+`InvocationRecorder` that stamps every other table. This also resolves `docs/issues/archive/024`'s
 unexplained `formations: 1`, with no change to `public.py` - the counter was right, its data was
 missing.
 

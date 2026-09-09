@@ -2,7 +2,7 @@
 
 **Moved out of `cli/run.py` by record `114`.** `_fill_summary` was added there under time pressure
 in the 0.2.0a2 batch and acknowledged as misplaced. It is not a rendering concern: it is an
-aggregate over fill rows, and it is the aggregate `docs/issues/039` shows nobody could compute by
+aggregate over fill rows, and it is the aggregate `docs/issues/archive/039` shows nobody could compute by
 hand in time.
 
 Takes rows rather than a `SimulationResult`, deliberately. That keeps it a pure function of data --
@@ -19,7 +19,7 @@ from decimal import Decimal
 def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     """What this run's orders actually did, which `ok: true` says nothing about.
 
-    `docs/issues/039`. A market-neutral run reported `{"ok": true, "occurrences": 732,
+    `docs/issues/archive/039`. A market-neutral run reported `{"ok": true, "occurrences": 732,
     "account_version": 244}`. Its long side landed on 0.500 every time and its short side never
     did, drifting to **9.1% of NAV in unintended net long exposure** by December -- because 3.1% of
     fills dealt nothing, mostly names that were not tradable at the fill instant.
@@ -57,7 +57,7 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
         filled = abs(Decimal(str(row.get("dealt_quantity") or "0")))
         if filled < requested:
             partial += 1
-    # The axis `reasons` cannot see (`docs/issues/085`): one row missing on each of 200 names is
+    # The axis `reasons` cannot see (`docs/issues/archive/085`): one row missing on each of 200 names is
     # what a market looks like, the same name missing on every one of 82 rebalances is a
     # configuration error, and both fold into one `absent: N`. A name ordered in a run that never
     # dealt once cannot be produced by ordinary market behaviour at any length of run, so it is

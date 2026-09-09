@@ -13,7 +13,7 @@ read-path campaign's lane D note.
 > *Earlier status:* **Status 2026-09-02 — first half OPEN, second half CLOSED.** The updates below record both. Lane D
 (`read-046a-one-scan`, one scan serving several fields) **has not been started**: `git worktree list`
 shows only the main tree, and no `qlibx-wt-046a` exists. It is the last open lane of
-`docs/refactoring/2026-09-01-the-read-path-campaign.md`, and `docs/issues/049`'s closing measurement
+`docs/refactoring/2026-09-01-the-read-path-campaign.md`, and `docs/issues/archive/049`'s closing measurement
 waits on it.
 
 Concretely, what is still per-field today: `models/calls.py::declared_rows` issues one
@@ -63,7 +63,7 @@ distinction is not collapsed.
 (`observation_rows`); `src/vqapr/data/store.py:59` (`DuckDbObservationStore.query`);
 `src/vqapr/flow/simulation.py:1386` (`_dispatch_callback`, one `ModelWindow` per occurrence).
 
-[035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) measured the accessor on
+[035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) measured the accessor on
 the **materialization** path, where one call returns half a million rows. This is the same accessor
 on the **simulation** path, where it is called thousands of times and returns a few hundred rows
 each time — a different regime, with a different dominant term.

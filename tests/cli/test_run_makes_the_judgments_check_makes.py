@@ -1,6 +1,6 @@
 """`run` refuses what `check` refuses, in the same codes, for a registered run.
 
-The defect this closes (`docs/issues/015`): the eight judgments lived only in `check`, so a run
+The defect this closes (`docs/issues/archive/015`): the eight judgments lived only in `check`, so a run
 with a real look-ahead -- a fill at 15:30 with decisions at or after it -- was refused by `check`
 and executed by `run`. The run then wrote a permanent record that `vqapr list runs` shows beside
 legitimate runs with nothing marking it, and no command deletes a run. A reader could not tell.

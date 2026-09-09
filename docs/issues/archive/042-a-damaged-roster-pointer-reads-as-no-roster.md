@@ -12,7 +12,7 @@ longer reads.
 `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (§6, C1). Not a journey finding — it
 was found by reading the two call sites against the docstring of the function they call.
 **Touches:** `src/vqapr/public.py` (`_registered_roster`, `roster_report`);
-`Workspace.registered_instruments`; `docs/issues/007`.
+`Workspace.registered_instruments`; `docs/issues/archive/007`.
 
 ## The two states this collapsed
 
@@ -43,7 +43,7 @@ names them, and the guard written for an absent workspace had quietly grown to c
 
 `vqapr run` completes with `ok: true` and `roster: null`. Every fill records `kind: None`.
 `cost_by_kind()` collapses to one unlabelled bucket. On a KRX-shaped venue the ETF sleeve is charged
-the share sale tax it is exempt from — which is precisely the defect `docs/issues/007` closed,
+the share sale tax it is exempt from — which is precisely the defect `docs/issues/archive/007` closed,
 returning through a `try/except` written for a different case.
 
 Nothing in the envelope distinguishes it from a rosterless run, and the frozen record says the same.

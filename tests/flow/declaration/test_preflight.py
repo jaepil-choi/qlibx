@@ -822,7 +822,7 @@ def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
 def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`docs/issues/069`: 735 occurrences were built three times per command and 15 kept.
+    """`docs/issues/archive/069`: 735 occurrences were built three times per command and 15 kept.
 
     Two facts. The derived agenda holds only the sessions inside `[start, end]` -- the cut is on
     dates, before an occurrence and its offset proof exist -- and one `check` derives it once,

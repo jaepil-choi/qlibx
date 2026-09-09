@@ -1,6 +1,6 @@
 # 044 — A plan counts only money that will arrive
 
-Closes `docs/issues/006-a-plan-funds-buys-with-proceeds-the-venue-refuses.md`, and fixes a Windows
+Closes `docs/issues/archive/006-a-plan-funds-buys-with-proceeds-the-venue-refuses.md`, and fixes a Windows
 concurrency defect found while verifying it.
 
 ## Why this exists

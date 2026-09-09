@@ -1,6 +1,6 @@
 # 114 — The surface renders and nothing else
 
-**Closes:** Step 9 of the approved structural plan, and the second half of `docs/issues/030`.
+**Closes:** Step 9 of the approved structural plan, and the second half of `docs/issues/archive/030`.
 **Branch:** `step-09-the-surface-renders-and-nothing-else`.
 
 ## Part one — three pieces of domain logic leave the CLI
@@ -10,7 +10,7 @@ contradicted that, and one of them was known to at the time it was written.
 
 **`_fill_summary` → `analysis/execution.py` as `fill_summary`.** It was added to `cli/run.py` under
 time pressure in the 0.2.0a2 batch and acknowledged as misplaced in its own issue. It is not
-rendering: it is the aggregate `docs/issues/039` shows nobody could compute by hand in time — a
+rendering: it is the aggregate `docs/issues/archive/039` shows nobody could compute by hand in time — a
 3.1% zero-dealt rate against a 1.2% baseline, reachable only by reading 47,318 rows.
 
 **It now takes rows rather than a `SimulationResult`**, which is the part that matters. That makes
@@ -26,7 +26,7 @@ dependencies rather than a plan's suggestion, so they go beside `flow/records.py
 **`_lookback_arguments` → `authoring_lookback.py` as `lookback_declaration`.** A domain rule wearing
 argparse clothes: the strategy scaffold takes rows only, because its emitted `len(values) >=
 LOOKBACK` guard counts observations and a calendar window would make it count observations against a
-number of days (`docs/issues/033`). It now takes `kind`, `rows` and `calendar` rather than a
+number of days (`docs/issues/archive/033`). It now takes `kind`, `rows` and `calendar` rather than a
 `Namespace`, so a second surface that scaffolds a component can apply the same rule without building
 an argparse object to do it.
 
@@ -34,7 +34,7 @@ an argparse object to do it.
 
 ## Part two — `cli.usage` is inside the six-field guarantee
 
-`docs/issues/030` left this open explicitly, as *"a decision, not an omission"*. The reporter could
+`docs/issues/archive/030` left this open explicitly, as *"a decision, not an omission"*. The reporter could
 not tell whether it was issue 016 and said so.
 
 **The facts.** `SKILL.md` guarantees, unconditionally: *"Every entry carries `code`, `source`,

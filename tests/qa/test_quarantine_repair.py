@@ -191,7 +191,7 @@ datasets:
 def test_an_entry_without_field_types_is_quarantined_and_repaired_the_same_way(
     two_stale_workspace: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The third missing key (`docs/issues/088`): decodes, lists, refuses reads, re-registers.
+    """The third missing key (`docs/issues/archive/088`): decodes, lists, refuses reads, re-registers.
 
     `field_types` was a measurement until 2026-09-08 and is a declaration since; an entry that
     lacks it is exactly as quarantined as one that lacks `grain`, and the same command repairs it.

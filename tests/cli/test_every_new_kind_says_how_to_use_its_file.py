@@ -1,6 +1,6 @@
 """Every `vqapr new` kind says what to do with the file it wrote.
 
-`docs/issues/026`. `new --help` promised:
+`docs/issues/archive/026`. `new --help` promised:
 
     Every kind reports the file to hand `vqapr register` as `declaration`
 

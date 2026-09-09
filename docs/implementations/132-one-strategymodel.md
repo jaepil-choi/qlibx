@@ -1,6 +1,6 @@
 # 132 — one StrategyModel
 
-**Advances:** `docs/issues/036` (the last third; M1.4 closes it).
+**Advances:** `docs/issues/archive/036` (the last third; M1.4 closes it).
 **Step:** M1.3 of `docs/refactoring/2026-09-02-the-convergence-campaign.md`.
 **Authority:** `docs/vqapr-architecture.md` §4.4, §5.1, §5.1.1, §9.1 · records `123`, `125`, `130`,
 `131`.
@@ -68,7 +68,7 @@ view says so with `nav=None` rather than a fabricated zero.
 
 ### The recorder states the repair
 
-The refusal `docs/issues/019` fixed lived in the adapter's `_validated_diagnostics`. The property
+The refusal `docs/issues/archive/019` fixed lived in the adapter's `_validated_diagnostics`. The property
 — name what was written, name the method that declares it, name what *is* declared — now belongs
 to `InvocationRecorder.append_batch`, which is the only gate left, and the `qa` test for `019` is
 rewritten against it.
@@ -120,7 +120,7 @@ showcases **6 of 9**.
 `show_003`/`show_007` (against `on_occurrence`) run on the merged contract without a
 showcase-specific fix. `show_005`, `show_006`, `show_008` fail exactly as before —
 `SingleNameCap.__init__() missing 1 required keyword-only argument: 'benchmark_dataset_id'` —
-which is `docs/issues/052`'s remaining half and not this contract's.
+which is `docs/issues/archive/052`'s remaining half and not this contract's.
 
 Directed checks:
 

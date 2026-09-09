@@ -1,6 +1,6 @@
 # 173 — A dataset declares its field types, and registration verifies them once
 
-**Closes:** `docs/issues/088`. **Branch:** `feat/088-declared-field-types`, on top of record
+**Closes:** `docs/issues/archive/088`. **Branch:** `feat/088-declared-field-types`, on top of record
 `170` (`07c9353e`, `develop`). **Owner ruling, 2026-09-08:** the user prepares the parquet, so
 the user declares what each field is; the framework compares the declaration with the file once,
 at registration, and refuses a mismatch. `049`'s "an author never writes a type" and `079`'s

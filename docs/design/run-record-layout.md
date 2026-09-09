@@ -62,7 +62,7 @@ per table, and the end folds every part and the remainder into the compact file.
 
 **Why not per chunk.** Record `135` streamed so that a killed run kept every chunk that landed,
 and record `146` made each chunk a complete parquet file because parquet is readable only once
-its footer is written. Measured (`docs/issues/087`): 1.5 ms of file cost per append before any
+its footer is written. Measured (`docs/issues/archive/087`): 1.5 ms of file cost per append before any
 row conversion, a physical write per occurrence per table, about a fifth of a real strategy's
 wall clock, and a finished table of six hundred 8 KB files whose framing outweighed their data a
 hundredfold. The owner ruled (2026-09-07) that a run should not write per loop, that what it
@@ -176,7 +176,7 @@ as one parquet file once the last session has completed (`164`; a file per sessi
 and the directory registers as the dataset's source right after, through the registration path
 every other dataset takes. There are no `tables/` under a datamodel's record directory, and
 `datamodel.json` carries one line per session (evaluation time, output `available_at`, row
-count) rather than the per-instrument lineage `docs/issues/059` measured at 478 MB. A run that
+count) rather than the per-instrument lineage `docs/issues/archive/059` measured at 478 MB. A run that
 fails first leaves no output and no registration; a re-run starts the directory clean.
 
 `materialize()`, the spec file it read and the `materialization` record kind are gone: a

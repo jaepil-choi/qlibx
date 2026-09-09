@@ -1,4 +1,4 @@
-"""`docs/issues/057`: a table read that points at nothing is refused, naming what exists.
+"""`docs/issues/archive/057`: a table read that points at nothing is refused, naming what exists.
 
 `read_strategy_table(store_root, run_id, table, strategy_ref)` returned an empty iterator for
 the project directory (the root is `<project>/.vqapr`), for `strategy_ref=None` on a current

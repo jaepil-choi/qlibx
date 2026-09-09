@@ -64,7 +64,7 @@ def test_the_delisted_name_keeps_a_tradable_tail(panel) -> None:
 
 @pytest.mark.slow
 def test_prices_are_the_double_the_dataset_declares(panel) -> None:
-    """The sample is the parquet a user would produce (`docs/issues/088`).
+    """The sample is the parquet a user would produce (`docs/issues/archive/088`).
 
     It was decimal128 until 2026-09-08, on the reasoning this test's old name carried ("prices
     are exact"), and every model then received `Decimal` from a field registered as DOUBLE.

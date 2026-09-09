@@ -1,6 +1,6 @@
 # 038 — One `instruments:` list filters every requirement, so a second dataset's row keys must be enumerated as instruments even when they are not instruments
 
-**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
+**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
 (lane C of the read-path campaign). `instrument_field` is optional at registration, and a dataset
 registered without one has no instrument axis: no instrument predicate, no instrument column, and
 the declared instrument list is not applied to it.

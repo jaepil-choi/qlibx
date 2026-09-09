@@ -60,6 +60,6 @@ than decided here.
 ## What not to do
 
 Do not fix it by changing the docstring to say "rows". The type exists so that a number cannot
-silently mean two things (design 2.4, `docs/issues/033`); making it mean "source rows" on a
+silently mean two things (design 2.4, `docs/issues/archive/033`); making it mean "source rows" on a
 grain where the row count per instant is a property of the vendor's layout is the same silence
 under a new name.

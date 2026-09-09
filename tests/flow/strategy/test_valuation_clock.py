@@ -244,7 +244,7 @@ def clock_run(tmp_path_factory) -> tuple[list[dict], dict]:
     prices = tmp_path / "prices.parquet"
     connection = duckdb.connect()
     # `CAST(... AS DOUBLE)` on both tables: a bare `72000.0` is DECIMAL(6,1) to duckdb, and a
-    # price column is the DOUBLE a real parquet holds (`docs/issues/088`).
+    # price column is the DOUBLE a real parquet holds (`docs/issues/archive/088`).
     connection.execute(
         f"""COPY (SELECT instrument, trade_at, is_tradable, CAST(close AS DOUBLE) AS close
         FROM (VALUES

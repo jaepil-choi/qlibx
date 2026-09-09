@@ -1,6 +1,6 @@
 """The skill says the KRX profile is long-only, where a reader decides to use it.
 
-`docs/issues/020`. `vqapr new exchange <id> --profile krx` is the realistic profile and the skill's
+`docs/issues/archive/020`. `vqapr new exchange <id> --profile krx` is the realistic profile and the skill's
 Costs section recommends it. `krx_listings` produces `ListingAccess.LONG_ONLY` rules, so
 
     --profile krx  +  initial_account.mode: SIGNED

@@ -70,8 +70,8 @@ class DatasetCodec(Document):
 
     Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
     `field_types`. Measured: `aggregated`, `span`; `produced_by` is stamped by a datamodel run.
-    `field_types` was a measurement from `docs/issues/049` until 2026-09-08 and is a declaration
-    since (`docs/issues/088`); an entry written under the old shape carries the value duckdb
+    `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a declaration
+    since (`docs/issues/archive/088`); an entry written under the old shape carries the value duckdb
     measured, which is what the author would have declared, so it decodes as declared.
 
     A measurement cannot be invented for an entry that predates it: an entry without `span`
@@ -197,7 +197,7 @@ class DatasetDeclaration(Document):
     fields: dict[str, str]
     field_types: dict[str, str]
     """Every field's declared type, one of `scan.DECLARABLE_FIELD_TYPES`; registration compares
-    it with what the file evaluates to, once (`docs/issues/088`). A string here so that
+    it with what the file evaluates to, once (`docs/issues/archive/088`). A string here so that
     `DatasetRegistration.of` refuses an unknown or non-declarable name with the permitted list,
     rather than pydantic refusing it with the enum's every member, DECIMAL included."""
     grain: Grain | None = None

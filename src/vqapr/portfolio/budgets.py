@@ -25,7 +25,7 @@ class Budget(BaseModel):
 
     **The two budgets the authoring constructors make, as numbers** -- named here because an
     author building a `Rebalance` directly had to reconstruct them from a sentence inside
-    `Rebalance.of`'s docstring (`docs/issues/075`):
+    `Rebalance.of`'s docstring (`docs/issues/archive/075`):
 
     ```python
     Budget(direction=PortfolioDirection.LONG_ONLY,   # Rebalance.of with no `short=`

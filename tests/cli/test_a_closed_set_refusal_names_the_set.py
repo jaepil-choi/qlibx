@@ -1,6 +1,6 @@
 """A mistyped closed-set value is refused with the permitted set, not an exception repr.
 
-`docs/issues/017`, message half. `AccountMode[str(...).upper()]` raised a bare `KeyError`, which
+`docs/issues/archive/017`, message half. `AccountMode[str(...).upper()]` raised a bare `KeyError`, which
 reached the envelope as:
 
     "observed": "KeyError: 'LONG_SHORT'"

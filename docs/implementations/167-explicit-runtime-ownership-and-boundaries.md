@@ -85,7 +85,7 @@ readability, not measurable time.
 - **R5, four `load_strategy_model` calls per CLI run.** Measured again after the change: still
   four, and two `load_exchange`. Three are contracts, not duplication: `_freeze_strategy` stages
   the initial payload from one fresh instance, `_validate_initial_model_state` restores it on a
-  second fresh instance (`docs/issues/076`), and `_run_strategy` owns the mutable instance that
+  second fresh instance (`docs/issues/archive/076`), and `_run_strategy` owns the mutable instance that
   runs. The one recoverable load is the judgments' — it reads `requirements()` and nothing
   else — and recovering it means handing a loaded object from `judgments` into `preflight_run`
   across two verbs whose contract is that neither passes objects to the other. One module import

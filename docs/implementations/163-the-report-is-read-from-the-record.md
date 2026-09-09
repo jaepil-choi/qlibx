@@ -1,6 +1,6 @@
 # 163 — the report is read from the record: one API, no renderer
 
-**Closes:** no issue; files `docs/issues/087` on the way (one parquet part per occurrence,
+**Closes:** no issue; files `docs/issues/archive/087` on the way (one parquet part per occurrence,
 ruled: compaction on `release()`, its own branch). **Branch:** `reporting-api`, off
 `develop @ 6717c469` (rebased onto the 0.5.0 stamp, after record `162`). **Campaign:** none. **Authority:** the owner,
 2026-09-07 — a Python API only, no CLI verb; visualisation belongs to the skill; the three
@@ -30,7 +30,7 @@ machine-readable renderer from the package, charts from the user over the same v
   report resolves `<id>` / `<id>@<fp8>` / `None` exactly as `read_table` does.
 - **`SKILL.md`**, Rung 3: what the report holds, how to render a paper's tables and figures
   from it in the project's own plotting library, and a house style for the figure.
-- **`docs/issues/087`** filed and indexed; `docs/design/report-from-the-record.md` written.
+- **`docs/issues/archive/087`** filed and indexed; `docs/design/report-from-the-record.md` written.
 
 ## Conventions (the owner's three, and the ones they implied)
 

@@ -1,6 +1,6 @@
 """Every self-contained showcase completes, driven by the test suite rather than by hand.
 
-`docs/issues/052`: five of nine showcases were broken by ordinary contract changes and nothing
+`docs/issues/archive/052`: five of nine showcases were broken by ordinary contract changes and nothing
 noticed, because nothing in `pytest` ran them. The five were repaired (records `131`, `133`), and
 this file is the second half of that issue -- the gate. A showcase that a contract change breaks
 now fails `test_all` (`uv run pytest tests/ -q -m ""`), which is what a handoff must pass.

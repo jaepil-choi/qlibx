@@ -1,6 +1,6 @@
 # 103 — The audit's two correctness findings, before the release
 
-**Closes:** `docs/issues/042-a-damaged-roster-pointer-reads-as-no-roster.md` (C1), and the C3 defect
+**Closes:** `docs/issues/archive/042-a-damaged-roster-pointer-reads-as-no-roster.md` (C1), and the C3 defect
 the same audit found in code written earlier in this batch.
 **Branch:** `fix/post-campaign-audit-029-043`.
 **Source of both:** `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` §6 — a structural
@@ -15,7 +15,7 @@ is the value reserved for **no roster registered**.
 
 A truncated `.vqapr/instruments.json` therefore produced a complete run with `roster: null`, every
 fill recording `kind: None`, and a KRX-shaped venue charging the ETF sleeve the sale tax it is
-exempt from — `docs/issues/007` returning silently through a guard written for a different case.
+exempt from — `docs/issues/archive/007` returning silently through a guard written for a different case.
 
 **The fix is a split, not a removal.** `Workspace.open` stays guarded, because a run assembled
 outside a workspace genuinely has no roster to find. The `registered_instruments()` call moves out
@@ -61,7 +61,7 @@ histogram intact.
 ## What is not fixed here
 
 `C2` — `Workspace.remove()` checking references outside its lock, which can leave a workspace that
-`Workspace.open()` refuses — is filed as `docs/issues/043` and left for a pass of its own. The
+`Workspace.open()` refuses — is filed as `docs/issues/archive/043` and left for a pass of its own. The
 reason is recorded there: `run_records.py` documents two prior attempts to fix a neighbouring race
 by reordering around a lock, both of which made it measurably worse and were reverted. A lock-scope
 change here needs a concurrency test that fails on the current code first.

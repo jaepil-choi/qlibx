@@ -1,7 +1,7 @@
 # 091 — The run-spec template offers account modes that exist
 
 **Closes:** the template half of
-`docs/issues/017-the-template-offers-an-account-mode-that-does-not-exist.md`. The message half —
+`docs/issues/archive/017-the-template-offers-an-account-mode-that-does-not-exist.md`. The message half —
 a mistyped closed-set enum surfacing as an exception repr rather than as the permitted set — is
 `fix/017-closed-set-refusal`, the next branch.
 **Branch:** `fix/017-template-account-mode`.

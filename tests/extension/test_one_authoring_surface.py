@@ -1,7 +1,7 @@
 """One author surface: the facade and `vqapr.authoring` name the same objects, and the three
 scaffolds teach one grammar.
 
-This began as the characterization suite for `docs/issues/036` -- every assertion stated what the
+This began as the characterization suite for `docs/issues/archive/036` -- every assertion stated what the
 package did on 2026-09-02 and named the milestone that would delete it. The milestones landed:
 records `126` (the two lookbacks), `130` (Constraint), `131` (DataModel) and `132` (StrategyModel).
 What is left is the specification those tests were counting down to.
@@ -49,7 +49,7 @@ def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
     """An author who imports either name has written against the same contract."""
     assert getattr(public, name) is getattr(authoring, name), (
         f"public.{name} and authoring.{name} came apart again; that is the defect "
-        f"docs/issues/036 measured, not a refactor."
+        f"docs/issues/archive/036 measured, not a refactor."
     )
 
 
@@ -178,7 +178,7 @@ def test_load_strategy_model_accepts_an_authored_strategy(tmp_path: Path) -> Non
 def test_load_data_model_accepts_an_authored_data_model(tmp_path: Path) -> None:
     """WAS: the same authoring contract a StrategyModel may use was refused for a DataModel.
 
-    This was the half of `docs/issues/036` that reading the issue does not reveal: the two
+    This was the half of `docs/issues/archive/036` that reading the issue does not reveal: the two
     surfaces were **differently reachable per kind**. A DataModel author had no choice to make,
     because `vqapr new datamodel` emitted the engine class since nothing else loaded. Record `131`
     made the class one; this asserts the inverse, including that a model declaring no reads loads.
@@ -194,7 +194,7 @@ def test_load_data_model_accepts_an_authored_data_model(tmp_path: Path) -> None:
 def test_load_constraint_accepts_an_authored_constraint(tmp_path: Path) -> None:
     """WAS: the same authoring contract a StrategyModel may use was refused for a Constraint.
 
-    That asymmetry is what `docs/issues/036` was about at the loader -- two surfaces, and which
+    That asymmetry is what `docs/issues/archive/036` was about at the loader -- two surfaces, and which
     one worked depended on the kind. Record `130` made the constraint contract one class, so the
     refusal has nothing left to refuse and this asserts the inverse.
 

@@ -94,7 +94,7 @@ def test_the_record_says_stale_rather_than_claiming_the_run_knew_no_roster(
 def test_a_programming_error_still_escapes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of R1's fix: the absorber catches `VqaprError` ONLY.
 
-    A bare `except Exception` here would be the over-broad catch `docs/issues/042` exists to
+    A bare `except Exception` here would be the over-broad catch `docs/issues/archive/042` exists to
     prevent — it would swallow a bug in report construction and record a stale marker for it,
     which is a defect reported as a damaged file.
     """

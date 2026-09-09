@@ -1,7 +1,7 @@
 """`_internal` has no extension authorities left, and the two shared primitives are named.
 
 **This file's original subject no longer exists, and that is the outcome rather than a loss.** It
-was written for `docs/issues/029`: four modules under `extension/` were forwarding shims over
+was written for `docs/issues/archive/029`: four modules under `extension/` were forwarding shims over
 `_internal/extensions/*`, and the rule was that every caller reach the authorities through the one
 door, so the shims' eventual deletion would be four files removed with every stale import breaking
 loudly rather than a grep.
@@ -85,7 +85,7 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     """The outcome of record `110`, asserted so it cannot quietly come back.
 
     A future change that recreates `_internal/extensions/` would restore the exact shape
-    `docs/issues/029` was filed about: one authority reachable by two names, and a deletion that
+    `docs/issues/archive/029` was filed about: one authority reachable by two names, and a deletion that
     has to be found by grep.
     """
     # Modules, not the directory. `.exists()` failed on a tree that had merely kept the stale
@@ -99,7 +99,7 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     assert not modules, (
         f"`_internal/extensions/` is back: {modules}. The extension authorities live in "
         "`vqapr/extension/` since record 110; putting an implementation back under `_internal` "
-        "recreates the two-door problem docs/issues/029 records."
+        "recreates the two-door problem docs/issues/archive/029 records."
     )
 
     # `identity` is deliberately absent. It was the fifth promoted module, and record `124`

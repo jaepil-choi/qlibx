@@ -389,7 +389,7 @@ class ValuationHandler:
                     "measured": finding.measured,
                     "bound": finding.bound,
                     "excess": finding.excess,
-                    # The framework's verdict beside the author's `passed` (`docs/issues/086`):
+                    # The framework's verdict beside the author's `passed` (`docs/issues/archive/086`):
                     # `held`, `within_tolerance` or `breached`, and the tolerance it was judged
                     # against, so a reader of this table can split the populations the way the
                     # record's `contract` block does.

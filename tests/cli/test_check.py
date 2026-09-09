@@ -361,7 +361,7 @@ def test_a_blocked_judgment_carries_its_cause_separately(workspace: Path) -> Non
 def _judge(root: Path, definition: RunDefinition) -> list[str]:
     """Every dataset code the run's members produce, the way `judgments` dispatches them.
 
-    One judge per member since `docs/issues/077`, so this loops where it used to make one call.
+    One judge per member since `docs/issues/archive/077`, so this loops where it used to make one call.
     `_agenda_once` is a CALL, not a value: an agenda that cannot be derived raises to the judge
     that asked, which is what makes the judgment block instead of reading as passed.
     """
@@ -370,7 +370,7 @@ def _judge(root: Path, definition: RunDefinition) -> list[str]:
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
     # Derived at most once per `check` and reached by every judge that needs it
-    # (`docs/issues/069`).
+    # (`docs/issues/archive/069`).
     agenda = _agenda_once(space, definition)
     return [
         failure.code
@@ -399,7 +399,7 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(tmp_path:
 def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     tmp_path: Path,
 ) -> None:
-    """`docs/issues/056`: seven fields from one missing dataset were seven identical failures.
+    """`docs/issues/archive/056`: seven fields from one missing dataset were seven identical failures.
 
     `requirements()` fans a `DatasetInput` out to one requirement per field; the judgment used
     to emit per requirement. The skill promises every INDEPENDENT problem at once, and one
@@ -508,7 +508,7 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
 
     This test used to assert the opposite half of the same fact: that the judgment stayed silent,
     on the reasoning that registration and preflight both refuse a `sessions_from` naming an
-    unregistered dataset, so answering here would report one defect twice. `docs/issues/077`
+    unregistered dataset, so answering here would report one defect twice. `docs/issues/archive/077`
     established what that cost -- a silent judgment is returned as an empty result, which
     `judgments` cannot tell from "asked and found nothing", so `check` reported the run as judged
     when the question was never asked. The owner settled it on 2026-09-04: the defect is named

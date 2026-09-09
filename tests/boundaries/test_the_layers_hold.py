@@ -201,7 +201,7 @@ def test_the_open_set_is_not_slack() -> None:
     """A closed edge leaves `OPEN` in the commit that closes it.
 
     An entry that no longer describes reality is permission for the next accident to reoccupy it,
-    which is what happened to the facade count in `docs/issues/028`.
+    which is what happened to the facade count in `docs/issues/archive/028`.
     """
     stale = sorted(edge for edge in OPEN if edge not in _violations())
 

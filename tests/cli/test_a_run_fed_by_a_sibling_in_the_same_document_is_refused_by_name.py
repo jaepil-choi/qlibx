@@ -1,4 +1,4 @@
-"""`docs/issues/084`, the second half: a document holding two runs where the second takes its
+"""`docs/issues/archive/084`, the second half: a document holding two runs where the second takes its
 sessions from the first's output cannot be registered -- the dataset does not exist until the
 first has run, and the first cannot run until the document is registered. The refusal used to
 say only that the dataset is unregistered, while the run producing it sat in the same document.

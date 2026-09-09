@@ -9,7 +9,7 @@ accepted rows go to the sink at the swap and no root retains them.
 Two properties, asserted directly:
 
 - each occurrence's rows leave the roots at publish and the final state retains none; since
-  `docs/issues/087` the writer holds them as Arrow tables and writes once when the run ends,
+  `docs/issues/archive/087` the writer holds them as Arrow tables and writes once when the run ends,
   so the disk is untouched while the run executes;
 - the peak heap of a streamed run is a fraction of the same run kept in memory -- measured with
   `tracemalloc`, not inferred from a row count. A columnar buffer is that fraction; the rows as
@@ -178,7 +178,7 @@ def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_e
 ) -> None:
     """The sink takes each occurrence's rows at publish and the roots keep none; the writer
     holds them typed in memory and writes one file per table when the run ends
-    (`docs/issues/087` -- record `146` wrote one file per occurrence, a physical write per loop)."""
+    (`docs/issues/archive/087` -- record `146` wrote one file per occurrence, a physical write per loop)."""
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
     table = writer.directory / TABLES_DIRECTORY / "probe"

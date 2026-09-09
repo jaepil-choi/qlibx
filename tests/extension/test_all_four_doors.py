@@ -177,7 +177,7 @@ def test_the_scaffold_registers_as_written(tmp_path: Path, kind, register, objec
     """What `vqapr new` emits must pass the door it is emitted for.
 
     Canon 16 once asked for the opposite -- that a fresh template *fail* conformance so the user
-    knew they were not done. That was withdrawn (`docs/issues/004`): conformance answers whether
+    knew they were not done. That was withdrawn (`docs/issues/archive/004`): conformance answers whether
     Flow can call a component, and a template that cannot be called teaches nothing on the first
     command a user types. The "not done yet" signal is the marked line in the source, not a
     manufactured failure. This test is what keeps the two from drifting apart again.

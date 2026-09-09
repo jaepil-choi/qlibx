@@ -1,4 +1,4 @@
-"""`docs/issues/055`: `show model` answers from `inputs()`, `tables()` and `account_history()`.
+"""`docs/issues/archive/055`: `show model` answers from `inputs()`, `tables()` and `account_history()`.
 
 It read three private attributes nothing in the tree assigned -- `_aliases`, `_authored_tables`,
 `_authored_history` -- behind `getattr` defaults, so `reads` was always empty, `records` never
@@ -83,7 +83,7 @@ class Venue(AcademicExchange):
 def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused_by_name(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`docs/issues/083`. Feeding `list components` to `show model` broke on the exchange with
+    """`docs/issues/archive/083`. Feeding `list components` to `show model` broke on the exchange with
 
         {"stage": "unhandled", "failures": [], "error": "TypeError: ref must identify a
          strategy_model component"}

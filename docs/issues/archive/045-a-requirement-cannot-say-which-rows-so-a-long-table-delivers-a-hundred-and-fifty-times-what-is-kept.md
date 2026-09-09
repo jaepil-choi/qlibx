@@ -1,6 +1,6 @@
 # 045 — A `DataRequirement` can name columns and a window but not which rows, so a long-format dataset delivers 153 rows for every one the model keeps
 
-**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
+**Status: CLOSED 2026-09-01** by [`123-a-field-is-an-expression-and-instrument-is-optional.md`](../../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md)
 (lane C of the read-path campaign). **The diagnosis was upheld and the proposed mechanism was not**,
 and both halves of that survive the implementation.
 
@@ -188,7 +188,7 @@ itself got cheap.
 
 So the honest reading is: **a predicate is worth several times here, not several hundred**, and the
 rest of the 614x is the shape. This issue and a columnar path
-([035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)) are complements rather
+([035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)) are complements rather
 than alternatives — which is also why the workaround below is so effective, and so tempting.
 
 ## The workaround, and why the package should not rely on it

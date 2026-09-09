@@ -25,7 +25,7 @@ exist today and three of them are held open by exactly that mechanism:
 | `authoring ↔ account` | `account/history.py:33`, `TYPE_CHECKING` |
 | `extension ↔ testing` | module-level both ways; import order happens to work |
 
-This is the same failure `docs/issues/028` cost: `docs/design/agent-first-surface.md` named the
+This is the same failure `docs/issues/archive/028` cost: `docs/design/agent-first-surface.md` named the
 facade boundary and gave the command to measure it, a step took the count from 12 to 13, and the
 1,400-test suite stayed green because the tripwire lived in a document nobody executes. The fix
 then was `test_the_facade_is_not_reached_up_to.py`. This is that fix generalised from one boundary

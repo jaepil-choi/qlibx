@@ -431,7 +431,7 @@ class VqaprError(Exception):
         The default pickling of an exception calls `cls(*args)` with the message, which this
         constructor refuses; a `--jobs` worker's refusal then came back to the parent as
         `TypeError: ... takes 1 positional argument` and rendered as unhandled with no failures
-        (`docs/issues/073`; record `170`).
+        (`docs/issues/archive/073`; record `170`).
         """
         return (
             _rebuild_error,
@@ -490,7 +490,7 @@ def unhandled(error: BaseException, *, stage: Stage) -> Failure:
 
     The old envelope rendered these as `stage: "unhandled"` with an empty failure list and a
     traceback that was cut at eight lines or sent to a file. An agent could not tell the
-    framework's bug from its own (`docs/issues/076`). Now it is a failure like any other, with
+    framework's bug from its own (`docs/issues/archive/076`). Now it is a failure like any other, with
     the whole traceback in `cause` and the status saying whose it is.
     """
     status = status_of(error)

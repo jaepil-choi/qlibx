@@ -27,9 +27,9 @@ paid once per run in the panel build (record `137`). The `rows` side is the vend
 the tree now has it: one ranked scan per evaluation, every source row handed back as an
 `Observation`. A profile of that side (80 instruments, one evaluation) puts **30% in the scan and
 70% in constructing the `Observation`s** -- `_copy_values` re-checking field names character by
-character and `pytz` conversions -- which is `docs/issues/054`. The `rows` side also cannot declare
+character and `pytz` conversions -- which is `docs/issues/archive/054`. The `rows` side also cannot declare
 the calendar window the original model did, and the count it must declare instead counts rows
-rather than instants on a long table: `docs/issues/053`.
+rather than instants on a long table: `docs/issues/archive/053`.
 
 The ratio is within-process, as the original was; the data is generated (statement facts with two
 scopes, quarterly and annual rows, an exercised code fallback and a later bundle that must win),
@@ -38,7 +38,7 @@ harness in the consumer repo no longer exists (record `136`); the measurement no
 here.
 
 **Superseded status (2026-09-01): the ruling is IMPLEMENTED 2026-09-01 by
-[`123-a-field-is-an-expression-and-instrument-is-optional.md`](../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md) (lane C); the issue stays open
+[`123-a-field-is-an-expression-and-instrument-is-optional.md`](../../implementations/123-a-field-is-an-expression-and-instrument-is-optional.md) (lane C); the issue stays open
 for its number.** A field is an expression, a requirement names `(dataset_id, field_id)` and a
 lookback, and `instrument_field` is optional — all three are in `develop`, with `044` (record `119`)
 and `046`'s second half (record `120`) merged before them. What remains is `046`'s first half (lane
@@ -146,7 +146,7 @@ columnar accessor). Wide delivery removes most of the cells that made row-major 
 **Status when filed:** open, and filed as the **severity** of what
 [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md),
 [045](045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)
-and [035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) each describe one
+and [035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) each describe one
 surface of. Measured 2026-08-31/09-01 in `kwam-enhanced-index/vqapr-performance-testbed/` against
 `vqapr-0.2.0a2` (built wheel).
 **Touches:** the read path as a whole — `data/requirements.py`, `data/scan.py`, `data/store.py`,

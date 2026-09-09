@@ -1,6 +1,6 @@
 # 155 — the affordability estimate reads the channel that bills, and leaves cash instead of refusing
 
-**Closes:** `docs/issues/078`. **Branch:** `fix/078-size-down-and-leave-cash`, off
+**Closes:** `docs/issues/archive/078`. **Branch:** `fix/078-size-down-and-leave-cash`, off
 `develop @ 71747774`. **Campaign:** none — this is spine-adjacent (`orders/planning.py`) and the
 one-shape campaign explicitly does not touch it. **Authority:** the owner, 2026-09-05, for the
 second half; the first half is a defect on its own.

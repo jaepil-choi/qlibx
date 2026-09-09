@@ -28,7 +28,7 @@ skills, and how to install them.
 
 **219 lines of per-status recovery catalogue.** PRD §11.2 ruled that failure recovery is not a
 skill: the envelope carries `status`, `stage` and `cause` beside `fix`, `requirement`, `observed`
-and `source`, and prose restating them goes stale every release — which `docs/issues/025`, `030`
+and `source`, and prose restating them goes stale every release — which `docs/issues/archive/025`, `030`
 and `067` each were.
 
 The four things the envelope genuinely cannot carry were moved before the deletion, and verified

@@ -1,4 +1,4 @@
-"""`docs/issues/066`: every envelope says which workspace it is about, and an implicit root
+"""`docs/issues/archive/066`: every envelope says which workspace it is about, and an implicit root
 under an existing workspace is refused rather than silently started.
 
 `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside the project's real

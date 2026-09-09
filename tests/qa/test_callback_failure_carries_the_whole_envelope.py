@@ -7,7 +7,7 @@ first, because it is the sentence that fixes this occurrence.
 A raise inside `decide()` delivered four of the six fields of the day. `fix`, `explain` and
 `source` were absent entirely, and `requirement` degraded to "the guarded boundary must complete
 without raising", which is a statement about this package's plumbing rather than about anything
-the author did. Recorded as `docs/issues/016`, which is the cross-cutting half of three separate
+the author did. Recorded as `docs/issues/archive/016`, which is the cross-cutting half of three separate
 entries in the journey log. Record `171` replaced `explain` with `status` and put the exception
 itself on the entry as `cause`.
 """
@@ -96,7 +96,7 @@ def test_fix_names_where_to_look_and_that_re_registration_is_in_place() -> None:
 
     It cannot know the specific cause of an arbitrary exception, so it must at least say where the
     fault is and what the repair loop costs -- which is nothing: registration replaces in place, so
-    no new component id is needed (`docs/issues/009`).
+    no new component id is needed (`docs/issues/archive/009`).
     """
     body = _failure(SimulationStage.CALLBACK_INTENT, ValueError("boom"))
     fix = body["failures"][0]["fix"]

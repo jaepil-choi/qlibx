@@ -494,7 +494,7 @@ def _dataset_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
     # EVERY kind. For a single-file kind the template IS the declaration, so it equals
     # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
-    # instead of branching on which of them happen to write two files (`docs/issues/026`).
+    # instead of branching on which of them happen to write two files (`docs/issues/archive/026`).
     return success(
         "template.new", kind="dataset", path=str(target), declaration=str(target)
     )

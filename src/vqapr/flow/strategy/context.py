@@ -131,7 +131,7 @@ class SimulationResult:
     occurrences: tuple[OccurrenceTrace | DueExecutionTrace, ...]
     final_state: AcceptedRunState
     timing: Mapping[str, float] = field(default_factory=dict)
-    """Seconds spent, by phase, over the whole run (`docs/issues/068`): `total`, `callback`
+    """Seconds spent, by phase, over the whole run (`docs/issues/archive/068`): `total`, `callback`
     (window and decide, every static occurrence), `due` (every fill-side item), and one entry
     per due stage -- `simulation.due.snapshot`, `simulation.due.order_planning`, ... -- so a
     reader learns where a run's wall clock went without a profiler. Wall-clock, not CPU."""
@@ -407,7 +407,7 @@ def _author_frame(cause: BaseException, strategy: object, component_id: str) -> 
     innermost one IN THEIR FILE, so every frame is compared against the file the strategy class
     was loaded from and the last match wins. `key_path` names the strategy either way, so a
     framework raise with no author frame still says which strategy it was about
-    (`docs/issues/071`).
+    (`docs/issues/archive/071`).
     """
     source = FailureSource(key_path=f"strategies.{component_id}")
     try:
@@ -510,7 +510,7 @@ class FlowContext:
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.
 
-        Every package table stamps `event_time` in that zone (`docs/issues/058`): the execution
+        Every package table stamps `event_time` in that zone (`docs/issues/archive/058`): the execution
         table normalises targets to UTC, and a reader lining a fill up against the NAV or the
         monitoring row that followed it was converting by hand.
         """

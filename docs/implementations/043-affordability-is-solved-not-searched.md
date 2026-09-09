@@ -1,6 +1,6 @@
 # 043 — Affordability is solved, not searched
 
-Closes `docs/issues/005-affordability-is-searched-one-lot-at-a-time.md`.
+Closes `docs/issues/archive/005-affordability-is-searched-one-lot-at-a-time.md`.
 
 ## Why this exists
 

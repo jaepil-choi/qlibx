@@ -1590,7 +1590,7 @@ portfolio를 만든다. monitoring은 실제로 committed된 것을 보고 넘�
 monitoring의 질문이 아니다** — 넘었으면 넘은 것이다.
 
 **그래서 판단을 만든 직후에 그 판단을 다시 채점하는 자리는 없다.** 한때 있었고, 그것이 무엇을 만들었는지
-기록해 둔다: 같은 규칙이 판단을 잴 때와 계좌를 잴 때 서로 다른 답을 냈고(`docs/issues/014`), *"판단
+기록해 둔다: 같은 규칙이 판단을 잴 때와 계좌를 잴 때 서로 다른 답을 냈고(`docs/issues/archive/014`), *"판단
 시점엔 통과했는데 나중엔 위반"*이 **실행이 계획과 달라져서인지 두 채점이 갈려서인지 구분되지 않았다.**
 세는 자리가 하나면 그 모호함이 생길 수 없다.
 
@@ -4109,7 +4109,7 @@ family에 속하고, 타입이 steering을 한다 — panel grain은 `InstantsLo
 아래는 결정 이전의 기록이며, 근거로 남긴다.
 
 2026-09-01의 소유자 mental model 진술은 *"rows lookback은 종목별로 몇 row를 보는 것이 아니라 pivot된 2d
-wide table 기준"*이다. **§4.2와 §16과 `docs/issues/033`은 반대로 적혀 있고, 033의 반대 방향은 2026-08-30에
+wide table 기준"*이다. **§4.2와 §16과 `docs/issues/archive/033`은 반대로 적혀 있고, 033의 반대 방향은 2026-08-30에
 소유자가 직접 확인한 것이다.** 대조는 §17.9에 있다.
 
 **둘 다 필요한 질문이지 둘 중 하나가 틀린 질문이 아니다.**
@@ -4238,7 +4238,7 @@ wide table 기준"*이다. **§4.2와 §16과 `docs/issues/033`은 반대로 적
 - [ ] 내장 Exchange·Constraint가 쓰는 API 집합이 public surface 안에 있다
 - [ ] preflight가 내장 컴포넌트와 project-local 컴포넌트를 구분하지 않는다
 - [x] `vqapr new`가 깐 템플릿이 **처음부터 conformance를 통과한다** (2026-08-20 철회·역전:
-      원래 항목은 "통과하지 못한다"였다. `docs/issues/004` 참조 — conformance는 "Flow가 부를 수
+      원래 항목은 "통과하지 못한다"였다. `docs/issues/archive/004` 참조 — conformance는 "Flow가 부를 수
       있는가"를 판정하고, 부를 수 없는 템플릿은 사용자가 처음 치는 명령에서 잘못된 것을 가르친다.
       "아직 안 끝났다"는 신호는 소스의 표시된 줄이 이미 하고 있다.
       `tests/extension/test_all_four_doors.py::test_the_scaffold_registers_as_written`이 고정한다)
@@ -4334,7 +4334,7 @@ datasets:
   dataset이 같은 파일을 볼 때는 같은 `source_id`와 같은 `path`를 각각 적고, workspace가 `source_id`
   하나로 보관한다. 두 번째 선언이 첫 번째와 다르면 `dataset.register.source_conflict`로 거절한다
   (`workspace.py:606`).
-- `fields:`의 값은 **컬럼 이름이 아니라 값 표현식**이다(`docs/issues/049` ruling). 맨 컬럼은 축퇴된
+- `fields:`의 값은 **컬럼 이름이 아니라 값 표현식**이다(`docs/issues/archive/049` ruling). 맨 컬럼은 축퇴된
   표현식이므로 ruling 이전에 쓰인 등록은 글자 하나 바뀌지 않는다. 표현식이 **statement**이면
   (`FROM`/`GROUP BY`/subquery) 등록이 거절한다(`datasets.py:248`, `field_not_an_expression`) — 표현식은
   한 instant 안에서 평가되므로 look-ahead가 **문법으로** 막힌다.
@@ -4365,7 +4365,7 @@ agent의 선택이다. **다만 skill은 date x ticker로 매핑되는 데이터
 - 그리고 shipped skill은 **long을 기본값으로 권한다**: *"Registering at the vendor's grain is still the
   right default"*(`agent/skill/SKILL.md:89`). 그 아래 문단이 비용을 경고하지만
   (*"read cost scales with the cells a requirement's window admits"*), 권유 자체는 진술과 반대다.
-  `docs/issues/048`이 그 경고 문단을 넣어 닫혔고, `049`는 **권유를 바꾸는 데까지는 가지 않았다.**
+  `docs/issues/archive/048`이 그 경고 문단을 넣어 닫혔고, `049`는 **권유를 바꾸는 데까지는 가지 않았다.**
 
 **판정: 부분.** 기계는 두 shape를 모두 받고 판정도 정직하다. **문서가 다른 쪽을 권한다.** 진술을
 지키려면 SKILL.md의 default 문장을 바꿔야 하고, 그것은 `049`가 "이 목록에서 가장 싼 항목"으로 지목한
@@ -4388,7 +4388,7 @@ pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 
 - grouped 등록은 유일성을 **검사해서** 얻지 않고 **구성으로** 얻는다: `GROUP BY 1, 2`가 그 쌍당 한 행을
   보장하므로 검사할 것이 남지 않는다.
 - `available_at`은 필수이고 tz-aware여야 한다(`datasets.py:215`). **`instrument_field`는 선택이다**
-  (`docs/issues/038`) — instrument 축이 없는 dataset은 factor series, index level, macro release이고,
+  (`docs/issues/archive/038`) — instrument 축이 없는 dataset은 factor series, index level, macro release이고,
   그런 표에는 선언된 instrument 목록이 적용되지 않는다. 즉 "timestamp와 instrument를 가져야 한다"는
   조건은 등록 전체에 걸린 조건이 아니라 **instrument 축을 선언한 등록에만** 걸린다.
 
@@ -4471,7 +4471,7 @@ execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 �
 > `authoring.Model -> DataModel (compute)` / `-> StrategyModel (decide, tables, account_history,
 > save_payload/load_payload)`, `Constraint (project, monitor)`는 `memory`가 없어 `Model` 밖 — 그리고
 > `vqapr.public`은 같은 객체를 재수출하며, 세 scaffold 모두 `from vqapr import authoring as va`를 emit한다.
-> `_internal/strategy_bridge.py`와 `_internal/models/`는 삭제됐다. 측정은 `docs/issues/036`이 닫히는
+> `_internal/strategy_bridge.py`와 `_internal/models/`는 삭제됐다. 측정은 `docs/issues/archive/036`이 닫히는
 > 근거로 남긴다.
 
 엔진 층 — `models/model.py:11`의 `Model(ABC)`가 `memory`와 `requirements()`를 들고 둘이 거기서 나온다:
@@ -4496,13 +4496,13 @@ ABC -> StrategyModel  (inputs, account_history, diagnostics, decide)
 | `vqapr new datamodel` | `from vqapr.public import DataModel, ...`(`:65`) | 엔진 `DataModel` |
 | `vqapr new constraint` | `from vqapr.public import ...`(`:171`) | 엔진 `Constraint` |
 
-`docs/issues/036`이 저자가 직접 만든 대조표를 담고 있다 — import, 선언 메서드(`requirements()` tuple 대
+`docs/issues/archive/036`이 저자가 직접 만든 대조표를 담고 있다 — import, 선언 메서드(`requirements()` tuple 대
 `inputs()` dict), 요구 타입(`DataRequirement` 대 `DatasetInput`), 진입점(`compute` 대 `decide`), 행의
 타입(dict 대 객체), 필드 접근(`row["x"]` 대 `row.values["x"]`), instrument 접근(`row["instrument"]` 대
 `row.instrument_id`), timestamp가 보이는지 여부. **소유자 ruling은 2026-08-31에 CONVERGE로 나왔고 아직
 구현되지 않았다.**
 
-읽는 쪽 타입 이름도 진술과 어긋난 적이 있다 — `docs/issues/031`: DataModel이 소비해야 하는
+읽는 쪽 타입 이름도 진술과 어긋난 적이 있다 — `docs/issues/archive/031`: DataModel이 소비해야 하는
 `ObservationBatch`가 `__all__`에 없어 설치본 소스를 열어야 알 수 있었다(지금은 들어 있다,
 `public.py:196`의 주석).
 
@@ -4530,7 +4530,7 @@ mechanism이 닮는다", "같은 동작에 다른 이름을 쓰지 않는다")�
   하나다. `cli/run.py`는 호출마다 spec을 읽어 `RunDefinition`을 **새로 만든다.** 재활용의 단위는 객체가
   아니라 파일이다.
 - 병렬은 프로세스 N개다(17.1.4).
-- 관련 이슈: `docs/issues/040`. agenda가 전략 하나만 구동하던 cardinality는 **의도가 아니라고 판정**되어
+- 관련 이슈: `docs/issues/archive/040`. agenda가 전략 하나만 구동하던 cardinality는 **의도가 아니라고 판정**되어
   `strategy_configs`를 `agenda_id`가 아니라 component id로 다시 키잉하기로 했다(owner-decided
   2026-08-31; **구현됨 — 기록 `138`, 2026-09-02**). **그것은 cadence 공유이지 run 공유가 아니다** — 040이
   구현된 지금도 run은 여전히 전략 하나다.
@@ -4558,7 +4558,7 @@ run_id · account · tables · contract · source_digest · declared_digest · r
 | instruments | **없다** — 목록도 개수도 없다. `roster`는 어떤 instrument **분류표**를 읽었는지이지 이 run이 무엇을 돌렸는지가 아니다 |
 | strategy component id | **없다** |
 | strategy file 경로 | **없다**(17.3.2) |
-| exchange / execution input id | **없다**(`docs/issues/034`) |
+| exchange / execution input id | **없다**(`docs/issues/archive/034`) |
 | constraints | id별 `held`/`checked`만 — `contract` |
 | initial account | 최종 snapshot만 — `account` |
 | 모든 선언의 접힌 digest | **있다** — `declared_digest` |
@@ -4691,11 +4691,11 @@ run"*(`cli/run.py:385`).
 - **unfill이 사유와 함께 남는다.** `ZeroDealtReason`(`exchange/fills.py:13`)이
   `ABSENT`/`NONTRADABLE`/`NO_TRADE`/`UNFUNDED` 넷이고, 마지막 하나는 **시장이 거절한 것이 아니라 내
   지갑이 빈 것**이라 따로 이름이 있다 — 앞의 셋을 합산해 *"시장이 무엇을 거절했나"*를 묻는 독자에게
-  자기 잔고를 섞어 주지 않기 위해서다. `docs/issues/039`가 기록 `102`로 닫히며 들어왔다.
+  자기 잔고를 섞어 주지 않기 위해서다. `docs/issues/archive/039`가 기록 `102`로 닫히며 들어왔다.
 - **NAV는 표가 아니라 유도값이다.** `analysis/performance.py`의 `nav_series`가 `vqapr.account`의 측정
   행에서 만든다.
 - 진술의 네 항목 중 셋(weight, NAV, 매매기록)은 프레임워크가 보장하고, **signal은 저자가 `tables()`로
-  선언해야 남는다** — 선언하지 않은 전략의 signal은 어디에도 없다(`docs/issues/019`가 그 거절 메시지를
+  선언해야 남는다** — 선언하지 않은 전략의 signal은 어디에도 없다(`docs/issues/archive/019`가 그 거절 메시지를
   고쳐 닫혔다).
 - 두 기록을 가르는 축이 없다. run 하나가 전략 하나이므로(17.3) 디렉터리 하나가 곧 "그 전략의 그 run"이고,
   **"이 전략의 모든 run"을 모으는 인덱스도 그것을 여는 키도 없다**(17.4).
@@ -4736,7 +4736,7 @@ FillConvention(              # 규약 — 언제, 어느 가격으로
 run spec이 id로 가리키기 때문이다. 이것은 진술과 어긋나지 않는다: 두 체결 규약이 서로 다른 frozen input
 이어야 두 run이 비교 가능해진다.
 
-**판정: 지켜짐.** 관련 열린 이슈는 `docs/issues/034` — **바꾸기는 쉽고 바꾼 결과가 record에 남지
+**판정: 지켜짐.** 관련 열린 이슈는 `docs/issues/archive/034` — **바꾸기는 쉽고 바꾼 결과가 record에 남지
 않는다.** run이 자기가 어떤 execution convention을 썼는지 말하지 못한다. 17.3.1과 같은 결손이다.
 
 ---
@@ -4750,8 +4750,8 @@ run spec이 id로 가리키기 때문이다. 이것은 진술과 어긋나지 �
 
 닫힌 것:
 
-- `docs/issues/029`(CLOSED, 기록 `098`): `_internal`로 들어가는 문이 둘이었고 하나가 되었다.
-- `docs/issues/028`(CLOSED, 기록 `097`): CLI 아래 모듈이 facade를 통해 위로 손을 뻗던 경로가 **테스트로
+- `docs/issues/archive/029`(CLOSED, 기록 `098`): `_internal`로 들어가는 문이 둘이었고 하나가 되었다.
+- `docs/issues/archive/028`(CLOSED, 기록 `097`): CLI 아래 모듈이 facade를 통해 위로 손을 뻗던 경로가 **테스트로
   고정**되었다. `run_spec.py`의 docstring이 그 사건을 담고 있다 — `cli/check.py`가 `cli/run.py`를
   import해 정의를 빌리던 자리를 없애려면 어휘를 **두 verb가 공통으로 올라선 층**으로 내려야 했고,
   그러지 않으면 `cli.run -> flow.judgments -> cli.run` 순환이 되었다.
@@ -4773,7 +4773,7 @@ vqapr.public.StrategyModel        -> vqapr.models.strategy_model.StrategyModel
 vqapr.authoring.StrategyModel     -> vqapr.authoring.StrategyModel            (다른 클래스)
 ```
 
-`docs/issues/036`이 같은 사실을 저자 쪽에서 본 것이다: *"Nothing says which is canonical."* 그리고
+`docs/issues/archive/036`이 같은 사실을 저자 쪽에서 본 것이다: *"Nothing says which is canonical."* 그리고
 scaffold가 그 모호함을 **실행 가능한 형태로** 굳힌다 — strategy는 `authoring`, datamodel과 constraint는
 `public`(17.2의 표).
 
@@ -4801,7 +4801,7 @@ lookback을 본다.
   줄어드는 것을 막는다는 것.
 - **§16 acceptance checklist**도 같은 것을 요구한다: *"`RowsLookback(N)`이 field가 여럿일 때 field당 N행을
   준다 (합쳐서 N행이 아니다)"*.
-- `docs/issues/033`(CLOSED 2026-08-31)이 **소유자에게 직접 물어 확인한 문장을 인용해 두었다**:
+- `docs/issues/archive/033`(CLOSED 2026-08-31)이 **소유자에게 직접 물어 확인한 문장을 인용해 두었다**:
   *"`RowsLookback` with `rows=` does fetch the last N rows per instrument, that is correct. Otherwise
   you would have set the period with a lookback — that is `CalendarLookback`."* 033은 semantics 버그가
   아니라 **steering 버그**로 닫혔다: 두 클래스에 docstring이 생기고

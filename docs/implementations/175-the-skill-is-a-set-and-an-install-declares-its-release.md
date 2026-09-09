@@ -161,14 +161,14 @@ differs from every release vqapr has shipped* — is true of both.
   file, as the working tree requires; running it without `--check` records and a re-check passes.
   Verified both directions, then the generated table was removed again for the reason above.
 - `tests/agent/test_the_release_records_what_it_ships.py` — new, 5 tests. That the gate fails while
-  content is unrecorded, that its message names the real fixing command (`docs/issues/025`'s rule),
+  content is unrecorded, that its message names the real fixing command (`docs/issues/archive/025`'s rule),
   that no shipped file is exempt from the check, the record-then-judge round trip that turns
   yesterday's bytes into `outdated`, and that history is additive.
 - `tests/agent/test_an_installed_skill_declares_where_it_came_from.py` — new, 10 tests. The five
   states, the `outdated`/`modified` split with a synthetic release table, `WRITABLE_WITHOUT_FORCE`,
   the worst-file rollup, and that a hash known for one skill does not vouch for another skill's
   identical file.
-- `tests/cli/test_the_stale_skill_message_names_a_real_command.py` — rewritten. `docs/issues/025`'s
+- `tests/cli/test_the_stale_skill_message_names_a_real_command.py` — rewritten. `docs/issues/archive/025`'s
   mechanical condition is kept: every `vqapr ...` in backticks anywhere in a payload is extracted
   and executed. Its `test_install_gained_no_no_op_force_flag` was **retired with its reasoning**,
   not deleted — a `--force` on the old `install` would have been a no-op, and on this one it is

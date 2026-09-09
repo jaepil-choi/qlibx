@@ -202,7 +202,7 @@ class StrategyEventLoop(
         started = time.perf_counter()
         result = super().run()
         # The phases the context accumulated, plus the whole: what the record reports as
-        # `timing` (`docs/issues/068`). `total` covers the loop itself; the panel build and the
+        # `timing` (`docs/issues/archive/068`). `total` covers the loop itself; the panel build and the
         # record freeze happen outside it and are the caller's to time.
         timing = {**self._context.timing, "total": time.perf_counter() - started}
         return replace(result, timing=timing)
@@ -221,7 +221,7 @@ class StrategyEventLoop(
         # A scheduled event is a callback, always (record `148`: valuation happens at the
         # execution instant and monitoring right after each commit, inside the due path; record
         # `182`: an occurrence carries no role to branch on). `callback` is the whole scheduled
-        # side: the window built for the model and the model's own `decide` (`docs/issues/068`:
+        # side: the window built for the model and the model's own `decide` (`docs/issues/archive/068`:
         # a user learns their strategy is 5% of the wall clock from the record, not from
         # cProfile).
         with self._context.timed("callback"):

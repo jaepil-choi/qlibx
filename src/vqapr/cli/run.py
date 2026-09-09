@@ -104,7 +104,7 @@ def _chain(error: BaseException) -> str:
     `raise ValueError(...) from error` is how this package names the step that failed while
     keeping the evidence, and dropping `__cause__` threw away the half that says WHY -- a reader
     was told "the initial payload cannot be staged" and never told that `load_payload` hit
-    `EOFError: Ran out of input` (`docs/issues/076`). Only `__cause__` is followed, never
+    `EOFError: Ran out of input` (`docs/issues/archive/076`). Only `__cause__` is followed, never
     `__context__`: an explicit `from` is an author saying these two are one story, whereas an
     incidental exception caught during handling is not.
     """
@@ -121,7 +121,7 @@ def _chain(error: BaseException) -> str:
 def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     """A bare TypeError or ValueError from a framework invariant, given an envelope.
 
-    ONE renderer for both verbs (`docs/issues/076`). `check` caught these per phase and `run`
+    ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and `run`
     called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded refusal
     from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
 
@@ -197,7 +197,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 + ", ".join(entry.component_id for entry in definition.members),
                 retry=f"vqapr show run {target}, then name one of its models",
             ) from unknown
-    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/070`):
+    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/archive/070`):
     # the judgments, the freeze and the roster read all see the same document. The judgments are
     # asked inside `preflight_run`, in the order `check` asks them, so this verb and a Python
     # caller refuse the same run for the same reasons (record `168`); a refusal arrives as the
@@ -206,7 +206,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         frozen = preflight_run(workspace, definition)
     except (TypeError, ValueError) as refused:
         # `check` renders exactly this as a bounded refusal; letting it escape here rendered the
-        # SAME judgment as `stage: "unhandled"` (`docs/issues/076`).
+        # SAME judgment as `stage: "unhandled"` (`docs/issues/archive/076`).
         #
         # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
         # `flow/declaration/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and
@@ -266,7 +266,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 for component_id, record in outcome.records.items()
             },
         )
-    # One line per strategy the run was asked to run, completed or failed (`docs/issues/073`).
+    # One line per strategy the run was asked to run, completed or failed (`docs/issues/archive/073`).
     # A failed strategy's line is the same `simulation.*` payload a refusal used to be the whole
     # envelope of, so a reader who handled that shape handles this one, per strategy.
     strategies: dict[str, dict[str, Any]] = {}
@@ -357,12 +357,12 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
         "tables": sorted(record.get("tables") or {}),
         # What the orders did, not only that they were placed. `ok: true` means the simulation
         # executed; it does not mean the book that was declared is the book that was held, and
-        # those differed by nine percent of NAV in the run that filed `docs/issues/039`.
+        # those differed by nine percent of NAV in the run that filed `docs/issues/archive/039`.
         "fills": fill_summary(
             tuple(read_typed_table(store_root, run_id, FILL_TABLE, strategy_ref))
         ),
         "contract": record.get("contract"),
-        # Seconds by phase (`docs/issues/068`), so "my strategy is 5% of the wall clock and
+        # Seconds by phase (`docs/issues/archive/068`), so "my strategy is 5% of the wall clock and
         # the snapshot is half of it" is read off the result rather than off a profiler.
         "timing": record.get("timing"),
     }
@@ -377,7 +377,7 @@ def _held_record(running: RunRecordLive) -> VqaprError:
     **What this refusal may not say is that the holder is alive.** The lock proves only that it
     was touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
     interrogated -- so a run killed seconds ago presents exactly like one that is executing
-    (`docs/issues/037`). `fix` names the self-healing wait FIRST, because it is the remedy that is
+    (`docs/issues/archive/037`). `fix` names the self-healing wait FIRST, because it is the remedy that is
     correct under both readings and costs nothing.
     """
     claim = running.claim
@@ -415,7 +415,7 @@ def _roster_envelope(roster: object | None) -> dict[str, object]:
     field that answers the question.
 
     Built from the roster the run READ (`RunResult.roster`), never from a second read after the
-    run (`docs/issues/070`): what this reports is what the fills were classified by, and the
+    run (`docs/issues/archive/070`): what this reports is what the fills were classified by, and the
     `stale` branch that described a re-read failing after a long run describes a state that can
     no longer occur.
     """

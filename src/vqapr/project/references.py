@@ -46,7 +46,7 @@ def _references_in(state: _State, kind: str, identity: str) -> tuple[str, ...]:
         # (`check.dataset.unregistered`), which is the same place it would be refused had
         # the dataset never been registered. A datamodel run that WRITES this dataset is
         # not a blocker: withdrawing the output is how that run is run again
-        # (`docs/issues/060`).
+        # (`docs/issues/archive/060`).
         for run_id, definition in runs.items():
             if definition.sessions_from == identity:
                 blockers.append(f"run {run_id!r} (sessions_from)")

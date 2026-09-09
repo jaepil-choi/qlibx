@@ -178,7 +178,7 @@ def _install(root: Path, *, targets: tuple[str, ...], dry_run: bool, force: bool
     }
     if refused:
         body["refused"] = refused
-        # 문장이 지목하는 flag가 실제로 존재해야 한다. `docs/issues/025`는 없는 flag를 지목한
+        # 문장이 지목하는 flag가 실제로 존재해야 한다. `docs/issues/archive/025`는 없는 flag를 지목한
         # 메시지가 남긴 비용의 기록이고, 그 비용은 읽는 사람마다 다시 든다.
         body["note"] = (
             "these files differ from every release vqapr has shipped, so they hold edits that are "

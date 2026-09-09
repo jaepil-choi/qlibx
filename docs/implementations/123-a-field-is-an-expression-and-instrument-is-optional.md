@@ -1,9 +1,9 @@
 # 123 — A field is an expression, and instrument is optional
 
-**Closes:** [`045`](../issues/045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)
-and [`038`](../issues/038-one-instrument-list-filters-every-requirement.md), implementing the owner
+**Closes:** [`045`](../issues/archive/045-a-requirement-cannot-say-which-rows-so-a-long-table-delivers-a-hundred-and-fifty-times-what-is-kept.md)
+and [`038`](../issues/archive/038-one-instrument-list-filters-every-requirement.md), implementing the owner
 ruling recorded in
-[`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
+[`049`](../issues/archive/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md) — lane C
 of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2).
 **Branch:** `read-038-049-fields-are-expressions`, rebased onto `develop@edaadbc1` — after lane B,
@@ -103,7 +103,7 @@ made them. It does **not** change the axis the window is counted on: the rank is
 `PARTITION BY instrument`, the proof groups by instrument, and a name short of the declared count is
 read with no bound at all so it reaches back as far as its own history needs. So a `RowsLookback`
 still gives each name its own last N, and a batch's calendar span is still set by the sparsest name
-in it — which is exactly what `docs/issues/033` measured and what the owner's 2026-09-01 statement
+in it — which is exactly what `docs/issues/archive/033` measured and what the owner's 2026-09-01 statement
 about a panel axis is about. That statement is a redefinition this lane neither makes nor forecloses;
 `docs/design/the-panel-the-surface-and-the-run.md` §2.4 holds the design. **`033` is not closed by
 this lane.**

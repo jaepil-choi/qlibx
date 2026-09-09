@@ -24,7 +24,7 @@ calls "a real finding" apiece.
   Test: `tests/cli/test_run_makes_the_judgments_check_makes.py::test_an_unknown_strategy_name_…`.
 - **A datamodel refused in a `--jobs` worker died as `stage: unhandled`, `failures: []`**
   (`flow/orchestration.py`). The strategy pool and the datamodel pool were copies; the
-  `docs/issues/073` fix (a worker's failure must pickle) landed only in the strategy copy. Fixed at
+  `docs/issues/archive/073` fix (a worker's failure must pickle) landed only in the strategy copy. Fixed at
   depth rather than by a second copy of the outcome trick: `VqaprError.__reduce__` rebuilds the
   error through its keyword-only constructor, so a datamodel's refusal crosses the `spawn`
   boundary as itself and the parent raises what the sequential loop raises; and one pool driver,

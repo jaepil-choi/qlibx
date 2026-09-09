@@ -1,6 +1,6 @@
 # 007 — An undeclared instrument is silently a share
 
-**Status: SUPERSEDED 2026-08-27 by `docs/issues/008-an-instrument-is-not-the-venues-to-own.md`.**
+**Status: SUPERSEDED 2026-08-27 by `docs/issues/archive/008-an-instrument-is-not-the-venues-to-own.md`.**
 The diagnosis below stands — an undeclared instrument silently gets share treatment — but the
 prescription put the roster inside the venue, and the plan's entire cost followed from that. **Do
 not answer the `WIDE`/`NARROW` question; it does not survive 008.** Read 008 first, then this file

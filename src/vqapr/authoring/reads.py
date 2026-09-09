@@ -48,7 +48,7 @@ class DatasetInput(BaseModel):
 
 
 def requirements_for(declaration: DatasetInput) -> tuple[DataRequirement, ...]:
-    """One declared alias, as the engine's requirements: one per field (`docs/issues/049`).
+    """One declared alias, as the engine's requirements: one per field (`docs/issues/archive/049`).
 
     The single place the fan-out is written. Every role that declares reads derives its
     requirements through here, so a Model cannot declare one thing to preflight and read another

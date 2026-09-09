@@ -1,6 +1,6 @@
 """Rung 1's stop condition names commands the CLI accepts.
 
-`docs/issues/030`, found on the very first command of a first-time journey. The skill said:
+`docs/issues/archive/030`, found on the very first command of a first-time journey. The skill said:
 
 > **Stop condition:** `vqapr list` shows all required elements and `register` accepted every
 > declaration without failures.
@@ -12,7 +12,7 @@ reading `vqapr list --help` -- not the skill, which is what the reader was follo
 The sentence now names the calls. This test is what stops it drifting from the CLI again: a kind
 renamed or added in `list_.KINDS` and not reflected in the skill fails here.
 
-Only the runnable half of `docs/issues/030` is closed. The second half -- whether `cli.usage`
+Only the runnable half of `docs/issues/archive/030` is closed. The second half -- whether `cli.usage`
 refusals are inside the six-field envelope guarantee, which they are not today -- is a decision
 about what that guarantee covers, and is left open deliberately.
 """
@@ -29,7 +29,7 @@ from vqapr.cli.main import main
 SURVEYS_THE_WORKSPACE = "inspect-workspace"
 """The skill that now owns surveying a workspace with `vqapr list`.
 
-`docs/issues/030`'s sentence lived under "Rung 1" in the single pre-split skill, and this helper
+`docs/issues/archive/030`'s sentence lived under "Rung 1" in the single pre-split skill, and this helper
 sliced it out between two heading strings. PRD §11.2 made the skill a set, and the surveying half
 moved here.
 
@@ -47,7 +47,7 @@ def _stop_condition_block() -> str:
 def test_bare_list_is_still_refused_so_the_skill_must_not_name_it(capsys) -> None:
     """The behaviour the sentence contradicted, pinned rather than assumed.
 
-    If `list` ever grows an all-kinds form -- which `docs/issues/030` argues is the better shape --
+    If `list` ever grows an all-kinds form -- which `docs/issues/archive/030` argues is the better shape --
     this fails, and the skill can go back to one sentence in the same commit.
     """
     assert main(["list"]) != 0

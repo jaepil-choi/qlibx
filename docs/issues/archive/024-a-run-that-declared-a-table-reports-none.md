@@ -3,7 +3,7 @@
 *Correction, 2026-08-31:* the fix below **did not reach production**. `_tables_declared` read
 `result.tables`, and `SimulationResult` has no such attribute, so the component-declared half
 reported nothing while its unit test passed against a stand-in that did have one. Found while
-wiring `docs/issues/039`, filed as `docs/issues/041`, fixed by
+wiring `docs/issues/archive/039`, filed as `docs/issues/archive/041`, fixed by
 `docs/implementations/102-a-run-says-what-its-orders-did.md`.
 
 **Status:** **closed** by `docs/implementations/094-a-run-reports-the-tables-it-declared.md`
@@ -11,7 +11,7 @@ wiring `docs/issues/039`, filed as `docs/issues/041`, fixed by
 declaration surfaces - `store.tables` and `StrategyModel.diagnostics()`. The empty list was not
 wrong about what it measured; it measured one of two surfaces. The counter is renamed
 `formations` -> `instants`, which is what its expression counts, and its `vqapr.fill` value became
-meaningful when `docs/issues/022` gave fills a clock.
+meaningful when `docs/issues/archive/022` gave fills a clock.
 
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-008**,

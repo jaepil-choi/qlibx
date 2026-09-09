@@ -10,7 +10,7 @@ Korean daily equities, amended live to FF5+MOM (K = 6) OU+Thresh (phase 1), then
 OU+Thresh / Fourier+FFN plus a cProfile of one strategy (phase 2). Everything asked for was
 delivered inside the package; nothing was `blocked`.
 
-**Triage outcome.** 17 findings. 14 filed as `docs/issues/055`-`068` (the mapping is under each
+**Triage outcome.** 17 findings. 14 filed as `docs/issues/archive/055`-`068` (the mapping is under each
 entry below, written into the file by the evaluator). Not filed: F-003 (console encoding, agreed
 `No`); F-015 (same root as F-013 / `061`, its numbers attached there). Closed the same day by the
 deletion campaign: `058` (record `146`, F-008) and `061` (record `143`, F-013 / F-015); of the
@@ -67,7 +67,7 @@ points nowhere.
 
 > **Evaluator triage, 2026-09-03 (phase 1 entries F-001–F-014).** Each `Yes`/`Unsure` entry was
 > re-checked against the `qlibx` source before filing. Twelve are filed upstream as
-> `qlibx/docs/issues/055`–`066`; the mapping is written under each entry below. Not filed: F-003
+> `qlibx/docs/issues/archive/055`–`066`; the mapping is written under each entry below. Not filed: F-003
 > (console encoding, `No`). The `027` annotation above is kept as evidence on that issue.
 >
 > **Second triage, 2026-09-03 (phase 2 entries F-015–F-017).** F-017 filed as `067`, F-016 as
@@ -77,7 +77,7 @@ points nowhere.
 
 ### F-001 — `Hold(reason=...)`: skill says one token no spaces, docstring says spaces are allowed
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/062`. Confirmed: `SKILL.md:429` vs `authoring.py:467`; the docstring is the true rule (record 125).
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/062`. Confirmed: `SKILL.md:429` vs `authoring.py:467`; the docstring is the true rule (record 125).
 
 **Severity:** papercut
 **Kind:** docs
@@ -90,7 +90,7 @@ points nowhere.
 
 ### F-002 — `vqapr new strategy --dataset residuals --field resid` names the alias `prices` and the docstring "Ranks the cross-section"
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/063`. Confirmed in the scaffold template.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/063`. Confirmed in the scaffold template.
 
 **Severity:** papercut
 **Kind:** docs
@@ -117,7 +117,7 @@ points nowhere.
 
 ### F-004 — ran `vqapr register` from a subdirectory; a second workspace appeared silently and the next refusal named the missing datasets but not the workspace it looked in
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/066`, as a message defect (`Unsure` → `Yes`). `Workspace.create` never looks at parent directories and no envelope carries `workspace_root`.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/066`, as a message defect (`Unsure` → `Yes`). `Workspace.create` never looks at parent directories and no envelope carries `workspace_root`.
 
 **Severity:** slowed
 **Kind:** message
@@ -130,7 +130,7 @@ points nowhere.
 
 ### F-005 — `vqapr show model` lists the same dataset id once per field under `decides`, and `records: []` for a strategy whose `tables()` declares a table
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/055`. Confirmed and worse than reported: `show model` reads attributes (`_aliases`, `_authored_tables`) that no code sets, so `reads` is empty for every model.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/055`. Confirmed and worse than reported: `show model` reads attributes (`_aliases`, `_authored_tables`) that no code sets, so `reads` is empty for every model.
 
 **Severity:** papercut
 **Kind:** code
@@ -143,7 +143,7 @@ points nowhere.
 
 ### F-006 — `vqapr check <run>` reports one missing dataset seven times, once per field the strategy reads from it
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/056`. Confirmed: the judgment loop is per requirement (= per field) with no grouping by dataset.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/056`. Confirmed: the judgment loop is per requirement (= per field) with no grouping by dataset.
 
 **Severity:** papercut
 **Kind:** message
@@ -156,7 +156,7 @@ points nowhere.
 
 ### F-007 — `read_strategy_table(<wrong root>, ...)` returns an empty iterator instead of refusing
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/057` (together with F-012). Confirmed: `read_table` returns silently on a missing path, and `strategy_ref=None` resolves to a record shape a 0.3.0 run never writes.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/057` (together with F-012). Confirmed: `read_table` returns silently on a missing path, and `strategy_ref=None` resolves to a record shape a 0.3.0 run never writes.
 
 **Severity:** slowed
 **Kind:** message
@@ -169,7 +169,7 @@ points nowhere.
 
 ### F-008 — recorded `event_time` is printed with `+09:00` in `vqapr.account` rows and `+00:00` in `vqapr.fill` rows of the same strategy
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/058` (`Unsure` → `Yes`, code). Confirmed: the execution table converts the fill target to UTC; agenda-stamped rows keep the declared zone.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/058` (`Unsure` → `Yes`, code). Confirmed: the execution table converts the fill target to UTC; agenda-stamped rows keep the declared zone.
 > **Fixed upstream 2026-09-03:** `058` closed by record `146` — the fill row's `event_time` is stamped in the strategy agenda's zone, and record tables are parquet so the zone travels in the column type. Lands in the next wheel.
 
 **Severity:** papercut
@@ -183,7 +183,7 @@ points nowhere.
 
 ### F-009 — a 2,378-session materialization wrote a 478 MB lineage JSON, held ~3 GB of RAM, and took 20 minutes, with no progress output
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/059`. Confirmed: rows and per-evaluation access records are accumulated in two lists and written after the loop; lineage repeats every instrument per evaluation. Both 477–478 MB lineage files in `.vqapr/materialized/` are the evidence.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/059`. Confirmed: rows and per-evaluation access records are accumulated in two lists and written after the loop; lineage repeats every instrument per evaluation. Both 477–478 MB lineage files in `.vqapr/materialized/` are the evidence.
 
 **Severity:** slowed
 **Kind:** code
@@ -196,7 +196,7 @@ points nowhere.
 
 ### F-010 — the paper's "decide on the close, trade at that close" cannot be stated; I had to invent a 15:35 fill five minutes after a 15:30 close
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/064` (`Unsure` → `Yes`, docs). The agendas template presents the one-session-lag convention as the correct one and names no other; this is the entry the testbed exists for.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/064` (`Unsure` → `Yes`, docs). The agendas template presents the one-session-lag convention as the correct one and names no other; this is the entry the testbed exists for.
 
 **Severity:** slowed
 **Kind:** docs
@@ -209,7 +209,7 @@ points nowhere.
 
 ### F-011 — `vqapr rm` has no `dataset` kind, so a materialized dataset can never be withdrawn
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/060`. Confirmed: eight `rm` kinds, none of them `dataset`; the skill line promising the removal is `SKILL.md:157`.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/060`. Confirmed: eight `rm` kinds, none of them `dataset`; the skill line promising the removal is `SKILL.md:157`.
 
 **Severity:** papercut
 **Kind:** code
@@ -222,7 +222,7 @@ points nowhere.
 
 ### F-012 — urge: when `read_strategy_table` returned nothing I wanted to open `vqapr/flow/run_records.py` to see how it resolves the root
 
-> **Filed upstream 2026-09-03:** folded into `qlibx/docs/issues/057` with F-007.
+> **Filed upstream 2026-09-03:** folded into `qlibx/docs/issues/archive/057` with F-007.
 
 **Severity:** urge
 **Kind:** docs
@@ -235,7 +235,7 @@ points nowhere.
 
 ### F-013 — `window.values[name][-30:]` costs exactly as much as reading the whole 1,030-row column; there is no cheap "last n" on a long lookback
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/061` (`Unsure` → `Yes`, code). Confirmed and worse than measured: `values` builds every name's column on each access, so `values[name]` is the whole panel, then one column.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/061` (`Unsure` → `Yes`, code). Confirmed and worse than measured: `values` builds every name's column on each access, so `values[name]` is the whole panel, then one column.
 > **Fixed upstream 2026-09-03:** `061` closed by record `143` — `values` is a lazy mapping (`values[name]` converts one column), `latest()` and `counts()` stay in Arrow, and the docstring states the cost. No `tail(n)`. Lands in the next wheel.
 
 **Severity:** slowed
@@ -250,7 +250,7 @@ points nowhere.
 
 ### F-014 — a 2 x 2 grid (two signals x two residual sets) needed four near-identical strategy files because a component's `inputs()` cannot be parametrised from the run
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/065`. Confirmed: preflight and orchestration both call `requirements()` before `memory` is assigned, so the safe reading was right; the design question (class + config under one id) is attached to the issue.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/065`. Confirmed: preflight and orchestration both call `requirements()` before `memory` is assigned, so the safe reading was right; the design question (class + config under one id) is attached to the issue.
 
 **Severity:** slowed
 **Kind:** docs
@@ -263,7 +263,7 @@ points nowhere.
 
 ### F-015 — `PanelWindow.values` rebuilds every column on each access; `window.values[name]` inside a loop over names is O(N²) and was 82% of a strategy run
 
-> **Evaluator 2026-09-03:** same root as F-013 → `qlibx/docs/issues/061`, **closed by record 143** (`values` is a lazy mapping; `values[name]` converts one column). The profile numbers here are attached to `061` as evidence. Not filed separately.
+> **Evaluator 2026-09-03:** same root as F-013 → `qlibx/docs/issues/archive/061`, **closed by record 143** (`values` is a lazy mapping; `values[name]` converts one column). The profile numbers here are attached to `061` as evidence. Not filed separately.
 
 **Severity:** slowed
 **Kind:** code
@@ -276,7 +276,7 @@ points nowhere.
 
 ### F-016 — where the rest of a strategy session goes, from the same profile (for the maintainer, not a defect)
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/068`. Filed as a defect after all: the two per-session execution snapshots are fetched row by row as Python datetimes (the `pytz`/`replace` lines), the shape `054`/`061` closed elsewhere; `counts` and `run_records.append` are already changed by records `143`/`146`. The per-phase timing request is in the same issue.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/068`. Filed as a defect after all: the two per-session execution snapshots are fetched row by row as Python datetimes (the `pytz`/`replace` lines), the shape `054`/`061` closed elsewhere; `counts` and `run_records.append` are already changed by records `143`/`146`. The per-phase timing request is in the same issue.
 
 **Severity:** papercut
 **Kind:** code
@@ -289,7 +289,7 @@ points nowhere.
 
 ### F-017 — the skill says an edited component needs `vqapr register ... --force`; the CLI has no `--force`, and a plain re-register silently replaces the registration
 
-> **Filed upstream 2026-09-03:** `qlibx/docs/issues/067`. Confirmed: `_merge_component` replaces by default and its `force` parameter is a no-op; the only `--force` in the CLI belongs to `run`; the success payload never names the replaced fingerprint.
+> **Filed upstream 2026-09-03:** `qlibx/docs/issues/archive/067`. Confirmed: `_merge_component` replaces by default and its `force` parameter is a no-op; the only `--force` in the CLI belongs to `run`; the success payload never names the replaced fingerprint.
 
 **Severity:** papercut
 **Kind:** docs

@@ -56,7 +56,7 @@ class SampleReversal5d(StrategyModel):
         window = call.read("prices", "close")
         closes: dict[str, list[Decimal]] = {}
         for name in window.instruments:
-            # A DOUBLE field arrives as `float`, as the dataset declared it (`docs/issues/088`).
+            # A DOUBLE field arrives as `float`, as the dataset declared it (`docs/issues/archive/088`).
             # The intent below is stated in Decimal, so the crossing happens here, once, and
             # through `str`: `Decimal(0.1)` would inherit the binary expansion.
             closes[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]

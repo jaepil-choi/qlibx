@@ -76,7 +76,7 @@ def preflight_run(
     `VqaprError` `check` renders, in `check`'s codes.
 
     Takes the `Workspace` a caller already holds, or a root to open one from. A CLI command
-    opens the document once and hands that one snapshot to every step (`docs/issues/070`):
+    opens the document once and hands that one snapshot to every step (`docs/issues/archive/070`):
     opening again here made the run freeze against a document that could differ from the one
     its judgments had just read.
     """
@@ -116,7 +116,7 @@ class StrategyOutcome:
     Strings and plain dict trees only, on purpose: this is what a `--jobs` worker returns to the
     parent, and the `SimulationFailure` it stands in for cannot cross that boundary -- its
     keyword-only constructor and the owner objects it keeps on itself both refuse to pickle
-    (`docs/issues/073`). `failure` is the exception's `as_dict()`, the same payload a
+    (`docs/issues/archive/073`). `failure` is the exception's `as_dict()`, the same payload a
     single-process run renders, so the two paths report one shape.
     """
 
@@ -141,7 +141,7 @@ class RunResult:
     end. `records` holds each strategy's `strategy.json` as written, for every strategy run under
     a store -- including those run by worker processes, whose in-process result never crosses the
     process boundary and is read back from the record instead. `outcomes` has an entry for EVERY
-    strategy the run was asked to run, completed or failed (`docs/issues/073`): a refusal of one
+    strategy the run was asked to run, completed or failed (`docs/issues/archive/073`): a refusal of one
     strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps
     the `SimulationFailure` itself for a strategy that failed in this process.
     """
@@ -152,7 +152,7 @@ class RunResult:
     roster: RegisteredRoster | None = None
     """The instrument roster this run read at its start, or `None` when none was registered --
     or when the run was a datamodel run, which reads no roster. Carried so the caller's report
-    is built from what the run used rather than from a second read (`docs/issues/070`)."""
+    is built from what the run used rather than from a second read (`docs/issues/archive/070`)."""
     outcomes: Mapping[str, StrategyOutcome] = field(default_factory=dict)
     errors: Mapping[str, SimulationFailure] = field(default_factory=dict)
 
@@ -214,7 +214,7 @@ def run(
     """Execute a frozen run: each of its strategies (or those named), each in its own flow.
 
     `workspace` is the document the caller already opened, when it did: the roster is read
-    through it rather than by opening the document again (`docs/issues/070`), so a command
+    through it rather than by opening the document again (`docs/issues/archive/070`), so a command
     judges, freezes and runs against one snapshot. Omitted, the roster is read from
     `project_root` -- one open, once per run, not once per strategy.
 
@@ -255,7 +255,7 @@ def run(
 
     # ONE read of the roster for the whole run, through the caller's workspace when it has one.
     # It was read once per strategy, and the CLI read it a further time for its envelope
-    # (`docs/issues/070`); the record is written from this read and so is the report.
+    # (`docs/issues/archive/070`); the record is written from this read and so is the report.
     roster = registered_roster(workspace if workspace is not None else root_path)
     selected = tuple(frozen.strategy(name) for name in (strategies or ())) or frozen.strategies
     store = None if store_root is None else Path(store_root)
@@ -304,7 +304,7 @@ def run(
                 roster=roster,
             )
         except SimulationFailure as failed:
-            # One strategy's refusal is that strategy's outcome (`docs/issues/073`, `071`). It
+            # One strategy's refusal is that strategy's outcome (`docs/issues/archive/073`, `071`). It
             # has its own flow and its own account (design section 7-4); the strategies after it
             # in the run have nothing to learn from its decision being declined, and stopping
             # them left a comparison run with three records and no word about the other five.
@@ -393,7 +393,7 @@ def _in_workers[Returned](
     """One member per worker, in `jobs` spawned processes; what each returns, by component id.
 
     The one pool behind `--jobs` for both kinds of run. The strategy branch and the datamodel
-    branch each carried their own copy of this, and the `docs/issues/073` fix -- a worker's
+    branch each carried their own copy of this, and the `docs/issues/archive/073` fix -- a worker's
     failure has to be something `concurrent.futures` can pickle -- landed in only one of them.
     `worker` is a module-level function taking `(project_root, run_id, component_id, store_root,
     *arguments)` as strings and bools, because it crosses a `spawn` boundary.
@@ -529,7 +529,7 @@ def run_registered_strategy(
     parent, and this one carries the owner object that was refused -- a `Rebalance` whose weights
     are a `MappingProxyType` -- so the parent used to receive `TypeError: cannot pickle
     'mappingproxy' object`, render `stage: unhandled` with `failures: []`, and say nothing about
-    the strategies that had finished (`docs/issues/073`).
+    the strategies that had finished (`docs/issues/archive/073`).
     """
     workspace = Workspace.open(project_root)
     frozen = _preflight_run(workspace, workspace.run_definition(run_id))
@@ -567,7 +567,7 @@ def _run_strategy(
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
-    `roster` is the one read `run` made at its start (`docs/issues/070`); the record is written
+    `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is written
     from it rather than from a read of this strategy's own.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
@@ -593,7 +593,7 @@ def _run_strategy(
     # The record is written from the ONE roster read `run` made, never from a second one.
     # `roster` carries the digest and the table list beside the registry, so a `vqapr register`
     # landing during the run cannot make the record state a digest the fills were never classified
-    # by (`docs/issues/050`).
+    # by (`docs/issues/archive/050`).
     registry = roster.registry if roster is not None else None
     catalog = _FrozenCatalog(frozen)
     # One physical handle for the whole strategy. duckdb caches parquet metadata for a
@@ -717,7 +717,7 @@ def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object
     loudly. **Not `None`, and that distinction is the whole point.** `roster: null` in a record
     means *"the run never knew the categories"*; any run that reaches this line did read its
     roster, so the marker says what actually happened: the run knew its categories, and the record
-    could not re-read them at the end (`docs/issues/042`, `050`).
+    could not re-read them at the end (`docs/issues/archive/042`, `050`).
     """
     try:
         return roster_report(roster)

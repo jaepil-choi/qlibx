@@ -1,6 +1,6 @@
 # 129 — three debts that cost nothing to pay
 
-**Closes:** `docs/issues/047`, and OS-2 of `docs/diagnostics/archive/2026-08-18-vqapr-review.md`.
+**Closes:** `docs/issues/archive/047`, and OS-2 of `docs/diagnostics/archive/2026-08-18-vqapr-review.md`.
 **Step:** 0 of `docs/refactoring/2026-09-02-the-convergence-campaign.md`.
 **Branch:** `step-00-the-cheap-debts`.
 
@@ -48,7 +48,7 @@ person to run a static check will read it.
 The campaign's acceptance condition for this item anticipated the case in these words: *"넷 중
 하나라도 실제로 필요하면 그 import를 찾아 이 항목에서 빼고 이유를 적는다."* This is that.
 
-### 2. duckdb's progress bar no longer lands in the JSON envelope (`docs/issues/047`)
+### 2. duckdb's progress bar no longer lands in the JSON envelope (`docs/issues/archive/047`)
 
 Both places in `data/scan.py` that open a duckdb handle now go through one `_configure`, which sets
 `preserve_insertion_order=false` as before and `enable_progress_bar=false`, which is new.

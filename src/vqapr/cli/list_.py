@@ -58,7 +58,7 @@ COMPONENT_KINDS = (*AUTHORED_KINDS, "exchange")
 """What `--kind` accepts: the three kinds an author registers by name, plus the one declared.
 
 Spelled the way `new` and `register` spell them and the way `list` reports them (`cli_kind`),
-so the value a reader copies off one row filters the next call. `docs/issues/083` is a reader
+so the value a reader copies off one row filters the next call. `docs/issues/archive/083` is a reader
 handing `list components` to `show model` and breaking on the exchange because nothing could
 say "the strategies and datamodels only".
 """
@@ -177,7 +177,7 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
     """Every strategy record of one run, finished or not, filtered on record fields.
 
     Finished records first, each `status: completed`. Then every strategy directory that has no
-    record yet (`docs/issues/074`): `status: running` while its writer keeps touching its lock,
+    record yet (`docs/issues/archive/074`): `status: running` while its writer keeps touching its lock,
     with `chunks`, `last_event_time` and `lock.refreshed_ago` so a reader can see whether it is
     still advancing; `status: unfinished` once the lock is stale or gone, which is what a killed
     or refused strategy leaves. Those rows have no `fingerprint` beyond the `<fp8>` in their ref,
@@ -245,7 +245,7 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
 
 
 def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """Every datamodel record of one run (record `148`), finished or not (`docs/issues/080`).
+    """Every datamodel record of one run (record `148`), finished or not (`docs/issues/archive/080`).
 
     Finished records first, `status: completed`. Then every datamodel directory without a
     record, the way `_strategies` lists them: `running` while its lock is fresh, `unfinished`
@@ -310,7 +310,7 @@ def _reading(
 ) -> list[dict[str, Any]]:
     """The components whose declared reads name `dataset_id`, and what each reads from it.
 
-    The reverse of `show model` (`docs/issues/082`): "who reads this dataset" had no verb, so it
+    The reverse of `show model` (`docs/issues/archive/082`): "who reads this dataset" had no verb, so it
     was `list components` then `show model` per component -- 41 processes and 36 seconds on a
     forty-component workspace. The cost was the process starts, not the loads: this asks every
     component in this one process, the way `show model` asks one. An exchange declares no
@@ -473,7 +473,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             ]
             row["status"] = "registered"
         # And every run the STORE holds that the workspace no longer registers
-        # (`docs/issues/081`): withdrawing a definition left its records readable but not
+        # (`docs/issues/archive/081`): withdrawing a definition left its records readable but not
         # findable, because this walked the registrations only. An orphan is an entry point to
         # `list strategies|datamodels --run` and to `rm run`, which is all that was missing.
         registered = {str(row["run_id"]) for row in rows}

@@ -1,6 +1,6 @@
 """Every command a skill message names is a command that runs.
 
-`docs/issues/025`. `vqapr skill list` reported staleness with *"run `vqapr skill install --force` to
+`docs/issues/archive/025`. `vqapr skill list` reported staleness with *"run `vqapr skill install --force` to
 update it"*, and `install` accepted only `--target`, `--into` and `--dry-run`. Following the
 instruction produced:
 

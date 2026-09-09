@@ -1,6 +1,6 @@
 # 149 — the issues left open at 0.4.0, closed on one branch
 
-**Closes:** `docs/issues/055`, `056`, `057`, `060`, `062`, `063`, `066`, `067`, `068`, `069`,
+**Closes:** `docs/issues/archive/055`, `056`, `057`, `060`, `062`, `063`, `066`, `067`, `068`, `069`,
 `070`; the docs half of `065`. **Branch:** `fix/0.4.0-open-issues`. **Authority:** the owner,
 2026-09-04 — *"1번 덩어리를 한 브랜치로 모두 닫고, 같은 브랜치에서 코드 부분도 수정하고 넘어가자"*,
 after ruling `064` closed won't-fix (same-close trading is look-ahead; the one-session lag is

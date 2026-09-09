@@ -240,7 +240,7 @@ datasets:
 def test_a_usage_rejection_carries_the_fields_too(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`docs/issues/030`, second half, settled by record `114` — and this test used to assert the
+    """`docs/issues/archive/030`, second half, settled by record `114` — and this test used to assert the
     opposite.
 
     It asserted `fix`, `source` and `explain` were absent "by design", on the reasoning that usage

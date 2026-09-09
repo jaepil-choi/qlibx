@@ -165,7 +165,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         # A registered id of a kind this verb does not describe. It used to fall through to the
         # strategy loader, whose `TypeError: ref must identify a strategy_model component` then
         # left as `stage: unhandled` -- a sentence that is false (this verb reads three kinds,
-        # and had just shown a datamodel) and unstructured (`docs/issues/083`). The mistake is
+        # and had just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is
         # the same one as an unregistered id, one line up, and gets the same answer.
         shown = ", ".join(
             cli_kind(item)
@@ -186,7 +186,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     # are what the framework acts on. This read three private attributes nothing in the tree
     # assigned (`_aliases`, `_authored_tables`, `_authored_history`, relics of the shape records
     # `126`-`133` removed) behind `getattr` defaults, so `reads` was always empty and `records`
-    # never listed a declared table (`docs/issues/055`). No defaults now: a model without
+    # never listed a declared table (`docs/issues/archive/055`). No defaults now: a model without
     # `inputs` is not a model, and the loader would already have refused it.
     aliases = dict(model.inputs())
     tables = tuple(model.tables()) if isinstance(model, StrategyModel) else ()
@@ -269,7 +269,7 @@ def resolve_member(
 
     `unfinished` widens the known set to directories without a record. `show` reads finished
     records only; `rm` is precisely the verb a reader wants for a directory a crashed run left
-    behind, and it could not name one (`docs/issues/080`).
+    behind, and it could not name one (`docs/issues/archive/080`).
     """
     plural = "strategies" if kind == "strategy" else "datamodels"
     run_id, slash, rest = identifier.partition("/")

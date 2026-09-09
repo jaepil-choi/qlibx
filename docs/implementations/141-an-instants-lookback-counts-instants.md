@@ -1,6 +1,6 @@
 # 141 — an `InstantsLookback` counts instants
 
-**Closes:** `docs/issues/053`. **Step:** 1 of `docs/refactoring/2026-09-03-the-deletion-campaign.md`.
+**Closes:** `docs/issues/archive/053`. **Step:** 1 of `docs/refactoring/2026-09-03-the-deletion-campaign.md`.
 **Authority:** design `docs/design/the-panel-the-surface-and-the-run.md` §2.4 and §7-1 (the
 lookback types follow the grain; `InstantsLookback` is each name's own last n instants, `grain:
 rows` only); record `137`, which moved the per-name count under that name.

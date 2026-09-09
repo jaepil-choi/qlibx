@@ -1,7 +1,7 @@
 """What a datamodel run leaves behind: the output contract, and the dataset it registers.
 
 The sessions' rows, typed as they come and held in memory, land as one parquet file under
-`.vqapr/materialized/<dataset_id>/` when the last session completes (`docs/issues/087`; a file per
+`.vqapr/materialized/<dataset_id>/` when the last session completes (`docs/issues/archive/087`; a file per
 session was a physical write per loop), and the dataset registers right after, through the
 registration path every other dataset takes. A run that fails first leaves no readable output -- a
 partial dataset registers with nothing -- and a re-run starts clean.
@@ -271,7 +271,7 @@ class DataModelOutput:
 
     The directory is the source: `SourceSpec` reads every parquet beneath a directory. Sessions
     are held as Arrow tables and land as one `all.parquet` when the run registers
-    (`docs/issues/087`:
+    (`docs/issues/archive/087`:
     a file per session was a physical write per loop); above `spill_bytes` a spill part is
     written first and folded into the compact file at the end. Each file is written beside its
     target and moved into place, so a reader listing the directory never opens a file whose
@@ -311,7 +311,7 @@ class DataModelOutput:
     def _declarable(self, schema: pa.Schema) -> dict[str, ColumnType]:
         """The field types this output will declare, read off what the first session wrote.
 
-        The producer states the types, as any author does (`docs/issues/088`), and states them
+        The producer states the types, as any author does (`docs/issues/archive/088`), and states them
         from the schema it is about to write so that registration's DESCRIBE agrees by
         construction. A type that no declaration may carry -- a `Decimal` value field above all
         -- is refused here, at the first session, rather than after every session has run.
@@ -372,7 +372,7 @@ class DataModelOutput:
             # The schema is whatever pyarrow inferred from the first non-empty session, and this
             # session's rows did not fit it. That is all this code knows. It used to call this
             # `type_drift` and tell the author to "return the same scalar type on every session"
-            # -- which was already true in the run that filed `docs/issues/079`: the type was
+            # -- which was already true in the run that filed `docs/issues/archive/079`: the type was
             # `Decimal` throughout and what moved was its SCALE, inferred as 27 decimal places
             # from one session's ratios and 28 from the next's. A refusal that names a cause it
             # did not measure sends the reader the wrong way; pyarrow's own sentence, beside the
@@ -482,7 +482,7 @@ class DataModelOutput:
             grain=Grain.INSTRUMENT_INSTANT,
         )
         if self._run_id is not None:
-            # The dataset names the run that wrote it (`docs/issues/082`): known here and
+            # The dataset names the run that wrote it (`docs/issues/archive/082`): known here and
             # nowhere later, since the registration is the only thing that outlives this run.
             registration = registration.with_producer(self._run_id)
         source = SourceSpec.of(source_id, self._directory)

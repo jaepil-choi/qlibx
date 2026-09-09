@@ -11,14 +11,14 @@ false, which is what `067` had to fix; that correction is part of this issue's c
 separate defect.
 
 **Planning was halted 2026-08-27 by the owner and corrected by
-`docs/issues/009-a-fingerprint-is-a-receipt-not-a-gate.md`.** Read 009 first if you are reading this
+`docs/issues/archive/009-a-fingerprint-is-a-receipt-not-a-gate.md`.** Read 009 first if you are reading this
 file for its history. The planning pass that was running on it was deliberating FREEZE vs IMPORT for
 the registry; that comparison is void — both options rest on a premise 009 refutes — and this file's
 section on it has been rewritten. 009 also adds the `--force` and `remove` commands this issue
 depended on.
 
 Written 2026-08-27 after owner review of 007's plan.
-**Supersedes:** `docs/issues/007-an-undeclared-instrument-is-silently-a-share.md`. 007's diagnosis
+**Supersedes:** `docs/issues/archive/007-an-undeclared-instrument-is-silently-a-share.md`. 007's diagnosis
 holds — an undeclared instrument silently gets share treatment — but its prescription put the roster
 in the wrong place, and its plan's whole complexity followed from that. **Read this file instead of
 answering 007's WIDE/NARROW question; that question does not survive.**
@@ -116,7 +116,7 @@ Both options assumed that a roster changing between runs is a dangerous event. I
 batch lists new tickers, issuers delist, names get reclassified. **A roster grows as a matter of
 course**, and a gate on ordinary growth refuses runs that never touch the new name.
 
-See `docs/issues/009-a-fingerprint-is-a-receipt-not-a-gate.md`, "Stop the 008 comparison". The
+See `docs/issues/archive/009-a-fingerprint-is-a-receipt-not-a-gate.md`, "Stop the 008 comparison". The
 settled shape:
 
 ```

@@ -90,7 +90,7 @@ def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
 
 
 def test_there_is_no_force_parameter_left_to_promise(tmp_path: Path) -> None:
-    """`docs/issues/067`: the method carried a `force` that gated nothing, and the skill kept
+    """`docs/issues/archive/067`: the method carried a `force` that gated nothing, and the skill kept
     promising `register --force` against it. One contract, replacement by default, and the
     dead spelling is gone so a docstring cannot cite it again."""
     workspace, source = _workspace(tmp_path)
@@ -180,7 +180,7 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
 def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
     tmp_path: Path,
 ) -> None:
-    """`docs/issues/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
+    """`docs/issues/archive/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
     A component's reads live in its code and are refused at its next preflight; a registered
     run's `sessions_from` lives here, and is the blocker this walk can name.

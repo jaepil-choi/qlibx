@@ -81,6 +81,6 @@ refusal, and this journey happened to hit the one the package itself suggested.
 
 ## Related
 
-`docs/issues/011.7` was `KeyError: 'component'` surfacing as a refusal, closed 2026-08-29. This is
+`docs/issues/archive/011.7` was `KeyError: 'component'` surfacing as a refusal, closed 2026-08-29. This is
 the same class at a different key, which suggests the fix there was applied at the site rather than
 to the pattern.

@@ -1,6 +1,6 @@
 # 158 — a residue within tolerance is not a breach: judged once, reported in three
 
-**Closes:** `docs/issues/086`. **Branch:** `fix/086-tolerance-and-three-buckets`, off `develop`
+**Closes:** `docs/issues/archive/086`. **Branch:** `fix/086-tolerance-and-three-buckets`, off `develop`
 after record `157`. **Campaign:** none — the contract block in `flow/records.py` is one-shape
 campaign Step 6 territory, and this lands first as a small addition so Step 6 reshapes the split
 rather than the fold. **Authority:** the owner, 2026-09-05.

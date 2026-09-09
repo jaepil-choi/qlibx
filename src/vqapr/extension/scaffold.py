@@ -199,7 +199,7 @@ _LOOKBACK_FLAVOURS = {
 
 One template rather than two files, because everything else about the two scaffolds is identical
 and a second copy would drift. What differs is exactly what an author has to understand: which
-class, what the number means, and which completeness guard follows from it (`docs/issues/033`).
+class, what the number means, and which completeness guard follows from it (`docs/issues/archive/033`).
 """
 
 _CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
@@ -346,7 +346,7 @@ def render(
     `lookback_kind` selects which member of the lookback pair a DataModel declares. `rows` is the
     default because it is what this scaffold always emitted; `calendar` exists because the default
     is the wrong member for every cross-sectional model and there was no way to ask for the other
-    one (`docs/issues/033`). The StrategyModel template takes `rows` only: its body counts
+    one (`docs/issues/archive/033`). The StrategyModel template takes `rows` only: its body counts
     observations per name, so a calendar window would leave the emitted guard meaningless.
     """
     if kind not in _TEMPLATES:
@@ -376,7 +376,7 @@ def render(
             component_id=component_id,
             class_name=_class_name(component_id),
             dataset_id=dataset_id,
-            # The alias is the dataset id (`docs/issues/063`): a fixed `prices` read as a
+            # The alias is the dataset id (`docs/issues/archive/063`): a fixed `prices` read as a
             # required name to a first-time user, and described a read the flags did not ask for.
             alias=dataset_id,
             field=field,

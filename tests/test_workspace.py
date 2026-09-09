@@ -488,7 +488,7 @@ def _make_undeclared(workspace: Workspace, count: int) -> None:
     """Rewrite the first `count` registrations into the shape they had before `field_types`.
 
     The `field_types:` key and its indented entries are removed and nothing else: a document
-    written before `docs/issues/088`, not a corrupt one.
+    written before `docs/issues/archive/088`, not a corrupt one.
     """
     kept: list[str] = []
     dropping = False
@@ -508,7 +508,7 @@ def _make_undeclared(workspace: Workspace, count: int) -> None:
 
 
 def test_a_registration_without_field_types_is_quarantined_not_a_deadlock(tmp_path: Path) -> None:
-    """`docs/issues/088`: the same quarantine as a missing span, for the key it introduced.
+    """`docs/issues/archive/088`: the same quarantine as a missing span, for the key it introduced.
 
     An entry that predates `field_types` still opens and lists (or nothing could report it),
     every read on it is refused by name until its author declares the types, and registering it

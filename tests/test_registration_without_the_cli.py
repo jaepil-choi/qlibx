@@ -10,7 +10,7 @@ rather than a layer, and a surface that owns rules costs twice: the rules cannot
 driving argparse, and they cannot be reached from another entry point — so a second entry point
 grows its own copy and the two diverge.
 
-`docs/issues/012` is that divergence, already paid for: `check` refused a spec that `run` completed,
+`docs/issues/archive/012` is that divergence, already paid for: `check` refused a spec that `run` completed,
 because each verb decided for itself.
 """
 

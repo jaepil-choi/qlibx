@@ -16,7 +16,7 @@ for the strategy record's `contract` block. The values themselves -- `measured`,
 
 So a run whose book breached a limit could say *that* it did, in a count, and never *which name*
 crossed *what bound* by *how much*. Those three are exactly what PRD §7.1 says a breach must leave
-behind, and the framework was producing them and dropping them at the door. `docs/issues/051` fixed
+behind, and the framework was producing them and dropping them at the door. `docs/issues/archive/051` fixed
 the count being always empty; this fixes the count being all there was.
 
 The owner's ruling that opened the constraint redesign -- *constraints are user-pluggable modules

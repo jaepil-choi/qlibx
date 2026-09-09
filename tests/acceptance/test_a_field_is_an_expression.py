@@ -1,4 +1,4 @@
-"""The acceptance criteria of `docs/issues/049`'s ruling, read one at a time.
+"""The acceptance criteria of `docs/issues/archive/049`'s ruling, read one at a time.
 
 The campaign's own measurement is 614x on a Korean statement warehouse
 (`kwam-enhanced-index/vqapr-performance-testbed/`), which this suite cannot carry. What it can
@@ -9,7 +9,7 @@ different is a different model rather than a faster one, so the equality is chec
 anti-join in both directions rather than as a spot comparison.
 
 The other two criteria are the ruling's other halves: a dataset with no instrument axis is not
-narrowed by a run's instrument list (`docs/issues/038`), and a requirement is a field id and a
+narrowed by a run's instrument list (`docs/issues/archive/038`), and a requirement is a field id and a
 lookback and nothing else.
 """
 
@@ -128,7 +128,7 @@ def _register(root: Path, dataset_id: str, path: Path, *, long: bool) -> None:
             ),
             # Both registrations expose the SAME eight field ids: a field id is unique within a
             # dataset, not across the workspace, and schema parity is what makes the two
-            # comparable at all (`docs/issues/049`, the owner's 2026-09-01 correction).
+            # comparable at all (`docs/issues/archive/049`, the owner's 2026-09-01 correction).
             fields={name: (_expression(code) if long else name) for name, code in ACCOUNTS.items()},
             # An expression's declared type is what it evaluates to: `arg_max` over a DOUBLE
             # column is a DOUBLE, and the pre-pivoted file carries the same eight DOUBLEs.

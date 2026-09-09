@@ -1,6 +1,6 @@
 """`vqapr list strategies --run <id>` shows a strategy that has no record yet.
 
-`docs/issues/074`: a strategy's record is written last, `list` read records only, and `show`
+`docs/issues/archive/074`: a strategy's record is written last, `list` read records only, and `show`
 refused a record still being written -- so for the eleven minutes a run took, nothing on the
 surface said how far each strategy had got, and an author counted parquet files by hand. One of
 the eight had stopped advancing, and the count could not say whether it was dead or slow.

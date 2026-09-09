@@ -1,6 +1,6 @@
 # 079 — A venue borrows a category, it does not own one
 
-`docs/issues/013` filed a defect: a fill could record `kind: stock` while the tax charged followed
+`docs/issues/archive/013` filed a defect: a fill could record `kind: stock` while the tax charged followed
 the venue's own `etf`. It offered three defensible repairs and asked which statement should win.
 
 The question that collapsed them was shorter than any of the three: **why does a venue have a
@@ -108,7 +108,7 @@ The refusal-code baseline gains codes and removes none.
 
 ## What this does not close
 
-`docs/issues/013` also observes that nothing compares a venue's categories against the roster. That
+`docs/issues/archive/013` also observes that nothing compares a venue's categories against the roster. That
 comparison is now unnecessary for KRX, because the venue has no categories to compare. A venue
 that still resolves cost from construction-time rules — any user-authored one — can still disagree
 with the roster, and `check` has no judgment for it. The issue stays open for that.

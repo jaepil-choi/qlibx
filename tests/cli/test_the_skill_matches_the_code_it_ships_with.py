@@ -1,4 +1,4 @@
-"""Sentences in the shipped skill that the code no longer backed (`docs/issues/062`, `067`).
+"""Sentences in the shipped skill that the code no longer backed (`docs/issues/archive/062`, `067`).
 
 The skill is installed from the package, so a sentence in it is a promise the package makes. Two
 had drifted: `Hold(reason=...)` was said to take "one token, no spaces" while the docstring and the

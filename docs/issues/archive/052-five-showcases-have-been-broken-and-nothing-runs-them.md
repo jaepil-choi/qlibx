@@ -3,12 +3,12 @@
 **Status: CLOSED 2026-09-03.** The gate half is `tests/showcases/test_every_showcase_completes.py` (deletion campaign Step 0, harness-only, no implementation record): eight showcases run as `slow` tests under `test_all`, each a subprocess asserting exit 0; a new showcase directory is collected without editing the test. `show_003` is the one exception -- it reads the gitignored `data/DW` warehouse, so it stays a hand-run step before a release rather than a conditional skip, and `.agent/project.yaml`'s `test_all` comment says so.
 
 **Status before that: OPEN for its gate half; all five showcases run again as of record `133`.** Two closed by
-[`131-one-datamodel-and-a-dead-half-deleted.md`](../implementations/131-one-datamodel-and-a-dead-half-deleted.md)
+[`131-one-datamodel-and-a-dead-half-deleted.md`](../../implementations/131-one-datamodel-and-a-dead-half-deleted.md)
 as a side effect** -- `show_002` and `show_004` failed because their DataModels declared reads in a
 retired shape, and converging the DataModel contract retired the shape everywhere at once. Three
 remain (`show_005`, `show_006`, `show_008`), all the `SingleNameCap` constructor case. **The second
 half -- a gate that runs them -- is still the finding.** Found while establishing a showcase baseline before the
-constraint convergence (`docs/issues/036`, record `130`), by running all nine and comparing against
+constraint convergence (`docs/issues/archive/036`, record `130`), by running all nine and comparing against
 the branch point — not by a user, and not by any gate.
 
 **Touches:** `showcases/show_002`, `show_004`, `show_005`, `show_006`, `show_008`; the absence of

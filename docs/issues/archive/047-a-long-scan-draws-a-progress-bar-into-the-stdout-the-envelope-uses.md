@@ -1,7 +1,7 @@
 # 047 — A long scan draws duckdb's progress bar into the same stdout the CLI writes its JSON envelope to, so a slow command's output does not parse
 
 **Status: CLOSED 2026-09-02 by
-[`129-three-debts-that-cost-nothing-to-pay.md`](../implementations/129-three-debts-that-cost-nothing-to-pay.md).**
+[`129-three-debts-that-cost-nothing-to-pay.md`](../../implementations/129-three-debts-that-cost-nothing-to-pay.md).**
 Both duckdb connection factories in `src/vqapr/data/scan.py` now go through one `_configure`, which
 sets `enable_progress_bar=false` alongside the `preserve_insertion_order=false` that was already
 there.
@@ -83,7 +83,7 @@ first opened covers every cursor taken from it.
 
 Whether the bar should be *unavailable* or merely *off by default*. A human running `vqapr run`
 interactively on a five-minute materialization is the one case where it earns its keep, and
-[035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) plus
+[035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) plus
 `VQAPR-ISSUES.md` A4 in the research environment both record the same complaint from the other
 direction — that a long run gives no sign of life. If progress is worth showing, it belongs on
 **stderr**, or behind an explicit flag, and the envelope stream stays clean either way. What cannot

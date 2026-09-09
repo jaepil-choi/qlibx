@@ -1,7 +1,7 @@
 # 130 — one constraint declaration, two consumers
 
-**Closes:** `docs/issues/051`. Half-closes `docs/issues/036` (the Constraint third of it).
-**Files:** `docs/issues/052`.
+**Closes:** `docs/issues/archive/051`. Half-closes `docs/issues/archive/036` (the Constraint third of it).
+**Files:** `docs/issues/archive/052`.
 **Step:** M1.1 of `docs/refactoring/2026-09-02-the-convergence-campaign.md`.
 **Authority:** `docs/vqapr-prd.md` §7, §7.1 and `docs/vqapr-architecture.md` §5.7, both rewritten by
 owner ruling in commit *"A constraint has two consumers, not three"*.
@@ -22,7 +22,7 @@ not be fixed while it existed.
 no fills exist at decision time (`UC-CONSTRAINT-ADJUST-001`). The member that judged the decision
 structurally missed exactly the case the framework's own use case says to watch for.
 
-**Two scorers can disagree.** `docs/issues/014` measured it: the shipped cap read a signed weight in
+**Two scorers can disagree.** `docs/issues/archive/014` measured it: the shipped cap read a signed weight in
 one member and an absolute one in the other, so a proposed `-0.30` passed the check before execution
 and was reported as a violation by the check after it, while the box handed to the optimiser had
 excluded it outright. One rule, one book, three answers. That was closed by making the two members
@@ -89,7 +89,7 @@ identity for the three that converged, and still asserts the divergence of the t
 
 ### The run record reports its constraints for the first time
 
-`docs/issues/051`. The block walked lifecycle entries asking each for an `evidence` attribute; a
+`docs/issues/archive/051`. The block walked lifecycle entries asking each for an `evidence` attribute; a
 lifecycle entry has `kind` and `detail`, and the evidence is the `detail`. The lookup returned
 `None` every time and the loop never ran, so **every record ever written carried `{}` there**. The
 only test asserted the key existed, which it did.
@@ -123,7 +123,7 @@ fast; **1308 passed** full.
 
 **Showcases: 4 of 9 complete, unchanged from the branch point.** Measured both ways — with this work
 applied and with it stashed — and the same five fail either way, for causes that predate it
-(`docs/issues/052`). `show_003` regressed mid-change and was repaired; it passes.
+(`docs/issues/archive/052`). `show_003` regressed mid-change and was repaired; it passes.
 
 Directed checks:
 

@@ -1,4 +1,4 @@
-"""`docs/issues/080`: the datamodel side of `074`.
+"""`docs/issues/archive/080`: the datamodel side of `074`.
 
 A datamodel run that dies inside a callback leaves `<id>@<fp8>/tables/` and no `datamodel.json`.
 `list datamodels --run` showed finished records only, so the directory was invisible; `rm

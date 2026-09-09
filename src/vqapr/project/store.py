@@ -315,7 +315,7 @@ class Workspace:
         A dataset registered without an `instrument_field` has no instrument axis, so it carries
         no instruments to enumerate and this returns nothing. That is not an empty answer standing
         in for a missing one: the rows of a factor series or an index level are not instruments,
-        which is the fact `instrument_field` being absent states (`docs/issues/038`).
+        which is the fact `instrument_field` being absent states (`docs/issues/archive/038`).
         """
         registration = self.dataset(raw_dataset_id)
         if registration.instrument_field is None:
@@ -575,7 +575,7 @@ class Workspace:
             state = self._read()
             # The reference check runs HERE, against the state the lock already read, rather than
             # before the lock against a state that can be stale by the time the write lands.
-            # `docs/issues/043`: it was two reads with no lock across them, and the consequence is
+            # `docs/issues/archive/043`: it was two reads with no lock across them, and the consequence is
             # worse than a lost update -- `_decode` validates forward references, so a document
             # holding a config whose component was removed makes `Workspace.open()` raise and every
             # command in the project fail until the file is hand-repaired.
@@ -630,7 +630,7 @@ class Workspace:
 
         Reads the workspace itself, for callers outside a write cycle. `remove` does NOT use this:
         it holds the lock and must evaluate against the state that lock already read, which is
-        `_references_in` below (`docs/issues/043`).
+        `_references_in` below (`docs/issues/archive/043`).
         """
         return references_in(self._read(), kind, identity)
 

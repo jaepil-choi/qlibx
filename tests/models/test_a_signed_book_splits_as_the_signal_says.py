@@ -1,6 +1,6 @@
 """`Rebalance.signed`, and the exactness `Rebalance.of` gained by delegating to `rescale`.
 
-`docs/issues/075`. The specification was ordinary for a market-neutral residual strategy: signed
+`docs/issues/archive/075`. The specification was ordinary for a market-neutral residual strategy: signed
 weights whose absolute values sum to one, the long/short split being whatever the signal produced,
 cash the net residual. `of` structurally cannot say it -- it takes two mappings and splits
 `invested` EVENLY between them -- and its docstring pointed at the direct constructor, which the
@@ -58,7 +58,7 @@ def test_the_split_is_the_signals_not_an_even_one() -> None:
 
 
 def test_gross_two_is_the_textbook_book_of_cannot_reach() -> None:
-    """`docs/issues/018` documented that `of` tops out at half a textbook book. This is the half.
+    """`docs/issues/archive/018` documented that `of` tops out at half a textbook book. This is the half.
 
     `gross=2` is $1 long and $1 short, which is the scale a published SMB or HML series is quoted
     at, and the scale a factor arm has to reach to be compared against one.

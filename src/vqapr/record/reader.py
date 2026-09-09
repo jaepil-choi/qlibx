@@ -71,7 +71,7 @@ class LockClaim:
     `age` is carried out of the read rather than recomputed by the caller, because it is the one
     fact that separates the two states this claim cannot tell apart: a run that is executing, and a
     run whose process died in the last `LOCK_STALE_AFTER` seconds. Both present as a fresh lock;
-    only the age says how long the operator would have to wait to find out (`docs/issues/037`).
+    only the age says how long the operator would have to wait to find out (`docs/issues/archive/037`).
     """
 
     pid: int
@@ -94,7 +94,7 @@ def _lock_claim(lock: Path) -> LockClaim | None:
     because a pid is not portable liveness evidence and a recycled one is worse than none. Callers
     that render this to a user must say "holds a lock, last refreshed Ns ago" rather than "is
     running now"; a reporter who checked the pid, found nothing, and concluded the package lies is
-    what `docs/issues/037` records.
+    what `docs/issues/archive/037` records.
     """
     try:
         # Clamped at zero. A lock written microseconds ago can carry an `st_mtime` marginally
@@ -125,7 +125,7 @@ class RunRecordLive(FileExistsError):
     executing one are indistinguishable by construction, and that window is exactly when an
     operator retries after a Ctrl-C, a CI timeout or an OOM kill. So the message says what is
     known -- a lock, its age, and when it releases itself -- and `releases_in` is carried so the
-    remedy that actually costs nothing can be named (`docs/issues/037`).
+    remedy that actually costs nothing can be named (`docs/issues/archive/037`).
     """
 
     def __init__(self, run_id: str, directory: Path, claim: LockClaim) -> None:
@@ -186,14 +186,14 @@ STATUS_UNFINISHED = "unfinished"
 none and a lock touched inside `LOCK_STALE_AFTER`; `unfinished` has none and a lock that is stale
 or gone -- a strategy that was killed, or whose flow ended in a refusal, both of which leave rows
 and no record. The two cannot be told apart from the directory; the run envelope is where a
-refusal is reported (`docs/issues/073`, `074`)."""
+refusal is reported (`docs/issues/archive/073`, `074`)."""
 
 
 def unfinished_strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
     """Every strategy directory of this run WITHOUT `strategy.json`, as `<id>@<fp8>`, sorted.
 
     The complement of `strategy_refs`. A long run used to be invisible from the surface between
-    its first accepted session and its record (`docs/issues/074`): `list` showed a record only
+    its first accepted session and its record (`docs/issues/archive/074`): `list` showed a record only
     once it was finished, so an author counted parquet files by hand to learn whether a strategy
     was still advancing.
     """
@@ -205,7 +205,7 @@ def unfinished_datamodel_refs(root: Path, run_id: str) -> tuple[str, ...]:
 
     The datamodel side of `074`. Record `148` gave datamodels `datamodel_refs` and neither of the
     other two, so a datamodel run that died inside a callback left a directory nothing listed and
-    nothing could name (`docs/issues/080`) -- and the skill's "count the directories" then
+    nothing could name (`docs/issues/archive/080`) -- and the skill's "count the directories" then
     over-counted a model's tunings by its crashes.
     """
     return unfinished_member_refs(root, run_id, kind=DATAMODEL_KIND)
@@ -229,7 +229,7 @@ def unfinished_member_refs(root: Path, run_id: str, *, kind: str) -> tuple[str, 
 def recorded_run_ids(root: Path) -> tuple[str, ...]:
     """Every run this root holds ANY trace of: a run record, or a member directory of either kind.
 
-    `run_ids` is the finished set. This is the wider one `list runs` needs (`docs/issues/081`):
+    `run_ids` is the finished set. This is the wider one `list runs` needs (`docs/issues/archive/081`):
     a run whose definition was withdrawn still has records, and a run that was killed before its
     run record still has member directories, and both are findable only from here.
     """
@@ -522,7 +522,7 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
 class RunRecordMissing(ValueError):
     """No record where the caller pointed: the wrong root, run id or strategy ref.
 
-    `docs/issues/057`. `read_table` returned an empty iterator for a root that was the project
+    `docs/issues/archive/057`. `read_table` returned an empty iterator for a root that was the project
     directory rather than its `.vqapr`, for a run id nothing had written, and for a `strategy_ref`
     that named no directory -- and the user's code failed three steps later on an empty frame. An
     empty TABLE is a fact about a run (a declared table nobody wrote); a missing RECORD is a
@@ -618,7 +618,7 @@ def read_table(
     (`<strategy-id>@<fp8>`, or the bare `<strategy-id>` when one record of it exists, or `None`
     when the run holds one strategy) name a record that must exist: a root, run or ref that
     names nothing is refused with `RunRecordMissing`, naming what was found instead
-    (`docs/issues/057`). A table the record declares but never wrote reads back empty.
+    (`docs/issues/archive/057`). A table the record declares but never wrote reads back empty.
 
     A generator because a run's tables are the large half of the record, and a caller counting
     rows should not have to hold all of them to do it. A `Decimal` comes back a `Decimal` and an

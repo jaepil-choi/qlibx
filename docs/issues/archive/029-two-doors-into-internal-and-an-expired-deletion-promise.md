@@ -21,7 +21,7 @@ The bypasses are the bolded rows. Verified by grep against `develop` after 097 l
 `extension/*.py:11`, the frozen cluster inside `project.py`, and the two named above.
 
 **Status when filed:** open. Found 2026-08-30 by the same owner-requested boundary audit that filed
-`docs/issues/028`, against `develop@ad4565f9`. Not a journey finding, and not a defect a user can
+`docs/issues/archive/028`, against `develop@ad4565f9`. Not a journey finding, and not a defect a user can
 observe — it is a maintenance hazard that will surface as a mass edit the first time anyone acts on
 the note the modules carry.
 **Touches:** `src/vqapr/extension/component.py`, `.../fingerprint.py`, `.../loading.py`,
@@ -102,7 +102,7 @@ is one more site the `G008` cutover has to find by grep rather than by deleting 
 letting imports break loudly. That is the difference between a deletion that the compiler proves
 complete and one that is complete when somebody says it is.
 
-`docs/issues/028` is the same failure at the other end of the package, and both have the same root:
+`docs/issues/archive/028` is the same failure at the other end of the package, and both have the same root:
 a boundary that is documented in prose and enforced by nothing.
 
 ## What closes it

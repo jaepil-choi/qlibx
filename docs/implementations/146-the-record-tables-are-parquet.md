@@ -1,6 +1,6 @@
 # 146 — the record's tables are parquet, one complete file per chunk
 
-**Closes:** `docs/issues/058` (one run recorded two clocks). **Step:** 5 of
+**Closes:** `docs/issues/archive/058` (one run recorded two clocks). **Step:** 5 of
 `docs/refactoring/2026-09-03-the-deletion-campaign.md` (decision D3, the second half: a record
 that carries its types is parquet, not JSONL with a hand-written type sidecar).
 **Authority:** `docs/design/run-record-layout.md` (updated with this record); record `135` (the

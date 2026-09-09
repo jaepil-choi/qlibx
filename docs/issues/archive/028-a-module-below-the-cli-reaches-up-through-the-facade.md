@@ -29,7 +29,7 @@ flow/judgments.py                                                   <-- new
 ```
 
 `src/vqapr/flow/judgments.py:29` is `from vqapr.public import Workspace`. It arrived in
-`1a0f58c1` — *"Judgments move below the verbs that ask them"*, the pure-move half of `docs/issues/015`.
+`1a0f58c1` — *"Judgments move below the verbs that ask them"*, the pure-move half of `docs/issues/archive/015`.
 
 The move itself was correct and its stated criterion held: no module under `flow/` imports `cli`.
 Nothing in that criterion mentioned `public`, so the import style travelled down with the code. The
@@ -79,7 +79,7 @@ keeping are already enforced by the absence of a path"*; this adds a path from `
 It is also one line away from a cycle. `public.py` imports `flow.simulation`, `flow.run`,
 `flow.materialize`, `flow.preflight`, `flow.run_records` and `flow.run_state`; `flow.judgments` now
 imports `public`. The two do not meet only because `public.py` has no reason to import `judgments`
-yet — and `run` performing the judgments (`docs/issues/015`) is exactly the kind of change that
+yet — and `run` performing the judgments (`docs/issues/archive/015`) is exactly the kind of change that
 would give it one.
 
 ## Why nothing caught it

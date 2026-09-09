@@ -22,7 +22,7 @@ contact surface narrow on purpose. Record `119` flags it as a decision rather th
 
 **Superseded status: owner-decided 2026-09-01, scheduled first** in the campaign anchored
 at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md). The ruling is
-[035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)'s, applied here: **the
+[035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md)'s, applied here: **the
 read path validates nothing.** What a registration accepted is thereafter trusted, and data that
 only turns out to be wrong at runtime is not chased — it blows up where it happens and the message
 is passed through unedited.
@@ -37,7 +37,7 @@ rather than felt: the ladder and the cProfile dumps are in that directory's `res
 **Touches:** `src/vqapr/domain/rows.py:38` (`normalize_rows`); `src/vqapr/data/store.py:93`
 (`DuckDbObservationStore.query`); `src/vqapr/data/scan.py:804` (`observation_rows`).
 
-**Read [035](035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) first.** This is not
+**Read [035](../035-the-only-data-accessor-is-ninety-times-slower-than-the-file.md) first.** This is not
 a second report of that cost. 035 measured `normalize_rows` at 1.635s of a 3.498s accessor and
 attributed it to `normalize_scalar` — "per-cell revalidation", 2.9M calls — and its addendum reasons
 carefully about what that per-cell check buys and why removing it without relocating the finiteness

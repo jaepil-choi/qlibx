@@ -83,7 +83,7 @@ def model_price_parquet(tmp_path_factory, _con) -> Path:
     """PIT window와 DataModel materialization용 sparse-field 가격 parquet."""
     out = tmp_path_factory.mktemp("model-price") / "price_daily.parquet"
     # A bare `100.0` literal is DECIMAL(4,1) to duckdb, which no dataset may declare
-    # (`docs/issues/088`); the cast makes these the DOUBLE columns a user's file holds.
+    # (`docs/issues/archive/088`); the cast makes these the DOUBLE columns a user's file holds.
     _con.execute(
         f"""COPY (
             SELECT session_date, available_at, instrument,

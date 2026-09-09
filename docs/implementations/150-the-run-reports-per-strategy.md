@@ -1,6 +1,6 @@
 # 150 — the run reports per strategy: a worker's refusal comes back, the refusal names its numbers and its strategy, and a live strategy can be watched
 
-**Closes:** `docs/issues/073`, `071`, `074`. **Branch:** `fix/073-the-run-reports-per-strategy`,
+**Closes:** `docs/issues/archive/073`, `071`, `074`. **Branch:** `fix/073-the-run-reports-per-strategy`,
 off `develop @ 3a814ed6`. **Authority:** the owner, 2026-09-04, on the recommendation to take
 the three as one branch after scenario testbed run 4 (`kaist-thesis/vqapr-scenario-testbed/`,
 `FINDINGS.md` F-005 to F-010) reproduced the paper end to end on the `0.4.0` wheel and lost two

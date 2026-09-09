@@ -13,7 +13,7 @@ it means. A components-only declaration says nothing, which is the rule's other 
 
 **Status before closing:** **REOPENED 2026-08-31 by the owner**, who asked why nothing puts the
 `available_at` question to them at registration time. That is this file's proposal, so it is scheduled rather than
-held. It composes with `docs/issues/034`: this makes the convention be spoken at the moment it is
+held. It composes with `docs/issues/archive/034`: this makes the convention be spoken at the moment it is
 declared, and 034 records which convention a run actually executed under. Neither substitutes for
 the other.
 

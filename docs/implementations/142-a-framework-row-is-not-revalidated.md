@@ -1,8 +1,8 @@
 # 142 — a row the framework built is not validated again
 
-**Closes:** `docs/issues/054`. **Step:** 2 of `docs/refactoring/2026-09-03-the-deletion-campaign.md`.
+**Closes:** `docs/issues/archive/054`. **Step:** 2 of `docs/refactoring/2026-09-03-the-deletion-campaign.md`.
 **Authority:** the `035` ruling (validation happens at registration; the read path is trusted),
-already applied to the other read path by record `119` (`docs/issues/044`).
+already applied to the other read path by record `119` (`docs/issues/archive/044`).
 
 ## Why this exists
 

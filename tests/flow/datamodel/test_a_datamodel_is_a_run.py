@@ -1,6 +1,6 @@
 """A DataModel is run as a registered run: the same loop, the same record, a dataset as output.
 
-Record `148` (campaign Step 7, M2) closes `docs/issues/059`. `materialize()` ran a DataModel through
+Record `148` (campaign Step 7, M2) closes `docs/issues/archive/059`. `materialize()` ran a DataModel through
 a loop of its own -- every row of every evaluation in memory until the end, one parquet and a
 per-instrument lineage file at once, a record of its own kind that `show run` projected through a
 special case. A datamodel run now goes through `preflight_run` and `orchestration.run` like a
@@ -309,7 +309,7 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
 def test_the_output_lands_as_one_file_when_the_dataset_registers(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Sessions stay in memory and land once, at registration (`docs/issues/087`).
+    """Sessions stay in memory and land once, at registration (`docs/issues/archive/087`).
 
     The model itself counts the files in its output directory at compute time: both sessions
     see an empty directory, and the finished dataset is one `all.parquet`.
@@ -544,7 +544,7 @@ def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raise
 ) -> None:
     """A datamodel refused in a `--jobs` worker is refused by its own code in the parent.
 
-    The strategy pool learned this in `docs/issues/073` by returning an outcome; the datamodel
+    The strategy pool learned this in `docs/issues/archive/073` by returning an outcome; the datamodel
     pool was a copy that never did, so a `VqaprError` raised in a worker failed to unpickle
     (keyword-only constructor) and the run died as `stage: unhandled` with no failures. One pool
     driver for both kinds and a picklable `VqaprError` close it (record `170`).

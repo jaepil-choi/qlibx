@@ -146,7 +146,7 @@ class SimulationFailure(RuntimeError, ValueError):
     ) -> None:
         """`component_id` names the strategy whose flow raised, and `source` where in the
         author's own file it was raised from, when a frame of that file is on the traceback.
-        Both were absent (`docs/issues/071`): an eight-strategy run refused with a message
+        Both were absent (`docs/issues/archive/071`): an eight-strategy run refused with a message
         that named no strategy, and `source` was three nulls on every callback failure."""
         require_tz_aware(clock, name="clock")
         require_tz_aware(cutoff, name="cutoff")

@@ -144,7 +144,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 # The freeze alone. The public `preflight_run` asks the judgments first (record
                 # `168`), and this verb has just asked them itself, collecting rather than
                 # raising; asking again would render a blocked judgment a second time as a
-                # failure. Same workspace snapshot as the judgments read (`docs/issues/070`).
+                # failure. Same workspace snapshot as the judgments read (`docs/issues/archive/070`).
                 assert workspace is not None
                 freeze_run(workspace, definition)  # type: ignore[arg-type]
         except VqaprError as error:

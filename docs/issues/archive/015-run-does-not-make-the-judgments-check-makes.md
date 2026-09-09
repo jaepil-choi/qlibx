@@ -93,6 +93,6 @@ it recording that `check` said no is the part that costs a reader a wrong answer
 
 ## Not the same as 012
 
-`docs/issues/012` was `check` refusing a spec that `run` completes, and the answer there was that
+`docs/issues/archive/012` was `check` refusing a spec that `run` completes, and the answer there was that
 the **judgment** was wrong — a lookback measured at `start` rather than at the first decision. Here
 the judgment is right and `run` never asks it. Same observable shape, opposite cause.

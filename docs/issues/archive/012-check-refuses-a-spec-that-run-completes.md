@@ -55,7 +55,7 @@ $ vqapr --project-root <root> run spec.yaml
 
 ## Why this is the same defect as 011's constraint crash, mirrored
 
-`docs/issues/011` and `docs/implementations/068` are about `check` returning `ok:true` on a spec
+`docs/issues/archive/011` and `docs/implementations/068` are about `check` returning `ok:true` on a spec
 `run` then refused. This is the other direction, and the approved plan's Principle 5 names both:
 
 > **Never let `check` certify what `run` refuses — or refuse what `run` would accept.** … Both

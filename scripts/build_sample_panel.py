@@ -31,7 +31,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 PRICE_TYPE = pa.float64()
-"""A price is a DOUBLE, as the sample's declaration says it is (`docs/issues/088`).
+"""A price is a DOUBLE, as the sample's declaration says it is (`docs/issues/archive/088`).
 
 This was `decimal128(18, 4)` until 2026-09-08, on the reasoning that prices should stay exact.
 What it did instead was hand every model `Decimal` from a field registered as DOUBLE and make the

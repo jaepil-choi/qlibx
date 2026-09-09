@@ -1,4 +1,4 @@
-"""The measurement `docs/issues/049` exists for, taken on this tree and reproducible from it.
+"""The measurement `docs/issues/archive/049` exists for, taken on this tree and reproducible from it.
 
 `049` measured one model twice -- the same annual-fundamentals reduction against a statement
 warehouse registered long at the vendor's grain, and against the same facts pivoted wide -- and

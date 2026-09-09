@@ -1,7 +1,7 @@
 # 120 — A read carries the proof the next one needs, so a declared input costs one round trip
 
 **Closes:** the second half of
-[046](../issues/046-a-factor-book-pays-per-callback-and-each-declared-input-costs-two-queries.md) —
+[046](../issues/archive/046-a-factor-book-pays-per-callback-and-each-declared-input-costs-two-queries.md) —
 each declared `RowsLookback` input costing two statements to answer with one row per name. Lane B
 of the read-path campaign (`docs/refactoring/2026-09-01-the-read-path-campaign.md` §2).
 **Branch:** `read-046b-one-round-trip`.

@@ -1,4 +1,4 @@
-"""One reduction, three registrations: the annual-fundamentals model `docs/issues/049` measured.
+"""One reduction, three registrations: the annual-fundamentals model `docs/issues/archive/049` measured.
 
 The model is the enhanced-index one, step for step -- consolidated annual rows only, the latest
 dump bundle wins, an ORDERED FALLBACK among account codes (never a sum), one statement per fiscal
@@ -41,7 +41,7 @@ per name (March, June, September and December quarters; the December annual row 
 quarter's instant). The reduction keeps only the last two fiscal years, so reaching a third
 changes nothing in the published rows, and the anti-join is what proves that.
 
-This was `2000` while the read counted source rows rather than instants (`docs/issues/053`): a
+This was `2000` while the read counted source rows rather than instants (`docs/issues/archive/053`): a
 name carried between ~250 and ~600 rows a year, so the number had to be argued in a docstring
 rather than read off the calendar. Deletion campaign Step 1 made the count mean what the type
 says, and the number became the one the question has."""

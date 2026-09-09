@@ -185,7 +185,7 @@ def test_a_non_datetime_availability_value_is_refused():
 
 
 def test_a_framework_built_observation_is_the_validated_one_without_the_validation():
-    """`docs/issues/054`: the read builds rows through `Observation._framework_row`, which skips
+    """`docs/issues/archive/054`: the read builds rows through `Observation._framework_row`, which skips
     `__post_init__`. What it builds must be indistinguishable from the validated constructor's
     result -- equal, frozen, values immutable -- because an author holds both kinds."""
     projected = observations(

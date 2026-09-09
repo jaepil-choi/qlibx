@@ -12,7 +12,7 @@ declared-versus-realised gap one degree quieter, and it was 1,404 of this run's 
 larger half and needs a shape decision; this closes the half where every number already existed.
 
 *Found while wiring it:* `tables_declared` had been reading an attribute `SimulationResult` does not
-have, so `docs/issues/024`'s fix never reached production. Filed as `docs/issues/041`.
+have, so `docs/issues/archive/024`'s fix never reached production. Filed as `docs/issues/archive/041`.
 
 **Status when filed:** open. Found 2026-08-30 by the first-time-user journey in
 `kaist-thesis/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-017**,

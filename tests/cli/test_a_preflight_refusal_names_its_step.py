@@ -1,6 +1,6 @@
 """A preflight refusal names the step that failed and carries what raised it -- from BOTH verbs.
 
-`docs/issues/076`. Preflight round-trips a strategy's payload on fresh instances before the first
+`docs/issues/archive/076`. Preflight round-trips a strategy's payload on fresh instances before the first
 callback, and two things about that were invisible to the author who tripped it:
 
 - **One `try` around three steps.** `save_payload` on a fresh instance, `load_payload` on a

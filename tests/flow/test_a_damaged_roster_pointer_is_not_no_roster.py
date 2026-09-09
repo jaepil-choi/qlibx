@@ -1,6 +1,6 @@
 """A registered roster whose pointer is damaged is refused, not read as "no roster".
 
-`docs/issues/042`, found by the structural audit in
+`docs/issues/archive/042`, found by the structural audit in
 `docs/diagnostics/2026-08-31-vqapr-structural-refactoring.md` (C1).
 
 `Workspace.registered_instruments()` raises a typed `workspace.instruments.unreadable` for a
@@ -12,7 +12,7 @@ Two callers on the run path caught `Exception` around it and returned `None`. (B
 `vqapr.flow.roster` and made the first one public; the defect and its fix are unchanged.) `None` means **no
 roster registered** -- a legal, ordinary state -- so a truncated `.vqapr/instruments.json` made a
 run complete with `ok: true`, `roster: null`, and every fill recording `kind: None`. On a KRX-shaped
-venue that charges the ETF sleeve at the share rate, which is exactly the defect `docs/issues/007`
+venue that charges the ETF sleeve at the share rate, which is exactly the defect `docs/issues/archive/007`
 closed, returning silently through a `try/except` written for a different case.
 
 The comment three lines below the swallow said *"A REGISTERED roster that cannot be read is refused,
@@ -87,7 +87,7 @@ def test_a_damaged_pointer_refuses_rather_than_reading_as_absent(
         "the typed refusal must reach the caller instead of becoming `no roster`"
     )
 
-    # The envelope side never reads the pointer at all (`docs/issues/070`): `cli/run.py`'s
+    # The envelope side never reads the pointer at all (`docs/issues/archive/070`): `cli/run.py`'s
     # `_roster_envelope` is handed the roster the run READ (`RunResult.roster`), so a pointer
     # damaged after the run cannot change what the envelope says, and a pointer damaged before
     # it is the refusal above, at run start, before anything is spent. `None` here is the one

@@ -226,7 +226,7 @@ def _fill_rows(
     The five envelope fields are stamped here rather than by `InvocationRecorder`, because these
     rows are staged straight into the run-state chunks and never pass through a recorder. That is
     why they carried none of them while `vqapr.account` -- which does go through one -- carried all
-    five (`docs/issues/022`).
+    five (`docs/issues/archive/022`).
 
     `sequence` is per call, matching the recorder's own contract: it numbers rows within one
     staged batch, and `account_version` is what orders batches against each other.

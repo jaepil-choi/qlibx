@@ -60,7 +60,7 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
     )
     assert definition.at is not None
     if definition.start is not None and definition.end is not None:
-        # Cut on DATES before an occurrence is built, not on occurrences after (`docs/issues/069`:
+        # Cut on DATES before an occurrence is built, not on occurrences after (`docs/issues/archive/069`:
         # a run of 15 sessions built 735 occurrences, with their fold and offset proofs and the
         # agenda's identity over them, three times per command). An occurrence on venue-local
         # day `d` at `at` lies inside `[start, end]` only if `d` lies between the bounds' local
@@ -222,7 +222,7 @@ def _validate_initial_model_state(
     """Stage and round-trip the Flow-owned initial Strategy payload.
 
     Three separate steps, each with its own `try` and its own name in the refusal
-    (`docs/issues/076`). One block around all three could only say "cannot be staged", so a
+    (`docs/issues/archive/076`). One block around all three could only say "cannot be staged", so a
     `load_payload` that hit `EOFError` on an empty source and a `save_payload` that was not
     deterministic produced the SAME sentence -- and the author could not tell which of their two
     methods to open. The `from error` chain carries the original; `cli.run.preflight_refusal`

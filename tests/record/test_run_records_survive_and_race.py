@@ -4,7 +4,7 @@ Four attacks, each stronger than what `tests/flow/test_run_records.py` already c
 
 1. A run INTERRUPTED mid-write -- a real OS signal to a separate process, not a hand-written
    partial record -- leaves every row it recorded and no `record.json`, and `run_ids` must not
-   list it. Since `docs/issues/087` the rows live in memory until the run ends, and an interrupt
+   list it. Since `docs/issues/archive/087` the rows live in memory until the run ends, and an interrupt
    IS an end: the writer's `release` runs on the failure path and writes them.
 2. A run hard-KILLED mid-write (`terminate()`, which no code can answer) keeps what the spill
    valve had already forced to disk and loses the rest -- the promise as `087` narrowed it,

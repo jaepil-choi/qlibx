@@ -1,7 +1,7 @@
 """What a Constraint is handed, built for a test.
 
 Every Constraint member now takes a `ConstraintCall` rather than a `ModelWindow` and a tuple
-(record `129`+, `docs/issues/036`), so a test that used to pass `(window, instruments)` or
+(record `129`+, `docs/issues/archive/036`), so a test that used to pass `(window, instruments)` or
 `(None, instruments)` passes one of these instead.
 
 Two builders, because the two cases are genuinely different and collapsing them hides which one a

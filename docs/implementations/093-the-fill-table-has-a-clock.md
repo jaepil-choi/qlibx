@@ -1,7 +1,7 @@
 # 093 — The fill table has a clock
 
-**Closes:** `docs/issues/022-the-fill-table-has-no-clock.md`, and resolves the unexplained half of
-`docs/issues/024`.
+**Closes:** `docs/issues/archive/022-the-fill-table-has-no-clock.md`, and resolves the unexplained half of
+`docs/issues/archive/024`.
 **Branch:** `fix/022-fill-envelope`.
 
 ## Why this change exists
@@ -44,7 +44,7 @@ than omitting one. Production always supplies it.
 
 ## This also closes 024's unexplained half
 
-`docs/issues/024` reported a per-table counter nobody could interpret: 7 for `ff3.formation` and
+`docs/issues/archive/024` reported a per-table counter nobody could interpret: 7 for `ff3.formation` and
 `vqapr.weight`, 85 for `vqapr.account`, and **1 for `vqapr.fill`** — *"which is the one that defeats
 any reading I could construct, because 7 rebalances produced 13,012 fills across 7 distinct
 instants"*.

@@ -1,6 +1,6 @@
 # 164 — the record is written once, when the run ends: no physical write per loop
 
-**Closes:** `docs/issues/087`. **Branch:** `fix/087-write-once-flush-on-exit`, off
+**Closes:** `docs/issues/archive/087`. **Branch:** `fix/087-write-once-flush-on-exit`, off
 `develop @ 22f3e271` (after record `163`). **Campaign:** none. **Authority:** the owner,
 2026-09-07, two rulings: first "compact on `release()`", then -- on asking why a run had to write
 per loop at all -- "write once at the end, and save what was recorded when the run dies",

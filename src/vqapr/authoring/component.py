@@ -44,7 +44,7 @@ class Component(ABC):  # noqa: B024 - concrete roles add their abstract callback
     **The author's base class, so it lives on the author's surface.** An engine-side `models/`
     package once held it while `DataModel` and `StrategyModel` were defined here without it, so
     the two authored kinds shared no ancestor and an author who wrote against this module got a
-    class the loader could not run (`docs/issues/036`). `Constraint` then stood outside the base
+    class the loader could not run (`docs/issues/archive/036`). `Constraint` then stood outside the base
     for a reason that turned out to be wrong -- *"a constraint is a stateless predicate"* -- and
     copied `inputs()` and `requirements()` verbatim to get the same declaration. A rule such as
     *"out after three breaches"* needs to count, and counting is memory; the premise was the
@@ -80,7 +80,7 @@ class Component(ABC):  # noqa: B024 - concrete roles add their abstract callback
         **Evaluated before `memory` exists.** Registration and preflight call this on a fresh
         instance, before any `initial_model_memory` is applied or a snapshot restored, and the
         run refuses a model whose requirements then differ from the frozen ones. So the reads
-        cannot depend on memory or on a run's per-model settings (`docs/issues/065`): a family
+        cannot depend on memory or on a run's per-model settings (`docs/issues/archive/065`): a family
         of settings that changes WHAT is read is a family of registered components.
 
         Declaring nothing is legitimate and is what the shipped `NoShort` constraint does: a rule
@@ -200,7 +200,7 @@ class Constraint(Component):
     fixed. Two reasons, both recorded in `docs/vqapr-architecture.md` §5.7: it could not see the
     breach that matters most, because integer quantity conversion pushes a weight over a limit and
     that is unknowable before fills exist (`UC-CONSTRAINT-ADJUST-001`); and two scorers can
-    disagree, which `docs/issues/014` measured -- the same rule read a signed weight in one member
+    disagree, which `docs/issues/archive/014` measured -- the same rule read a signed weight in one member
     and an absolute one in the other, so a proposal passed the gate before execution and was
     reported as a violation by the check after it. One place to measure, and that ambiguity cannot
     arise.
@@ -229,7 +229,7 @@ class Constraint(Component):
         `None`, the default, leaves it to the framework: ``max(bound * 1%, 10bp of NAV)``. A book
         executes in whole lots and is marked after its fills, so the realised weight lands a
         little off the target the optimiser put on the grid; without a tolerance that residue is
-        filed as a violation in the same counter as a real one (`docs/issues/086` -- 40 of 82
+        filed as a violation in the same counter as a real one (`docs/issues/archive/086` -- 40 of 82
         rebalances, worst 0.01%p, beside one real breach of 4.89%p). Override with a `Decimal`
         share of NAV to tighten or loosen it. The comparison itself stays the author's:
         `monitor` returns `passed`, `measured`, `bound`, `excess` as before, and the framework

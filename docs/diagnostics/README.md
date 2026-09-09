@@ -23,7 +23,7 @@
 > 들어왔고, "실환경 결함 다섯"은 `134`(원자적 등록) · `135`(흘려 쓰기, tz 안전한 포맷) · `139`(등록
 > digest) · `129`(unused deps)가 닫았다. `049`의 최종 측정은 `experiments/exp_049_the_measurement/`가
 > 잰다 (rows 372.57s · expr 5.04s · wide 2.46s, anti-join 0). 그 측정이 새로 낸 관측 둘은
-> `docs/issues/053`·`054`다. §0 이하는 **2026-09-02의 관측**으로 남긴다 — 무엇이 측정되었는지의 기록이지
+> `docs/issues/archive/053`·`054`다. §0 이하는 **2026-09-02의 관측**으로 남긴다 — 무엇이 측정되었는지의 기록이지
 > 할 일 목록이 아니다.
 
 ---
@@ -74,7 +74,7 @@ resolved/still-live를 항목별로 적고, 재검증하지 않은 항목은 그
 | 문서 | 왜 보관인가 |
 |---|---|
 | [`archive/2026-08-18-vqapr-review.md`](archive/2026-08-18-vqapr-review.md) | 130 modules / 11,959 lines / 334 tests 기준. 오늘 트리는 30,260 lines / 1,292 tests다. **still live: OS-2 · RF-1 · RF-2** |
-| [`archive/2026-08-19-vqapr-performance.md`](archive/2026-08-19-vqapr-performance.md) | 읽기 경로를 그 뒤로 두 번 다시 썼다(records `104`–`118`, `119`–`128`). 이 파일의 논지 전체가 `docs/issues/049`의 숫자 하나가 되었다 |
+| [`archive/2026-08-19-vqapr-performance.md`](archive/2026-08-19-vqapr-performance.md) | 읽기 경로를 그 뒤로 두 번 다시 썼다(records `104`–`118`, `119`–`128`). 이 파일의 논지 전체가 `docs/issues/archive/049`의 숫자 하나가 되었다 |
 
 ## 3. 뒤집힌 진단 — 읽는 사람이 반드시 알아야 할 하나
 

@@ -401,7 +401,7 @@ later reader can tell an inherited edge from a new one.
 The tripwire above watches modules reaching **up** to `vqapr.public`. This section watches the
 other end: modules reaching **past** the four forwarding adapters under `extension/` into
 `_internal/extensions/`, which is the same failure — a boundary documented in prose and enforced by
-nothing — measured at the bottom of the package instead of the top. `docs/issues/029` is the file
+nothing — measured at the bottom of the package instead of the top. `docs/issues/archive/029` is the file
 that found it.
 
 **The rule.** `vqapr.extension.component`, `.fingerprint`, `.loading` and `.registration` are the
@@ -428,7 +428,7 @@ frozen cluster above — unshipped, no new callers, no growth — so its `_inter
 inherited edges recorded here rather than an example to copy.
 
 `tests/boundaries/test_internal_has_one_door.py` enforces this list by AST walk, including
-function-local imports, because the three bypasses `docs/issues/029` found were all inside function
+function-local imports, because the three bypasses `docs/issues/archive/029` found were all inside function
 bodies and a header-only check would have called those files clean. `tests/` are deliberately out of
 scope: they may reach the physical home directly, and
 `tests/extension/test_agent_first_internal_routes.py` exists to do exactly that.
@@ -514,6 +514,6 @@ scaffold-propagation finding all come from.
 
 **It stays untracked and untouched, by owner ruling.** Nothing is `git add`ed out of it, no file is
 relocated into `docs/`, and it is not committed. This ruling and
-`docs/issues/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
+`docs/issues/archive/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
 intended durability: the conclusions are carried by tracked documents, and the raw journey stays
 where a later run can regenerate or replace it without a repository decision.

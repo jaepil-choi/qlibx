@@ -1,6 +1,6 @@
 """A `Rebalance` refusal names the value it saw and the bound it crossed.
 
-`docs/issues/071`: `cash_weight is outside the declared budget` was the whole message for a book
+`docs/issues/archive/071`: `cash_weight is outside the declared budget` was the whole message for a book
 whose quantised shorts summed to `-1.000000000001`, so cash was `2.000000000001` against a
 `cash_upper` of `2`. The author reasoned both numbers out by hand. All five refusals in
 `Rebalance`'s validator had the same shape: the rule, never the numbers.

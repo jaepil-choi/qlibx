@@ -77,6 +77,6 @@ currently left to discover by elimination that the package has no opinion to off
 
 ## Related
 
-`docs/issues/011.1` — *"There is no reachable way to declare a per-trade cost"* — closed 2026-08-29
+`docs/issues/archive/011.1` — *"There is no reachable way to declare a per-trade cost"* — closed 2026-08-29
 by making `krx_rules` reachable. This journey found the cost machinery and could not use it, for a
 reason that issue did not cover.

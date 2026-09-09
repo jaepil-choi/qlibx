@@ -1,6 +1,6 @@
 # 160 — document is the domain: one pydantic shape per declared thing, one door, one place per rule
 
-**Closes:** `docs/issues/027`, `082`. **Branch:** `step-05-document-is-the-domain`, off
+**Closes:** `docs/issues/archive/027`, `082`. **Branch:** `step-05-document-is-the-domain`, off
 `develop @ 9cbc859e`. **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`,
 Step 5 (owner decisions D1·D2·D3); ExecPlan section M5 in `.agent/plans/active/one-shape-campaign.md`.
 **Authority:** the owner, 2026-09-04 (D1–D3) and 2026-09-07 (milestone order: the merge before the

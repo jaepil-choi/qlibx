@@ -1,6 +1,6 @@
 # 148 — a datamodel is a run, and a run declares its sessions and one wall time
 
-**Closes:** `docs/issues/059` (a materialization holds every row and every access record until
+**Closes:** `docs/issues/archive/059` (a materialization holds every row and every access record until
 the end, writes a 478 MB lineage, prints nothing). **Step:** 7 of
 `docs/refactoring/2026-09-03-the-deletion-campaign.md` (decision D1, and the three owner
 decisions taken on 2026-09-03 when the step opened: D5, D6, D7).

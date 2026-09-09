@@ -1,6 +1,6 @@
 """A damaged workspace is not "no roster", and the report describes the roster the run READ.
 
-`docs/issues/050`, the sibling of `docs/issues/042` at the other door. 042 closed the guard around
+`docs/issues/archive/050`, the sibling of `docs/issues/archive/042` at the other door. 042 closed the guard around
 the roster POINTER and its own closing text named what stayed open: *"only `Workspace.open` itself
 is guarded."*
 
@@ -11,7 +11,7 @@ file that is corrupt or half-written. Both readers on the run path wrapped it in
 return None`, and `None` means **no roster is registered** -- a legal, ordinary state. So a
 workspace damaged between preflight and `run()` made a project that HAS a roster read as one that
 never had one: the run continued, every fill recorded `kind: None`, and on a KRX-shaped venue the
-ETF sleeve was charged the share rate. That is `docs/issues/007` returning through a `try/except`
+ETF sleeve was charged the share rate. That is `docs/issues/archive/007` returning through a `try/except`
 written for an absent workspace.
 
 ## Half two
@@ -85,7 +85,7 @@ def test_the_envelope_reports_the_roster_the_run_read_whatever_happens_to_the_fi
 
     `cli/run.py`'s `_roster_envelope` used to re-read the roster after the run and report
     `known: true, stale: true` when the workspace had become unreadable meanwhile. Since
-    `docs/issues/070` it is handed the roster the run READ (`RunResult.roster`) and reads
+    `docs/issues/archive/070` it is handed the roster the run READ (`RunResult.roster`) and reads
     nothing: a workspace damaged after the run cannot turn a known roster into `known: false`,
     nor into a stale marker -- the counts are the ones the fills were classified by.
     """

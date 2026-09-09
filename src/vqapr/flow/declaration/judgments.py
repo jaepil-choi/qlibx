@@ -4,7 +4,7 @@ These answer one question -- is this run worth starting? -- and both `check` and
 answer. They lived in `cli/check.py` because `check` was built on top of `run`'s spec vocabulary and
 so the judgments landed in the verb that needed them first. That left `run` executing what `check`
 would refuse: a real look-ahead ran to completion, wrote a permanent record, and appeared beside
-legitimate runs with nothing marking it (`docs/issues/015`).
+legitimate runs with nothing marking it (`docs/issues/archive/015`).
 
 Moving them here is what makes a single answer possible. The module sits below the CLI and imports
 nothing from it, so both verbs can reach the same judgments without either importing the other.
@@ -17,7 +17,7 @@ is judged in turn, since one run now names several.
 it replaced was easy to forget -- and forgetting it means a run whose judgment could not ANSWER
 reports as clean, which is the divergence this module exists to close, reproduced one layer down.
 
-**No helper in this module catches on behalf of a judge** (`docs/issues/077`). Five of them did,
+**No helper in this module catches on behalf of a judge** (`docs/issues/archive/077`). Five of them did,
 and returned an empty result, which `judgments` cannot tell from "asked the question, found
 nothing wrong" -- so `check` reported `passed: [..., "judgments"]` on a run whose look-ahead
 judgment never ran, with `blocked` empty. Every judge here therefore lets its exception reach the
@@ -40,7 +40,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 
 # Through `extension/`, not `_internal/`, matching `flow/declaration/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
-# adapters misses a caller (`docs/issues/029`).
+# adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.declaration.preflight import derived_agenda
 from vqapr.project.run import RunDefinition
@@ -115,7 +115,7 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
     `preflight_run`, which the CLI's `run` and the sample's `execute` both call (record `168`).
     `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
     15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
-    wrote a permanent record nothing marked (`docs/issues/015`); `run` then asked them and the
+    wrote a permanent record nothing marked (`docs/issues/archive/015`); `run` then asked them and the
     Python surface still did not, so the same run was refused by the CLI and executed from
     Python (record `167`, R7). Refusing outright, with no flag to bypass, is the decision
     recorded in `docs/implementations/087`.
@@ -153,11 +153,11 @@ def judgments(
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
     # The run's one agenda, derived at most ONCE for every judge that reads it
-    # (`docs/issues/069`: it was derived per strategy inside the ordering judge and again per
+    # (`docs/issues/archive/069`: it was derived per strategy inside the ordering judge and again per
     # member inside the dataset judge, each time over the dataset's whole session list). Reached
     # through a CALL rather than handed over as a value: a failure to derive it has to land inside
     # the per-judge wrapper below, where it becomes a blocked entry for each judge that needed it.
-    # Flattening it to `None` here was `docs/issues/077` -- the judges read `None` as "nothing to
+    # Flattening it to `None` here was `docs/issues/archive/077` -- the judges read `None` as "nothing to
     # report" and the run was reported as judged.
     agenda = _agenda_once(workspace, definition)
 
@@ -169,7 +169,7 @@ def judgments(
             lambda: _judge_execution_ordering(definition, workspace, at, agenda),
         ),
         # ONE judge per member, NAMED for the member it judges. Two reasons, both from
-        # `docs/issues/077`. A member whose component does not load blocks its own entry and no
+        # `docs/issues/archive/077`. A member whose component does not load blocks its own entry and no
         # other -- this verb promises every INDEPENDENT problem at once, and one member failing to
         # load says nothing about another member's datasets. And the name is where the reader
         # learns WHICH member: a blocked entry carries the exception's own text, and
@@ -252,7 +252,7 @@ def _instant(value: object) -> datetime | None:
     as reversed and `check` refuses what `run` accepts -- a gate contradicting the thing it gates.
 
     A value that IS declared but is not an aware instant raises, and the judgment that asked for it
-    blocks (`docs/issues/077`). Returning `None` for it read, at the call site, as "nothing was
+    blocks (`docs/issues/archive/077`). Returning `None` for it read, at the call site, as "nothing was
     declared" -- so a dataset whose span could not be parsed left the lookback question silently
     unasked and the judgment reported as passed.
     """
@@ -303,10 +303,10 @@ def _agenda_once(workspace: Workspace, definition: RunDefinition) -> Callable[[]
     """The run's decide agenda, derived at most once and delivered to each judge that asks.
 
     Built from the run's sessions and `at` (record `148`). Two judgments read it, and
-    `docs/issues/069` made that one derivation rather than one per strategy and one per member.
+    `docs/issues/archive/069` made that one derivation rather than one per strategy and one per member.
 
     Returned as a CALL, and a failure to derive it is re-raised to every asker rather than
-    flattened to `None` (`docs/issues/077`). A dataset that does not resolve, or a session that
+    flattened to `None` (`docs/issues/archive/077`). A dataset that does not resolve, or a session that
     does not exist in the zone, is still preflight's refusal to name -- but it is ALSO the reason
     two judgments could not be answered, and the reader has to hear that from the judgments
     themselves. Both dependent judges then block carrying the same reason, which is the point:
@@ -341,8 +341,8 @@ def _judge_execution_ordering(
     the simulation was already underway and earlier callbacks had mutated account state.
 
     An execution dataset that does not resolve, and an agenda that cannot be derived, both raise out
-    of here on purpose. This is the judgment `docs/issues/015` exists for, and reporting it as
-    answered when it was not is the defect `docs/issues/077` filed.
+    of here on purpose. This is the judgment `docs/issues/archive/015` exists for, and reporting it as
+    answered when it was not is the defect `docs/issues/archive/077` filed.
     """
     if definition.execution is None:
         return []
@@ -403,7 +403,7 @@ def _judge_member_datasets(
     One member per call, and `judgments` dispatches one judge per member, so a component that does
     not load blocks its own entry and leaves the other members answered. It used to `continue` past
     that member inside a single judgment covering all of them -- which reported the whole judgment
-    as passed while a component nothing could be read from sat in the run (`docs/issues/077`).
+    as passed while a component nothing could be read from sat in the run (`docs/issues/archive/077`).
     """
     section, entry, loader = member
     found: list[Failure] = []
@@ -416,7 +416,7 @@ def _judge_member_datasets(
 
     first_read = _first_decision(definition, agenda)
     # One unregistered dataset is ONE problem however many fields the component reads from
-    # it (`docs/issues/056`): `requirements()` fans a `DatasetInput` out to one requirement
+    # it (`docs/issues/archive/056`): `requirements()` fans a `DatasetInput` out to one requirement
     # per field, and reporting per requirement printed eight identical failures for one
     # missing registration. The fields ride along as examples, which is what a reader
     # deciding between "register it" and "point the component elsewhere" wants to see.
@@ -548,7 +548,7 @@ def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> 
     `None` means the run declared no `start` or no `end` -- which the period judgment reports, and
     which leaves nothing here to measure against. An agenda that cannot be DERIVED is a different
     thing entirely and is no longer flattened into the same `None`: `agenda()` raises, and the
-    judgment that asked blocks (`docs/issues/077`).
+    judgment that asked blocks (`docs/issues/archive/077`).
     """
     start, end = definition.start, definition.end
     if start is None or end is None:
@@ -603,7 +603,7 @@ def _judge_weights(
         return found
     # No `try`. An exchange that does not resolve or does not load is still preflight's refusal to
     # name, but it is ALSO the reason this judgment cannot be made, and swallowing it reported the
-    # weights judgment as passed on a run nothing was proven about (`docs/issues/077`).
+    # weights judgment as passed on a run nothing was proven about (`docs/issues/archive/077`).
     exchange = load_exchange(
         workspace.component(definition.exchange), project_root=workspace.project_root
     )

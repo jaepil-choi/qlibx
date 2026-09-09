@@ -278,7 +278,7 @@ def test_run_executes_a_registered_run_end_to_end(
     # exercises the intent path, the execution path and the account commit rather than skipping
     # all three.
     assert strategy["account_version"] == 2
-    # What the orders DID (`docs/issues/039`). `ok: true` says the simulation executed; it does
+    # What the orders DID (`docs/issues/archive/039`). `ok: true` says the simulation executed; it does
     # not say the declared book is the held book, and in the run that filed the issue those
     # differed by nine percent of NAV because 3.1% of fills dealt nothing. Pinned rather than
     # `>= 0`, which a run that placed no orders would also satisfy.
@@ -607,7 +607,7 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     assert ran["ok"] is True
 
     # And the breach is IN THE RECORD, named. The block that carries it reported `{}` for every
-    # run ever written until `docs/issues/051`, so this asserts its content and not its presence.
+    # run ever written until `docs/issues/archive/051`, so this asserts its content and not its presence.
     code, shown = _cli(
         capsys, "--project-root", str(tmp_path), "show", "strategy", "capped/my-alpha",
     )
@@ -769,7 +769,7 @@ def test_a_run_says_whether_it_knew_what_its_instruments_were(
 def test_one_run_command_opens_the_workspace_document_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`docs/issues/070`: `run` opened `workspace.yaml` four times -- to look the definition
+    """`docs/issues/archive/070`: `run` opened `workspace.yaml` four times -- to look the definition
     up, again inside preflight, again for the roster at run start, and again for the envelope's
     roster after the run. Four reads of a file other commands write is four chances to judge
     one document and freeze another. One open, and everything else is handed that snapshot."""
@@ -797,7 +797,7 @@ def test_one_run_command_opens_the_workspace_document_once(
 def test_a_run_says_where_its_time_went(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`docs/issues/068`: a per-phase timing block in the record and the envelope.
+    """`docs/issues/archive/068`: a per-phase timing block in the record and the envelope.
 
     The testbed's agent needed cProfile to learn that its strategy was 5% of the wall clock and
     two execution snapshots were half of it. The record now says so: `total` for the loop,
@@ -1081,7 +1081,7 @@ def test_help_keeps_argparses_own_behaviour(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """`docs/issues/058`: the fill table's `event_time` is in the run's zone like every other.
+    """`docs/issues/archive/058`: the fill table's `event_time` is in the run's zone like every other.
 
     The execution table normalises its target to UTC and the fill row used to carry that, so a
     reader lining a fill up against the NAV row written at that same instant converted by hand.
@@ -1119,11 +1119,11 @@ class {object_name}(StrategyModel):
 def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`docs/issues/073`: the envelope of a run with one failed strategy used to be that
+    """`docs/issues/archive/073`: the envelope of a run with one failed strategy used to be that
     strategy's refusal alone -- or, under `--jobs`, `stage: unhandled` with `failures: []` --
     and said nothing about the strategies that completed. It now has the same `strategies` map
     as a green run, with a `status` per strategy, and the failed one's block is the refusal.
-    `docs/issues/071`: the refusal names its strategy, its file and its line."""
+    `docs/issues/archive/071`: the refusal names its strategy, its file and its line."""
     _workspace_for_run(tmp_path, capsys)
     code, scaffold = _cli(
         capsys, "--project-root", str(tmp_path), "new", "strategy", "never-ready",

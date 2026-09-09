@@ -1,9 +1,9 @@
 # 136 — one scan serves every field an alias declares
 
-**Closes:** `docs/issues/046` (first half; the second closed in `120`). The last lane of
+**Closes:** `docs/issues/archive/046` (first half; the second closed in `120`). The last lane of
 `docs/refactoring/2026-09-01-the-read-path-campaign.md`. **Step:** 4 of
 `docs/refactoring/2026-09-02-the-convergence-campaign.md` (M4).
-**Authority:** the read-path campaign's lane D contract; `docs/issues/049` (a requirement names
+**Authority:** the read-path campaign's lane D contract; `docs/issues/archive/049` (a requirement names
 one field; expressions over one dataset fuse into one `SELECT`).
 
 ## Why this exists

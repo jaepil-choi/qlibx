@@ -9,7 +9,7 @@ publishing one is gone -- the four ensemble showcases stand on it.
 Two things the registration must say, because a record does not: `available_at` is `event_time`
 (the decision instant the row was written at), and a `Decimal` is stored as text, so a numeric
 field is `CAST`. It is cast to `DOUBLE`, the one numeric type a dataset field may declare
-(`docs/issues/088`): the record keeps the member's `Decimal` exactly, and the dataset the next run
+(`docs/issues/archive/088`): the record keeps the member's `Decimal` exactly, and the dataset the next run
 reads is the data plane, which is float.
 """
 

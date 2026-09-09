@@ -234,7 +234,8 @@ class StrategyEventLoop(
             return self._callback.dispatch(event.occurrence)
 
     def _handle_market(self, event: MarketEvent) -> DueExecutionTrace:
-        """One instant of the market clock, in the order design §3.1 fixes -- written once, here.
+        """One instant of the market clock, in the order design §3.1 fixes -- written once, here,
+        and held to `domain.wiring.MARKET_CLOCK_ORDER` by the wiring test.
 
             1. ACCRUE      what the holding period up to now earned         (a place, for now)
             2. EXECUTE     the pending intent whose target is this instant  (when there is one)

@@ -24,13 +24,22 @@ from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
 from vqapr.domain.identifiers import ComponentId, component_id
 from vqapr.domain.values import ModelMemory, normalize_memory
+from vqapr.domain.wiring import Role
 
 
 class ComponentKind(StrEnum):
+    """The registrable kinds: the four rows of the wiring table an author can write. `ACCRUAL`
+    is a row with no kind -- a place, not yet a door (design §7.3)."""
+
     DATA_MODEL = "data_model"
     STRATEGY_MODEL = "strategy_model"
     EXCHANGE = "exchange"
     COMPLIANCE = "compliance"
+
+    @property
+    def role(self) -> Role:
+        """This kind's row of the wiring table."""
+        return Role(self.value)
 
 
 class ComponentRef(BaseModel):

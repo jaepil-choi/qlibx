@@ -1,4 +1,4 @@
-"""What an author subclasses: the Component, and the three roles it takes.
+"""What an author subclasses: the Component, the part/tool split, and the three roles here.
 
 A Component is an object the engine calls back on an event, with that event's time. The roles
 differ in what the callback is handed and what it returns -- values in, a dataset out for a
@@ -20,7 +20,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import BinaryIO
+from typing import BinaryIO, ClassVar
 
 from vqapr.authoring.call import ComplianceCall, DataCall, StrategyCall
 from vqapr.authoring.history import AccountHistoryInput
@@ -31,9 +31,10 @@ from vqapr.authoring.view import EconomicAccountView
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.shapes import Rows
 from vqapr.domain.values import ModelMemory
+from vqapr.domain.wiring import WIRING, Role, Wiring
 
 
-class Component(ABC):  # noqa: B024 - concrete roles add their abstract callbacks
+class Component(ABC):
     """An object the engine calls back on an event, with that event's time.
 
     **This is the one thing the four authored kinds are** (owner ruling, 2026-09-08; the review in
@@ -76,6 +77,15 @@ class Component(ABC):  # noqa: B024 - concrete roles add their abstract callback
 
     memory: ModelMemory = None
 
+    ROLE: ClassVar[Role]
+    """Which row of the wiring table this role is (design §4). Set by each role class; the table
+    -- not the class -- says which clock it is called on and who receives its answer."""
+
+    @classmethod
+    def wiring(cls) -> Wiring:
+        """This role's row of the table: its clock, what it is handed, who receives its answer."""
+        return WIRING[cls.ROLE]
+
     def inputs(self) -> Mapping[str, DatasetInput]:
         """Declare every aliased dataset read this component performs. Empty by default.
 
@@ -104,7 +114,26 @@ class Component(ABC):  # noqa: B024 - concrete roles add their abstract callback
         )
 
 
-class DataModel(Component):
+class Part(Component):
+    """A Component that declares its own clock -- one per run (design §4.3).
+
+    **A part is a tool plus a clock.** A run holds exactly one part, and the part's agenda
+    (`RunDefinition.agenda`, design §3.4) is the strategy clock the run is called on. What a part
+    reads and remembers is what every Component reads and remembers; what makes it a part is that
+    a run cannot be declared without naming it and its clock.
+    """
+
+
+class Tool(Component):
+    """A Component that attaches to somebody else's clock (design §4.3).
+
+    A tool declares no clock: the wiring table says which one it is called on -- today the
+    market clock, for all three (`Exchange`, `Compliance`, and the `Accrual` place) -- and a run
+    may declare several of one kind (compliance rules) or none.
+    """
+
+
+class DataModel(Part):
     """A Component whose result is values: data in, a dataset out, and no account in between.
 
     **What makes it a DataModel is that nothing it returns is executed** (architecture 4.4). It
@@ -121,12 +150,14 @@ class DataModel(Component):
     uses.
     """
 
+    ROLE: ClassVar[Role] = Role.DATA_MODEL
+
     @abstractmethod
     def compute(self, call: DataCall) -> Rows:
         """Compute this instant's rows from the declared reads. One dict per instrument."""
 
 
-class StrategyModel(Component):
+class StrategyModel(Part):
     """User extension that decides what to hold; its memory owns cadence and path-dependent rules.
 
     One class (record `132`). Two carried this name: this one, which the scaffold taught and an
@@ -145,6 +176,8 @@ class StrategyModel(Component):
     """
 
     recorder: InvocationRecorder | None = None
+
+    ROLE: ClassVar[Role] = Role.STRATEGY_MODEL
 
     def tables(self) -> tuple[TableSpec, ...]:
         """Declare every table this Strategy may write during a callback. Empty by default."""
@@ -185,7 +218,7 @@ class StrategyModel(Component):
         """
 
 
-class Compliance(Component):
+class Compliance(Tool):
     """User extension contract: an observer of the committed account, on the market clock.
 
     Design §7.2 (`docs/design/two-clocks-and-the-wiring-table.md`):
@@ -215,6 +248,8 @@ class Compliance(Component):
     which rule this is and is checked at load against the id it was registered under, so a rule
     registered as `noshort` and answering to `no-short` is refused before a run is spent.
     """
+
+    ROLE: ClassVar[Role] = Role.COMPLIANCE
 
     @property
     @abstractmethod

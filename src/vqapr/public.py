@@ -24,8 +24,10 @@ from vqapr.authoring import (
     DataModel,
     DatasetInput,
     Hold,
+    Part,
     Rebalance,
     StrategyModel,
+    Tool,
 )
 from vqapr.authoring.context import DataModelContext, StrategyModelContext
 from vqapr.authoring.records import TableSpec
@@ -235,6 +237,7 @@ __all__ = (
     "OptimizeRefusal",
     "OptimizeResult",
     "PanelWindow",
+    "Part",
     "PortfolioDirection",
     "PortfolioTarget",
     "Rebalance",
@@ -262,6 +265,7 @@ __all__ = (
     "StrategyReport",
     "TableSpec",
     "TickerNetting",
+    "Tool",
     "TradeRule",
     "TradeTerms",
     "VqaprError",

@@ -34,12 +34,13 @@ from datetime import datetime
 from decimal import Decimal
 from typing import ClassVar
 
-from vqapr.authoring import Component
+from vqapr.authoring import Tool
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster
 from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import ModelMemory, require_tz_aware, side_of
+from vqapr.domain.wiring import Role
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
     accepted_requests,
@@ -92,8 +93,8 @@ class ExecutionCall:
             )
 
 
-class Exchange(Component):
-    """The execution extension point: a Component that fills an order batch at a fill instant.
+class Exchange(Tool):
+    """The execution extension point: a tool on the market clock that fills an order batch.
 
     Deliberately small. A venue declares what it trades (`rules`) and, when its regime needs a
     second price beside the trade price, which execution-table field that is
@@ -104,6 +105,7 @@ class Exchange(Component):
     """
 
     exchange_id: str
+    ROLE: ClassVar[Role] = Role.EXCHANGE
 
     @property
     @abstractmethod

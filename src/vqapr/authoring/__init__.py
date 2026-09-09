@@ -42,7 +42,7 @@ what the rest declares.
 from __future__ import annotations
 
 from vqapr.authoring.call import ComplianceCall, DataCall, StrategyCall
-from vqapr.authoring.component import Compliance, Component, DataModel, StrategyModel
+from vqapr.authoring.component import Compliance, Component, DataModel, Part, StrategyModel, Tool
 from vqapr.authoring.history import AccountHistory, AccountHistoryInput
 from vqapr.authoring.reads import DatasetInput, requirements_for
 from vqapr.authoring.records import TableSpec
@@ -68,10 +68,12 @@ __all__ = (
     "InstantsLookback",
     "Observation",
     "PanelWindow",
+    "Part",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
     "StrategyModel",
     "TableSpec",
+    "Tool",
     "requirements_for",
 )

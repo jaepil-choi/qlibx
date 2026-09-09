@@ -53,12 +53,14 @@ def test_module_exports_are_exact() -> None:
         "Component",
         "Observation",
         "PanelWindow",
+        "Part",
         "Rebalance",
         "RowsLookback",
         "requirements_for",
         "StrategyCall",
         "StrategyModel",
         "TableSpec",
+        "Tool",
     }
     assert set(authoring.__all__) == expected
     for name in expected:
@@ -501,7 +503,7 @@ def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
     forbidden = {"account_version", "version", "recorder", "memory", "compliance_id"}
     for name in authoring.__all__:
-        if name in {"Component", "StrategyModel"}:
+        if name in {"Component", "Part", "Tool", "StrategyModel"}:
             # `Component` carries `memory` on purpose: it is the small strict-JSON state every role
             # shares (architecture 4.4; a Compliance rule too, owner ruling 2026-09-08), and it arrived on
             # this surface with the base class in record `131`. `StrategyModel` carries `recorder`

@@ -25,6 +25,8 @@ binding, and the judgments derive the one agenda the run fires on from exactly t
 from __future__ import annotations
 
 import hashlib
+
+import duckdb
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -43,6 +45,7 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
+from vqapr.public import register_instruments
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 RUN = "probe"
@@ -114,16 +117,35 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
     _register_component(root, component_id, ComponentKind.EXCHANGE, source)
 
 
-def _venue_dataset(root: Path) -> None:
-    """The venue table as a dataset with an execution role (record 185); the fill is the run's."""
-    exec_dir = root / "exec"
+def _venue_dataset(
+    root: Path, days: tuple[date, ...] = (date(2023, 12, 1),), dataset_id: str = "my-exec"
+) -> None:
+    """The venue table as a dataset with an execution role (record 185); the fill is the run's.
+
+    A REAL table since the two-clocks campaign (design §3.3): the run's trading days are the
+    days this table has rows for, so the days a test wants the probe to decide on are written
+    here, one 15:30 UTC row each.
+    """
+    exec_dir = root / dataset_id
     exec_dir.mkdir(exist_ok=True)
-    (exec_dir / "placeholder").write_text("x", encoding="utf-8")
+    rows = ",\n".join(
+        f"(TIMESTAMPTZ '{day.isoformat()} 15:30:00+00', 'A', true, 100.0::DOUBLE)" for day in days
+    )
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT * FROM (VALUES
+{rows}
+            ) AS t(trade_at, instrument, is_tradable, close))
+            TO '{(exec_dir / "e.parquet").as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
     with Workspace.transaction(root) as t:
         t.register_dataset(
             DatasetRegistration.of(
-                'my-exec',
-                'exec-src',
+                dataset_id,
+                f'{dataset_id}-src',
                 instrument_field="instrument",
                 available_at="trade_at",
                 grain="instrument_instant",
@@ -132,19 +154,15 @@ def _venue_dataset(root: Path) -> None:
                 field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
                 execution={"is_tradable": "is_tradable"},
             ).with_span(*_SPAN),
-            SourceSpec.of("exec-src", exec_dir),
+            SourceSpec.of(f"{dataset_id}-src", exec_dir),
         )
 
 
-def _fill(fill_at: str = "15:30") -> RunExecution:
+def _fill(fill_at: str = "15:30", dataset: str = "my-exec") -> RunExecution:
     return RunExecution(
-        dataset="my-exec",
-        fill=RunFill(
-            selector="next_eligible",
-            at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-            timezone="UTC",
-            trade_price="close",
-        ),
+        dataset=dataset,
+        trade_price="close",
+        fill=RunFill(at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time()),
     )
 
 
@@ -152,10 +170,10 @@ def _definition(**overrides: object) -> RunDefinition:
     """The probe run: one strategy deciding on 2023-12-01 at 15:30 UTC, unless overridden."""
     declared: dict[str, object] = {
         "run_id": RUN,
+        "writes": f"{RUN}-weights",
         "strategies": (StrategyEntry("model"),),
-        "sessions": (date(2023, 12, 1),),
         "timezone": "UTC",
-        "at": time(15, 30),
+        "agenda": {"every": "1d", "at": time(15, 30)},
         "instruments": ("A",),
         "exchange": "venue",
         "execution": _fill(),
@@ -197,6 +215,9 @@ def workspace(tmp_path: Path) -> Path:
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
     _venue_dataset(tmp_path)
+    # Declared so the four defects above are the ONLY findings: an undeclared roster is a fifth
+    # (`roster.absent`), asked by its own judge, and tested on its own.
+    register_instruments(tmp_path, {"A": "stock"})
     with Workspace.transaction(tmp_path) as t:
         t.register_run(_definition())
     return tmp_path
@@ -391,6 +412,7 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(tmp_path:
     reports nothing, which is exactly what a passing judgment reports.
     """
     Workspace.create(tmp_path)
+    _venue_dataset(tmp_path)  # the trading days come from the execution table (design §3.3)
     _strategy_reading(tmp_path, "model", "absent_dataset", "close")
 
     assert _judge(tmp_path, _definition()) == ["dataset.unregistered"]
@@ -409,6 +431,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     from vqapr.flow.declaration.judgments import _agenda_once, _judge_member_datasets, _members
 
     Workspace.create(tmp_path)
+    _venue_dataset(tmp_path)
     source = tmp_path / "wide.py"
     scaffold = render(
         ComponentKind.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
@@ -423,7 +446,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    definition = _definition().replace(strategies=(StrategyEntry('wide'),))
+    definition = _definition().replace(strategy=StrategyEntry('wide'))
     (member,) = _members(definition)
     failures = _judge_member_datasets(
         definition,
@@ -458,9 +481,10 @@ def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> N
             SourceSpec.of("prices-source", "prepared/prices"),
         )
     _strategy_reading(tmp_path, "model", "prices", "close")
+    # On a trading day the data covers, so the absent field is the only thing wrong.
+    _venue_dataset(tmp_path, days=(date(2024, 6, 3),))
 
-    # On a session the data covers, so the absent field is the only thing wrong.
-    assert _judge(tmp_path, _definition(sessions=(date(2024, 6, 3),))) == ["field.absent"]
+    assert _judge(tmp_path, _definition()) == ["field.absent"]
 
 
 def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -> None:
@@ -490,24 +514,32 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     _strategy_reading(tmp_path, "model", "prices", "close")
     begins = _SPAN[0]
 
-    # Deciding a day BEFORE the data begins: the window really is short, and it is named.
+    # Deciding a day BEFORE the data begins: the window really is short, and it is named. The
+    # trading days are the execution table's (design §3.3), so the day is written there.
     early = begins.date().replace(day=1)
     start = datetime.combine(early, time(0), tzinfo=UTC)
-    assert _judge(tmp_path, _definition(start=start, sessions=(early,), at=time(4, 0))) == [
-        "lookback.uncovered"
-    ]
+    _venue_dataset(tmp_path, days=(early,))
+    at_four = {"every": "1d", "at": time(4, 0)}
+    assert _judge(tmp_path, _definition(start=start, agenda=at_four)) == ["lookback.uncovered"]
 
     # The same run, deciding on a day the data covers, is not refused -- even though `start` is
     # still earlier than the dataset's first observation. That difference is the whole fix.
     covered = date(2024, 6, 3)
-    assert _judge(tmp_path, _definition(start=start, sessions=(covered,), at=time(4, 0))) == []
+    _venue_dataset(tmp_path, days=(covered,), dataset_id="my-exec-covered")
+    assert (
+        _judge(
+            tmp_path,
+            _definition(start=start, agenda=at_four, execution=_fill(dataset="my-exec-covered")),
+        )
+        == []
+    )
 
 
 def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> None:
-    """No sessions, no agenda, no answer -- and it SAYS so. No guess either.
+    """No trading days, no agenda, no answer -- and it SAYS so. No guess either.
 
     This test used to assert the opposite half of the same fact: that the judgment stayed silent,
-    on the reasoning that registration and preflight both refuse a `sessions_from` naming an
+    on the reasoning that registration and preflight both refuse a day source naming an
     unregistered dataset, so answering here would report one defect twice. `docs/issues/archive/077`
     established what that cost -- a silent judgment is returned as an empty result, which
     `judgments` cannot tell from "asked and found nothing", so `check` reported the run as judged
@@ -536,13 +568,13 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
         )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
-    # The sessions come from a dataset that is not registered: the agenda cannot be built here.
-    # Nothing is guessed, and nothing is silently returned either -- it raises, and `judgments`
-    # turns that into a blocked entry.
-    unanswerable = _definition(sessions=(), sessions_from="absent")
+    # The trading days come from the execution table (design §3.3), and no `my-exec` dataset is
+    # registered here: the agenda cannot be built. Nothing is guessed, and nothing is silently
+    # returned either -- it raises, and `judgments` turns that into a blocked entry.
+    unanswerable = _definition()
     with pytest.raises(Exception) as refused:
         _judge(tmp_path, unanswerable)
-    assert "absent" in str(refused.value), refused.value
+    assert "my-exec" in str(refused.value), refused.value
 
     # And end to end, through the verb: blocked, not passed, and `ok` is false.
     from vqapr.flow.declaration.judgments import judgments

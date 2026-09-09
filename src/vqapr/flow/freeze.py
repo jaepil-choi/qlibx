@@ -16,10 +16,9 @@ from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import LifecycleKind
-from vqapr.flow.strategy.loop import SimulationResult
+from vqapr.flow.run.loop import DataModelResult, SimulationResult
 from vqapr.record import (
     DATAMODEL_KIND,
     STRATEGY_KIND,
@@ -66,8 +65,9 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
                 "trade_at_field": execution.table.trade_at_field,
                 "price_fields": dict(execution.table.price_fields),
                 "fill": {
-                    "selector": execution.fill.selector.value,
-                    "local_time": execution.fill.local_time.isoformat(),
+                    "at": None if execution.fill.at is None else execution.fill.at.isoformat(),
+                    "after": execution.fill.after,
+                    "within": execution.fill.within,
                     "timezone": execution.fill.timezone,
                     "trade_price": execution.fill.trade_price,
                     "declaration_identity": execution.fill.declaration_identity,
@@ -93,9 +93,10 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
             }
             for dataset in frozen.datasets
         ],
+        writes=frozen.writes,
         strategies=[
             {"component_id": layer.component_id, "record": layer.record_ref}
-            for layer in frozen.strategies
+            for layer in ((frozen.strategy,) if frozen.strategy is not None else ())
         ],
         # A run holds one kind (record `148`); the other list is empty, and stays in the record
         # so a reader never has to know which kind it is holding to ask.
@@ -103,9 +104,9 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
             {
                 "component_id": layer.component_id,
                 "record": layer.record_ref,
-                "dataset_id": layer.dataset_id,
+                "dataset_id": frozen.writes,
             }
-            for layer in frozen.datamodels
+            for layer in ((frozen.datamodel,) if frozen.datamodel is not None else ())
         ],
     )
     return write_run_record(root, frozen.run_id, record)
@@ -118,8 +119,12 @@ def freeze_strategy_record(
     layer: FrozenStrategy,
     as_loaded: Mapping[str, str],
     roster: dict[str, object] | None,
+    exchange: Mapping[str, object] | None = None,
 ) -> None:
     """Write one strategy's rows and its own facts, so a later process can read them.
+
+    `exchange` is the venue block -- component id, registered fingerprint and the venue's own
+    `settings` (design §6.1) -- built by the caller that loaded the venue.
 
     The rows go first and the record last, because `strategy.json` existing is what marks the
     record complete. A reader that finds one knows the strategy reached its end; one killed midway
@@ -158,10 +163,11 @@ def freeze_strategy_record(
             "content_identity": layer.agenda.content_identity,
             "occurrences": len(layer.agenda.occurrences),
         },
-        constraints=[
-            {"component_id": str(constraint.component_id), "fingerprint": constraint.fingerprint}
-            for constraint in layer.constraints.constraints
+        compliance=[
+            {"component_id": str(rule.component_id), "fingerprint": rule.fingerprint}
+            for rule in layer.compliance.rules
         ],
+        exchange=None if exchange is None else dict(exchange),
         account=(
             None
             if snapshot is None
@@ -178,9 +184,9 @@ def freeze_strategy_record(
         contract=contract_report(result),
         # What ran, not what was registered -- PER COMPONENT rather than folded (design §4.2).
         # `fingerprint` above is what was registered; this is the fingerprint of the bytes on disk
-        # when they were loaded. They agree unless the component was edited after registration,
-        # and that difference is the whole signal (`docs/issues/archive/009`, `023`): a strategy that ran
-        # 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
+        # when they were loaded. They agree unless the component was edited after registration, and
+        # that difference is the whole signal (`docs/issues/archive/009`, `023`): a strategy that
+        # ran 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
         # overfitting tell that a new component_id per edit would have scattered.
         source_digest=dict(as_loaded),
         # The declaration this strategy froze against: its own identity, not the run's.
@@ -236,7 +242,7 @@ def freeze_datamodel_record(
             "content_identity": layer.agenda.content_identity,
             "occurrences": len(layer.agenda.occurrences),
         },
-        dataset_id=layer.dataset_id,
+        dataset_id=frozen.writes,
         value_fields=list(layer.value_fields),
         rows=result.rows,
         sessions=[
@@ -261,25 +267,25 @@ def freeze_datamodel_record(
 
 
 def contract_report(result: SimulationResult) -> dict[str, object]:
-    """What the strategy's constraints promised, and how often each was actually observed to hold.
+    """What the run's Compliance rules watched, and how often each was actually observed to hold.
 
     `held` and `checked` are two different numbers, and conflating them hides the case that matters
     most: a declaration checked zero times is not a declaration that held. It is one nobody asked
     about, and reporting that as `ok` would be the strongest false assurance this record could
-    carry. So a constraint with `checked == 0` reports `ok: false` with a `cause` saying exactly
-    that.
+    carry. So a rule with `checked == 0` reports `ok: false` with a `cause` saying exactly that.
 
-    **These count monitoring observations of the committed account.** They used to be meant to
-    count judgements of the decision, and that member no longer exists: whether a limit held is a
-    question about the book, not about the plan (PRD 7.1).
+    **These count observations of the committed account, on the market clock.** They used to be
+    meant to count judgements of the decision, and that member no longer exists: whether a limit
+    held is a question about the book, not about the plan (PRD 7.1; design §7.2).
 
     **And they used to count nothing at all.** This walked the run's lifecycle entries asking each
     for an `evidence` attribute, but a lifecycle entry carries `kind` and `detail` and the evidence
     is the `detail` -- so the lookup returned `None` every time and the loop never ran
     (`docs/issues/archive/051`).
 
-    Scope, stated rather than implied: this reports the CONSTRAINTS a strategy declared. AC-R6 also
-    names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
+    Scope, stated rather than implied: this reports the Compliance RULES the run declared.
+    AC-R6 also names `weights`/`forms`/`records`, which are the authoring contract's
+    declarations -- they do
     not exist yet, and inventing entries for them here would report a promise nobody made.
     """
 
@@ -292,11 +298,11 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     for trace in getattr(result, "occurrences", ()):
         occurrence_report = getattr(getattr(trace, "result", None), "report", None)
         for stamped in getattr(occurrence_report, "findings", ()) or ():
-            constraint_id = str(getattr(stamped, "constraint_id", "") or "")
-            if not constraint_id:
+            rule_id = str(getattr(stamped, "rule_id", "") or "")
+            if not rule_id:
                 continue
             counts = findings.setdefault(
-                constraint_id,
+                rule_id,
                 {
                     "held": 0,
                     "within_tolerance": 0,
@@ -327,7 +333,7 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
         if getattr(entry, "kind", None) is LifecycleKind.ACCEPTED_INTENT
     )
     report: dict[str, object] = {}
-    for constraint_id, counts in sorted(findings.items()):
+    for rule_id, counts in sorted(findings.items()):
         checked = int(counts["checked"])  # type: ignore[call-overload]
         breached = int(counts["breached"])  # type: ignore[call-overload]
         entry: dict[str, object] = {
@@ -348,16 +354,16 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
                 f"{counts['tolerance']} (worst excess {counts['worst_breached']})"
             )
             entry["fix"] = (
-                f"change the strategy so what it holds satisfies {constraint_id}, loosen the "
+                f"change the strategy so what it holds satisfies {rule_id}, loosen the "
                 "bound, or -- if these are execution residue and not intent -- raise the "
-                "constraint's `tolerance`"
+                "rule's `tolerance`"
             )
         elif checked == 0:
             entry["cause"] = "declared but never checked, so nothing was proven about it"
             entry["fix"] = "remove the declaration, or run over a period where it is exercised"
-        report[constraint_id] = entry
+        report[rule_id] = entry
 
-    # A run that accepted intents while checking no constraint is not a clean run; it is a run
+    # A run that accepted intents while checking no rule is not a clean run; it is a run
     # nobody constrained. Saying so is the point of reporting counts rather than a verdict.
     report["accepted_intents"] = accepted
     return report

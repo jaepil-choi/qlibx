@@ -37,10 +37,10 @@ Evidence includes:
 The legacy showcase generated a project-local `Constraint` component whose `project`,
 `validate_intended`, and `evaluate` methods were unconditionally-passing stubs projecting
 trivial `[0, 1]` per-instrument bounds. It demonstrated no economic behaviour of its own —
-only that a constraint component could be generated, fingerprinted, and registered. That
-scaffolding claim is not worth keeping: constraints are exercised for real in `show_003`
-and `show_008`, and authoring an inert one here just to keep the field non-empty would
-demonstrate nothing. The run's `StrategyEntry("showcase-strategy")` names no constraints instead.
+only that such a component could be generated, fingerprinted, and registered. That
+scaffolding claim is not worth keeping: the box kit and the compliance rules are exercised for
+real in `show_003` and `show_008`, and authoring an inert one here just to keep a field
+non-empty would demonstrate nothing. The run declares no `compliance` instead.
 
 ## Reproduce
 

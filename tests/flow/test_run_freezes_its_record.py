@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from vqapr.domain.errors import VqaprError
+
 import tests.sample.journey as journey
 from vqapr.cli.show import RECORD_FIELDS, STRATEGY_FIELDS, record_view
 from vqapr.record import (
@@ -125,7 +127,7 @@ def test_the_records_and_show_cannot_drift_apart(tmp_path: Path) -> None:
     for field in STRATEGY_FIELDS:
         if field not in ("contract", "roster"):
             assert record[field] is not None, field
-    assert record["roster"] is None, "the sample registers no roster, and the record says so"
+    assert record["roster"]["by_kind"] == {"stock": 10}, "the sample declares its ten names"
     assert record["period"]["occurrences"] > 0
     # The pre-139 run record's field set is still what `show` projects for a record.json run.
     assert "declared_digest" in RECORD_FIELDS
@@ -139,8 +141,12 @@ def test_a_second_run_of_the_same_strategy_refuses_without_replace(tmp_path: Pat
     frozen = _frozen(project)
     execute_run(project, frozen, store_root=store)
 
-    with pytest.raises(RunRecordExists):
+    # The run's own earlier output stands in the warehouse, so the second run is refused by the
+    # own-output rule (design §2.1, record `202`) before the record's lock is even asked; both
+    # say the same thing -- one producer, one artifact -- and `replace_record` lifts both.
+    with pytest.raises(VqaprError) as refused:
         execute_run(project, frozen, store_root=store)
+    assert [failure.code for failure in refused.value.failures] == ["run.output_registered"]
     execute_run(project, frozen, store_root=store, replace_record=True)
     assert len(strategy_refs(store, journey.RUN_ID)) == 1
 
@@ -154,4 +160,4 @@ def test_the_registered_run_is_what_the_sample_executes(tmp_path: Path) -> None:
     registered = Workspace.open(project).run_definition(journey.RUN_ID)
 
     assert registered == journey.definition(panel)
-    assert [entry.component_id for entry in registered.strategies] == [journey.STRATEGY_ID]
+    assert registered.strategy.component_id == journey.STRATEGY_ID

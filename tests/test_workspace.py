@@ -319,7 +319,7 @@ def test_a_document_still_declaring_execution_inputs_is_refused_by_name(
     workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
     workspace_path.parent.mkdir(parents=True)
     workspace_path.write_text(
-        "sources: {}\ndatasets: {}\nexecution_inputs:\n  krx-daily:\n    fill: {}\n",
+        "sources: {}\ndatasets: {}\nexecution_inputs:\n  krx-daily:\n    trade_price: close\n",
         encoding="utf-8",
     )
 

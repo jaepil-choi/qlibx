@@ -19,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from vqapr.domain.instruments import export_roster
+
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 CALLBACK = "08:00"
@@ -114,9 +116,17 @@ def _zone():
     return ZoneInfo(VENUE)
 
 
-def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
-    """The `sample.yaml` body: every section a run needs, paths relative to the document."""
+def declaration(
+    panel: dict[str, Any], second_session: str, roster_tables: dict[str, str]
+) -> dict[str, Any]:
+    """The `sample.yaml` body: every section a run needs, paths relative to the document.
+
+    `roster_tables` is `{kind: file name}` for the roster `materialize` exported beside the data:
+    a strategy run needs the project to have declared what each name IS (design §6.2), so the
+    sample declares its ten names before it declares the run that orders them.
+    """
     return {
+        "instruments": {"tables": roster_tables},
         "datasets": {
             DATASET_ID: {
                 "source_id": f"{DATASET_ID}-source",
@@ -126,7 +136,8 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                 "grain": "instrument_instant",
                 "key_fields": ["available_at", "instrument"],
                 "fields": {name: name for name in ("open", "high", "low", "close", "volume")},
-                # What each field IS (`docs/issues/archive/088`): prices are DOUBLE, the count is INTEGER.
+                # What each field IS (`docs/issues/archive/088`): prices are DOUBLE, the count is
+                # INTEGER.
                 "field_types": {
                     "open": "DOUBLE",
                     "high": "DOUBLE",
@@ -168,21 +179,21 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                 "instruments": list(panel["instruments"]),
                 "start": _iso(second_session, "00:00:00"),
                 "end": _iso(panel["last_session"], "23:59:59"),
-                "sessions_from": DATASET_ID,
                 "timezone": VENUE,
-                "at": CALLBACK,
+                # The strategy clock (design §3.4): decided once a day at CALLBACK, on every
+                # day the execution table has rows for.
+                "agenda": {"every": "1d", "at": CALLBACK},
                 "exchange": EXCHANGE_ID,
                 "execution": {
                     "dataset": EXECUTION_ID,
-                    "fill": {
-                        "selector": "same_day",
-                        "at": CLOSE,
-                        "timezone": VENUE,
-                        "trade_price": "close",
-                    },
+                    "trade_price": "close",
+                    # The first execution instant after the 08:00 decision is that day's close;
+                    # `at` says so explicitly (design §3.5).
+                    "fill": {"at": CLOSE},
                 },
                 "initial_account": {"cash": OPENING_CASH, "mode": "LONG_ONLY", "positions": {}},
-                "strategies": {STRATEGY_ID: {}},
+                "writes": f"{STRATEGY_ID}-weights",
+                "strategy": {"component": STRATEGY_ID},
             }
         },
     }
@@ -201,6 +212,7 @@ end); the strategy and the venue are yours to read and change.
 | `observations.parquet` | daily OHLCV, one row per (close, instrument) |
 | `execution.parquet` | the venue table a run fills against |
 | `instruments.csv`, `panel.json` | the names and the panel's shape |
+| `instruments_stock.parquet` | the roster: what each of the ten names IS (all shares) |
 | `sample.yaml` | the one declaration that registers all of the above and the run `{run_id}` |
 
 Three commands, from the directory that holds `.vqapr/` (or that will):
@@ -235,7 +247,10 @@ def materialize(directory: str | Path) -> Materialized:
         shutil.copyfile(_package_file(name, data=True), target / name)
     panel = panel_metadata()
     second = _next_session(int(panel["sessions"]), target / "observations.parquet")
-    body = declaration(panel, second)
+    # The ten names are synthetic shares. Exported here rather than shipped, so the parquet is
+    # written by the same exporter `vqapr new instruments` uses and never drifts from it.
+    roster = export_roster({name: "stock" for name in panel["instruments"]}, target)
+    body = declaration(panel, second, {kind: path.name for kind, path in sorted(roster.items())})
     (target / DECLARATION).write_text(
         "# Written by `vqapr new sample`. Register with: vqapr register <this file>\n"
         + yaml.safe_dump(body, sort_keys=False, allow_unicode=True),

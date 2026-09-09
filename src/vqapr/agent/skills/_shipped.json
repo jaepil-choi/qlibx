@@ -1,29 +1,37 @@
 {
   "analyze-result/SKILL.md": {
+    "0dd4ff9047b1942d7844893df834b4fdf6f2e72647e619e9ac7c34b24d8d6259": "0.9.0.dev1",
     "b512da792ac08d63846f127c43f5e3a03bba6b12515b4cd65b3335bdd92554ba": "0.8.0"
   },
   "analyze-result/references/paper-figures.md": {
+    "6fdd9e0e0697a17bf4bb9cc0ce37c2576cf416837dbd2175637dc0a59f22266c": "0.9.0.dev1",
     "bc96df8120d12ece6e79070a247cfd136bba028b07b42a687ed6663ddac99993": "0.8.0"
   },
   "analyze-result/references/plotting-environment.md": {
     "3ef824999c0774a27cc1dde84588ccb5e5ff5904f67c7ec1824f346b60fa2e2f": "0.8.0"
   },
   "analyze-result/references/reading-a-record.md": {
+    "cd85d428341b89bcea89af192100afd59ffacedaed90f1773c73396168f775b4": "0.9.0.dev1",
     "d7202466b6a2993c5d501e410b82632be8e419b97090cfa0b58adb47b26997de": "0.8.0"
   },
   "analyze-result/references/report-sections.md": {
-    "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0"
+    "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0",
+    "cf82917bf2cccc37faf9ce0a71093bd1f3a67fc4a3ee1a3090a2932ad0e72bd5": "0.9.0.dev1"
   },
   "analyze-result/references/result-tables.md": {
-    "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0"
+    "916f0e913aac429c94b450d2c17f606aa064c41c58ef4f99caa6dd394547f1c8": "0.9.0.dev1",
+    "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0",
+    "c402e1c9478d3a212edab89eb46be553de1b2f91572e1776fcc45a9759784e5e": "0.9.0.dev1"
   },
   "analyze-result/scripts/check_plotting_env.py": {
     "9b437bc625e9d852efe1565ca69630d1d3792a252a05f6f66344ae977ff739bb": "0.8.0"
   },
   "inspect-workspace/SKILL.md": {
-    "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0"
+    "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0",
+    "be17bfaf2b79f31dbe364f45082c404015eb6655f8aa88bf81a13e3a59eb6d42": "0.9.0.dev1"
   },
   "inspect-workspace/references/deleting.md": {
+    "4bac2bc8f832771aaa0efbd1165d3fabd9d7033a22d1883a66a80cc3ea4201e8": "0.9.0.dev1",
     "6f5657a4bbe40b65e208b167d8cc1162bd469e39cf8fbf486085e616e4db1982": "0.8.0"
   },
   "inspect-workspace/references/reuse-judgement.md": {
@@ -31,13 +39,15 @@
   },
   "introduce-vqapr/SKILL.md": {
     "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0",
+    "0cd651bf892804edd9022d688b270922bc2e96cbce287bc9b03840fd7eeec1e6": "0.9.0.dev1",
     "fff93d3aee7e38d620daea8a865780607df0c4a5ac49324b3071bd6d78246ec3": "0.9.0.dev1"
   },
   "introduce-vqapr/references/install-and-environment.md": {
     "b1f5b73f00eb4a902e5f634b4f9651c480c1547196a54637376bc081dd98b3c5": "0.8.0"
   },
   "introduce-vqapr/references/mental-model.md": {
-    "6b6254a01457963bbb85517903fd035c0f4a5d93e61279f4e3437685f64bc28e": "0.8.0"
+    "6b6254a01457963bbb85517903fd035c0f4a5d93e61279f4e3437685f64bc28e": "0.8.0",
+    "e0318a6e4f1dc905e6d48739943cf2840faf737e65735bcc92bbd6ffc2c2dc9b": "0.9.0.dev1"
   },
   "introduce-vqapr/references/reading-the-envelope.md": {
     "281460eec14305eb72adeb8242785affffcda6a6dcde7a9be7c9e5e9d881392f": "0.8.0"
@@ -45,7 +55,23 @@
   "introduce-vqapr/references/sample-journey.md": {
     "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0"
   },
+  "make-compliance/SKILL.md": {
+    "330e4c02877ad61831e49820ac379af543bcaffe978240c0cb162f5ea191065d": "0.9.0.dev1"
+  },
+  "make-compliance/references/declaring-data.md": {
+    "c1324a254368607a5a7704c3239e8dd93f3b65eca7b255e0a062233b29d3d6e4": "0.9.0.dev1"
+  },
+  "make-compliance/references/observe.md": {
+    "60220169a9c94699eba252b58a440003fa948506b2ef1e02cb8079d7be3a1bd3": "0.9.0.dev1"
+  },
+  "make-compliance/references/the-box.md": {
+    "e355a858ad9658014d9c6a24cb0af3c5408a192adc5e28fc2e8315b185cb7232": "0.9.0.dev1"
+  },
+  "make-compliance/references/tolerance.md": {
+    "277727c2f79d4e5d64b795aa4965861d0f89898065a4a72fe9746195b9e2d540": "0.9.0.dev1"
+  },
   "make-constraint/SKILL.md": {
+    "735e289c8505f4b202161ed05fe092e057c03acfe539d976156f5ac15533ef10": "0.9.0.dev1",
     "d969395d752d64957741bc2507e5fe375045552b22992df9de1d1f0040c378af": "0.8.0"
   },
   "make-constraint/references/declaring-data.md": {
@@ -58,6 +84,7 @@
     "3b7f8892b5a0b9a3f95f2361ca7debab80c489217a50707c38caa95e94cbed9b": "0.8.0"
   },
   "make-datamodel/SKILL.md": {
+    "5752b61165140d42bfe7cd259608f40b8ec4ce27bc58ac3c09b1ea548ab4aaf4": "0.9.0.dev1",
     "c00c898a8bd66724b6ce2abab0821df99a258ffe18bd9a84c4882472f90e1f46": "0.8.0"
   },
   "make-datamodel/references/datamodel-or-strategy.md": {
@@ -70,9 +97,12 @@
     "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0"
   },
   "make-datamodel/references/running-a-datamodel.md": {
+    "06969cb4db1eb3a92e8bac607e983572d3a079b5b97864b3fb94cd76442ab39b": "0.9.0.dev1",
+    "63fe7350c19a458029af7598290d6e528c86b2f86b034ddb54c9dd7ae7a9b4cb": "0.9.0.dev1",
     "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
   },
   "make-exchange/SKILL.md": {
+    "2a7fd6065ed15a19f7a82a2fde653026a629eb75e8f6699c6b212a837daf7e6a": "0.9.0.dev1",
     "3f3aedc2af43b7a1f7e508a22cb3ec0c2d17984877d4f94eb4da811c1b6e1754": "0.8.0"
   },
   "make-exchange/references/access-and-account.md": {
@@ -82,7 +112,9 @@
     "bf0cabc109fad25075dde886859608648b3f3ada6573a15cbca267264e555a7e": "0.8.0"
   },
   "make-exchange/references/execution-profiles.md": {
-    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0"
+    "9fdbf4e8ee9366ca6e65cee5c6c914ace9b2dbf0e53c61793a928980d6528a8f": "0.9.0.dev1",
+    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0",
+    "e8bc59712f221335a797e908190311cfdba1bc913a047566bcdbe58b41cc3a97": "0.9.0.dev1"
   },
   "make-exchange/references/fill-timing.md": {
     "1b303aa9a32616e06ab2c7a50a05d5475dac67a0f7d57e4c22660fd730ea0819": "0.8.0"
@@ -97,6 +129,7 @@
     "5cb2473443628daf196af870d0ef7c6c1ed465f2b22fdb039f467862fc014708": "0.8.0"
   },
   "make-strategy/references/public-helpers.md": {
+    "2e37bb1f593be2185841b68fdae660baa615bc83906b96cbdb1fa7362e4ed1a7": "0.9.0.dev1",
     "30042906d2fa185a979addcd3206865f41071efbea2bc0ecaac7e9569f14d2e4": "0.8.0"
   },
   "make-strategy/references/reading-inputs.md": {
@@ -109,6 +142,7 @@
     "3744c4b026b14ecc260646504695fa3efbf25959fe84cb37e0069ea717335968": "0.8.0"
   },
   "register-dataset/references/correcting-a-registration.md": {
+    "1e32723c859f23da65d8bc023d7ad5d2c06fc35cb953579367f46b4f08d064d2": "0.9.0.dev1",
     "96a7a2791e4a15d69e77b54bcc7466e80eede39e8edda9e55196ff59fc4caaf8": "0.8.0"
   },
   "register-dataset/references/discouraged-preparation.md": {
@@ -142,7 +176,9 @@
     "476d2613e1bfb81107a9e5970052fa25943c26603636e036e25d5a52422269c6": "0.9.0.dev1"
   },
   "run-backtest/SKILL.md": {
-    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0"
+    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0",
+    "8f49db5b695a877643ce092d7a1f4c86c7ae168722c7e29f820a724a2b718100": "0.9.0.dev1",
+    "fe164f9dbb2c7f8a17a2dac8dbd5f78f1bf465fc3bcc6435f2582ed710d264e4": "0.9.0.dev1"
   },
   "run-backtest/references/check-before-run.md": {
     "bedc547dce75939d1545936bb80ed01598df051bd79a951f8bfa335970562a1d": "0.8.0"
@@ -151,10 +187,15 @@
     "9585bb08e676c3ce773fad13e736b09ac7d2b47709c93f788b79fd6e88d83332": "0.8.0"
   },
   "run-backtest/references/records-and-tweaks.md": {
-    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0"
+    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0",
+    "c4e1cada9f524313c571047347996b834dbd3dcbd0e5ff64e5927ff3ee4e4076": "0.9.0.dev1"
   },
   "run-backtest/references/run-declaration.md": {
-    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0"
+    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "61e1900d6812ff71d3c953cebf542f5254c74fe92bc71832397dbc780b6dabae": "0.9.0.dev1",
+    "77061b8a63ff07034ffe44c8d55a7604fd2da4909ccf42ee4ec984bf6477dae8": "0.9.0.dev1",
+    "930a7e3e6ca4b0ec150470bba4dd06a9b36e410b7b0472f78c9a05ab3bb1b1cc": "0.9.0.dev1",
+    "ec3fea404ee4694c5b5b365eaa17ad1b36f41fc59a3b2317fb60421fd71101df": "0.9.0.dev1"
   },
   "run-backtest/references/watching-and-failures.md": {
     "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0"

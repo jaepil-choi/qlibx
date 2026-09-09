@@ -17,14 +17,14 @@ is judged in turn, since one run now names several.
 it replaced was easy to forget -- and forgetting it means a run whose judgment could not ANSWER
 reports as clean, which is the divergence this module exists to close, reproduced one layer down.
 
-**No helper in this module catches on behalf of a judge** (`docs/issues/archive/077`). Five of them did,
-and returned an empty result, which `judgments` cannot tell from "asked the question, found
+**No helper in this module catches on behalf of a judge** (`docs/issues/archive/077`). Five of them
+did, and returned an empty result, which `judgments` cannot tell from "asked the question, found
 nothing wrong" -- so `check` reported `passed: [..., "judgments"]` on a run whose look-ahead
 judgment never ran, with `blocked` empty. Every judge here therefore lets its exception reach the
-one wrapper below that owns the decision. The defect is then named twice, once as a blocked
-judgment and once as preflight's own refusal, and that is deliberate: they are two different
-statements, one saying the question could not be asked and the other saying what is wrong (owner
-decision, 2026-09-04).
+one wrapper below that owns the decision. The defect is then named twice, once as a blocked judgment
+and once as preflight's own refusal, and that is deliberate: they are two different statements, one
+saying the question could not be asked and the other saying what is wrong (owner decision,
+2026-09-04).
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
-from vqapr.flow.declaration.preflight import derived_agenda
+from vqapr.flow.declaration.preflight import bound_execution_table, derived_agenda
+from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import RunDefinition
 
 # `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
@@ -71,6 +72,7 @@ JUDGMENT_STAGE = Stage.CHECK
 # a line here fails the suite rather than the reader. Record `171`: the codes lost their `check.`
 # prefix; `status` says who must act and `stage` (CHECK) says which operation was under way.
 UNIVERSE_ABSENT = "universe.absent"
+ROSTER_ABSENT = "roster.absent"
 PERIOD_UNCOVERED = "period.uncovered"
 EXECUTION_NOT_AFTER_DECISION = "execution.not_after_decision"
 FIELD_ABSENT = "field.absent"
@@ -78,10 +80,11 @@ LOOKBACK_UNCOVERED = "lookback.uncovered"
 DATASET_UNREGISTERED = "dataset.unregistered"
 WEIGHTS_MODE_CONFLICT = "weights.mode_conflict"
 WEIGHTS_VENUE_CONFLICT = "weights.venue_conflict"
-DATAMODEL_OUTPUT_REGISTERED = "datamodel.output_registered"
+RUN_OUTPUT_REGISTERED = "run.output_registered"
 
 JUDGMENT_CODES = (
     UNIVERSE_ABSENT,
+    ROSTER_ABSENT,
     PERIOD_UNCOVERED,
     EXECUTION_NOT_AFTER_DECISION,
     FIELD_ABSENT,
@@ -89,7 +92,7 @@ JUDGMENT_CODES = (
     DATASET_UNREGISTERED,
     WEIGHTS_MODE_CONFLICT,
     WEIGHTS_VENUE_CONFLICT,
-    DATAMODEL_OUTPUT_REGISTERED,
+    RUN_OUTPUT_REGISTERED,
 )
 """Every code `judgments` can emit, in the order the judges run and raise them.
 
@@ -115,10 +118,10 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
     `preflight_run`, which the CLI's `run` and the sample's `execute` both call (record `168`).
     `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
     15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
-    wrote a permanent record nothing marked (`docs/issues/archive/015`); `run` then asked them and the
-    Python surface still did not, so the same run was refused by the CLI and executed from
-    Python (record `167`, R7). Refusing outright, with no flag to bypass, is the decision
-    recorded in `docs/implementations/087`.
+    wrote a permanent record nothing marked (`docs/issues/archive/015`); `run` then asked them and
+    the Python surface still did not, so the same run was refused by the CLI and executed from
+    Python (record `167`, R7). Refusing outright, with no flag to bypass, is the decision recorded
+    in `docs/implementations/087`.
 
     **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
     letting it through would let a run nothing was proven about run to completion.
@@ -153,29 +156,30 @@ def judgments(
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
     # The run's one agenda, derived at most ONCE for every judge that reads it
-    # (`docs/issues/archive/069`: it was derived per strategy inside the ordering judge and again per
-    # member inside the dataset judge, each time over the dataset's whole session list). Reached
+    # (`docs/issues/archive/069`: it was derived per strategy inside the ordering judge and again
+    # per member inside the dataset judge, each time over the dataset's whole session list). Reached
     # through a CALL rather than handed over as a value: a failure to derive it has to land inside
     # the per-judge wrapper below, where it becomes a blocked entry for each judge that needed it.
-    # Flattening it to `None` here was `docs/issues/archive/077` -- the judges read `None` as "nothing to
-    # report" and the run was reported as judged.
+    # Flattening it to `None` here was `docs/issues/archive/077` -- the judges read `None` as
+    # "nothing to report" and the run was reported as judged.
     agenda = _agenda_once(workspace, definition)
 
     judges: tuple[tuple[str, Callable[[], list[Failure]]], ...] = (
         ("universe", lambda: _judge_universe(definition, at)),
+        ("roster", lambda: _judge_roster(definition, workspace, at)),
         ("period", lambda: _judge_period(definition, at)),
         (
             "execution_ordering",
             lambda: _judge_execution_ordering(definition, workspace, at, agenda),
         ),
         # ONE judge per member, NAMED for the member it judges. Two reasons, both from
-        # `docs/issues/archive/077`. A member whose component does not load blocks its own entry and no
-        # other -- this verb promises every INDEPENDENT problem at once, and one member failing to
-        # load says nothing about another member's datasets. And the name is where the reader
-        # learns WHICH member: a blocked entry carries the exception's own text, and
-        # `VqaprError: component object must load and construct` does not say whose.
-        # Default arguments rather than closure capture -- a lambda reading the loop variable
-        # would hand every member the last one.
+        # `docs/issues/archive/077`. A member whose component does not load blocks its own entry and
+        # no other -- this verb promises every INDEPENDENT problem at once, and one member failing
+        # to load says nothing about another member's datasets. And the name is where the reader
+        # learns WHICH member: a blocked entry carries the exception's own text, and `VqaprError:
+        # component object must load and construct` does not say whose. Default arguments rather
+        # than closure capture -- a lambda reading the loop variable would hand every member the
+        # last one.
         *(
             (
                 f"datasets[{member[1].component_id}]",
@@ -244,6 +248,21 @@ def _judge_universe(definition: RunDefinition, at: FailureSource) -> list[Failur
     ]
 
 
+def _judge_roster(
+    definition: RunDefinition, workspace: Workspace, at: FailureSource
+) -> list[Failure]:
+    """A strategy run over a project that has declared no instrument cannot fill an order.
+
+    Design §6.3, the preflight half asked here so `check` reports it beside the run's other
+    defects: zero declarations means no order can succeed, so there is no reason to run. A
+    datamodel run orders nothing and is not asked. Only the pointer is read; the tables are read
+    once, at run start.
+    """
+    if definition.strategy is None or workspace.registered_instruments() is not None:
+        return []
+    return [absent_roster_failure(definition.run_id, source=_key(at, "exchange"))]
+
+
 def _instant(value: object) -> datetime | None:
     """One declared timestamp as an aware instant. `None` ONLY when nothing was declared.
 
@@ -252,8 +271,8 @@ def _instant(value: object) -> datetime | None:
     as reversed and `check` refuses what `run` accepts -- a gate contradicting the thing it gates.
 
     A value that IS declared but is not an aware instant raises, and the judgment that asked for it
-    blocks (`docs/issues/archive/077`). Returning `None` for it read, at the call site, as "nothing was
-    declared" -- so a dataset whose span could not be parsed left the lookback question silently
+    blocks (`docs/issues/archive/077`). Returning `None` for it read, at the call site, as "nothing
+    was declared" -- so a dataset whose span could not be parsed left the lookback question silently
     unasked and the judgment reported as passed.
     """
     if value is None:
@@ -303,14 +322,15 @@ def _agenda_once(workspace: Workspace, definition: RunDefinition) -> Callable[[]
     """The run's decide agenda, derived at most once and delivered to each judge that asks.
 
     Built from the run's sessions and `at` (record `148`). Two judgments read it, and
-    `docs/issues/archive/069` made that one derivation rather than one per strategy and one per member.
+    `docs/issues/archive/069` made that one derivation rather than one per strategy and one per
+    member.
 
-    Returned as a CALL, and a failure to derive it is re-raised to every asker rather than
-    flattened to `None` (`docs/issues/archive/077`). A dataset that does not resolve, or a session that
-    does not exist in the zone, is still preflight's refusal to name -- but it is ALSO the reason
-    two judgments could not be answered, and the reader has to hear that from the judgments
-    themselves. Both dependent judges then block carrying the same reason, which is the point:
-    blocking one and passing the other would be a report that contradicts itself.
+    Returned as a CALL, and a failure to derive it is re-raised to every asker rather than flattened
+    to `None` (`docs/issues/archive/077`). A dataset that does not resolve, or a session that does
+    not exist in the zone, is still preflight's refusal to name -- but it is ALSO the reason two
+    judgments could not be answered, and the reader has to hear that from the judgments themselves.
+    Both dependent judges then block carrying the same reason, which is the point: blocking one and
+    passing the other would be a report that contradicts itself.
     """
     settled: list[tuple[object | None, BaseException | None]] = []
 
@@ -334,55 +354,67 @@ def _judge_execution_ordering(
     at: FailureSource,
     agenda: Callable[[], object],
 ) -> list[Failure]:
-    """AC-C5: a decision cannot fill at an instant that has already passed.
+    """AC-C5: every decision must have an execution instant after it that the fill rule admits.
 
     Caught here, before the run, rather than at the first callback. The old failure mode was a
     bare `ValueError: no exact execution target exists within the run horizon` raised only once
-    the simulation was already underway and earlier callbacks had mutated account state.
+    the simulation was already underway and earlier callbacks had mutated account state. Since
+    design §3.5 the question is asked of the table itself -- the market clock -- rather than of a
+    wall time: a decision AT the last instant of the day, with `at` set to that instant, has no
+    fill until the next day, and `within: 1d` may forbid that.
 
-    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise out
-    of here on purpose. This is the judgment `docs/issues/archive/015` exists for, and reporting it as
-    answered when it was not is the defect `docs/issues/archive/077` filed.
+    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise
+    out of here on purpose (`docs/issues/archive/077`).
     """
-    if definition.execution is None:
+    if definition.execution is None or definition.start is None or definition.end is None:
         return []
-    fill_at = definition.execution.fill.at
-    found: list[Failure] = []
+    # The agenda first: an execution table that cannot be read blocks this judge and the
+    # dataset judge for the SAME reason (`docs/issues/archive/077`), rather than this one
+    # naming the horizon scan and the other the agenda derivation.
     occurrences = agenda().occurrences  # type: ignore[attr-defined]
-    for entry in definition.strategies:
-        late = [
-            occurrence.occurrence_id
-            for occurrence in occurrences
-            if occurrence.local_instant.local_time >= fill_at
-        ]
-        if not late:
-            continue
-        found.append(
-            Failure.bounded(
-                EXECUTION_NOT_AFTER_DECISION,
-                "every decision must be strictly earlier than the instant it fills at",
-                observed=(
-                    f"strategy {entry.component_id!r} fills at {fill_at.isoformat()}; "
-                    f"{len(late)} occurrence(s) at or after it"
-                ),
-                examples=late,
-                example_total=len(late),
-                fix=(
-                    f"move the strategy cadence earlier than {fill_at.isoformat()}, or declare a "
-                    "fill convention whose instant is later than every decision"
-                ),
-                status=Status.PRECONDITION,
-                source=_key(at, "strategies", entry.component_id),
-            )
+    table = bound_execution_table(workspace, definition)
+    horizon = table.build_horizon(start_time=definition.start, end_time=definition.end)
+    late = [
+        occurrence.occurrence_id
+        for occurrence in occurrences
+        if table.select_target(
+            decision_time=occurrence.evaluation_time, end_time=definition.end, horizon=horizon
         )
-    return found
+        is None
+    ]
+    if not late or definition.strategy is None:
+        return []
+    return [
+        Failure.bounded(
+            EXECUTION_NOT_AFTER_DECISION,
+            "every decision must have an execution instant after it that the fill rule admits",
+            observed=(
+                f"strategy {definition.strategy.component_id!r} fills at "
+                f"{table.fill.describe()}; {len(late)} occurrence(s) with no such instant"
+            ),
+            examples=late,
+            example_total=len(late),
+            fix=(
+                "move the decision earlier than the instant it should fill at, extend the run "
+                "end, or loosen the fill's `at`/`after`/`within`"
+            ),
+            status=Status.PRECONDITION,
+            source=_key(at, "strategies", definition.strategy.component_id),
+        )
+    ]
 
 
 def _members(definition: RunDefinition) -> list[tuple[str, Any, Any]]:
     """Every component the run names: the section it was declared under, the entry, its loader."""
     return [
-        *(("strategies", entry, load_strategy_model) for entry in definition.strategies),
-        *(("datamodels", entry, load_data_model) for entry in definition.datamodels),
+        *(
+            ("strategies", entry, load_strategy_model)
+            for entry in ((definition.strategy,) if definition.strategy is not None else ())
+        ),
+        *(
+            ("datamodels", entry, load_data_model)
+            for entry in ((definition.datamodel,) if definition.datamodel is not None else ())
+        ),
     ]
 
 
@@ -403,7 +435,8 @@ def _judge_member_datasets(
     One member per call, and `judgments` dispatches one judge per member, so a component that does
     not load blocks its own entry and leaves the other members answered. It used to `continue` past
     that member inside a single judgment covering all of them -- which reported the whole judgment
-    as passed while a component nothing could be read from sat in the run (`docs/issues/archive/077`).
+    as passed while a component nothing could be read from sat in the run
+    (`docs/issues/archive/077`).
     """
     section, entry, loader = member
     found: list[Failure] = []
@@ -488,6 +521,16 @@ def _judge_member_datasets(
             )
     for dataset_id, fields in unregistered.items():
         close = get_close_matches(dataset_id, sorted(registered), n=1)
+        # The graph's answer first (design §2): if a registered run declares this name as its
+        # `writes`, the dataset is not missing, it is not made yet -- and the repair is to run
+        # that run, not to register anything.
+        producer = workspace.producer_of(dataset_id)
+        if producer is not None and producer != definition.run_id:
+            fix = f"run {producer!r} writes {dataset_id!r}: vqapr run {producer}, then this run"
+        elif close:
+            fix = f"register {dataset_id!r}, or point the component at {close[0]!r}"
+        else:
+            fix = f"register {dataset_id!r} with `vqapr register <declaration>`"
         found.append(
             Failure.bounded(
                 DATASET_UNREGISTERED,
@@ -495,14 +538,15 @@ def _judge_member_datasets(
                 observed=(
                     f"{entry.component_id!r} reads {len(fields)} field(s) from it; "
                     f"registered: {', '.join(sorted(registered)) or '(none)'}"
+                    + (
+                        f"; run {producer!r} declares it as its writes and has not run"
+                        if producer is not None and producer != definition.run_id
+                        else ""
+                    )
                 ),
                 examples=tuple(fields),
                 example_total=len(fields),
-                fix=(
-                    f"register {dataset_id!r}, or point the component at {close[0]!r}"
-                    if close
-                    else f"register {dataset_id!r} with `vqapr register <declaration>`"
-                ),
+                fix=fix,
                 status=Status.MISSING,
                 source=source,
             )
@@ -513,29 +557,29 @@ def _judge_member_datasets(
 def _judge_outputs(
     definition: RunDefinition, registered: dict[str, Any], at: FailureSource
 ) -> list[Failure]:
-    """A datamodel run writes a dataset that does not exist yet (record `148`).
+    """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
 
-    The refusal preflight raises as `datamodel.output_registered` under `freeze`, asked here so
-    `check` cannot certify a run that `run` then refuses.
+    The refusal preflight raises as `run.output_registered` under `freeze`, asked here so `check`
+    cannot certify a run that `run` then refuses. It was a datamodel-only question (record `148`)
+    while only datamodels wrote; a strategy publishes its allocation now, so both do.
     """
-    found: list[Failure] = []
-    for entry in definition.datamodels:
-        if entry.dataset_id not in registered:
-            continue
-        found.append(
-            Failure.bounded(
-                DATAMODEL_OUTPUT_REGISTERED,
-                "a datamodel run writes a dataset that does not exist yet",
-                observed=f"{entry.dataset_id!r} is already registered",
-                fix=(
-                    f"declare a new dataset_id for {entry.component_id!r}, or remove the "
-                    f"existing {entry.dataset_id} registration from the workspace first"
-                ),
-                status=Status.CONFLICT,
-                source=_key(at, "datamodels", entry.component_id, "dataset_id"),
-            )
+    taken = registered.get(definition.writes)
+    # The run's own earlier output is not a defect of the declaration (see preflight).
+    if taken is None or getattr(taken, "produced_by", None) == definition.run_id:
+        return []
+    return [
+        Failure.bounded(
+            RUN_OUTPUT_REGISTERED,
+            "a run writes a dataset that does not exist yet",
+            observed=f"{definition.writes!r} is already registered",
+            fix=(
+                f"declare a new `writes` for run {definition.run_id!r}, or withdraw the "
+                f"existing {definition.writes} first: vqapr rm dataset {definition.writes}"
+            ),
+            status=Status.CONFLICT,
+            source=_key(at, "writes"),
         )
-    return found
+    ]
 
 
 def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> datetime | None:

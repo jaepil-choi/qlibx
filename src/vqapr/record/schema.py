@@ -64,7 +64,7 @@ write and the parts' removal cannot double-count.
 
 COMPACT_FILENAME = "all.parquet"
 """The one file a finished table or dataset is: written when the run ends, after which any spill
-part beside it is stale input. Shared with `vqapr.flow.datamodel.output`, which writes an output
+part beside it is stale input. Shared with `vqapr.flow.run.output`, which writes an output
 dataset the same way (`docs/issues/archive/087`).
 
 Here rather than beside that writer -- where both lived until campaign M6 Step 3 -- because a
@@ -173,10 +173,12 @@ class _Record(BaseModel):
 class RunRecord(_Record):
     """`run.json`: the configuration every strategy of this run shares (record `139`) --
     architecture §17.3.1's missing rows: the universe, the venue and the execution dataset with its
-    fill convention (`docs/issues/archive/034`), the initial account declaration, the datasets and their
+    fill convention (`docs/issues/archive/034`), the initial account declaration, the datasets and
+    their
     source digests (A7), and which strategies the run names."""
 
     run_id: str
+    writes: str
     declared_digest: str
     instruments: list[str]
     period: dict[str, Any]
@@ -200,7 +202,11 @@ class StrategyRecord(_Record):
     fingerprint: str
     component: dict[str, Any]
     agenda: dict[str, Any]
-    constraints: list[dict[str, Any]]
+    compliance: list[dict[str, Any]]
+    exchange: dict[str, Any] | None
+    """The venue this strategy filled on: its component id, its registered fingerprint and its
+    `settings` -- what it declared it models (design §6.1), so a reader learns which regimes a
+    past run measured under without opening the venue's source at its digest."""
     account: dict[str, Any] | None
     tables: dict[str, Any]
     contract: dict[str, Any]

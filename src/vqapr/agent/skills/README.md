@@ -21,7 +21,7 @@ adapter를 놓았고 이유는 "복사본이 두 개가 되는 순간 하나는 
 ## 현재 담고 있는 것
 
 PRD §11.2가 정한 아홉은 전부 서 있다: `introduce-vqapr`, `register-dataset`, `make-datamodel`,
-`make-strategy`, `make-exchange`, `make-constraint`, `run-backtest`, `analyze-result`,
+`make-strategy`, `make-exchange`, `make-compliance`, `run-backtest`, `analyze-result`,
 `inspect-workspace`. `_shipped.json`은 릴리스마다 `scripts/record_shipped_skills.py`가 갱신한다.
 
 **열 번째는 축이 다르다.** `report-issue-dev`는 vqapr로 무엇을 하는 skill이 아니라 vqapr가

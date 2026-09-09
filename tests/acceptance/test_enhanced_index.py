@@ -16,9 +16,6 @@ from uuid import UUID
 import duckdb
 import pytest
 
-from vqapr.authoring import ConstraintBounds
-from vqapr.constraints.builtin import NoShort, SingleNameCap
-from vqapr.constraints.evaluation import merged_constraint_bounds, project_constraints
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
@@ -31,6 +28,7 @@ from vqapr.portfolio.allocation import (
     AllocationViolation,
     validate_allocation,
 )
+from vqapr.portfolio.bounds import intersect, no_short, single_name_cap
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -107,66 +105,27 @@ def active(manifest: dict[str, object]) -> dict[datetime, dict[str, Decimal]]:
     return panel
 
 
-class _Catalog:
-    def __init__(self, registration: DatasetRegistration, source: SourceSpec) -> None:
-        self._registration = registration
-        self._source = source
-
-    def dataset(self, raw_dataset_id: str) -> DatasetRegistration:
-        return self._registration
-
-    def source(self, raw_source_id: str) -> SourceSpec:
-        return self._source
-
-
-def _window(
-    manifest: dict[str, object],
-    instruments: tuple[str, ...],
-    requirement: DataRequirement,
-    cutoff: datetime,
-) -> ModelWindow:
-    registration = DatasetRegistration.of(
-        "benchmark_weight_daily",
-        "benchmark-source",
-        instrument_field="instrument",
-        available_at="available_at",
-        grain="instrument_instant",
-        key_fields=("available_at", "instrument"),
-        # The committed vendor slice carries DECIMAL(18,8) weights, which no dataset may declare
-        # (`docs/issues/archive/088`): the field evaluates to the DOUBLE it declares, and `SingleNameCap`
-        # crosses to Decimal once on its side.
-        fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
-        field_types={"benchmark_weight": "DOUBLE"},
-    )
-    source = SourceSpec.of("benchmark-source", FIXTURE / str(manifest["benchmark_path"]))
-    return ModelWindow(
-        evaluation_time=cutoff,
-        instruments=instruments,
-        store=DuckDbObservationStore(_Catalog(registration, source)),
-        allowed_requirements=(requirement,),
-        consumer_id="test-consumer",
-    )
-
-
 def _bounds(
-    manifest: dict[str, object],
+    _manifest: dict[str, object],
     benchmark: dict[str, Decimal],
-    cutoff: datetime,
+    _cutoff: datetime,
     tolerance: Decimal,
-) -> ConstraintBounds:
-    """Project and intersect the **shipped** constraint set through a real point-in-time window.
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    """The box the showcase strategy builds (design §7.1): the shipped kit, on the benchmark the
+    strategy subscribes to, validated the way the strategy validates it before it becomes a bound.
 
-    Reimplementing the cap here would let a regression in `SingleNameCap` leave this suite green,
-    which would make criterion 4 prove nothing about the code that actually ships.
+    Reimplementing the cap here would let a regression in `single_name_cap` leave this suite
+    green, which would make criterion 4 prove nothing about the code that actually ships.
     """
-    instruments = tuple(sorted(benchmark))
-    cap = SingleNameCap(
-        cap=str(CAP),
-        benchmark_dataset_id="benchmark_weight_daily",
-        tolerance=str(tolerance),
+    validate_allocation(
+        benchmark,
+        AllocationInvariants.of(
+            sign=AllocationSign.LONG_ONLY, tolerance=tolerance, required_coverage=()
+        ),
+        label="benchmark",
     )
-    window = _window(manifest, instruments, cap.requirements()[0], cutoff)
-    return merged_constraint_bounds(project_constraints((NoShort(), cap), window))
+    instruments = tuple(sorted(benchmark))
+    return intersect(no_short(instruments), single_name_cap(instruments, benchmark, CAP))
 
 
 def _construct(
@@ -182,12 +141,12 @@ def _construct(
         instrument: (weight + scale * active.get(instrument, Decimal(0))).quantize(QUANTUM)
         for instrument, weight in benchmark.items()
     }
-    bounds = _bounds(manifest, benchmark, cutoff, tolerance)
+    lower, upper = _bounds(manifest, benchmark, cutoff, tolerance)
     return optimize(
         desired=desired,
         current={},
-        lower=dict(bounds.lower_weights),
-        upper=dict(bounds.upper_weights),
+        lower=lower,
+        upper=upper,
         cash_range=(Decimal("0"), Decimal("1")),
     )
 
@@ -213,8 +172,8 @@ def test_criterion_4_scale_zero_reproduces_the_benchmark_exactly(
 ) -> None:
     """s = 0 must return the index itself, compared by Decimal equality across a grid change.
 
-    Every committed session, each projecting the shipped constraint set through its own
-    point-in-time window, so the identity is proved against real data rather than a sample of it.
+    Every committed session, each building the box from its own point-in-time benchmark, so
+    the identity is proved against real data rather than a sample of it.
     """
     for session in sessions:
         result = _construct(
@@ -225,24 +184,24 @@ def test_criterion_4_scale_zero_reproduces_the_benchmark_exactly(
         assert sum(result.weights.values()) + result.cash == Decimal(1)
 
 
-def test_criterion_4_a_signed_tilt_stays_feasible_under_the_constraint_set(
+def test_criterion_4_a_signed_tilt_stays_feasible_inside_the_box(
     benchmark: dict[datetime, dict[str, Decimal]],
     active: dict[datetime, dict[str, Decimal]],
     sessions: list[datetime],
     tolerance: Decimal,
     manifest: dict[str, object],
 ) -> None:
-    """A signed active view enters unchanged; long-only emerges from the constraints."""
+    """A signed active view enters unchanged; long-only emerges from the box."""
     session = sessions[0]
     tilt = active[session]
     assert min(tilt.values()) < 0, "the active view must actually be signed"
 
-    bounds = _bounds(manifest, benchmark[session], session, tolerance)
+    lower, upper = _bounds(manifest, benchmark[session], session, tolerance)
     result = _construct(manifest, benchmark[session], tilt, Decimal("0.5"), tolerance, session)
 
     for instrument, weight in result.weights.items():
-        assert weight >= bounds.lower_weights[instrument] >= Decimal(0)
-        assert weight <= bounds.upper_weights[instrument]
+        assert weight >= lower[instrument] >= Decimal(0)
+        assert weight <= upper[instrument]
     assert sum(result.weights.values()) + result.cash == Decimal(1)
 
 
@@ -389,13 +348,13 @@ def test_criterion_7_a_frozen_holding_survives_into_a_validated_intent(
     weights = benchmark[session]
     held = next(iter(sorted(weights)))
     holding = Decimal("0.099700000000")
-    bounds = _bounds(manifest, weights, session, tolerance)
+    lower, upper = _bounds(manifest, weights, session, tolerance)
 
     result = optimize(
         desired={k: v for k, v in weights.items()},
         current={held: holding},
-        lower=dict(bounds.lower_weights),
-        upper=dict(bounds.upper_weights),
+        lower=lower,
+        upper=upper,
         frozen=frozenset({held}),
         cash_range=(Decimal("0"), Decimal("1")),
     )
@@ -431,14 +390,14 @@ def test_a_frozen_holding_finer_than_the_grid_is_refused(
     session = sessions[0]
     weights = benchmark[session]
     held = next(iter(sorted(weights)))
-    bounds = _bounds(manifest, weights, session, tolerance)
+    lower, upper = _bounds(manifest, weights, session, tolerance)
 
     with pytest.raises(OptimizeRefusal, match="finer than the canonical grid"):
         optimize(
             desired=dict(weights),
             current={held: Decimal("0.0997000000000001")},
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozenset({held}),
             cash_range=(Decimal("0"), Decimal("1")),
         )

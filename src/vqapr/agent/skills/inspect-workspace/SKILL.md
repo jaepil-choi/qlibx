@@ -26,7 +26,7 @@ user actually asked, and that is what this skill is for.
 | "what have I registered?" | `vqapr list <kind>` — one kind per call |
 | "what reversal strategies did I write?" | `vqapr list components --kind strategy --id reversal` |
 | "what breaks if I delete this dataset?" | `vqapr list components --reads <dataset-id>` |
-| "which runs failed their constraints?" | `vqapr list strategies --run <id> --failed-contract` |
+| "which runs breached a compliance rule?" | `vqapr list strategies --run <id> --failed-contract` |
 | "what did that run actually use?" | `vqapr show run <run-id>` |
 | "where did this number come from?" | `vqapr show strategy <run-id>/<ref> --table <t>` |
 | "can I reuse this instead of re-running?" | [references/reuse-judgement.md](references/reuse-judgement.md) |
@@ -64,7 +64,7 @@ The remaining kinds are per-run: `vqapr list strategies --run <run-id>` and
 | `--reads` | `components` | keep the components whose `inputs()` names this dataset id |
 | `--run` | `strategies`, `datamodels` | which run's records |
 | `--strategy` / `--fingerprint` | records | narrow to one component or one version of it |
-| `--failed-contract` | `strategies` | only records whose constraint contract failed |
+| `--failed-contract` | `strategies` | only records whose compliance contract failed |
 | `--since` | records | only records after an instant |
 
 ## Records are found by scanning

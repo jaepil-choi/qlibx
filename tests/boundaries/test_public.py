@@ -16,7 +16,7 @@ from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.project.store import Workspace
 from vqapr.public import (
     QUANTUM,
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AcademicExchange,
     AccountMode,
     AccountSnapshot,
@@ -25,15 +25,15 @@ from vqapr.public import (
     AllocationViolation,
     Budget,
     CalendarLookback,
-    CrossSection,
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
+    ComplianceReport,
+    ComplianceSet,
     Component,
     ComponentKind,
     ComponentRef,
-    Constraint,
-    ConstraintBounds,
-    ConstraintFinding,
-    ConstraintReport,
-    ConstraintSet,
+    CrossSection,
     DataModel,
     DataModelContext,
     DataRequirement,
@@ -44,8 +44,7 @@ from vqapr.public import (
     ExecutionTable,
     ExecutionTableSpec,
     FactorInstrument,
-    FillConvention,
-    FillSelector,
+    FillRule,
     FrozenAgenda,
     FrozenRun,
     Hold,
@@ -79,7 +78,7 @@ from vqapr.public import (
     register_dataset,
     register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
     validate_allocation,
 )
 
@@ -111,11 +110,11 @@ def test_public_exports_are_fixed() -> None:
             Component,
             ComponentKind,
             ComponentRef,
-            Constraint,
-            ConstraintBounds,
-            ConstraintFinding,
-            ConstraintReport,
-            ConstraintSet,
+            Compliance,
+            ComplianceCall,
+            ComplianceFinding,
+            ComplianceReport,
+            ComplianceSet,
             DataModel,
             DataModelContext,
             DataRequirement,
@@ -155,15 +154,15 @@ def test_public_exports_are_fixed() -> None:
             register_data_model,
             register_strategy_model,
             run,
-            shipped_constraint_path,
+            shipped_compliance_path,
             validate_allocation,
         )
     )
     assert QUANTUM is public.QUANTUM
-    assert SHIPPED_CONSTRAINTS is public.SHIPPED_CONSTRAINTS
+    assert SHIPPED_COMPLIANCE is public.SHIPPED_COMPLIANCE
     assert public.__all__ == (
         "QUANTUM",
-        "SHIPPED_CONSTRAINTS",
+        "SHIPPED_COMPLIANCE",
         "AcademicExchange",
         "AccountMode",
         "AccountSnapshot",
@@ -172,14 +171,14 @@ def test_public_exports_are_fixed() -> None:
         "AllocationViolation",
         "Budget",
         "CalendarLookback",
+        "Compliance",
+        "ComplianceCall",
+        "ComplianceFinding",
+        "ComplianceReport",
+        "ComplianceSet",
         "Component",
         "ComponentKind",
         "ComponentRef",
-        "Constraint",
-        "ConstraintBounds",
-        "ConstraintFinding",
-        "ConstraintReport",
-        "ConstraintSet",
         "CrossSection",
         "DataModel",
         "DataModelContext",
@@ -198,9 +197,8 @@ def test_public_exports_are_fixed() -> None:
         "ExecutionTable",
         "ExecutionTableSpec",
         "FactorInstrument",
-        "FillConvention",
         "FillCost",
-        "FillSelector",
+        "FillRule",
         "FrozenAgenda",
         "FrozenDataModel",
         "FrozenRun",
@@ -214,6 +212,7 @@ def test_public_exports_are_fixed() -> None:
         "InstrumentRoster",
         "IntentSourceRef",
         "KrxExchange",
+        "KrxSettings",
         "KrxTradeRule",
         "ListingAccess",
         "LocalInstantDeclaration",
@@ -221,17 +220,17 @@ def test_public_exports_are_fixed() -> None:
         "MarkBatch",
         "ModelWindow",
         "NeutralizationRefusal",
-        # `docs/issues/archive/031`: the return type of `ModelWindow.observations`, which is the only
-        # method a DataModel author can call, and which could not be imported from the facade.
         "ObservationBatch",
         "OperationOccurrence",
         "OptimizeRefusal",
         "OptimizeResult",
         "PanelWindow",
+        "Part",
         "PortfolioDirection",
         "PortfolioTarget",
         "Rebalance",
         "RowsLookback",
+        "RunAgenda",
         "RunDefinition",
         "RunExecution",
         "RunFill",
@@ -254,6 +253,7 @@ def test_public_exports_are_fixed() -> None:
         "StrategyReport",
         "TableSpec",
         "TickerNetting",
+        "Tool",
         "TradeRule",
         "TradeTerms",
         "VqaprError",
@@ -273,11 +273,13 @@ def test_public_exports_are_fixed() -> None:
         "information_coefficient",
         "instrument",
         "instruments",
+        "intersect",
         "krx_listings",
         "krx_rules",
         "nav_series",
         "net_members",
         "neutralize",
+        "no_short",
         "optimize",
         "preflight_run",
         "proportional_weight",
@@ -286,10 +288,11 @@ def test_public_exports_are_fixed() -> None:
         "read_run_record",
         "read_strategy_record",
         "read_strategy_table",
-        "register_constraint",
+        "register_compliance",
         "register_data_model",
         "register_dataset",
         "register_exchange",
+        "register_instruments",
         "register_run",
         "register_strategy_model",
         "rescale",
@@ -297,8 +300,9 @@ def test_public_exports_are_fixed() -> None:
         "run",
         "run_ids",
         "run_report",
-        "shipped_constraint_path",
+        "shipped_compliance_path",
         "signal_weight",
+        "single_name_cap",
         "strategy_refs",
         "strategy_report",
         "trade_rules_by_kind",
@@ -424,10 +428,10 @@ def test_public_run_uses_frozen_initial_model_memory(
     layer = object.__new__(FrozenStrategy)
     for name, value in {
         "config": SimpleNamespace(component=SimpleNamespace(component_id="s")),
-        "constraints": SimpleNamespace(constraints=()),
+        "compliance": SimpleNamespace(rules=()),
         "agenda": SimpleNamespace(occurrences=()),
         "requirements": (),
-        "constraint_requirements": (),
+        "compliance_requirements": (),
         "initial_model_memory": memory,
         "initial_model_state_ref": "frozen-memory-ref",
         "initial_payload": b"",
@@ -437,12 +441,13 @@ def test_public_run_uses_frozen_initial_model_memory(
     frozen = object.__new__(FrozenRun)
     for name, value in {
         "run_id": "facade",
+        "writes": "facade-weights",
         "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
         "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
         "execution": object(),
-        "strategies": (layer,),
-        "datamodels": (),
+        "strategy": layer,
+        "datamodel": None,
         "datasets": (),
         "sources": (),
         "instruments": ("A",),
@@ -457,6 +462,11 @@ def test_public_run_uses_frozen_initial_model_memory(
     )
     observed: dict[str, object] = {}
 
+    # What `public.run` reads off a finished run and nothing more: the recorder rows it
+    # publishes under `writes` (none here, so nothing is published). One object, so the
+    # assertions below can check identity: the outcome carries what the flow returned.
+    finished = SimpleNamespace(final_state=SimpleNamespace(recorder_rows={}))
+
     class Flow:
         def __init__(self, _frozen, loaded_strategy, state, **_kwargs) -> None:
             observed["frozen"] = _frozen
@@ -464,7 +474,7 @@ def test_public_run_uses_frozen_initial_model_memory(
             observed["ref"] = state.root.current_model_state_ref
 
         def run(self) -> object:
-            return "result"
+            return finished
 
     class State:
         def __init__(self, **_kwargs) -> None:
@@ -491,8 +501,8 @@ def test_public_run_uses_frozen_initial_model_memory(
     monkeypatch.setattr(orchestration, "StrategyEventLoop", Flow)
 
     outcome = public.run(tmp_path, frozen)
-    assert outcome.result() == "result"
-    assert outcome.results == {"s": "result"}
+    assert outcome.result() is finished
+    assert outcome.results == {"s": finished}
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,
@@ -529,12 +539,7 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
             is_tradable_field="is_tradable",
             price_fields={"open": "open", "close": "close"},
         ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        FillRule("close", "Asia/Seoul", at=time(15, 30)),
     )
 
     # The bound table is what preflight checks (record `185`): the price the RUN chose must be

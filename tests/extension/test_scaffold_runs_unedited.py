@@ -89,22 +89,17 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
             {
                 "runs": {
                     "scaffold": {
+                        "writes": "scaffold-weights",
                         "strategies": {"alpha": {}},
-                        "sessions_from": journey.DATASET_ID,
                         "timezone": journey.VENUE,
-                        "at": journey.CALLBACK.strftime("%H:%M"),
+                        "agenda": {"every": "1d", "at": journey.CALLBACK.strftime("%H:%M")},
                         "instruments": list(panel.instruments),
                         "start": f"{sessions[2].isoformat()}T00:00:00{journey.OFFSET}",
                         "end": f"{sessions[-1].isoformat()}T23:59:59{journey.OFFSET}",
                         "exchange": journey.EXCHANGE_ID,
                         "execution": {
                             "dataset": journey.EXECUTION_ID,
-                            "fill": {
-                                "selector": "same_day",
-                                "at": "15:30",
-                                "timezone": journey.VENUE,
-                                "trade_price": "close",
-                            },
+                            "trade_price": "close", "fill": {"at": "15:30"},
                         },
                         "initial_account": {
                             "mode": "LONG_ONLY",

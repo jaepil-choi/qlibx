@@ -1,7 +1,7 @@
 """Building an agenda from the sessions a dataset actually has.
 
 The constructor takes occurrences that are already known. The common case is not a list: it is
-"every session this registered dataset has, at 08:00 local".
+"every trading day the execution table has, at 08:00 local" -- `expand` with `1d`.
 Turning one into the other is mechanical, and it was being written by hand at every call site --
 three copies of the same sixteen lines, each of which owned the occurrence id scheme and the DST
 constants.
@@ -35,8 +35,8 @@ def test_one_occurrence_per_session_at_the_declared_local_time() -> None:
     agenda = _daily([date(2024, 3, 5), date(2024, 3, 6)])
 
     assert [o.occurrence_id for o in agenda.occurrences] == [
-        "alpha-2024-03-05",
-        "alpha-2024-03-06",
+        "alpha-2024-03-05T0800",
+        "alpha-2024-03-06T0800",
     ]
     # 08:00 Seoul is 23:00 UTC the previous day.
     assert agenda.occurrences[0].utc_evaluation_time == datetime(2024, 3, 4, 23, tzinfo=UTC)
@@ -52,7 +52,7 @@ def test_sessions_may_be_the_timestamps_a_dataset_reports() -> None:
 
     agenda = _daily(available_at)
 
-    assert [o.occurrence_id for o in agenda.occurrences] == ["alpha-2024-03-05"]
+    assert [o.occurrence_id for o in agenda.occurrences] == ["alpha-2024-03-05T0800"]
     assert agenda.occurrences[0].utc_evaluation_time == datetime(2024, 3, 4, 23, tzinfo=UTC)
 
 
@@ -71,9 +71,9 @@ def test_sessions_are_ordered_however_they_arrive() -> None:
     agenda = _daily([date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6)])
 
     assert [o.occurrence_id for o in agenda.occurrences] == [
-        "alpha-2024-03-05",
-        "alpha-2024-03-06",
-        "alpha-2024-03-07",
+        "alpha-2024-03-05T0800",
+        "alpha-2024-03-06T0800",
+        "alpha-2024-03-07T0800",
     ]
 
 

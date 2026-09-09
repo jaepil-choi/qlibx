@@ -1,6 +1,6 @@
 ---
 name: run-backtest
-description: Declares, checks, and executes a vqapr run: choosing sessions and decision times, binding strategies to an exchange and constraints, proving readiness with `vqapr check`, then executing with `vqapr run`. Use when the user wants to run, execute, or backtest something already registered, asks why a run refuses to start, or asks what a long run is doing while it executes.
+description: Declares, checks, and executes a vqapr run: choosing sessions and decision times, binding a strategy to an exchange and compliance rules, proving readiness with `vqapr check`, then executing with `vqapr run`. Use when the user wants to run, execute, or backtest something already registered, asks why a run refuses to start, or asks what a long run is doing while it executes.
 ---
 
 # Run a vqapr backtest
@@ -23,11 +23,12 @@ fires on, the venue-local wall time it fires at, the venue, the execution datase
 account, and the strategies it tries — and it is registered like everything else, so a result can
 always name the declaration that produced it.
 
-**Every strategy is called on every session, and decides for itself whether to act.** A monthly
-rebalance is a rule inside the strategy, read from `call.evaluation_time` and kept in
-`self.memory`. There is no separate cadence to declare, and no valuation or monitoring time
-either: the book is valued at the instant the venue fills, and the declared constraints judge it
-right after each commit.
+**The strategy is called at every instant of the run's `agenda` and decides for itself whether
+to act.** `every: 1d` with `at` is one decision a day; `every: 1M` the first trading day of each
+month; `every: 5m` with `from`/`to` every five minutes inside each day. The days come from the
+execution dataset, never from a list. There is no valuation or monitoring time to declare: the
+book is valued at every instant of the market clock, and the declared compliance rules observe it
+right after.
 
 **Three factor models on one cadence are one run with three strategies, not three runs.** Each
 strategy runs with its own account and writes its own record.
@@ -53,8 +54,8 @@ vqapr new run --out runs.yaml
 The template carries every required key with its meaning. Fill it with **registered** ids: an
 unregistered component, dataset or exchange is refused at step 3, by name.
 
-Sessions come from `sessions_from: <dataset>` (every session that dataset has) or an explicit
-`sessions:` list; the wall time comes from `timezone` and `at`. See
+The strategy clock is the `agenda:` block — `every` with `at`, or with `from`/`to` — expanded
+over the trading days the execution dataset has rows for; `timezone` is the zone it is read in. See
 [references/run-declaration.md](references/run-declaration.md) for what a run needs and what it
 must not carry.
 

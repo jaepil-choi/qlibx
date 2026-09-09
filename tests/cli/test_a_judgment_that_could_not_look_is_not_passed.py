@@ -33,27 +33,28 @@ from vqapr.cli.check import check
 
 
 def _corrupt_the_sessions_dataset(root: Path) -> None:
-    """The dataset the run derives its sessions from stops being readable after registration.
+    """The execution table the run derives its trading days from (design §3.3) stops being
+    readable after registration.
 
     `register` has already accepted it, and nothing re-validates a source file afterwards, so this
     is a state a real workspace reaches: the file moved, was rewritten, or was truncated between
     declaring the run and checking it.
     """
-    (root / "observation.parquet").write_bytes(b"not a parquet file")
+    (root / "execution.parquet").write_bytes(b"not a parquet file")
 
 
 def _make_available_at_naive(root: Path) -> None:
-    """The same rows, but `available_at` is a naive TIMESTAMP instead of TIMESTAMPTZ."""
-    obs = root / "observation.parquet"
+    """The same venue rows, but `trade_at` is a naive TIMESTAMP instead of TIMESTAMPTZ."""
+    table = root / "execution.parquet"
     con = duckdb.connect()
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-              (DATE '2024-03-05', TIMESTAMP '2024-03-05 03:00:00', 'A', 100.0),
-              (DATE '2024-03-06', TIMESTAMP '2024-03-06 03:00:00', 'A', 101.0),
-              (DATE '2024-03-07', TIMESTAMP '2024-03-07 03:00:00', 'A', 104.0)
-            ) AS t(session_date, available_at, instrument, close))
-            TO '{obs.as_posix()}' (FORMAT PARQUET)"""
+              (TIMESTAMP '2024-03-05 15:30:00', 'A', true, 100.0),
+              (TIMESTAMP '2024-03-06 15:30:00', 'A', true, 103.0),
+              (TIMESTAMP '2024-03-07 15:30:00', 'A', true, 105.0)
+            ) AS t(trade_at, instrument, is_tradable, close))
+            TO '{table.as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()

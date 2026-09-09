@@ -32,7 +32,7 @@ def test_the_sample_journeys_report_adds_up(tmp_path: Path) -> None:
     (strategy,) = report.strategies.values()
     assert strategy.positions_recorded is True
     assert strategy.omitted == {
-        "compliance": "vqapr.monitoring is empty: the strategy declared no constraint"
+        "compliance": "vqapr.monitoring is empty: the run declared no compliance rule"
     }
     performance = strategy.performance
     assert performance.periods_per_year == 252 and performance.periods > 500

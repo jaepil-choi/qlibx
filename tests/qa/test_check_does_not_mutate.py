@@ -14,7 +14,7 @@ tries to write inside `.vqapr/` itself?
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,9 +28,10 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.domain.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
+from vqapr.public import register_instruments
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
@@ -145,6 +146,8 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         )
     finally:
         con.close()
+    # A strategy run needs a declared roster to reach `preflight` clean (design §6.2).
+    register_instruments(root, {"A": "stock"})
     pub_register_dataset(
         root,
         DatasetRegistration.of(
@@ -167,20 +170,21 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         t.register_run(
             RunDefinition(
                 run_id="probe",
-                strategies=(StrategyEntry("evil"),),
+                strategy=StrategyEntry("evil"),
                 timezone="Asia/Seoul",
-                at=time(9, 0),
-                sessions=(date(2024, 1, 2),),
+                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
                 instruments=("A",),
                 exchange="venue",
                 execution=RunExecution(
                     dataset='my-exec',
-                    fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+                    trade_price='close',
+                    fill=RunFill(at=time(15, 30)),
                 ),
                 start=datetime(2024, 1, 2, tzinfo=UTC),
                 end=datetime(2024, 1, 5, tzinfo=UTC),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="probe-weights",
             )
         )
     return "probe"

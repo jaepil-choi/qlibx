@@ -25,7 +25,7 @@ __all__ = [
     "Book",
     "CalendarRow",
     "Compliance",
-    "ConstraintSummary",
+    "ComplianceSummary",
     "Correlation",
     "Costs",
     "HeadlineRow",
@@ -232,14 +232,14 @@ class OffenderCount(_Document):
     findings: int
 
 
-class ConstraintSummary(_Document):
-    """One declared constraint over the run, from `vqapr.monitoring`. `checked` splits into
+class ComplianceSummary(_Document):
+    """One declared Compliance rule over the run, from `vqapr.monitoring`. `checked` splits into
     `held`, `within_tolerance`, `breached` and `unmeasured` (a finding with no `measured` value:
     an input the rule could not see, which is not a breach). A record written before the
     framework's verdict existed (record `158`) has only the author's `passed`; then `held` and
     `breached` follow it and `tolerance_judged` is false."""
 
-    constraint: str
+    rule: str
     checked: int
     held: int
     within_tolerance: int
@@ -253,7 +253,7 @@ class ConstraintSummary(_Document):
 
 
 class Compliance(_Document):
-    constraints: list[ConstraintSummary]
+    rules: list[ComplianceSummary]
     instants: list[datetime]
     breached: list[int]
 

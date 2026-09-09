@@ -1,9 +1,8 @@
-"""What a callback is handed beyond its own call: the committed account, and the bounds on it.
+"""What a callback is handed beyond its own call: the committed account.
 
 `EconomicAccountView` is the account as one callback may see it -- an immutable snapshot, never the
-live book -- and `ConstraintBounds` is what every registered Constraint's projection agreed a
-target weight may be. Both are values the engine constructs and the author only reads, which is why
-they sit below `call.py`: a `StrategyCall` carries them.
+live book. A value the engine constructs and the author only reads, which is why it sits below
+`call.py`: a `StrategyCall` carries it, and a `Compliance` rule's `observe` receives it.
 """
 
 from __future__ import annotations
@@ -12,12 +11,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Self
-
-from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 
 from vqapr.authoring._validation import (
-    _VALUE_CONFIG,
     _copy_weights,
     _finite_decimal,
     _identifier,
@@ -33,7 +28,7 @@ class EconomicAccountView:
     **`values` was missing, and its absence made a whole rule shape inexpressible.** This view
     carried `positions` -- quantities -- plus one aggregate `nav`, and a weight is
     `value / nav`. Quantities cannot become weights without prices, so no weight-based rule
-    could be written against this type at all, which is what both shipped Constraints are. The
+    could be written against this type at all, which is what both shipped rules are. The
     gap went unnoticed because monitoring ran on the engine's `MarkBatch` instead, on the other
     side of the surface split this contract exists to remove.
 
@@ -43,7 +38,7 @@ class EconomicAccountView:
     **`values` is `None` where the framework has no marks to offer, and that is not zero.** A
     Strategy callback fires before the occurrence it decides for is executed or valued, so what
     it sees is the previous valuation's marks -- committed, and therefore point-in-time -- and
-    before the first valuation there are none; a monitoring Constraint fires against a marked
+    before the first valuation there are none; a Compliance rule fires against a marked
     account and always has them. An empty mapping would make `weight()` return a confident zero
     for every name and every weight rule report `passed`, so absence refuses instead.
     """
@@ -88,7 +83,7 @@ class EconomicAccountView:
         """This instrument's share of NAV, signed.
 
         The one derivation every weight-based rule needs, written once here rather than in each
-        Constraint that would otherwise divide by a NAV it had to reassemble. Refuses rather than
+        rule that would otherwise divide by a NAV it had to reassemble. Refuses rather than
         returning zero when NAV is absent or zero: a weight against no NAV is not a small number,
         it is an undefined one, and a rule that silently measured zero would report `passed`.
         """
@@ -109,58 +104,4 @@ class EconomicAccountView:
         return CrossSection._trusted(
             {instrument_id: self.weight(instrument_id) for instrument_id in sorted(self.values)},
             self.nav_observed_at,
-        )
-
-
-class ConstraintBounds(BaseModel):
-    """Frozen per-instrument target-weight bounds merged from every projected Constraint.
-
-    Declared as any `Mapping[str, Decimal]`; held as the read-only `CrossSection` it validates
-    into, so `bounds.lower_weights["A"]` reads the way it always did.
-    """
-
-    model_config = _VALUE_CONFIG
-
-    lower_weights: CrossSection[Decimal]
-    upper_weights: CrossSection[Decimal]
-
-    def __init__(
-        self, *, lower_weights: Mapping[str, Decimal], upper_weights: Mapping[str, Decimal]
-    ) -> None:
-        # The door's own signature: what an author passes is any mapping, what the field holds
-        # is the cross-section it validated into. Written out so a type checker sees the former.
-        super().__init__(lower_weights=lower_weights, upper_weights=upper_weights)
-
-    @field_validator("lower_weights", "upper_weights", mode="before")
-    @classmethod
-    def _weights(cls, value: object, info: ValidationInfo) -> CrossSection[Decimal]:
-        return _copy_weights(value, name=str(info.field_name))
-
-    @model_validator(mode="after")
-    def _same_names_ordered(self) -> Self:
-        lower, upper = self.lower_weights, self.upper_weights
-        if set(lower) != set(upper):
-            raise ValueError("lower_weights and upper_weights must cover the same instruments")
-        for instrument_id in lower:
-            if lower[instrument_id] > upper[instrument_id]:
-                raise ValueError("lower_weights must not exceed upper_weights")
-        return self
-
-    def lower_weight(self, instrument_id: str) -> Decimal:
-        checked = _identifier(instrument_id, name="instrument_id")
-        return self.lower_weights[checked]
-
-    def upper_weight(self, instrument_id: str) -> Decimal:
-        checked = _identifier(instrument_id, name="instrument_id")
-        return self.upper_weights[checked]
-
-    def detached(self) -> ConstraintBounds:
-        """A fresh value with no caller-owned mapping aliases.
-
-        Validation already copies into read-only views, so this is defensive rather than
-        load-bearing -- and it is kept because `StrategyModelContext` calls it on a value it did
-        not construct, where "already copied" is an assumption about someone else's code.
-        """
-        return ConstraintBounds(
-            lower_weights=self.lower_weights, upper_weights=self.upper_weights
         )

@@ -13,9 +13,9 @@ leaves its records readable (a finished run pins what it used inside its own rec
 records leaves the run registered to run again.
 
 **`rm run <id> --cascade` is the one gesture that says *remove all of it*** (owner ruling,
-2026-09-05, `docs/issues/archive/081`: deletion must be easy). Records first -- the only step that can
-refuse, on a live lock, and it refuses before anything is touched -- then the run definition, then
-the materialized outputs its datamodels wrote, then the components it named. A dataset or a
+2026-09-05, `docs/issues/archive/081`: deletion must be easy). Records first -- the only step that
+can refuse, on a live lock, and it refuses before anything is touched -- then the run definition,
+then the materialized outputs its datamodels wrote, then the components it named. A dataset or a
 component that another registered run still names is kept and reported as kept, with the run that
 holds it. Nothing is rolled back on a failure part-way: deleted evidence cannot be restored, so the
 payload names what went and what remains instead.
@@ -31,7 +31,7 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
 from vqapr.domain.inputs import VALUE_INVALID, InputError
-from vqapr.flow.datamodel.output import MATERIALIZED_DIRECTORY
+from vqapr.flow.run.output import MATERIALIZED_DIRECTORY
 from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
@@ -49,8 +49,8 @@ RECORD_KINDS = ("run", "strategy", "datamodel")
 DECLARATION_KINDS = {
     "component": "component",
     "run-definition": "run",
-    # `docs/issues/archive/060`: the skill told the user to withdraw a dataset registration and the CLI
-    # had no kind for it, so three throw-away materializations (1.3 GB) stayed registered and a
+    # `docs/issues/archive/060`: the skill told the user to withdraw a dataset registration and the
+    # CLI had no kind for it, so three throw-away materializations (1.3 GB) stayed registered and a
     # half-finished one could only be retried under a new id.
     "dataset": "dataset",
 }
@@ -130,10 +130,10 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             remove_strategy_record(root, run_id, strategy_ref)
             return success("record.removed", kind=kind, run_id=run_id, removed=[strategy_ref])
         if kind == "datamodel":
-            # The record only. The dataset it registered stays registered: a record is what a
-            # run wrote about itself, and a dataset is what other runs may already read. A
-            # directory WITHOUT a record -- what a crashed datamodel run leaves -- is precisely
-            # the one a reader wants to remove, and this could not name it (`docs/issues/archive/080`).
+            # The record only. The dataset it registered stays registered: a record is what a run
+            # wrote about itself, and a dataset is what other runs may already read. A directory
+            # WITHOUT a record -- what a crashed datamodel run leaves -- is precisely the one a
+            # reader wants to remove, and this could not name it (`docs/issues/archive/080`).
             run_id, datamodel_ref = resolve_member(
                 root, identifier, kind="datamodel", unfinished=True
             )
@@ -249,7 +249,7 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
         return success("workspace.removed", kind="run", identifier=run_id, cascade=True,
                        removed=removed, kept=kept)
     removed["run_definition"] = bool(workspace.remove("run", run_id))
-    outputs = [str(entry.dataset_id) for entry in definition.datamodels]
+    outputs = [str(definition.writes)]
     for dataset_id in outputs:
         blockers = workspace.references_to("dataset", dataset_id)
         if blockers:
@@ -262,11 +262,7 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
             removed["datasets"].append(dataset_id)
             if materialized is not None:
                 shutil.rmtree(materialized, ignore_errors=True)
-    named: list[str] = []
-    for entry in definition.strategies:
-        named.append(entry.component_id)
-        named.extend(entry.constraints)
-    named.extend(entry.component_id for entry in definition.datamodels)
+    named: list[str] = [definition.member.component_id, *definition.compliance]
     if definition.exchange is not None:
         named.append(definition.exchange)
     for component_id in dict.fromkeys(named):

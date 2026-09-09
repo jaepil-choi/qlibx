@@ -5,11 +5,11 @@
 that tells you a module has outgrown its role: the facade had a private consumer. It is
 `registered_roster` here, and the CLI reaches it by that name.
 
-The reading is deliberately fresh rather than frozen, and `docs/issues/archive/042` and `docs/issues/archive/050`
-are why the guard around it is narrow. **The roster is read exactly once per run**: what that read
-produced is carried in a `RegisteredRoster` and handed to `roster_report`, so the record describes
-the roster the fills were classified by rather than the file as it stands when the record is
-written. See `registered_roster` for all of it.
+The reading is deliberately fresh rather than frozen, and `docs/issues/archive/042` and
+`docs/issues/archive/050` are why the guard around it is narrow. **The roster is read exactly once
+per run**: what that read produced is carried in a `RegisteredRoster` and handed to `roster_report`,
+so the record describes the roster the fills were classified by rather than the file as it stands
+when the record is written. See `registered_roster` for all of it.
 """
 
 from __future__ import annotations
@@ -61,11 +61,11 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     tickers, issuers delist, a name is reclassified -- so a gate here would refuse every morning,
     including on runs that never touch the new name (issue 009).
 
-    This is the first workspace read on the `run` path, which until now consumed only `frozen.*`.
-    It is one small JSON file plus the tables it points at, done once per run -- and once is
-    literal: `roster_report` is handed what this returned rather than reading it again. A caller
-    that already holds the `Workspace` passes it (`docs/issues/archive/070`): the document is not opened
-    again for the pointer it merely locates.
+    This is the first workspace read on the `run` path, which until now consumed only `frozen.*`. It
+    is one small JSON file plus the tables it points at, done once per run -- and once is literal:
+    `roster_report` is handed what this returned rather than reading it again. A caller that already
+    holds the `Workspace` passes it (`docs/issues/archive/070`): the document is not opened again
+    for the pointer it merely locates.
     """
     if root_path is None:
         return None
@@ -73,17 +73,17 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     try:
         space = root_path if isinstance(root_path, Workspace) else Workspace.open(root_path)
     except VqaprError as unopened:
-        # NARROW, by `docs/issues/archive/050`. A run assembled outside a workspace has no roster to find,
-        # and saying so by returning `None` is honest: the refusal, when it comes, belongs at the
-        # point something asks what an instrument is -- not here, where nothing has been asked
+        # NARROW, by `docs/issues/archive/050`. A run assembled outside a workspace has no roster to
+        # find, and saying so by returning `None` is honest: the refusal, when it comes, belongs at
+        # the point something asks what an instrument is -- not here, where nothing has been asked
         # yet. But `Workspace.open` decodes `.vqapr/workspace.yaml`, and a file that is corrupt or
         # half-written -- a crash mid-write, a `vqapr register` landing mid-run, a hand edit --
         # makes it raise `workspace.open.invalid` instead. Catching that too collapsed the two
         # states this module keeps apart four lines below, and a project that HAS a roster read as
-        # one that never had one: the run continued and every fill recorded `kind: None`, which on
-        # a KRX-shaped venue charges the ETF sleeve at the share rate. `docs/issues/archive/007` through a
-        # `try/except` written for a different case.
-        if not _absent_workspace(unopened):
+        # one that never had one: the run continued and every fill recorded `kind: None`, which on a
+        # KRX-shaped venue charges the ETF sleeve at the share rate. `docs/issues/archive/007`
+        # through a `try/except` written for a different case.
+        if not absent_workspace(unopened):
             raise
         return None
     # OUTSIDE the guard above, deliberately. `registered_instruments()` raises a typed
@@ -158,10 +158,10 @@ def roster_report(read: RegisteredRoster | None) -> dict[str, object] | None:
     is the one the gap erases.
 
     **Every field comes from the read this was handed, and nothing is read here.** The docstring
-    used to claim that and it was true of the counts alone: `digest` and `tables` came from a
-    second `registered_instruments()`, so a `vqapr register` during a long run made the record
-    state one roster's digest beside another roster's counts (`docs/issues/archive/050`, half two). Taking
-    a `RegisteredRoster` rather than a project root is what makes the claim structural: there is no
+    used to claim that and it was true of the counts alone: `digest` and `tables` came from a second
+    `registered_instruments()`, so a `vqapr register` during a long run made the record state one
+    roster's digest beside another roster's counts (`docs/issues/archive/050`, half two). Taking a
+    `RegisteredRoster` rather than a project root is what makes the claim structural: there is no
     path from here to the file.
     """
     if read is None:
@@ -173,8 +173,9 @@ def roster_report(read: RegisteredRoster | None) -> dict[str, object] | None:
     return report
 
 
-def _absent_workspace(refusal: VqaprError) -> bool:
+def absent_workspace(refusal: VqaprError) -> bool:
     """Whether this refusal says the workspace is not there, as opposed to not readable."""
     return bool(refusal.failures) and all(
         failure.code == WORKSPACE_ABSENT for failure in refusal.failures
     )
+

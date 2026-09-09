@@ -76,7 +76,9 @@ class SimulationStage(StrEnum):
     CALLBACK_WINDOW = "simulation.callback.window"
     CALLBACK_INTENT = "simulation.callback.intent"
     CALLBACK_PUBLICATION = "simulation.callback.publication"
+    MARKET_ACCRUE = "simulation.market.accrue"
     DUE_SNAPSHOT = "simulation.due.snapshot"
+    DUE_INSTRUMENT_DECLARATION = "simulation.due.instrument_declaration"
     DUE_ORDER_PLANNING = "simulation.due.order_planning"
     DUE_EXCHANGE_EXECUTION = "simulation.due.exchange_execution"
     DUE_ACCOUNT_PREPARATION = "simulation.due.account_preparation"
@@ -86,7 +88,7 @@ class SimulationStage(StrEnum):
     DUE_ACCOUNT_MARK = "simulation.due.account_mark"
     DUE_FEEDBACK_CANDIDATE = "simulation.due.feedback_candidate"
     DUE_FEEDBACK_PUBLICATION = "simulation.due.feedback_publication"
-    MONITORING = "simulation.monitoring"
+    MARKET_COMPLIANCE = "simulation.market.compliance"
     FINALIZE = "simulation.finalize"
 
 
@@ -253,7 +255,6 @@ class CallbackEvidence:
     actual_source_refs: tuple[object, ...]
     decision: object
     pending: object | None
-    constraints: tuple[object, ...]
     mutation: bool = False
 
     def __post_init__(self) -> None:
@@ -344,9 +345,11 @@ class ValuationEvidence:
 
 @dataclass(frozen=True, slots=True)
 class MonitoringEvidence:
+    """What the declared Compliance rules found on the committed, marked book at one market-clock
+    instant (design §7.2). No occurrence: the observer has no decision of its own to point at."""
+
     run_identity: str
     agenda: object
-    occurrence: object
     cutoff: datetime
     account: AccountSnapshot
     valuation: ValuationEvidence

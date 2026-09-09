@@ -16,7 +16,7 @@ Two independent passes, on purpose:
   miss part of the vocabulary. This pass constant-folds those f-strings and follows parameter
   forwarding across call sites instead of guessing, for `code` and `status` alike -- across the
   whole package, because a refusal helper and its callers need not share a file
-  (`flow/datamodel/compute.py` raises through `flow/datamodel/output.py`'s `refusal`), and an
+  (`flow/run/compute.py` raises through `flow/run/output.py`'s `refusal`), and an
   index that stopped at the file boundary silently dropped a code whenever a module was split.
   A `status` that is a `Status` member (the case at almost every site) buckets the code
   under that member's number; a `status` computed from an exception (`status_of(error)`, a
@@ -138,8 +138,8 @@ class _SourceIndex:
 
     Those two are merged across modules on purpose. A per-file index only ever resolved a code
     forwarded through a helper defined in the same file, so splitting a module dropped codes from
-    the inventory without any refusal changing: `flow/datamodel/compute.py` raises through the
-    `refusal` helper `flow/datamodel/output.py` defines, and `datamodel.compute_failed` vanished
+    the inventory without any refusal changing: `flow/run/compute.py` raises through the
+    `refusal` helper `flow/run/output.py` defines, and `datamodel.compute_failed` vanished
     from the static pass the moment the two stopped sharing a file. A refusal helper is not
     required to live beside its callers, so neither is this index.
 
@@ -901,7 +901,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
 
 def _runtime_execution_table(tmp_path: Path) -> list[str]:
     from vqapr.data.sources import SourceSpec
-    from vqapr.exchange.conventions import FillConvention, FillSelector
+    from vqapr.exchange.conventions import FillRule
     from vqapr.exchange.execution_table import (
         ExecutionTable,
         ExecutionTableSpec,
@@ -920,12 +920,7 @@ def _runtime_execution_table(tmp_path: Path) -> list[str]:
                 is_tradable_field="is_tradable",
                 price_fields={"open": "open", "close": "close"},
             ),
-            FillConvention(
-                selector=FillSelector.SAME_DAY,
-                local_time=__import__("datetime").time(15, 30),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
+            FillRule("close", "Asia/Seoul", at=__import__("datetime").time(15, 30)),
         )
 
     bad_types = _write_parquet(
@@ -962,27 +957,24 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     from vqapr.domain.errors import VqaprError
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.public import register_constraint
+    from vqapr.public import register_compliance
     from vqapr.extension.conformance import conformance
 
     codes: list[str] = []
 
     good = textwrap.dedent(
         """
-        from vqapr.public import Constraint, ConstraintBounds
+        from vqapr.public import Compliance
 
-        class Limit(Constraint):
+        class Limit(Compliance):
             @property
-            def constraint_id(self):
+            def compliance_id(self):
                 return "limit"
 
             def requirements(self):
                 return ()
 
-            def project(self, call):
-                return ConstraintBounds(lower_weights={}, upper_weights={})
-
-            def monitor(self, call, account, bounds):
+            def observe(self, call, account):
                 return None
         """
     )
@@ -990,16 +982,14 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     # instantiation fails and `component.load.construction_failed` fires before the signature
     # check this fixture exists to provoke ever runs -- the exact silent-weakening this file's
     # own comment below warns about.
-    stale = good.replace(
-        "def monitor(self, call, account, bounds):", "def monitor(self, account, marks):"
-    )
-    missing = good.replace("def project(self, call):", "def unused(self):")
+    stale = good.replace("def observe(self, call, account):", "def observe(self, account):")
+    missing = good.replace("def observe(self, call, account):", "def unused(self):")
     broken = "class Limit:\n    pass\n"
 
     def _ref(source: str, name: str, *, component_id: str | None = None) -> ComponentRef:
-        # The filename and the registered id are separate arguments on purpose. `load_constraint`
-        # refuses a Constraint registered under an id its own `constraint_id` does not return, and
-        # every source below derives from `good`, whose `constraint_id` is `limit`. Registering
+        # The filename and the registered id are separate arguments on purpose. `load_compliance`
+        # refuses a rule registered under an id its own `compliance_id` does not return, and
+        # every source below derives from `good`, whose `compliance_id` is `limit`. Registering
         # them as `stale`/`missing` would trip that identity refusal FIRST, and because
         # `conformance` folds a loader exception into its collector and returns before
         # `_check_methods` runs, the defect each fixture exists to provoke would never be reached.
@@ -1010,11 +1000,11 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
         path.write_text(source, encoding="utf-8")
         return ComponentRef.of(
             component_id or name,
-            ComponentKind.CONSTRAINT,
+            ComponentKind.COMPLIANCE,
             path,
             "Limit",
             fingerprint=fingerprint_component(
-                path, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+                path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
             ),
         )
 
@@ -1031,7 +1021,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
         codes.extend(failure.code for failure in diagnosis.failures)
 
     try:
-        register_constraint(tmp_path, "again", tmp_path / "does-not-exist.py", "Limit")
+        register_compliance(tmp_path, "again", tmp_path / "does-not-exist.py", "Limit")
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
     except OSError:
@@ -1048,6 +1038,7 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
     # (`agendas:` is no longer a section), so the two malformed-document scenarios that used to
     # be agendas are runs: one missing what a run must declare, one with the wrong shape for it.
     run = {
+        "writes": "alpha-weights",
         "strategies": {"alpha": {}},
         "instruments": ["A"],
         "start": "2024-03-05T00:00:00+09:00",
@@ -1056,7 +1047,7 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
         "exchange": "venue",
         "execution": {
             "dataset": "fills",
-            "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+            "trade_price": "close", "fill": {"at": "15:30"},
         },
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
     }
@@ -1149,7 +1140,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
 
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.project.run import RunDefinition, StrategyEntry
+    from vqapr.project.run import RunAgenda, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(
@@ -1176,11 +1167,11 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
             t.register_run(
                 RunDefinition(
                     run_id="unsourced",
-                    strategies=(StrategyEntry("strategy"),),
+                    strategy=StrategyEntry("strategy"),
                     instruments=("A",),
                     timezone="Asia/Seoul",
-                    at=time(15, 30),
-                    sessions_from="does-not-exist",
+                    agenda=RunAgenda(every="1d", at=(time(15, 30),)),
+                    writes="unsourced-weights",
                 )
             )
     except VqaprError as error:
@@ -1250,14 +1241,13 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     """
     from datetime import UTC, datetime
     from decimal import Decimal
-    from types import SimpleNamespace
 
     from vqapr.domain.errors import VqaprError
-    from vqapr.flow.datamodel.output import DataModelOutput
+    from vqapr.flow.run.output import RunOutput
 
     codes: list[str] = []
-    output = DataModelOutput(
-        tmp_path, SimpleNamespace(dataset_id="scores", value_fields=("score",))
+    output = RunOutput(
+        tmp_path, writes="scores", value_fields=("score",)
     )
     output.open()
     try:

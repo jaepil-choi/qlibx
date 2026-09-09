@@ -5,7 +5,7 @@ comes back out here rather than there (record `195`). Nothing about it is execut
 memory, frames it with a payload into one envelope, and hashes that. No clock, no account, no IO.
 
 It is here because three layers exchange it and none owns it. `flow/run_state.py` proves a
-candidate's ref before publishing it, `flow/strategy/callback.py` takes the ref of what a callback
+candidate's ref before publishing it, `flow/run/callback.py` takes the ref of what a callback
 committed, and a `StrategyConfig` in `project/run.py` derives the ref of the memory a run starts
 with -- a **declaration**, which is what made the old home a layering problem: the project layer
 had to import the engine to name the seed state it declares.

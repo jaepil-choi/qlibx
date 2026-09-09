@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.flow.datamodel.test_a_datamodel_is_a_run import _definition, _prepared
+from tests.flow.run.test_a_datamodel_is_a_run import _definition, _prepared
 from tests.flow.declaration.test_preflight import _setup
 from vqapr.flow import orchestration as runtime
 from vqapr.record import DATAMODEL_KIND, STRATEGY_KIND, RunRecordLive, RunRecordWriter
@@ -17,13 +17,13 @@ def member(request, tmp_path: Path, model_price_parquet: Path):
     if kind == "strategy":
         workspace, definition = _setup(tmp_path, model_price_parquet)
         frozen = runtime.preflight_run(workspace, definition)
-        layer = frozen.strategies[0]
+        layer = frozen.strategy
     else:
         _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
         frozen = runtime.preflight_run(
-            tmp_path, _definition("review", DataModelEntry("reversal", "scores", ("score",)))
+            tmp_path, _definition("review", DataModelEntry("reversal", ("score",)), writes="scores")
         )
-        layer = frozen.datamodels[0]
+        layer = frozen.datamodel
     store = tmp_path / "records"
 
     def execute():

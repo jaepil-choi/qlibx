@@ -4,42 +4,62 @@ The template from `vqapr new run --out runs.yaml` carries every required key wit
 it is generated from the contract the package enforces. **Fill the template rather than
 hand-writing the YAML** — this file explains the choices, not the key list.
 
-## Sessions and the wall time
+## The strategy clock: `agenda`
 
-A run declares **when it fires**, in two parts:
+A run declares **when it fires** as one block, a trading-day filter plus a within-day rule:
 
-- `sessions_from: <dataset-id>` — every session that registered dataset has. Or an explicit
-  `sessions:` list.
-- `timezone` and `at` — the venue-local wall time within each session.
+```yaml
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d          # 1d | 2d | 1w | 1M pick trading days and pair with `at`
+      at: "15:29"        #   one wall time or a list
+    # agenda:
+    #   every: 5m        # 1m | 5m | 1h pick instants inside each day and pair with from/to
+    #   from: "09:00"
+    #   to: "15:20"
+```
 
-There is no separate agenda to declare and no cadence key. Every strategy is called on **every**
-session at `at`, and decides for itself whether to act.
+**The days are not declared.** They come from data: a strategy run's trading days are the days its
+execution dataset has rows for, so a denser table adds fill instants and never a decision day. A
+datamodel run has no venue and names the dataset whose days count with `agenda.days_from`. There
+is no `sessions:` list to type and no calendar to register.
 
-**A monthly rebalance is a rule inside the strategy**, not a declaration here: read
-`call.evaluation_time`, keep what you need in `self.memory`, and return no decision on the sessions
-you skip. Expressing it as a declaration would put a piece of the strategy's logic somewhere the
-strategy's file does not show.
+`1w` fires on the first trading day of each ISO week, `1M` on the first trading day of each calendar
+month; `2d` on every second trading day. A strategy called on a day it does not want to act still
+decides for itself (`Hold`).
 
 ## No valuation or monitoring time
 
-The book is valued at the instant the venue fills, and declared constraints judge it right after
-each commit. There is nothing to schedule.
+The book is valued at every instant of the market clock, and the run's declared Compliance rules
+observe it right after. There is nothing to schedule.
 
-## One run, several strategies
+## One run, one model, one `writes`
 
-Every strategy under `strategies:` runs with **its own account** from the run's
-`initial_account` declaration, and writes **its own record**.
+A run executes **one** model, named under `strategy:` (or `datamodel:`), and puts **one** dataset
+in the project under `writes:`. `writes` is required: the project is a graph of datasets and a run
+is one arrow of it, and an arrow that makes nothing is not a rule of the graph.
 
-Three factor models on one cadence are one run with three strategies. Splitting them into three
-runs gives three declarations to keep in step and no shared basis for comparing them — the
-`run_report` correlation and the `relative` block both need the strategies to be in one run.
+```yaml
+runs:
+  my-alpha:
+    writes: my-alpha-weights       # the allocation, one row per instrument per decision
+    strategy:
+      component: my-alpha
+    # compliance: [no-short]      # the rules that watch the book: the run's, beside the venue
+```
 
-A strategy's entry may carry a `constraints:` list naming registered components of kind
-`constraint`.
+Three factor models on one cadence are **three runs** with the same period, venue and account.
+That is not three declarations to keep in step: two runs declaring the same inputs freeze
+identically, so the comparison is exactly as sound as it was in one run — and now it holds across
+runs made on different days, which one run never could. `--jobs` spreads runs, and a strategy that
+wants another's allocation reads its `writes` like any other dataset.
+
+`vqapr check` reads the graph: a run whose model reads a dataset that another registered run
+`writes` is told to run that one first, rather than to register something.
 
 ## What a datamodel run must not carry
 
-A datamodel is a run too. Its declaration names `datamodels:` instead of `strategies:`, and
+A datamodel is a run too. Its declaration names `datamodel:` instead of `strategy:`, and
 `account`, `venue` and `execution` are **refused** on it — there is nothing to execute.
 
 ## What a run needs registered before it
@@ -47,10 +67,13 @@ A datamodel is a run too. Its declaration names `datamodels:` instead of `strate
 Three declaration kinds, each with its own `vqapr new` scaffold: datasets (the venue table a run fills against is a dataset with an `execution:` role, and the run picks its `trade_price`), an
 exchange, and at least one component.
 
-**And it wants a fifth: the instrument roster.** Not required — a run without one completes. But
-every fill then records `kind: None`, cost by kind collapses into one `unknown` bucket, and on a
-costed venue every name is charged as if it were the same thing. `vqapr run` states which roster it
-read, or that it read none.
+**And a strategy run requires a fifth: the instrument roster.** The venue must know what every
+ordered id *is* before it can size or charge it, so a project that has declared no instrument is
+refused at `check` and at `run` (`roster.absent`, 412) — `vqapr new instruments <ids...>` writes the
+tables and the declaration, `vqapr register instruments.yaml` registers them. The roster does not
+have to cover the whole execution table: only what the strategy orders. An order for an id the
+roster never described fails the run at the fill instant (`instrument.undeclared`), naming every
+undeclared id at once. `vqapr run` states which roster it read.
 
 ## Editing a run declaration
 

@@ -15,6 +15,7 @@ from vqapr.domain.errors import VqaprError
 from vqapr.public import (
     DataModelEntry,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     SourceSpec,
     preflight_run,
@@ -237,14 +238,13 @@ def _datamodel_run(
     """Register one datamodel run, freeze it, execute it; the result and its record."""
     definition = RunDefinition(
         run_id=run_id,
-        strategies=(),
         instruments=INSTRUMENTS,
-        datamodels=(DataModelEntry(component_id, dataset_id, value_fields),),
+        datamodel=DataModelEntry(component_id, value_fields),
         timezone="Asia/Seoul",
-        at=time(16, 0),
-        sessions=sessions,
+        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.combine(sessions[0], time(0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23), tzinfo=KST),
+        writes=dataset_id,
     )
     frozen = preflight_run(PROJECT, definition)
     outcome = run(PROJECT, frozen, store_root=PROJECT / ".vqapr")

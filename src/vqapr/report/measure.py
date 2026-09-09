@@ -33,7 +33,7 @@ from vqapr.report.document import (
     Book,
     CalendarRow,
     Compliance,
-    ConstraintSummary,
+    ComplianceSummary,
     Correlation,
     Costs,
     HeadlineRow,
@@ -50,7 +50,7 @@ from vqapr.report.document import (
 
 ACCOUNT_ROW = "_ACCOUNT"
 """The cash-and-NAV row's `instrument` in `vqapr.account`
-(`flow/strategy/context._ACCOUNT_IDENTITY`)."""
+(`flow/run/context._ACCOUNT_IDENTITY`)."""
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -707,7 +707,7 @@ def compliance(monitoring_rows: Iterable[Row]) -> Compliance:
     judged: dict[str, bool] = {}
     breached_at: dict[datetime, int] = {}
     for row in monitoring_rows:
-        name = str(row["constraint"])
+        name = str(row["rule"])
         at = row["event_time"]
         tally = counters.setdefault(
             name, {"checked": 0, "held": 0, "within_tolerance": 0, "breached": 0, "unmeasured": 0}
@@ -734,8 +734,8 @@ def compliance(monitoring_rows: Iterable[Row]) -> Compliance:
                 bucket = offenders.setdefault(name, {})
                 bucket[instrument] = bucket.get(instrument, 0) + 1
     summaries = [
-        ConstraintSummary(
-            constraint=name,
+        ComplianceSummary(
+            rule=name,
             checked=tally["checked"],
             held=tally["held"],
             within_tolerance=tally["within_tolerance"],
@@ -756,7 +756,7 @@ def compliance(monitoring_rows: Iterable[Row]) -> Compliance:
     ]
     instants = sorted(breached_at)
     return Compliance(
-        constraints=summaries, instants=instants, breached=[breached_at[at] for at in instants]
+        rules=summaries, instants=instants, breached=[breached_at[at] for at in instants]
     )
 
 
@@ -780,7 +780,7 @@ def headline(report: StrategyReport) -> HeadlineRow:
         breached=(
             None
             if report.compliance is None
-            else sum(entry.breached for entry in report.compliance.constraints)
+            else sum(entry.breached for entry in report.compliance.rules)
         ),
     )
 

@@ -1,7 +1,7 @@
 """`vqapr register <declaration.yaml>` — validate everything declared, then persist it.
 
 **One verb, one file.** A workspace holds two kinds of thing: code the user wrote (a Strategy, a
-DataModel, a Constraint, a venue) and facts about the world that code needs (where the data is,
+DataModel, a Compliance rule, a venue) and facts about the world that code needs (where the data is,
 what its columns mean, when decisions happen, at what price they fill). Both are registrations —
 both are refused unless they check out, and both live in the same workspace — so both enter here.
 

@@ -60,9 +60,9 @@ class ModelWindow:
 
         A `DataRequirement` no longer carries a consumer id, so the framework supplies it -- and
         the only place that knows which component is about to read is the loop that is about to
-        call it. The constraint loops project and evaluate each constraint in turn against one
-        window; each gets its own view of it, and every access still lands in the one log this
-        occurrence collects.
+        call it. The compliance evaluation observes with each rule in turn against one window;
+        each gets its own view of it, and every access still lands in the one log this instant
+        collects.
 
         **The access log is shared, not copied.** A view that kept its own would silently drop
         whatever it recorded.

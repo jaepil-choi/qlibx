@@ -1,18 +1,23 @@
-"""Assemble and execute one run -- every strategy it names -- from a frozen authority to results.
+"""Assemble and execute one run -- the one model it names -- from a frozen authority to results.
 
 **This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
-executes runs is not a facade. Record `139` made it a run of several strategies: the run layer is
-frozen once, and each strategy runs in its own `StrategyEventLoop` with its own `Account` and its
-own record directory (design §4.1, §7-4). Sequentially by default; with `jobs > 1`, in that many
-processes, each of which freezes the registered run again and runs one strategy of it.
+executes runs is not a facade. The run layer is frozen, and its model runs in its own
+`StrategyEventLoop` with its own `Account` and its own record directory (design §4.1, §7-4).
+
+**One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3).
+Record `139` had made it several so that a comparison would share one frozen layer; determinism
+already gives that, so the sharing bought an optimisation and cost the ability to compare runs
+made on different days. Parallelism moved with it: it used to be members inside a run and is now
+independent runs, which is both more general and the unit the graph will schedule.
 """
 
 from __future__ import annotations
 
 import multiprocessing
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from types import MappingProxyType
@@ -20,8 +25,8 @@ from types import MappingProxyType
 from vqapr.account.account import Account
 from vqapr.authoring import Component
 from vqapr.authoring.history import retained_marks
-from vqapr.constraints.evaluation import (
-    constraint_requirements as declared_constraint_requirements,
+from vqapr.compliance.evaluation import (
+    compliance_requirements as declared_compliance_requirements,
 )
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import ScanSession
@@ -29,19 +34,17 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
-from vqapr.domain.errors import VqaprError
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
-    load_constraint,
+    load_compliance,
     load_data_model,
     load_exchange,
     load_strategy_model,
 )
-from vqapr.flow.datamodel.loop import DataModelEventLoop, DataModelResult
-from vqapr.flow.datamodel.output import DataModelOutput
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.judgments import require_judged
 from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
@@ -52,8 +55,20 @@ from vqapr.flow.freeze import (
     freeze_run_record,
     freeze_strategy_record,
 )
-from vqapr.flow.roster import RegisteredRoster, registered_roster, roster_report
-from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
+from vqapr.flow.roster import (
+    RegisteredRoster,
+    absent_workspace,
+    registered_roster,
+    roster_report,
+)
+from vqapr.flow.run.context import DEFAULT_TABLE_PREFIX
+from vqapr.flow.run.loop import (
+    DataModelEventLoop,
+    DataModelResult,
+    SimulationResult,
+    StrategyEventLoop,
+)
+from vqapr.flow.run.output import RunOutput
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
 from vqapr.record import (
@@ -61,6 +76,7 @@ from vqapr.record import (
     RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
+    read_table,
 )
 
 
@@ -137,13 +153,13 @@ class StrategyOutcome:
 class RunResult:
     """What one call to `run` produced: an outcome per strategy it ran, and their records.
 
-    `results` holds the in-process `SimulationResult` of every strategy this process ran to the
-    end. `records` holds each strategy's `strategy.json` as written, for every strategy run under
-    a store -- including those run by worker processes, whose in-process result never crosses the
-    process boundary and is read back from the record instead. `outcomes` has an entry for EVERY
-    strategy the run was asked to run, completed or failed (`docs/issues/archive/073`): a refusal of one
-    strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps
-    the `SimulationFailure` itself for a strategy that failed in this process.
+    `results` holds the in-process `SimulationResult` of every strategy this process ran to the end.
+    `records` holds each strategy's `strategy.json` as written, for every strategy run under a store
+    -- including those run by worker processes, whose in-process result never crosses the process
+    boundary and is read back from the record instead. `outcomes` has an entry for EVERY strategy
+    the run was asked to run, completed or failed (`docs/issues/archive/073`): a refusal of one
+    strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps the
+    `SimulationFailure` itself for a strategy that failed in this process.
     """
 
     run_id: str
@@ -205,8 +221,6 @@ def run(
     frozen_run: FrozenRun,
     *,
     store_root: str | Path | None = None,
-    strategies: Sequence[str] | None = None,
-    jobs: int = 1,
     replace_record: bool = False,
     record_account_positions: bool = True,
     workspace: Workspace | None = None,
@@ -232,17 +246,16 @@ def run(
     """
     if not isinstance(frozen_run, FrozenRun):
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
-    if not isinstance(jobs, int) or jobs < 1:
-        raise ValueError("jobs must be a positive integer")
     root_path = Path(project_root)
     frozen = frozen_run
-    if frozen.datamodels:
+    _own_output_or_refuse(
+        workspace if workspace is not None else root_path, frozen, replace_record=replace_record
+    )
+    if frozen.datamodel is not None:
         return _run_datamodels(
             root_path,
             frozen,
             store_root=store_root,
-            selected=strategies,
-            jobs=jobs,
             replace_record=replace_record,
         )
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
@@ -253,11 +266,12 @@ def run(
         raise ValueError("public run requires a frozen execution dataset")
     validate_execution_table(frozen.execution).raise_if_failed()
 
-    # ONE read of the roster for the whole run, through the caller's workspace when it has one.
-    # It was read once per strategy, and the CLI read it a further time for its envelope
+    # ONE read of the roster, through the caller's workspace when it has one
     # (`docs/issues/archive/070`); the record is written from this read and so is the report.
     roster = registered_roster(workspace if workspace is not None else root_path)
-    selected = tuple(frozen.strategy(name) for name in (strategies or ())) or frozen.strategies
+    layer = frozen.strategy
+    if layer is None:  # pragma: no cover -- `FrozenRun` refuses this
+        raise ValueError("a strategy run froze no strategy")
     store = None if store_root is None else Path(store_root)
     if store is not None:
         freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
@@ -266,33 +280,7 @@ def run(
     records: dict[str, Mapping[str, object]] = {}
     outcomes: dict[str, StrategyOutcome] = {}
     errors: dict[str, SimulationFailure] = {}
-    if jobs > 1 and len(selected) > 1:
-        # Every worker's outcome is collected, failed or not. A `SimulationFailure` comes
-        # back INSIDE the outcome (`run_registered_strategy`); only an exception about the
-        # store or the package itself still escapes `result()` here, as it did before.
-        outcomes = _in_workers(
-            selected,
-            run_registered_strategy,
-            (replace_record, record_account_positions),
-            jobs=jobs,
-            store=store,
-            root_path=root_path,
-            run_id=frozen.run_id,
-        )
-        records = {
-            component_id: outcome.record
-            for component_id, outcome in outcomes.items()
-            if outcome.record is not None
-        }
-        return RunResult(
-            frozen.run_id,
-            MappingProxyType(results),
-            MappingProxyType(records),
-            roster=roster,
-            outcomes=MappingProxyType(outcomes),
-        )
-
-    for layer in selected:
+    if True:
         try:
             result, record = _run_strategy(
                 root_path,
@@ -302,19 +290,22 @@ def run(
                 replace_record=replace_record,
                 record_account_positions=record_account_positions,
                 roster=roster,
+                workspace=workspace,
             )
         except SimulationFailure as failed:
-            # One strategy's refusal is that strategy's outcome (`docs/issues/archive/073`, `071`). It
-            # has its own flow and its own account (design section 7-4); the strategies after it
-            # in the run have nothing to learn from its decision being declined, and stopping
-            # them left a comparison run with three records and no word about the other five.
+            # The run's refusal is its outcome, reported rather than raised
+            # (`docs/issues/archive/073`, `071`): a caller running several runs learns which one
+            # declined without losing the others, and that is now the caller's loop rather than
+            # this function's.
             errors[layer.component_id] = failed
             outcomes[layer.component_id] = _failed_outcome(layer.component_id, failed)
-            continue
-        results[layer.component_id] = result
-        if record is not None:
-            records[layer.component_id] = record
-        outcomes[layer.component_id] = StrategyOutcome(layer.component_id, COMPLETED, record=record)
+        else:
+            results[layer.component_id] = result
+            if record is not None:
+                records[layer.component_id] = record
+            outcomes[layer.component_id] = StrategyOutcome(
+                layer.component_id, COMPLETED, record=record
+            )
     return RunResult(
         frozen.run_id,
         MappingProxyType(results),
@@ -337,39 +328,24 @@ def _run_datamodels(
     frozen: FrozenRun,
     *,
     store_root: str | Path | None,
-    selected: Sequence[str] | None,
-    jobs: int,
     replace_record: bool,
 ) -> RunResult:
-    """Execute a datamodel run: each of its datamodels (or those named), each in its own flow.
+    """Execute a datamodel run: its one datamodel, in its own flow.
 
-    The same shape as the strategy branch of `run` (record `148`): `run.json` first, one record
-    directory per member, workers under `--jobs` that each re-freeze the registered run. What a
-    datamodel produces beyond its record is a registered dataset, which is why every one of them
-    needs a store: the record is what says which dataset a run wrote.
+    The same shape as the strategy branch of `run` (record `148`): `run.json` first, then the
+    record directory. What a datamodel produces beyond its record is a registered dataset, which
+    is why it needs a store: the record is what says which dataset a run wrote.
     """
-    layers = tuple(frozen.datamodel(name) for name in (selected or ())) or frozen.datamodels
+    one = frozen.datamodel
+    if one is None:  # pragma: no cover -- `FrozenRun` refuses this
+        raise ValueError("a datamodel run froze no datamodel")
+    layers = (one,)
     store = None if store_root is None else Path(store_root)
     if store is not None:
         freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
 
     results: dict[str, SimulationResult | DataModelResult] = {}
     records: dict[str, Mapping[str, object]] = {}
-    if jobs > 1 and len(layers) > 1:
-        # A datamodel's refusal is a `VqaprError`, and unlike a `SimulationFailure` it makes the
-        # trip back from the worker as itself (`VqaprError.__reduce__`), so `result()` raises
-        # here exactly what the sequential loop below raises.
-        records = _in_workers(
-            layers,
-            run_registered_datamodel,
-            (replace_record,),
-            jobs=jobs,
-            store=store,
-            root_path=root_path,
-            run_id=frozen.run_id,
-        )
-        return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
-
     for layer in layers:
         result, record = _run_datamodel(
             root_path, frozen, layer, store=store, replace_record=replace_record
@@ -380,59 +356,62 @@ def _run_datamodels(
     return RunResult(frozen.run_id, MappingProxyType(results), MappingProxyType(records))
 
 
-def _in_workers[Returned](
-    layers: Sequence[FrozenStrategy] | Sequence[FrozenDataModel],
+def in_workers[Returned](
+    run_ids: Sequence[str],
     worker: Callable[..., Returned],
     arguments: tuple[object, ...],
     *,
     jobs: int,
     store: Path | None,
     root_path: Path,
-    run_id: str,
 ) -> dict[str, Returned]:
-    """One member per worker, in `jobs` spawned processes; what each returns, by component id.
+    """One RUN per worker, in `jobs` spawned processes; what each returns, by run id.
 
-    The one pool behind `--jobs` for both kinds of run. The strategy branch and the datamodel
-    branch each carried their own copy of this, and the `docs/issues/archive/073` fix -- a worker's
-    failure has to be something `concurrent.futures` can pickle -- landed in only one of them.
-    `worker` is a module-level function taking `(project_root, run_id, component_id, store_root,
-    *arguments)` as strings and bools, because it crosses a `spawn` boundary.
+    The one pool behind `--jobs`. It spread the members of a single run until 2026-09-09; a run
+    holds one model now, so the unit is the run (`docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3). That is the more general unit as well -- two runs need share nothing, where two members
+    shared a frozen layer -- and it is what a graph scheduler will hand this function later.
+
+    `worker` is a module-level function taking `(project_root, run_id, store_root, *arguments)` as
+    strings and bools, because it crosses a `spawn` boundary. The
+    `docs/issues/archive/073` rule still holds: a worker's failure has to be something
+    `concurrent.futures` can pickle, which is why the strategy worker returns its outcome.
     """
     if store is None:
         raise ValueError(
             "jobs > 1 needs a store_root: a worker's result comes back through the record store"
         )
     context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=min(jobs, len(layers)), mp_context=context) as pool:
+    with ProcessPoolExecutor(max_workers=min(jobs, len(run_ids)), mp_context=context) as pool:
         futures = {
-            layer.component_id: pool.submit(
-                worker, str(root_path), run_id, layer.component_id, str(store), *arguments
-            )
-            for layer in layers
+            run_id: pool.submit(worker, str(root_path), run_id, str(store), *arguments)
+            for run_id in run_ids
         }
-        return {component_id: future.result() for component_id, future in futures.items()}
+        return {run_id: future.result() for run_id, future in futures.items()}
 
 
 def run_registered_datamodel(
     project_root: str,
     run_id: str,
-    component_id: str,
     store_root: str,
     replace_record: bool,
 ) -> Mapping[str, object]:
-    """Run one datamodel of a REGISTERED run, in this process; the worker under `--jobs`.
+    """Run one REGISTERED datamodel run, in this process; the worker under `--jobs`.
 
     A refusal is raised, not returned: a datamodel's `VqaprError` pickles (`__reduce__`), so the
-    parent's `future.result()` re-raises it as itself, the same exception the sequential loop
+    parent's `future.result()` re-raises it as itself, the same exception the sequential path
     raises. The strategy worker cannot do this because its `SimulationFailure` carries the owner
     objects that were refused; that is why it returns a `StrategyOutcome` instead.
     """
     workspace = Workspace.open(project_root)
     frozen = _preflight_run(workspace, workspace.run_definition(run_id))
+    layer = frozen.datamodel
+    if layer is None:
+        raise ValueError(f"run {run_id!r} is not a datamodel run")
     _, record = _run_datamodel(
         Path(project_root),
         frozen,
-        frozen.datamodel(component_id),
+        layer,
         store=Path(store_root),
         replace_record=replace_record,
     )
@@ -471,7 +450,12 @@ def _run_datamodel(
             )
             opened_writer.open(replace=replace_record)
             writer = opened_writer
-        output = DataModelOutput(root_path, layer, run_id=frozen.run_id)
+        output = RunOutput(
+            root_path,
+            writes=frozen.writes,
+            value_fields=layer.value_fields,
+            run_id=frozen.run_id,
+        )
         flow = DataModelEventLoop(
             frozen,
             layer,
@@ -513,14 +497,15 @@ def _run_datamodel(
 def run_registered_strategy(
     project_root: str,
     run_id: str,
-    component_id: str,
     store_root: str,
     replace_record: bool,
     record_account_positions: bool,
 ) -> StrategyOutcome:
-    """One strategy of one registered run, in this process, returning its outcome.
+    """One registered strategy run, in this process, returning its outcome.
 
-    The worker behind `jobs > 1`. Module-level and taking only strings and bools, because it
+    The worker behind `jobs > 1`, which parallelises RUNS since 2026-09-09 -- a run holds one
+    model, so the unit that can be spread across processes is the run itself. Module-level and
+    taking only strings and bools, because it
     crosses a `spawn` boundary; it freezes the registered run again rather than receiving a
     frozen one, since a frozen run is built from workspace objects that are not meant to travel.
 
@@ -533,7 +518,9 @@ def run_registered_strategy(
     """
     workspace = Workspace.open(project_root)
     frozen = _preflight_run(workspace, workspace.run_definition(run_id))
-    layer = frozen.strategy(component_id)
+    layer = frozen.strategy
+    if layer is None:
+        raise ValueError(f"run {run_id!r} is not a strategy run")
     try:
         _, record = _run_strategy(
             Path(project_root),
@@ -545,9 +532,9 @@ def run_registered_strategy(
             roster=registered_roster(workspace),
         )
     except SimulationFailure as failed:
-        return _failed_outcome(component_id, failed)
+        return _failed_outcome(layer.component_id, failed)
     assert record is not None
-    return StrategyOutcome(component_id, COMPLETED, record=record)
+    return StrategyOutcome(layer.component_id, COMPLETED, record=record)
 
 
 def _source_digests(frozen: FrozenRun) -> dict[str, str]:
@@ -564,11 +551,14 @@ def _run_strategy(
     replace_record: bool,
     record_account_positions: bool,
     roster: RegisteredRoster | None,
+    workspace: Workspace | None = None,
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
-    `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is written
-    from it rather than from a read of this strategy's own.
+    `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is
+    written from it rather than from a read of this strategy's own. `workspace` is the document
+    the command opened, when it did, so publishing the allocation registers through that one
+    open rather than a second.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
     # `run` refused a strategy run frozen without a venue or an initial account before
@@ -580,9 +570,7 @@ def _run_strategy(
     if initial_snapshot is None or initial_mode is None:
         raise RuntimeError("a frozen strategy run reached execution without an initial account")
     exchange = load_exchange(frozen.exchange, project_root=root_path)
-    constraints = tuple(
-        load_constraint(ref, project_root=root_path) for ref in layer.constraints.constraints
-    )
+    rules = tuple(load_compliance(ref, project_root=root_path) for ref in layer.compliance.rules)
     # What was ACTUALLY loaded, computed beside the loads that read it.
     #
     # Since the drift refusal went (issue 009), an edited component runs instead of being
@@ -605,9 +593,9 @@ def _run_strategy(
         strategy_requirements = strategy.requirements()
         if strategy_requirements != layer.requirements:
             raise ValueError("loaded Strategy requirements drifted from FrozenRun")
-        constraint_requirements = declared_constraint_requirements(constraints)
-        if constraint_requirements != layer.constraint_requirements:
-            raise ValueError("loaded Constraint requirements drifted from FrozenRun")
+        compliance_requirements = declared_compliance_requirements(rules)
+        if compliance_requirements != layer.compliance_requirements:
+            raise ValueError("loaded Compliance requirements drifted from FrozenRun")
         root = AccountState(initial_snapshot)
         strategy.memory = normalize_memory(layer.initial_model_memory)
         strategy.load_payload(BytesIO(layer.initial_payload))
@@ -619,10 +607,10 @@ def _run_strategy(
             initial_account=root,
             initial_model_memory=layer.initial_model_memory,
             initial_payload=layer.initial_payload,
-            # What each constraint holds as loaded -- its constructor's doing, from the config
-            # the fingerprint already folds -- is the memory the run commits from (record `181`).
+            # What each rule holds as loaded -- its constructor's doing, from the config the
+            # fingerprint already folds -- is the memory the run commits from (record `181`).
             initial_component_memory={
-                **{constraint.constraint_id: constraint.memory for constraint in constraints},
+                **{rule.compliance_id: rule.memory for rule in rules},
                 # The venue too, when it is a Component (record `184`); a loader double that
                 # only offers `execute` carries no memory to commit.
                 **(
@@ -652,20 +640,14 @@ def _run_strategy(
                 allowed_requirements=layer.requirements,
                 consumer_id=layer.component_id,
             ),
-            constraint_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=frozen.instruments,
-                store=observation_store,
-                # No consumer: this window serves every loaded constraint, and which one is reading
-                # is known only inside the loop that calls them.
-                allowed_requirements=layer.constraint_requirements,
-            ),
-            # Monitoring reads as of the fill instant it judges (record `148`).
-            constraint_window_at=lambda instant: ModelWindow(
+            # The rules read as of the market-clock instant they observe at (design §7.2). No
+            # consumer: this window serves every loaded rule, and which one is reading is known
+            # only inside the evaluation that calls them.
+            compliance_window_at=lambda instant: ModelWindow(
                 evaluation_time=instant,
                 instruments=frozen.instruments,
                 store=observation_store,
-                allowed_requirements=layer.constraint_requirements,
+                allowed_requirements=layer.compliance_requirements,
             ),
             # Each strategy has its own Account (design §7-4): the run shares the initial
             # DECLARATION, not the book. It retains the marks this strategy declared it would
@@ -675,7 +657,7 @@ def _run_strategy(
                 retained_marks=retained_marks(strategy.account_history()),
             ),
             exchange=exchange,
-            constraints=constraints,
+            compliance=rules,
             scan_session=session,
             # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
             # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
@@ -692,8 +674,33 @@ def _run_strategy(
             # stale marker rather than as `null`, which this record's own contract defines as
             # "no roster was ever read".
             freeze_strategy_record(
-                writer, result, frozen, layer, as_loaded, _roster_report_or_stale(roster)
+                writer,
+                result,
+                frozen,
+                layer,
+                as_loaded,
+                _roster_report_or_stale(roster),
+                # The venue as this run had it: which one, which bytes, and what it declared it
+                # models (design §6.1). Recorded so a reader can tell a tax-free KRX from a
+                # taxed one without opening the source at its digest.
+                exchange={
+                    "component_id": str(frozen.exchange.component_id),
+                    "fingerprint": frozen.exchange.fingerprint,
+                    "settings": normalize_memory(dict(exchange.settings)),
+                },
             )
+        # The record first -- it is the run -- and then the warehouse: what the run promised
+        # under `writes` (design §2), through the same door a datamodel's rows take. A stored
+        # run streamed its rows to the record and keeps none on its roots, so the allocation is
+        # read back from the record it just wrote; a run without a store still holds them.
+        _publish_allocation(
+            root_path,
+            frozen,
+            result.final_state.recorder_rows.get(WEIGHT_TABLE, ())
+            if writer is None
+            else read_table(writer.root, frozen.run_id, WEIGHT_TABLE, layer.record_ref),
+            workspace=workspace,
+        )
     except BaseException:
         # A strategy that died still holds its record's lock. Releasing here turns a crash into
         # an ordinary retry instead of stranding the directory until the lock goes stale.
@@ -708,6 +715,110 @@ def _run_strategy(
         else read_strategy_record(writer.root, frozen.run_id, layer.record_ref)
     )
     return result, record
+
+
+def _own_output_or_refuse(
+    workspace_or_root: Workspace | Path, frozen: FrozenRun, *, replace_record: bool
+) -> None:
+    """A run whose published output stands is run again the way its record is: deliberately.
+
+    Preflight lets the run's own `writes` through (it is this run's product, not a taken name);
+    the decision to replace it is made here, beside the record's, under the same flag. Without
+    `replace_record` the run is refused with the two ways forward; with it the earlier output is
+    withdrawn and the run publishes afresh. An authored dataset, or another run's, never reaches
+    this branch -- preflight refused it by name.
+
+    Read through the caller's `Workspace` when it holds one (`docs/issues/archive/070`: one
+    command, one open). A frozen run executed outside any workspace has nothing published to
+    stand in its way, so an ABSENT document is not a refusal here -- the same narrow tolerance
+    `registered_roster` keeps, and for the same reason: a damaged document still raises.
+    """
+    if isinstance(workspace_or_root, Workspace):
+        workspace = workspace_or_root
+    else:
+        try:
+            workspace = Workspace.open(workspace_or_root)
+        except VqaprError as unopened:
+            if not absent_workspace(unopened):
+                raise
+            return
+    existing = next(
+        (item for item in workspace.datasets if str(item.dataset_id) == frozen.writes), None
+    )
+    if existing is None or existing.produced_by != frozen.run_id:
+        return
+    if not replace_record:
+        raise VqaprError(
+            stage=Stage.RUN,
+            failures=[
+                Failure.bounded(
+                    code="run.output_registered",
+                    status=Status.CONFLICT,
+                    requirement="a run publishes its output once unless told to replace it",
+                    observed=(
+                        f"{frozen.writes!r} was published by an earlier run of {frozen.run_id!r}"
+                    ),
+                    fix=(
+                        f"vqapr run {frozen.run_id} --force to replace it, or "
+                        f"vqapr rm dataset {frozen.writes} to withdraw it first"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="pass --force, or withdraw the dataset, then retry",
+        )
+    workspace.remove("dataset", frozen.writes)
+
+
+WEIGHT_TABLE = f"{DEFAULT_TABLE_PREFIX}weight"
+"""The package table a strategy's allocation is published from."""
+
+
+def _publish_allocation(
+    root_path: Path,
+    frozen: FrozenRun,
+    recorded: Iterable[Mapping[str, object]],
+    *,
+    workspace: Workspace | None = None,
+) -> str | None:
+    """Put the strategy's allocation in the warehouse under the run's `writes` (design §2).
+
+    The rows are the `vqapr.weight` table the callback recorded -- one per instrument per
+    decision, the weight as the exact string the intent carried -- stamped `available_at` at the
+    decision's own `event_time`, which is when that weight was knowable and not a second earlier.
+    Published as DOUBLE: the data plane carries one numeric type per kind
+    (`docs/issues/archive/088`), and the exact value stays in the record. This is what makes a
+    published allocation and a registered benchmark the same kind of input
+    (`portfolio/allocation.py`): a later strategy reads either through a `DataRequirement`.
+
+    A strategy that held on every session has nothing to publish and publishes nothing: an empty
+    dataset cannot be typed, and a typed nothing would be a lie. The run still completes; `writes`
+    then names a dataset that does not appear, and `vqapr list runs` beside `list datasets` shows
+    exactly that.
+
+    `recorded` is the `vqapr.weight` table -- off the roots for a run without a store, read back
+    from the record for a stored run. Until record `210` this read the roots only, and a stored
+    run streams every row to its record and keeps none there, so `vqapr run` published nothing
+    while an in-process `run()` did (the showcases registered their allocations by hand from the
+    record, which is why nothing noticed).
+    """
+    rows = [
+        {
+            "available_at": row["event_time"],
+            "instrument": row["instrument"],
+            "weight": float(Decimal(str(row["weight"]))),
+        }
+        for row in recorded
+    ]
+    if not rows:
+        return None
+    output = RunOutput(
+        root_path, writes=frozen.writes, value_fields=("weight",), run_id=frozen.run_id
+    )
+    output.open()
+    output.append(rows)
+    output.register(workspace if workspace is not None else Workspace.open(root_path))
+    return frozen.writes
 
 
 def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object] | None:
@@ -739,11 +850,11 @@ def _as_loaded_fingerprints(
     """The fingerprint of every component this strategy actually loaded, by component id.
 
     Per component rather than folded (design §4.2): the strategy's own fingerprint is readable on
-    its own, so a change to one constraint does not disguise itself as a change to the strategy.
+    its own, so a change to one rule does not disguise itself as a change to the strategy.
     Only refs that carry a real source are included -- a run assembled in-process may hold a stub
     in place of a registered component, and such a thing has no bytes on disk to fingerprint.
     """
-    candidates = [layer.config.component, frozen.exchange, *layer.constraints.constraints]
+    candidates = [layer.config.component, frozen.exchange, *layer.compliance.rules]
     return {
         str(ref.component_id): as_loaded_fingerprint(ref, project_root=root_path)
         for ref in candidates

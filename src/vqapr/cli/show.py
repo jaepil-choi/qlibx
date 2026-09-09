@@ -138,24 +138,24 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         ) from None
 
     kind = getattr(ref, "kind", None)
-    if kind is ComponentKind.CONSTRAINT:
-        # A constraint declares what it reads and answers to an id, so it is describable in the
-        # same terms -- it simply forms nothing and produces no weights.
-        from vqapr.extension.loading import load_constraint
+    if kind is ComponentKind.COMPLIANCE:
+        # A rule declares what it reads and answers to an id, so it is describable in the same
+        # terms -- it simply forms nothing and produces no weights.
+        from vqapr.extension.loading import load_compliance
 
-        rule = load_constraint(ref, project_root=project_root)
+        rule = load_compliance(ref, project_root=project_root)
         return {
             "component_id": component_id,
             "kind": cli_kind(kind),
-            "constraint_id": str(rule.constraint_id),
+            "compliance_id": str(rule.compliance_id),
             "reads": {
                 f"{requirement.dataset_id}.{requirement.field_id}": str(requirement.lookback)
                 for requirement in rule.requirements()
             },
-            "decides": "the feasible set every instrument's weight must lie in",
+            "decides": "whether the committed book, marked, is inside the limit it observes",
             "forms": [],
-            "weights": "bounds only; a constraint narrows weights and never proposes them",
-            "records": [],
+            "weights": "none; a compliance rule observes the book and never proposes weights",
+            "records": ["vqapr.monitoring"],
         }
     if kind is ComponentKind.DATA_MODEL:
         model = load_data_model(ref, project_root=project_root)
@@ -163,14 +163,14 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         model = load_strategy_model(ref, project_root=project_root)
     else:
         # A registered id of a kind this verb does not describe. It used to fall through to the
-        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then
-        # left as `stage: unhandled` -- a sentence that is false (this verb reads three kinds,
-        # and had just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is
-        # the same one as an unregistered id, one line up, and gets the same answer.
+        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then left
+        # as `stage: unhandled` -- a sentence that is false (this verb reads three kinds, and had
+        # just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is the
+        # same one as an unregistered id, one line up, and gets the same answer.
         shown = ", ".join(
             cli_kind(item)
             for item in (
-                ComponentKind.STRATEGY_MODEL, ComponentKind.DATA_MODEL, ComponentKind.CONSTRAINT
+                ComponentKind.STRATEGY_MODEL, ComponentKind.DATA_MODEL, ComponentKind.COMPLIANCE
             )
         )
         raise InputError(

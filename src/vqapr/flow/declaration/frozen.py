@@ -2,11 +2,10 @@
 
 Split out of `flow/declaration/run.py` (one-shape campaign Step 6, record 161): `run.py` is the
 declaration -- what a document registers -- and this is what preflight makes of it. A `FrozenRun`
-shares the
-run layer's identity across every strategy; each `FrozenStrategy`/`FrozenDataModel` carries its
-own. Nothing here is declared or on disk as itself: identities are hashed from explicit payloads
-and records pick fields by name, which is why these stay dataclasses rather than becoming
-pydantic (ExecPlan M6, 6a).
+carries the run layer's identity and its one `FrozenStrategy`/`FrozenDataModel` carries its own.
+Nothing here is declared or on disk as itself: identities are hashed from explicit payloads and
+records pick fields by name, which is why these stay dataclasses rather than becoming pydantic
+(ExecPlan M6, 6a).
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (
     FINGERPRINT_PREFIX,
-    ConstraintSet,
+    ComplianceSet,
     StrategyConfig,
     _encoded_requirements,
     _identity,
@@ -94,15 +93,15 @@ def merged_occurrences(*agendas: FrozenAgenda | None) -> tuple[OperationOccurren
 class FrozenStrategy:
     """One strategy's layer of a frozen run: what is its own and not the run's.
 
-    Its identity folds the component fingerprint, its constraints, its agenda slice, its opening
-    memory and what it reads. Two strategies in one run differ here and nowhere else.
+    Its identity folds the component fingerprint, the run's Compliance rules, its agenda slice,
+    its opening memory and what it and the rules read.
     """
 
     config: StrategyConfig
-    constraints: ConstraintSet
+    compliance: ComplianceSet
     agenda: FrozenAgenda
     requirements: tuple[DataRequirement, ...] = ()
-    constraint_requirements: tuple[DataRequirement, ...] = ()
+    compliance_requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = None
     initial_payload: bytes = b""
     initial_model_state_ref: ModelStateRef = field(init=False)
@@ -112,7 +111,7 @@ class FrozenStrategy:
         if self.agenda.agenda_id != self.config.agenda_id:
             raise ValueError("agenda must match the strategy config's agenda_id")
         _require_requirements("requirements", self.requirements)
-        _require_requirements("constraint_requirements", self.constraint_requirements)
+        _require_requirements("compliance_requirements", self.compliance_requirements)
         memory = normalize_memory(self.initial_model_memory)
         object.__setattr__(self, "initial_model_memory", memory)
         object.__setattr__(
@@ -146,17 +145,16 @@ class FrozenStrategy:
                             self.component_id,
                             self.config.component.fingerprint,
                         ),
-                        "constraints": [
-                            (constraint.component_id, constraint.fingerprint)
-                            for constraint in self.constraints.constraints
+                        "compliance": [
+                            (rule.component_id, rule.fingerprint) for rule in self.compliance.rules
                         ],
                         "agenda": self.agenda.encoded(),
                         "initial_model_memory": self.initial_model_memory,
                         "initial_model_state_ref": self.initial_model_state_ref.digest,
                         "initial_payload": self.initial_payload.hex(),
                         "requirements": _encoded_requirements(self.requirements),
-                        "constraint_requirements": _encoded_requirements(
-                            self.constraint_requirements
+                        "compliance_requirements": _encoded_requirements(
+                            self.compliance_requirements
                         ),
                     }
                 ),
@@ -169,13 +167,12 @@ class FrozenDataModel:
     """One datamodel's layer of a frozen run: the component, its agenda slice, and its output.
 
     The datamodel counterpart of `FrozenStrategy`, minus what a datamodel has none of: no
-    constraints, no account, no payload. Its identity folds the component fingerprint, the
+    compliance rules, no account, no payload. Its identity folds the component fingerprint, the
     agenda slice, the output declaration, its opening memory and what it reads.
     """
 
     component: ComponentRef
     agenda: FrozenAgenda
-    dataset_id: str
     value_fields: tuple[str, ...]
     requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = None
@@ -184,7 +181,6 @@ class FrozenDataModel:
     def __post_init__(self) -> None:
         if self.component.kind is not ComponentKind.DATA_MODEL:
             raise ValueError("component must identify a DATA_MODEL")
-        _require_id(self.dataset_id, "dataset_id")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
         object.__setattr__(
@@ -210,7 +206,7 @@ class FrozenDataModel:
                     {
                         "datamodel": (self.component_id, self.component.fingerprint),
                         "agenda": self.agenda.encoded(),
-                        "output": (self.dataset_id, list(self.value_fields)),
+                        "output": list(self.value_fields),
                         "initial_model_memory": self.initial_model_memory,
                         "requirements": _encoded_requirements(self.requirements),
                     }
@@ -223,15 +219,19 @@ class FrozenDataModel:
 class FrozenRun:
     """Frozen owner declarations retained by a future preflight result.
 
-    The run layer -- what every strategy shares -- plus the frozen strategies. `identity` is the
+    The run layer -- period, venue, data -- plus the one frozen model. `identity` is the
     run layer's alone, so adding a strategy to a run does not rename the rows the others wrote;
-    `requirements`, `datasets` and `sources` are the union every strategy and constraint reads,
+    `requirements`, `datasets` and `sources` are the union the strategy and the rules read,
     which is the panel set (design §4.1).
     """
 
     run_id: str
-    strategies: tuple[FrozenStrategy, ...]
-    datamodels: tuple[FrozenDataModel, ...] = field(default=(), kw_only=True)
+    writes: str
+    """The dataset this run publishes -- the run layer's, shared by no one
+    (design §2): identity folds it, because two runs writing different names are two
+    arrows even when everything else about them is the same."""
+    strategy: FrozenStrategy | None = None
+    datamodel: FrozenDataModel | None = field(default=None, kw_only=True)
     exchange: ComponentRef | None = None
     execution: ExecutionTable | None = None
     start: datetime | None = None
@@ -253,12 +253,10 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if bool(self.strategies) == bool(self.datamodels):
-            raise ValueError("a frozen run holds strategies or datamodels, at least one, not both")
-        ids = [layer.component_id for layer in (*self.strategies, *self.datamodels)]
-        if len(set(ids)) != len(ids):
-            raise ValueError("a frozen run holds each model at most once")
-        if self.datamodels and (
+        _require_id(self.writes, "writes")
+        if (self.strategy is None) == (self.datamodel is None):
+            raise ValueError("a frozen run holds one strategy or one datamodel, not both")
+        if self.datamodel is not None and (
             self.exchange is not None
             or self.execution is not None
             or self.initial_account_snapshot is not None
@@ -317,32 +315,15 @@ class FrozenRun:
 
     @property
     def kind(self) -> str:
-        return "datamodel" if self.datamodels else "strategy"
+        return "datamodel" if self.datamodel is not None else "strategy"
 
     @property
-    def members(self) -> tuple[FrozenStrategy | FrozenDataModel, ...]:
-        return (*self.strategies, *self.datamodels)
-
-    def strategy(self, component_id: str) -> FrozenStrategy:
-        for layer in self.strategies:
-            if layer.component_id == component_id:
-                return layer
-        raise KeyError(
-            f"run {self.run_id!r} froze no strategy {component_id!r}; it holds "
-            f"{', '.join(layer.component_id for layer in self.members)}"
-        )
-
-    def datamodel(self, component_id: str) -> FrozenDataModel:
-        for layer in self.datamodels:
-            if layer.component_id == component_id:
-                return layer
-        raise KeyError(
-            f"run {self.run_id!r} froze no datamodel {component_id!r}; it holds "
-            f"{', '.join(layer.component_id for layer in self.members)}"
-        )
-
-    def member(self, component_id: str) -> FrozenStrategy | FrozenDataModel:
-        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
+    def member(self) -> FrozenStrategy | FrozenDataModel:
+        """The one model this run froze, whichever kind it holds."""
+        one = self.strategy if self.strategy is not None else self.datamodel
+        if one is None:  # pragma: no cover -- `__post_init__` refuses this
+            raise ValueError(f"run {self.run_id!r} froze no model")
+        return one
 
     def dispatch_order(
         self, layer: FrozenStrategy | FrozenDataModel
@@ -368,6 +349,7 @@ class FrozenRun:
             raise RuntimeError("initial account snapshot and mode were frozen apart")
         return _identity(
             {
+                        "writes": self.writes,
                 "run_id": self.run_id,
                 "exchange": (
                     (self.exchange.component_id, self.exchange.fingerprint)

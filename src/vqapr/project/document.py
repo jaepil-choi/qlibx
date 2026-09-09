@@ -70,9 +70,9 @@ class DatasetCodec(Document):
 
     Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
     `field_types`. Measured: `aggregated`, `span`; `produced_by` is stamped by a datamodel run.
-    `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a declaration
-    since (`docs/issues/archive/088`); an entry written under the old shape carries the value duckdb
-    measured, which is what the author would have declared, so it decodes as declared.
+    `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a
+    declaration since (`docs/issues/archive/088`); an entry written under the old shape carries the
+    value duckdb measured, which is what the author would have declared, so it decodes as declared.
 
     A measurement cannot be invented for an entry that predates it: an entry without `span`
     decodes into a QUARANTINED registration -- enumerable, removable, re-registrable, refused on
@@ -228,7 +228,7 @@ class InstrumentsDeclaration(Document):
 class ComponentDeclaration(Document):
     """`components.<component_id>`: where the code is and what it is, in the CLI's spelling."""
 
-    kind: Literal["datamodel", "strategy", "constraint", "exchange"]
+    kind: Literal["datamodel", "strategy", "compliance", "exchange"]
     path: str
     object_name: str
     config: dict[str, Any] | None = None
@@ -361,15 +361,15 @@ def _linked(raw: object) -> tuple[dict, ...]:
     runs = {}
     for raw_id, entry in document.runs.items():
         definition = _decoded("run", raw_id, RunDefinition, {"run_id": raw_id, **entry})
-        for strategy in definition.strategies:
+        if (strategy := definition.strategy) is not None:
             component = components.get(component_id(strategy.component_id))
             if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered strategy")
-            for name in strategy.constraints:
-                constraint = components.get(component_id(name))
-                if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
-                    raise ValueError(f"run {raw_id!r} names an unregistered constraint")
-        for datamodel in definition.datamodels:
+        for name in definition.compliance:
+            rule = components.get(component_id(name))
+            if rule is None or rule.kind is not ComponentKind.COMPLIANCE:
+                raise ValueError(f"run {raw_id!r} names an unregistered compliance rule")
+        if (datamodel := definition.datamodel) is not None:
             component = components.get(component_id(datamodel.component_id))
             if component is None or component.kind is not ComponentKind.DATA_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered datamodel")
@@ -387,10 +387,10 @@ def _linked(raw: object) -> tuple[dict, ...]:
                     "which declares no execution role"
                 )
         if (
-            definition.sessions_from is not None
-            and dataset_id(definition.sessions_from) not in datasets
+            definition.agenda.days_from is not None
+            and dataset_id(definition.agenda.days_from) not in datasets
         ):
-            raise ValueError(f"run {raw_id!r} takes its sessions from an unregistered dataset")
+            raise ValueError(f"run {raw_id!r} takes its trading days from an unregistered dataset")
         runs[raw_id] = definition
 
     return (datasets, sources, components, runs)

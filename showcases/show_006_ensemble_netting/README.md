@@ -24,7 +24,7 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
 | One member's memory moved, the other's never did | `reversal` mutates `self.memory` every occurrence; `momentum` never assigns it. The two members' published lineage — computed by the package from committed vs. current model-state refs, not self-reported — carries `state_path == ["moved"]` for `reversal` and `["constant"]` for `momentum` |
 | Long-only is emergent | Both members are signed and dollar-neutral. Neither is filtered before combination; the registered `no_short` intersected with `single_name_cap` is what removes the short leg |
 | The combination rule is the Strategy's own choice | The ensemble combines the netted per-ticker signal with `equal_weight` and matches its own declared gross-active budget with `rescale`. `net_members` itself never decides a combination — it only measures |
-| The bounds are the shipped constraint set's own | `optimize` is called against `context.constraint_bounds` — what the registered `NoShort` and `SingleNameCap` projected for that occurrence |
+| The bounds are the shipped kit's own | `optimize` is called against the box the strategy builds from `no_short` and `single_name_cap` on the benchmark it subscribes to |
 | The account is verified against its own journal | Cash and every position are rebuilt from the committed fill journal and compared to the committed `AccountSnapshot`; a mismatch aborts the run |
 | Output is deterministic | The whole pipeline runs twice into separate projects, and both the reported outcome and the SHA-256 artifact digests must match |
 
@@ -43,8 +43,8 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
   arithmetic fact about the two published panels; it says nothing about a portfolio-level risk
   measure.
 - **Four names are not two hundred.** The fixture is a four-constituent KOSPI 200 slice; the
-  benchmark this showcase's constraint set is defined against is registered but not itself
-  subscribed to by the ensemble, since this showcase is signal ensembling, not enhanced indexing
+  benchmark this showcase's cap is defined against is subscribed to by the ensemble only for the
+  cap, never as a signal, since this showcase is signal ensembling, not enhanced indexing
   (`show_005` demonstrates the benchmark-relative path).
 - **No warm-up trimming.** The reversal member needs six closes and the momentum member eleven;
   earlier occurrences on each agenda decline with `NoDecision` rather than being excluded from the
@@ -78,7 +78,7 @@ Last verified 2026-09-08 against `vqapr-0.8.0`, on the committed April 2026 KRX 
 | subscribed allocation inputs | `momentum_allocation` + `reversal_allocation` |
 | occurrences where a ticker crossed (non-zero offset) | 11 of 11 overlap occurrences |
 | max ticker offset_weight observed | 0.04 |
-| shipped constraints registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
+| shipped compliance registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
 | ensemble rebalances | 9 |
 | dealt fills | 14 (whole shares) |
 | commission / sale tax | 52,368.75 / 135,429.80 |

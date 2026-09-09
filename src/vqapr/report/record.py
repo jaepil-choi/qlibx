@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.strategy.context import FRAMEWORK_TABLES
+from vqapr.flow.run.context import FRAMEWORK_TABLES
 from vqapr.record import (
     read_run_record,
     read_strategy_record,
@@ -122,9 +122,9 @@ def strategy_report(
     else:
         compliance = None
         omitted["compliance"] = (
-            f"{MONITORING_TABLE} is empty: the strategy declared no constraint"
-            if not record.get("constraints")
-            else f"{MONITORING_TABLE} is empty although constraints were declared"
+            f"{MONITORING_TABLE} is empty: the run declared no compliance rule"
+            if not record.get("compliance")
+            else f"{MONITORING_TABLE} is empty although compliance rules were declared"
         )
     return StrategyReport(
         run_id=run_id,

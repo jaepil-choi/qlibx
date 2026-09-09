@@ -3,7 +3,8 @@ scaffolds teach one grammar.
 
 This began as the characterization suite for `docs/issues/archive/036` -- every assertion stated what the
 package did on 2026-09-02 and named the milestone that would delete it. The milestones landed:
-records `126` (the two lookbacks), `130` (Constraint), `131` (DataModel) and `132` (StrategyModel).
+records `126` (the two lookbacks), `130` (the observing role), `131` (DataModel) and `132`
+(StrategyModel); record `208` renamed that role `Compliance`.
 What is left is the specification those tests were counting down to.
 
 Design: `docs/design/the-panel-the-surface-and-the-run.md` §3 (명사 2 - 하나의 저자 표면).
@@ -18,18 +19,17 @@ import pytest
 import vqapr.authoring as authoring
 import vqapr.public as public
 from vqapr.extension.component import ComponentKind
-from vqapr.extension.loading import load_constraint, load_data_model, load_strategy_model
+from vqapr.extension.loading import load_compliance, load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render
-from vqapr.public import register_constraint, register_data_model, register_strategy_model
+from vqapr.public import register_compliance, register_data_model, register_strategy_model
 
 # --------------------------------------------------------------------------------------
 # One name, two classes.
 # --------------------------------------------------------------------------------------
 
 CONVERGED_NAMES = (
-    "Constraint",
-    "ConstraintBounds",
-    "ConstraintFinding",
+    "Compliance",
+    "ComplianceFinding",
     "DataModel",
     "StrategyModel",
 )
@@ -38,8 +38,8 @@ CONVERGED_NAMES = (
 The goal, asserted so that it cannot quietly come apart again. This list began as
 `DIVERGENT_NAMES` -- five names exported by BOTH `vqapr.public` and `vqapr.authoring` as
 different classes, with an inverse test asserting `is not` for each -- and every name crossed
-over in the milestone that converged it: the two lookbacks in record `126`, `Constraint` with
-`ConstraintBounds` and `ConstraintFinding` in `130`, `DataModel` in `131`, and `StrategyModel`,
+over in the milestone that converged it: the two lookbacks in record `126`, the observing role
+with its finding in `130` (`Compliance` since `208`), `DataModel` in `131`, and `StrategyModel`,
 the last, in `132`. The inverse test went with the last entry.
 """
 
@@ -60,7 +60,7 @@ def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
 _SCAFFOLDED_KINDS = (
     ComponentKind.STRATEGY_MODEL,
     ComponentKind.DATA_MODEL,
-    ComponentKind.CONSTRAINT,
+    ComponentKind.COMPLIANCE,
 )
 
 
@@ -84,7 +84,7 @@ def test_each_scaffold_differs_only_in_its_own_verb() -> None:
     verbs = {
         ComponentKind.STRATEGY_MODEL: ("def decide(self, call)",),
         ComponentKind.DATA_MODEL: ("def compute(self, context)",),
-        ComponentKind.CONSTRAINT: ("def project(self, call)", "def monitor(self, call"),
+        ComponentKind.COMPLIANCE: ("def observe(self, call, account",),
     }
     for kind, expected in verbs.items():
         source = render(kind, "sample", dataset_id="px")
@@ -120,25 +120,19 @@ class Model(va.DataModel):
         return ()
 '''
 
-_AUTHORED_CONSTRAINT = '''\
+_AUTHORED_COMPLIANCE = '''\
 from vqapr import authoring as va
 
 
-class Model(va.Constraint):
+class Model(va.Compliance):
     @property
-    def constraint_id(self):
-        return "authored-constraint"
+    def compliance_id(self):
+        return "authored-rule"
 
     def inputs(self):
         return {}
 
-    def project(self, call):
-        return va.ConstraintBounds(
-            lower_weights={i: 0 for i in call.instruments},
-            upper_weights={i: 1 for i in call.instruments},
-        )
-
-    def monitor(self, call, account, bounds):
+    def observe(self, call, account):
         raise NotImplementedError
 '''
 
@@ -191,19 +185,19 @@ def test_load_data_model_accepts_an_authored_data_model(tmp_path: Path) -> None:
     assert loaded.requirements() == ()
 
 
-def test_load_constraint_accepts_an_authored_constraint(tmp_path: Path) -> None:
-    """WAS: the same authoring contract a StrategyModel may use was refused for a Constraint.
+def test_load_compliance_accepts_an_authored_rule(tmp_path: Path) -> None:
+    """WAS: the same authoring contract a StrategyModel may use was refused for the observing role.
 
     That asymmetry is what `docs/issues/archive/036` was about at the loader -- two surfaces, and which
-    one worked depended on the kind. Record `130` made the constraint contract one class, so the
+    one worked depended on the kind. Record `130` made the observing contract one class, so the
     refusal has nothing left to refuse and this asserts the inverse.
 
     `tests/extension/test_all_four_doors.py` pins that all four extension points enter through one
     door; this pins that the door accepts the same thing for this one as for a strategy.
     """
-    path = _written(tmp_path, _AUTHORED_CONSTRAINT)
-    ref = register_constraint(tmp_path, "authored-constraint", path, "Model")
+    path = _written(tmp_path, _AUTHORED_COMPLIANCE)
+    ref = register_compliance(tmp_path, "authored-rule", path, "Model")
 
-    loaded = load_constraint(ref, project_root=tmp_path)
+    loaded = load_compliance(ref, project_root=tmp_path)
 
-    assert loaded.constraint_id == "authored-constraint"
+    assert loaded.compliance_id == "authored-rule"

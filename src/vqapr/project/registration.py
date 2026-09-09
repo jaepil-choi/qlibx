@@ -8,8 +8,8 @@ surface over this logic; it *was* this logic.
 `docs/vqapr-architecture.md` §10.2 defines the CLI as a product surface rather than a layer, and a
 surface that owns rules costs twice. The rules cannot be tested without driving argparse, and they
 cannot be reached from another entry point -- so a second entry point grows its own copy and the two
-diverge. `docs/issues/archive/012` is exactly that: `check` refused a spec `run` completed, because each
-verb decided for itself.
+diverge. `docs/issues/archive/012` is exactly that: `check` refused a spec `run` completed, because
+each verb decided for itself.
 
 `cli/register.py` keeps argparse wiring, one call into this module, and envelope rendering.
 """
@@ -40,7 +40,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
-from vqapr.exchange.conventions import FillSelector
+from vqapr.domain.instruments import export_roster
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.prepare import prepare_component
 from vqapr.project.document import (
@@ -54,7 +54,7 @@ from vqapr.project.store import Transaction, Workspace
 _COMPONENT_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "strategy": ComponentKind.STRATEGY_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
     "exchange": ComponentKind.EXCHANGE,
 }
 """확장점 넷 전부. canon §10.2가 닫아두지 말라고 한 목록이다.
@@ -122,6 +122,35 @@ def register_dataset(
     # a full read can establish, and the next reader would have to read the file again to get it.
     with Workspace.transaction(project_root) as transaction:
         return transaction.register_dataset(measured, source)
+
+def register_instruments(
+    project_root: str | Path,
+    universe: Mapping[str, str],
+    *,
+    directory: str | Path | None = None,
+) -> dict[str, Any]:
+    """Declare what each instrument IS and register the roster, in one call (design §6.2).
+
+    `universe` is the flat `{instrument_id: kind}` an author naturally builds. The per-kind
+    tables are exported under `directory` (default `<project_root>/instruments`) and registered
+    through the same door `vqapr register instruments.yaml` uses, so an in-process caller and a
+    CLI user land on one roster slot with one receipt. Returns that receipt: `instruments`,
+    `by_kind`, `digest`.
+
+    Re-registering is ordinary -- a roster grows -- and replaces the whole slot.
+    """
+    root = Path(project_root)
+    target = Path(directory) if directory is not None else root / "instruments"
+    written = export_roster(universe, target)
+    document = {
+        "instruments": {"tables": {kind: path.name for kind, path in sorted(written.items())}}
+    }
+    registered = apply(document, root, base=target)
+    (receipt,) = registered["instruments"]
+    if not isinstance(receipt, dict):
+        raise RuntimeError("apply registered a roster without its receipt")
+    return receipt
+
 
 def _mapping(value: object, *, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
@@ -637,11 +666,9 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
     the member list then guesses, and guessing converges only when the field name happens to
     suggest the right vocabulary.
 
-    Measured: `fill.selector` was a raw lookup, and a reader spent six consecutive attempts on
-    `close, market, close_price, last, vwap, next_open` — every one a *price* word, because
-    "selector" alongside `trade_price` reads as "which price". The members are `SAME_DAY` and
-    `NEXT_ELIGIBLE`, which are *scheduling* words. No number of guesses reaches a vocabulary the
-    field name argues against, so the refusal has to carry the list.
+    Measured (on the since-retired `fill.selector`): a raw lookup sent a reader through six
+    consecutive guesses at a vocabulary the field name argued against. No number of guesses
+    reaches a closed set the reader cannot see, so the refusal has to carry the list.
     """
     try:
         return kind[str(value).upper()]
@@ -884,16 +911,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
             # judged here so the refusal names every member and the nearest spelling
             # (`docs/issues/archive/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
-        execution = declared_run.get("execution")
-        if isinstance(execution, dict) and isinstance(execution.get("fill"), dict):
-            fill = execution["fill"]
-            if "selector" in fill:
-                # The same closed-set treatment as the account mode: `selector` reads as
-                # "which price" while its members are scheduling words (`docs/issues/archive/017`),
-                # so the refusal has to carry the list rather than a one-line pydantic error.
-                _enum(
-                    FillSelector, fill["selector"], name=f"{name}.execution.fill.selector"
-                )
         try:
             definition = RunDefinition.model_validate({"run_id": str(run_id), **declared_run})
         except (ValidationError, TypeError, ValueError) as invalid:
@@ -914,10 +931,11 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     status=Status.INVALID,
                     cause=invalid,
                     requirement=(
-                        "a run declares strategies (with exchange, execution and "
-                        "initial_account) or datamodels, plus instruments, start, end, "
-                        "sessions_from or sessions, timezone and at, each in the shape "
-                        "`vqapr new run` emits"
+                        "a run declares writes, and one strategy (with exchange, execution "
+                        "{dataset, trade_price, fill?} and initial_account) or one datamodel "
+                        "(with agenda.days_from), plus "
+                        "instruments, start, end, timezone and agenda (every, at or from/to), "
+                        "each in the shape `vqapr new run` emits"
                     ),
                     observed=observed,
                     examples=["2024-01-02T00:00:00+09:00"],
@@ -940,23 +958,23 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
 
 
 def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinition]]) -> None:
-    """A run whose sessions come from a dataset another run in this document will write.
+    """A run whose trading days come from a dataset another run in this document will write.
 
-    `inputs()` and `sessions_from` are resolved at registration, so a document holding two runs
+    `inputs()` and `agenda.days_from` are resolved at registration, so a document holding two runs
     where the second takes its sessions from the first's output cannot be registered at all: the
     dataset does not exist until the first has run, and the first cannot run until the document is
-    registered. The workspace refusal says only that the dataset is unregistered, and
-    `vqapr new run --out` scaffolds a `runs:` block that holds several runs and invites exactly
-    this. The reporter of `docs/issues/archive/084` split one file per run and lost ten minutes. This
-    refusal can see the producer -- it is in the same document -- and names it.
+    registered. The workspace refusal says only that the dataset is unregistered, and `vqapr new run
+    --out` scaffolds a `runs:` block that holds several runs and invites exactly this. The reporter
+    of `docs/issues/archive/084` split one file per run and lost ten minutes. This refusal can see
+    the producer -- it is in the same document -- and names it.
     """
     produced: dict[str, str] = {}
     for run_id, definition in definitions:
-        for entry in definition.datamodels:
-            produced.setdefault(str(entry.dataset_id), run_id)
+        # Either kind: a strategy publishes its allocation under `writes` too (design §2).
+        produced.setdefault(str(definition.writes), run_id)
     found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
-        wanted = definition.sessions_from
+        wanted = definition.agenda.days_from
         producer = None if wanted is None else produced.get(str(wanted))
         if producer is None or producer == run_id:
             continue
@@ -965,14 +983,14 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
                 "declaration.run_fed_by_sibling",
                 status=Status.INVALID,
                 requirement=(
-                    "a run that takes its sessions from a dataset must be registered after "
+                    "a run that takes its trading days from a dataset must be registered after "
                     "that dataset exists"
                 ),
                 observed=(
-                    f"run {run_id!r} takes sessions from {wanted!r}, which run {producer!r} in "
-                    "this same document will write when it runs"
+                    f"run {run_id!r} takes its trading days from {wanted!r}, which run "
+                    f"{producer!r} in this same document will write when it runs"
                 ),
-                source=_at(f"runs.{run_id}.sessions_from"),
+                source=_at(f"runs.{run_id}.agenda.days_from"),
                 fix=(
                     f"split the document: register and run {producer!r} first, then register "
                     f"{run_id!r} from its own file once {wanted!r} exists"
@@ -1053,7 +1071,7 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     base = {
         ComponentKind.STRATEGY_MODEL: "StrategyModel",
         ComponentKind.DATA_MODEL: "DataModel",
-        ComponentKind.CONSTRAINT: "Constraint",
+        ComponentKind.COMPLIANCE: "Compliance",
     }[kind]
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1131,7 +1149,7 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
 AUTHORED_KINDS = {
     "strategy": ComponentKind.STRATEGY_MODEL,
     "datamodel": ComponentKind.DATA_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
 }
 """The component kinds an author writes as a `.py` and registers directly.
 
@@ -1227,7 +1245,7 @@ def register_strategy_model(
     )
 
 
-def register_constraint(
+def register_compliance(
     project_root: str | Path,
     raw_component_id: str,
     path: str | Path,
@@ -1235,18 +1253,19 @@ def register_constraint(
     *,
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
-    """Register a project-local Constraint after proving it loads.
+    """Register a project-local Compliance rule after proving it loads.
 
-    `load_constraint` checks the public Constraint contract and that the component declares its
-    data requirements, so a constraint that cannot state what it reads is refused here rather
-    than at the first occurrence that projects it.
+    `load_compliance` checks the public Compliance contract, that the component declares its
+    reads, and that it answers to the id it is registered under -- so a rule that cannot say what
+    it reads, or is registered under the wrong name, is refused here rather than at the first
+    market-clock instant that observes with it.
     """
     return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.CONSTRAINT,
+        kind=ComponentKind.COMPLIANCE,
         config=config,
     )
 

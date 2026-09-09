@@ -58,6 +58,7 @@ from vqapr.public import (
     DatasetRegistration,
     Mark,
     MarkBatch,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -67,6 +68,7 @@ from vqapr.public import (
     preflight_run,
     register_dataset,
     register_exchange,
+    register_instruments,
     register_strategy_model,
     run,
 )
@@ -564,6 +566,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     paths = _write_components(project, universe)
     register_strategy_model(project, "show007-signal", paths["signal"], "ReversalSignalStrategy")
+    # Benchmark constituents are shares; the project says so before the run orders them.
+    register_instruments(project, {name: "stock" for name in universe})
     register_exchange(project, "show007-academic", paths["academic"], "ShowcaseAcademicExchange")
 
 
@@ -572,25 +576,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     definition = RunDefinition(
         run_id="show007",
-        strategies=(StrategyEntry("show007-signal"),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("show007-signal"),
         timezone=VENUE,
-        at=time(8, 0),
+        agenda=RunAgenda(every="1d", at=(time(8, 0),)),
         exchange="show007-academic",
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes="show007-weights",
     )
     run_result = run(project, preflight_run(project, definition), store_root=project / ".vqapr")
     result = run_result.result()

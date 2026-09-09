@@ -18,7 +18,7 @@ run fills against is a dataset with an `execution:` role), an exchange and the r
 is no agenda to declare (record `148`): the run
 says which sessions it fires on and at what wall time, every strategy is called on every
 session and decides for itself, the book is valued at the instant the venue fills, and the
-declared constraints judge it right after each commit.
+declared Compliance rules observe it at every instant of the market clock.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspa
 _KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "strategy": ComponentKind.STRATEGY_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
 }
 
 _LOOKBACK_DEFAULT = 6
@@ -57,7 +57,7 @@ asked for rows" from "the user left the default alone and asked for calendar day
 _DECLARATION_KIND = {
     ComponentKind.DATA_MODEL: "datamodel",
     ComponentKind.STRATEGY_MODEL: "strategy",
-    ComponentKind.CONSTRAINT: "constraint",
+    ComponentKind.COMPLIANCE: "compliance",
 }
 """The declaration spelling for each authored kind.
 
@@ -139,14 +139,13 @@ again: adding or renaming a member updates the template in the same edit.
 _RUN_TEMPLATE = f"""\
 # Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# A run is configuration (record 139): the universe, the period, the sessions it fires on and
-# the wall time it fires at, the venue, the execution dataset, the initial account, and the
-# strategies it tries. Every strategy is called on EVERY session at `at` and decides for itself
-# whether to act -- a monthly rebalance is a rule inside the strategy, read from
-# `call.evaluation_time` and kept in `self.memory` (record 148). The book is valued at the
-# instant the venue fills and the declared constraints judge it right after each commit; there
-# is no separate valuation or monitoring time to declare. Each strategy runs with its OWN
-# account from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/.
+# A run is configuration (record 139): the universe, the period, the strategy clock it decides
+# on (`agenda`), the venue, the execution dataset, the initial account, and the one strategy it
+# runs. The clock is expanded over the trading days the execution dataset has rows for -- a
+# denser table adds fill instants, never decision days -- and the strategy is called at every
+# instant of it, deciding for itself whether to act. The book is valued at every instant of the
+# market clock and the declared compliance rules observe it right after; there is no separate
+# valuation or monitoring time to declare. The run's record lives under .vqapr/runs/RUN_ID/.
 # Ids below name registered declarations; nothing here registers them.
 
 runs:
@@ -156,33 +155,36 @@ runs:
       - INSTRUMENT_B
     start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
     end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
-    sessions_from: DATASET_ID        # every session this registered dataset has a row for...
-    # sessions:                      # ...or list the days literally. Exactly ONE of the two.
-    #   - "2024-01-02"
-    timezone: Asia/Seoul             # the zone `at` is expressed in
-    at: "15:29"                      # when strategies decide; strictly before the execution `at`
+    timezone: Asia/Seoul             # the zone every wall time below is expressed in
+    agenda:                          # the strategy clock: a day filter and a within-day rule
+      every: 1d                      # 1d | 2d | 1w | 1M select trading days and pair with `at`;
+      at: "15:29"                    #   1m | 5m | 1h select instants and pair with `from`/`to`
+      # from: "09:00"                # the trading days are the days the execution dataset
+      # to: "15:20"                  #   below has rows for -- nothing to declare here
     exchange: my-venue               # component_id of a registered Exchange
     execution:                       # the registered venue table, and THIS run's fill on it
       dataset: my-venue-daily        # a dataset registered with `execution: {{is_tradable: ...}}`
-      fill:
-        selector: same_day           # SCHEDULING rule, not a price choice. One of:
-        #   same_day       fill at the instant selected within the same session
-        #   next_eligible  fill at the next session where the name is tradable
-        at: "15:30"                  # execution must be STRICTLY LATER than `at` above
-        timezone: Asia/Seoul         # venue timezone that this `at` is expressed in
-        trade_price: close           # which numeric field of the dataset this run fills at;
+      trade_price: close             # which numeric field of the dataset this run fills at;
                                      #   another run may fill the same table at `open`
+      fill:                          # optional. Without it a decision fills at the FIRST
+        at: "15:30"                  #   execution instant after it; `at` keeps only instants at
+        # after: "10m"               #   this wall time (run timezone) -- STRICTLY LATER than the
+        # within: "1d"               #   decision. `after`: minimum gap. `within`: maximum gap,
+                                     #   else the run is refused before it starts
+    # compliance: [no-short]          # registered Compliance rules that observe the committed
+                                     #   book at every market-clock instant; their parameters are
+                                     #   their own, never the strategy's
     initial_account:
       cash: "1000000"                # quoted to preserve precision (parsed as Decimal)
       # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
       # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
       mode: LONG_ONLY                # {_ACCOUNT_MODES}
       positions: {{}}                  # mapping of instrument -> quantity, or empty
-    strategies:                      # one entry per registered StrategyModel to try
-      my-alpha: {{}}
-      # my-other-alpha:
-      #   constraints: [constraint-component-id]
-      #   initial_model_memory: {{}}
+    writes: my-alpha-weights         # the dataset this run puts in the warehouse: its allocation,
+                                     #   one row per instrument per decision. Other runs read it
+    strategy:                        # the ONE registered StrategyModel this run executes
+      component: my-alpha
+      # initial_model_memory: {{}}
 """
 
 
@@ -234,14 +236,14 @@ def _declaration(
                 "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-12-31T23:00:00+09:00",
-                "sessions_from": dataset_id,
                 "timezone": "Asia/Seoul",
-                "at": "16:00",
-                "datamodels": {
-                    component_id: {
-                        "dataset_id": f"{component_id}-values",
-                        "value_fields": ["value"],
-                    }
+                # A datamodel run has no execution table, so it names the dataset whose days
+                # are its trading days (design §3.3).
+                "agenda": {"every": "1d", "at": "16:00", "days_from": dataset_id},
+                "writes": f"{component_id}-values",
+                "datamodel": {
+                    "component": component_id,
+                    "value_fields": ["value"],
                 },
             }
         }
@@ -260,7 +262,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "sample",
         ),
         help=(
-            "scaffold a component (datamodel/strategy/constraint) or emit a template "
+            "scaffold a component (datamodel/strategy/compliance) or emit a template "
             "(instruments/dataset/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
             "that registers it. Every kind reports the file to hand `vqapr register` as "
@@ -339,7 +341,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cap",
         default="0.2",
-        help="largest share of the book any one name may be (constraint scaffold)",
+        help="largest share of the book any one name may be (compliance scaffold)",
     )
     parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
@@ -365,7 +367,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     kind = _KINDS[args.kind]
     # `render` refuses an id that cannot become a Python class name. Caught here rather than left
     # to escape, because a bare `ValueError` reaches the envelope as `stage: "unhandled"` -- and
-    # it did: `vqapr new constraint '123-bad!'` emitted an unparseable file and then failed on
+    # it did: `vqapr new compliance '123-bad!'` emitted an unparseable file and then failed on
     # re-reading it, reporting a SyntaxError about the framework's own output.
     try:
         _class_name(args.component_id)
@@ -377,10 +379,10 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             retry="choose an id like `position-cap`, then retry",
         ) from unusable
     # Per kind, not per command. A DataModel and a StrategyModel are defined by what they read; a
-    # Constraint is a rule about weights and reads nothing -- the shipped `NoShort` returns an
+    # Compliance rule is about the book and reads nothing -- the shipped `NoShort` returns an
     # empty `requirements()`. Demanding `--dataset` from all three would make an author invent a
     # dataset to scaffold a rule that never opens one.
-    if kind is ComponentKind.CONSTRAINT:
+    if kind is ComponentKind.COMPLIANCE:
         source = render(kind, args.component_id, cap=str(getattr(args, "cap", "0.2")))
     else:
         if not args.dataset:
@@ -567,7 +569,7 @@ A run with no registered roster is refused here rather than charged one flat rat
 is no honest answer for an instrument nobody described.
 """
 
-from vqapr.public import KrxExchange, krx_listings
+from vqapr.public import KrxExchange
 
 # The ids this venue trades. What each one IS comes from the roster.
 INSTRUMENTS = (
@@ -582,22 +584,29 @@ class Venue(KrxExchange):
     This one charges; the academic one does not.
     """
 
-    def __init__(self) -> None:
-        # Costs are on. The limit-up/limit-down band is not, and that is the one thing here you
-        # may want to change.
+    def __init__(self, *, sale_tax_rate: str = "0.002", commission_rate: str = "0.0003") -> None:
+        # The venue's SETTINGS: what it models, on record. Costs are on at KRX's rates; the
+        # limit-up/limit-down band is off. Every run records `exchange.settings` in its
+        # `strategy.json` -- `vqapr show strategy` shows it -- so which configuration a past run
+        # measured under is read from the record, never recovered from this file.
+        #
+        # The two rates are constructor arguments so a registration can set them from `config:`
+        # -- `sale_tax_rate: "0"` is a tax-free KRX, a different venue with a different
+        # fingerprint, kept apart in the warehouse from the taxed one.
         #
         # `price_limits=True` models KRX's daily band, computed from the session base price, and
         # it REQUIRES your execution dataset to carry that price. Preflight refuses the run by name
         # if it does not -- it will not quietly produce limit-unaware numbers. The venue-table
         # dataset a run fills against carries a trade price only by default, so this scaffold
         # ships with the band off in order to run as emitted rather than refusing on first use.
-        #
         # To switch it on: add the session base price to your execution table's `price_fields`,
-        # then set this to True. The setting lives in THIS FILE, which the run record fingerprints
-        # as `source_digest` -- so which of the two a past run measured is recoverable by reading
-        # the venue at that digest. It is not a field in the record; do not expect to see it in
-        # `vqapr show run`.
-        super().__init__(krx_listings(INSTRUMENTS, price_limits=False))
+        # then set it to True.
+        super().__init__(
+            INSTRUMENTS,
+            sale_tax_rate=sale_tax_rate,
+            commission_rate=commission_rate,
+            price_limits=False,
+        )
 '''
 
 _EXCHANGE_DECLARATION = """\

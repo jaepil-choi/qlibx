@@ -1,15 +1,15 @@
 """Agent-first extension authoring/read/result contracts.
 
 The sole public home for what an author subclasses (``Component`` and its roles ``DataModel``,
-``StrategyModel``, ``Constraint``), receives (``DataCall``, ``StrategyCall``, ``ConstraintCall``,
+``StrategyModel``, ``Compliance``), receives (``DataCall``, ``StrategyCall``, ``ComplianceCall``,
 ``PanelWindow``, ``Observation``, ``EconomicAccountView``, ``AccountHistory``,
-``ConstraintBounds``), and returns (``Rows``, ``Hold``/``Rebalance``, ``ConstraintFinding``).
+``AccountHistory``), and returns (``Rows``, ``Hold``/``Rebalance``, ``ComplianceFinding``).
 
 Every public declaration here is a frozen, keyword-only value unless shown otherwise by the
 approved algebra (``Observation`` is positional; ``DataCall``, ``StrategyCall``, ``DataModel``,
-``StrategyModel``, and ``Constraint`` are abstract call/extension contracts, not values). What an
+``StrategyModel``, and ``Compliance`` are abstract call/extension contracts, not values). What an
 author constructs and hands to the engine -- ``DatasetInput``, ``AccountHistoryInput``,
-``ConstraintBounds``, ``Hold``, ``Rebalance``, ``ConstraintFinding`` -- is a strict pydantic
+``Hold``, ``Rebalance``, ``ComplianceFinding`` -- is a strict pydantic
 model (owner ruling 2026-09-08): a wrong type is refused rather than coerced, and the refusal is
 a ``pydantic.ValidationError``, which is a ``ValueError``. Constructors reject duplicate names,
 empty identifiers, naive datetimes, non-finite ``Decimal`` values, and author-supplied
@@ -41,13 +41,13 @@ what the rest declares.
 
 from __future__ import annotations
 
-from vqapr.authoring.call import ConstraintCall, DataCall, StrategyCall
-from vqapr.authoring.component import Component, Constraint, DataModel, StrategyModel
+from vqapr.authoring.call import ComplianceCall, DataCall, StrategyCall
+from vqapr.authoring.component import Compliance, Component, DataModel, Part, StrategyModel, Tool
 from vqapr.authoring.history import AccountHistory, AccountHistoryInput
 from vqapr.authoring.reads import DatasetInput, requirements_for
 from vqapr.authoring.records import TableSpec
-from vqapr.authoring.result import ConstraintFinding, Hold, Rebalance
-from vqapr.authoring.view import ConstraintBounds, EconomicAccountView
+from vqapr.authoring.result import ComplianceFinding, Hold, Rebalance
+from vqapr.authoring.view import EconomicAccountView
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
 from vqapr.domain.shapes import Observation
@@ -56,11 +56,10 @@ __all__ = (
     "AccountHistory",
     "AccountHistoryInput",
     "CalendarLookback",
+    "Compliance",
+    "ComplianceCall",
+    "ComplianceFinding",
     "Component",
-    "Constraint",
-    "ConstraintBounds",
-    "ConstraintCall",
-    "ConstraintFinding",
     "DataCall",
     "DataModel",
     "DatasetInput",
@@ -69,10 +68,12 @@ __all__ = (
     "InstantsLookback",
     "Observation",
     "PanelWindow",
+    "Part",
     "Rebalance",
     "RowsLookback",
     "StrategyCall",
     "StrategyModel",
     "TableSpec",
+    "Tool",
     "requirements_for",
 )

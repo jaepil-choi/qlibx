@@ -418,6 +418,18 @@ class Workspace:
         """Every registered run, ordered by run id."""
         return tuple(self._runs[key] for key in sorted(self._runs))
 
+    def producer_of(self, raw_dataset_id: str) -> str | None:
+        """The registered run whose `writes` is this dataset, or `None`: the graph's one edge.
+
+        Answered from the document, so it says who WILL write the dataset whether or not that
+        run has run yet; `DatasetRegistration.produced_by` says who DID. The two together are
+        what `check` needs to tell "not registered" from "not made yet" (design §2).
+        """
+        for definition in self.run_definitions:
+            if definition.writes == raw_dataset_id:
+                return definition.run_id
+        return None
+
     def run_definition(self, raw_run_id: str) -> RunDefinition:
         """One registered run by id: what `vqapr run <run-id>` freezes and executes."""
         return config_lookup(raw_run_id, self._runs, "run", noun="run_id")
@@ -453,12 +465,12 @@ class Workspace:
                     ),
                 )
 
-        for entry in definition.strategies:
-            component(entry.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
-            for name in entry.constraints:
-                component(name, ComponentKind.CONSTRAINT, "constraint")
-        for entry in definition.datamodels:
-            component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
+        if definition.strategy is not None:
+            component(definition.strategy.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
+        for name in definition.compliance:
+            component(name, ComponentKind.COMPLIANCE, "compliance rule")
+        if definition.datamodel is not None:
+            component(definition.datamodel.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
             component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
         if definition.execution is not None:
@@ -483,13 +495,13 @@ class Workspace:
                     ),
                 )
         if (
-            definition.sessions_from is not None
-            and dataset_id(definition.sessions_from) not in state.datasets
+            definition.agenda.days_from is not None
+            and dataset_id(definition.agenda.days_from) not in state.datasets
         ):
             raise reference_error(
-                f"run {definition.run_id!r} takes its sessions from dataset "
-                f"{definition.sessions_from!r}, which must be registered",
-                fix=f"register dataset {definition.sessions_from!r} first, or list `sessions`",
+                f"run {definition.run_id!r} takes its trading days from dataset "
+                f"{definition.agenda.days_from!r}, which must be registered",
+                fix=f"register dataset {definition.agenda.days_from!r} first",
             )
 
 
@@ -575,10 +587,10 @@ class Workspace:
             state = self._read()
             # The reference check runs HERE, against the state the lock already read, rather than
             # before the lock against a state that can be stale by the time the write lands.
-            # `docs/issues/archive/043`: it was two reads with no lock across them, and the consequence is
-            # worse than a lost update -- `_decode` validates forward references, so a document
-            # holding a config whose component was removed makes `Workspace.open()` raise and every
-            # command in the project fail until the file is hand-repaired.
+            # `docs/issues/archive/043`: it was two reads with no lock across them, and the
+            # consequence is worse than a lost update -- `_decode` validates forward references, so
+            # a document holding a config whose component was removed makes `Workspace.open()` raise
+            # and every command in the project fail until the file is hand-repaired.
             blockers = references_in(state, kind, identity)
             if blockers:
                 raise _workspace_error(

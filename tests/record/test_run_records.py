@@ -305,20 +305,21 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     fires once per occurrence, so a run that records no rows still proves it is alive.
     """
     from vqapr.flow.engine.loop import EventLoop
-    from vqapr.flow.strategy.loop import StrategyEventLoop
+    from vqapr.flow.run.loop import StrategyEventLoop
 
     signature = inspect.signature(StrategyEventLoop.__init__)
     assert "on_progress" in signature.parameters, (
         "the run loop no longer accepts a progress signal, so a long run cannot prove it is alive"
     )
 
-    # The walk is the shared loop both kinds of run use (record `148`).
+    # The walk is the shared loop both kinds of run use (record `148`); since the two-clocks
+    # campaign it is one merged sequence of both clocks (record `206`).
     source = inspect.getsource(EventLoop.run)
-    loop = source.index("while next_static is not None")
-    branch = source.index("due = self.pending()", loop)
-    assert "self._on_progress()" in source[loop:branch], (
-        "the progress signal must fire at the top of the occurrence loop, before the due/static "
-        "branch, or a run made entirely of due executions never signals"
+    loop = source.index("for event in")
+    handled = source.index("self.handle(event)", loop)
+    assert "self._on_progress()" in source[loop:handled], (
+        "the progress signal must fire at the top of the event loop, before the event is "
+        "handled, or a run made entirely of market instants never signals"
     )
 
 

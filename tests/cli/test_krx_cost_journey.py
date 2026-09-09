@@ -189,7 +189,10 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, emitted
     source = Path(emitted["path"])
     body = source.read_text(encoding="utf-8")
-    assert "krx_listings" in body, "the krx profile builds its trading facts from ids alone"
+    assert "KrxExchange" in body and "INSTRUMENTS" in body, (
+        "the krx profile builds its trading facts from ids alone"
+    )
+    assert "sale_tax_rate" in body, "the rates are the venue's settings, set from config"
     # THE POINT: the emitted venue names no category anywhere. What each instrument is comes from
     # the registered roster at fill time, so there is nothing here to edit and nothing to keep in
     # step. A venue holding its own copy could disagree with the roster, and a fill would then say
@@ -227,21 +230,16 @@ components:
             {
                 "runs": {
                     "krx": {
+                        "writes": "krx-weights",
                         "strategies": {"rotate": {}},
                         # Decide at 04:00 on every session the prices have a row for; the book
                         # is valued at the 15:30 fill it lands on (record 148).
-                        "sessions_from": "prices",
                         "timezone": "Asia/Seoul",
-                        "at": "04:00",
+                        "agenda": {"every": "1d", "at": "04:00"},
                         "exchange": "krx-venue",
                         "execution": {
                             "dataset": "venue-daily",
-                            "fill": {
-                                "selector": "next_eligible",
-                                "at": "15:30",
-                                "timezone": "Asia/Seoul",
-                                "trade_price": "close",
-                            },
+                            "trade_price": "close", "fill": {"at": "15:30"},
                         },
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
                         "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),

@@ -72,7 +72,7 @@ one.
 
 ## `compliance`
 
-Per constraint: `checked` split into `held` / `within_tolerance` / `breached` / `unmeasured`, the
+Per compliance rule: `checked` split into `held` / `within_tolerance` / `breached` / `unmeasured`, the
 worst excess and when, the offending names by count.
 
 `within_tolerance` is not a breach and not a clean hold. A book executes in whole lots and is

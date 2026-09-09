@@ -29,8 +29,50 @@ def execution_call(
     *,
     registry: InstrumentRoster | Mapping[str, Instrument] | None = None,
 ) -> ExecutionCall:
-    """The call for `venue` at the snapshot's instant, its rules bound to `registry` if given."""
-    rules = venue.rules if registry is None else venue.rules.with_registry(registry)
+    """The call for `venue` at the snapshot's instant, carrying `registry` as its dictionary.
+
+    A test that bound the venue's own view beforehand (`venue._rules = ...with_registry(...)`)
+    passes no registry, and the dictionary is read back off that view -- the call refuses a view
+    bound to a different one.
+    """
+    rules = venue.rules
+    if registry is None:
+        instruments = rules.registry if rules.registry is not None else InstrumentRoster({})
+    else:
+        instruments = registry if isinstance(registry, InstrumentRoster) else InstrumentRoster(registry)
     return ExecutionCall(
-        at=snapshot.target_at, orders=orders, account=account, snapshot=snapshot, rules=rules
+        at=snapshot.target_at,
+        orders=orders,
+        account=account,
+        snapshot=snapshot,
+        instruments=instruments,
+        rules=rules,
     )
+
+
+class _WithRoster:
+    """Delegates everything to the venue except `rules`, which serves the bound view."""
+
+    def __init__(self, venue: Exchange, rules) -> None:
+        self._venue = venue
+        self._bound = rules
+
+    @property
+    def rules(self):
+        return self._bound
+
+    def execute(self, *args, **kwargs):
+        return self._venue.execute(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._venue, name)
+
+
+def bound(venue: Exchange, roster: InstrumentRoster | Mapping[str, Instrument]):
+    """A venue whose view carries the project's dictionary, as the call binds it at a fill.
+
+    Venues accept no roster of their own, so a test does what the Flow does: build the venue, then
+    hand its view the identity it borrows (design §6.2: every ordered id is declared). The double
+    delegates everything else to the venue, so `execute` is the profile's own.
+    """
+    return _WithRoster(venue, venue.rules.with_registry(roster))

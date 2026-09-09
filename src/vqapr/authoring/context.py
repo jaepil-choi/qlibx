@@ -1,15 +1,15 @@
 """The `call` a Model receives, and the typed observations it reads through it.
 
-**One call surface for every Model role.** A DataModel, a StrategyModel and a Constraint declare
-their reads the same way -- `inputs()`, keyed by an alias the author names -- and read them the
-same way: `call.read(alias, field)` for a panel-grain alias, `call.rows(alias)` for a rows-grain
-one. What a StrategyModel additionally receives is what its role needs: the committed account, its
-own declared history, the bounds every registered Constraint projected. The difference between
-the roles is that list and nothing else (`docs/issues/archive/036`).
+**One call surface for every Model role.** A DataModel, a StrategyModel and a Compliance rule
+declare their reads the same way -- `inputs()`, keyed by an alias the author names -- and read
+them the same way: `call.read(alias, field)` for a panel-grain alias, `call.rows(alias)` for a
+rows-grain one. What a StrategyModel additionally receives is what its role needs: the committed
+account and its own declared history. The difference between the roles is that list and nothing
+else (`docs/issues/archive/036`).
 
 **One alias is one scan.** An alias over several fields is several `DataRequirement`s
-(`docs/issues/archive/049`: a requirement names one field), and `ModelWindow.declared` reads them in one
-statement -- the store's window SQL ranks each field's own last N rows, so the rows come back
+(`docs/issues/archive/049`: a requirement names one field), and `ModelWindow.declared` reads them in
+one statement -- the store's window SQL ranks each field's own last N rows, so the rows come back
 already joined on `(instant, instrument)` (record `136`).
 
 **Every read goes through `ModelWindow`.** Nothing here holds a store handle. The window is
@@ -28,8 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from vqapr.authoring import (
-    ConstraintBounds,
-    ConstraintCall,
+    ComplianceCall,
     DataCall,
     DatasetInput,
     EconomicAccountView,
@@ -57,9 +56,9 @@ def observations(
     to skip: dropping it silently would turn a broken declaration into a thin result.
 
     The observations are built through `Observation._framework_row`, without per-row validation.
-    `fields` are the alias's declared names, checked once when the `DatasetInput` was declared;
-    the scan already returned `available_at` from a `TIMESTAMPTZ` column and the instrument as
-    text. `docs/issues/archive/054` measured the validated constructor at 70% of a `rows` read -- 14.6M
+    `fields` are the alias's declared names, checked once when the `DatasetInput` was declared; the
+    scan already returned `available_at` from a `TIMESTAMPTZ` column and the instrument as text.
+    `docs/issues/archive/054` measured the validated constructor at 70% of a `rows` read -- 14.6M
     whitespace checks for 159k rows -- re-proving per row what registration proved once.
     """
     declared = tuple(fields)
@@ -98,16 +97,12 @@ def observations(
     return tuple(observations)
 
 
-def _unbounded() -> ConstraintBounds:
-    """The bounds a callback sees when no Constraint is registered: no names, no limits."""
-    return ConstraintBounds(lower_weights={}, upper_weights={})
-
-
 class _DeclaredReads:
     """`read(alias, field)` and `rows(alias)` over the aliases a Model declared in `inputs()`.
 
-    Shared by all three contexts because all three roles read the same way -- that sameness is
-    the point (`docs/issues/archive/036`), so it is one implementation rather than three that agree today.
+    Shared by all three contexts because all three roles read the same way -- that sameness is the
+    point (`docs/issues/archive/036`), so it is one implementation rather than three that agree
+    today.
 
     **The grain decides the verb** (design §2.5, owner ruling 2026-09-02). A panel-grain alias is
     read with `read(alias, field)` and returns a 2d `PanelWindow` -- instants x instruments, a
@@ -156,8 +151,8 @@ class _DeclaredReads:
                 f"{alias!r} is a panel-grain dataset; read a field of it with read({alias!r}, "
                 "<field>), which returns the instants x instruments window"
             )
-        # An alias is one requirement per declared field (`docs/issues/archive/049`) and ONE scan: the
-        # window reads every field in one statement and the rows come back already joined on
+        # An alias is one requirement per declared field (`docs/issues/archive/049`) and ONE scan:
+        # the window reads every field in one statement and the rows come back already joined on
         # `(instant, instrument)`. The author declared one thing and reads one thing.
         return observations(
             self.window.declared(requirements).rows,
@@ -168,18 +163,13 @@ class _DeclaredReads:
 
 
 @dataclass(frozen=True, slots=True)
-class ConstraintContext(_DeclaredReads, ConstraintCall):
-    """What a Constraint may reach, and the third role to reach it the same way.
+class ComplianceContext(_DeclaredReads, ComplianceCall):
+    """What a Compliance rule may reach, and the third role to reach it the same way.
 
     Records `126` and `128` gave DataModel and StrategyModel one declaration (`inputs()`) and one
-    read verb (`context.read(alias)`). A Constraint was still handed a `ModelWindow` and expected
-    to call `window.observations(requirement)` on it -- a framework type and a second read shape,
-    for the one extension point whose authoring class the loader would not even accept
-    (`docs/issues/archive/036`). This is that third role arriving.
-
-    **No account.** `project` runs before any decision exists, to say what the feasible set is,
-    and it never needed one. `monitor` receives an `EconomicAccountView` as its own argument
-    instead, so the capability is present exactly where it is used and absent everywhere else.
+    read verb (`context.read(alias)`); the observing role reads the same way. The committed
+    account it observes is `observe`'s own argument, so the capability is present exactly where
+    it is used and absent everywhere else.
     """
 
     window: ModelWindow
@@ -192,7 +182,7 @@ class ConstraintContext(_DeclaredReads, ConstraintCall):
 
     @property
     def evaluation_time(self):
-        """The single frozen point-in-time cutoff this projection is bounded to."""
+        """The market-clock instant this observation is bounded to."""
         return self.window.evaluation_time
 
 
@@ -201,8 +191,8 @@ class DataModelContext(_DeclaredReads, DataCall):
     """What a DataModel may reach: a cutoff and its declared reads, and nothing else.
 
     No account, no venue, no occurrence -- the absence is the definition of the role (architecture
-    4.4). The one implementation of `authoring.DataCall`, the way `ConstraintContext` is of
-    `ConstraintCall`.
+    4.4). The one implementation of `authoring.DataCall`, the way `ComplianceContext` is of
+    `ComplianceCall`.
     """
 
     window: ModelWindow
@@ -220,7 +210,7 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
 
     The one implementation of `authoring.StrategyCall`, the way the other two contexts are of
     their calls. `account` is the `EconomicAccountView` the Flow built from the committed
-    snapshot and its last valuation -- the same view a monitoring Constraint sees (record `130`).
+    snapshot and its last valuation -- the same view a Compliance rule sees (record `130`).
     The snapshot's `version` is not on it: that is a framework fact the Flow stamps onto the
     intent, and `_ENVELOPE_RESERVED_FIELDS` keeps it off every authored value.
     """
@@ -229,7 +219,6 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     window: ModelWindow
     account: EconomicAccountView
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
-    constraint_bounds: ConstraintBounds = field(default_factory=_unbounded)
     account_history: AccountHistory = field(default_factory=lambda: AccountHistory((), None))
     """What the Account itself recorded, bounded by this Strategy's declaration.
 
@@ -237,9 +226,6 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     raises rather than returning nothing, so a missing declaration fails loudly instead of
     silently disabling a rule that depends on it.
     """
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "constraint_bounds", self.constraint_bounds.detached())
 
     @property
     def occurrence_id(self) -> str:

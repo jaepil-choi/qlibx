@@ -31,7 +31,7 @@ import pytest
 _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("datamodel", ("dm", "--dataset", "prices")),
     ("strategy", ("st", "--dataset", "prices")),
-    ("constraint", ("c",)),
+    ("compliance", ("c",)),
     ("exchange", ("ex",)),
     ("instruments", ()),
     ("dataset", ()),
@@ -176,9 +176,12 @@ def test_new_datamodel_emits_the_run_that_computes_it(tmp_path: Path) -> None:
     assert list(document["components"]) == ["dm"]
     assert list(document["runs"]) == ["dm-run"]
     run = document["runs"]["dm-run"]
-    assert run["sessions_from"] == "prices", "the run's sessions are the dataset the model reads"
-    assert run["timezone"] == "Asia/Seoul" and run["at"] == "16:00"
-    assert run["datamodels"] == {"dm": {"dataset_id": "dm-values", "value_fields": ["value"]}}
+    assert run["agenda"] == {"every": "1d", "at": "16:00", "days_from": "prices"}, (
+        "a datamodel run names the dataset whose days are its trading days"
+    )
+    assert run["timezone"] == "Asia/Seoul"
+    assert run["writes"] == "dm-values"
+    assert run["datamodel"] == {"component": "dm", "value_fields": ["value"]}
     assert "strategies" not in run
     assert run["instruments"] == ["INSTRUMENT_A", "INSTRUMENT_B"], "placeholders, not guesses"
     for key in ("start", "end"):

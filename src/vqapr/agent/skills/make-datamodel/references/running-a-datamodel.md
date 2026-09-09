@@ -9,13 +9,15 @@ runs:
     instruments: [A005930, A000660]  # the universe every session computes over
     start: "2024-01-02T00:00:00+09:00"
     end:   "2024-12-31T23:00:00+09:00"
-    sessions_from: prices            # every session that registered dataset has (or `sessions:`)
     timezone: Asia/Seoul
-    at: "16:00"                      # when compute() is called, each session
-    datamodels:
-      my-derived:                    # the registered DataModel component
-        dataset_id: my-derived-values  # must NOT already be registered
-        value_fields: [value]          # the columns each row carries beside `instrument`
+    agenda:
+      every: 1d                      # the strategy clock (design §3.4); `1w`, `1M` also pick days
+      at: "16:00"                    # when compute() is called on each selected day
+      days_from: prices              # the dataset whose days are the trading days (no venue here)
+    writes: my-derived-values        # the dataset it makes; must NOT already be registered
+    datamodel:
+      component: my-derived          # the registered DataModel component
+      value_fields: [value]          # the columns each row carries beside `instrument`
 ```
 
 `vqapr new datamodel <id> --dataset <d>` emits this block beside the component.
@@ -66,7 +68,7 @@ vqapr rm dataset <id>
 withdraws the registration **and deletes the files** under `.vqapr/materialized/<id>/`. That is the
 way to retry a datamodel run, or to drop a throw-away output.
 
-It refuses while a registered run takes its sessions from that dataset (`sessions_from`), naming
+It refuses while a registered run takes its trading days from that dataset (`agenda.days_from`), naming
 the run — so a dataset that other runs are pinned to cannot be removed out from under them.
 
 A dataset registered from the user's **own path** is withdrawn without touching their file. Only a

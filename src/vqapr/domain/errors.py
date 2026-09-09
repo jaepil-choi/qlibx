@@ -489,9 +489,9 @@ def unhandled(error: BaseException, *, stage: Stage) -> Failure:
     """The one failure for an exception nobody classified: 500 or 502 by whose frame raised it.
 
     The old envelope rendered these as `stage: "unhandled"` with an empty failure list and a
-    traceback that was cut at eight lines or sent to a file. An agent could not tell the
-    framework's bug from its own (`docs/issues/archive/076`). Now it is a failure like any other, with
-    the whole traceback in `cause` and the status saying whose it is.
+    traceback that was cut at eight lines or sent to a file. An agent could not tell the framework's
+    bug from its own (`docs/issues/archive/076`). Now it is a failure like any other, with the whole
+    traceback in `cause` and the status saying whose it is.
     """
     status = status_of(error)
     cause = Cause.of(error)

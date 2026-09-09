@@ -2,24 +2,27 @@
 
 **A run is configuration; a strategy is what it tries** (record `139`, design
 `docs/design/the-panel-the-surface-and-the-run.md` §4). A `RunDefinition` names its universe,
-period, venue, execution dataset and fill, initial account and the strategies it runs -- by
-id, because it is a registered document, and the workspace is what resolves an id. Preflight
-freezes the run layer once into a `FrozenRun` and each strategy into a `FrozenStrategy`; the
-run layer's identity is shared by every strategy and each strategy's identity is its own.
+period, venue, execution dataset and fill, initial account and the one model it runs -- by id,
+because it is a registered document, and the workspace is what resolves an id. Preflight freezes
+the run layer into a `FrozenRun` and its model into a `FrozenStrategy`; the run layer's identity
+and the model's identity are separate.
 
-Before `139` both types held one `strategy` field, so a run was one strategy at the level of a
-dataclass field and a comparison across factor models was n runs with n copies of one period.
+**One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3). Record
+`139` had made it several so that a comparison across factor models would share one frozen layer.
+Determinism already gives that -- two runs declaring the same inputs freeze identically -- so the
+sharing bought an optimisation and cost two things: parallelism lived inside a run rather than
+across independent runs, and strategies run on different days could not be compared at all.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -36,10 +39,11 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from vqapr.account.account import AccountMode
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.agendas import AgendaRule
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.extension.component import ComponentKind, ComponentRef
 
 FINGERPRINT_PREFIX = 8
@@ -134,23 +138,21 @@ def _encoded_requirements(requirements: tuple[DataRequirement, ...]) -> list[tup
 
 
 @dataclass(frozen=True, slots=True)
-class ConstraintSet:
-    """The single constraint declaration shared by run consumers."""
+class ComplianceSet:
+    """The run's declared Compliance rules, resolved to registered components (design §7.2)."""
 
-    constraints: tuple[ComponentRef, ...]
+    rules: tuple[ComponentRef, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.constraints, tuple):
-            raise TypeError("constraints must be a tuple of ComponentRef values")
-        for constraint in self.constraints:
-            if not isinstance(constraint, ComponentRef):
-                raise TypeError("constraints must contain ComponentRef values")
-            if constraint.kind is not ComponentKind.CONSTRAINT:
-                raise ValueError("constraints must identify CONSTRAINT components")
-        if len({constraint.component_id for constraint in self.constraints}) != len(
-            self.constraints
-        ):
-            raise ValueError("constraints must not contain duplicate component references")
+        if not isinstance(self.rules, tuple):
+            raise TypeError("rules must be a tuple of ComponentRef values")
+        for rule in self.rules:
+            if not isinstance(rule, ComponentRef):
+                raise TypeError("rules must contain ComponentRef values")
+            if rule.kind is not ComponentKind.COMPLIANCE:
+                raise ValueError("rules must identify COMPLIANCE components")
+        if len({rule.component_id for rule in self.rules}) != len(self.rules):
+            raise ValueError("rules must not contain duplicate component references")
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,23 +192,32 @@ def _no_repeats(values: Sequence[str], what: str) -> None:
 
 @pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
 class StrategyEntry:
-    """One strategy a run tries: the component, the constraints it runs under, its opening memory.
+    """One strategy a run executes: the component and its opening memory.
 
     Ids, not refs: the entry is part of a registered document, and the component it names is
     looked up by preflight, which also binds it to the run's own sessions (record `148`).
     A pydantic dataclass rather than a `BaseModel` so it keeps its positional constructor --
-    `StrategyEntry("ou-k0", ("no-short",))` is how every showcase and test spells it.
+    `StrategyEntry("ou-k0")` is how every showcase and test spells it.
+
+    The rules that watch the run's book are the run's, not the strategy's -- `compliance:` on
+    the run (design §7.2: a watcher does not inherit the target of the thing it watches). The
+    `constraints:` list that used to sit here is refused by name.
     """
 
     component_id: Annotated[str, Field(min_length=1)]
-    constraints: tuple[Annotated[str, Field(min_length=1)], ...] = ()
     initial_model_memory: Any = None
 
-    @field_validator("constraints")
+    @model_validator(mode="before")
     @classmethod
-    def _unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        _no_repeats(value, "constraints")
-        return value
+    def _no_constraints(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "constraints" in raw:
+            raise ValueError(
+                "`constraints:` left the strategy entry (design §7.1-7.2): the box a strategy "
+                "builds inside is its own kit call (`no_short`, `single_name_cap`, `intersect`), "
+                "and the rules that watch the committed book are declared on the RUN as "
+                "`compliance: [rule-component-id, ...]`"
+            )
+        return raw
 
     @field_validator("initial_model_memory")
     @classmethod
@@ -236,15 +247,16 @@ def _require_value_fields(value: object) -> tuple[str, ...]:
 
 @pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
 class DataModelEntry:
-    """One datamodel a run computes: the component, the dataset it writes, its opening memory.
+    """One datamodel a run computes: the component, its output fields, its opening memory.
 
     The output's shape is declared here and not by the model (architecture 4.4): the model
-    computes rows, and what dataset those rows become -- its id and its value fields -- is
-    configuration of the run that produces it (record `148`).
+    computes rows, and what fields those rows carry is configuration of the run that produces it
+    (record `148`). **Which dataset they become is the run's `writes`**, not this entry's: what a
+    run puts in the warehouse is a property of the run, the same for a strategy as for a
+    datamodel (`docs/design/two-clocks-and-the-wiring-table.md` §2).
     """
 
     component_id: Annotated[str, Field(min_length=1)]
-    dataset_id: Annotated[str, Field(min_length=1)]
     value_fields: tuple[str, ...]
     initial_model_memory: Any = None
 
@@ -300,59 +312,147 @@ class _InitialAccount(BaseModel):
 
 
 class RunFill(BaseModel):
-    """`runs.<id>.execution.fill`: on which session instant, at which price, a decision fills.
+    """`runs.<id>.execution.fill`: the optional handles on when a decision fills (design §3.5).
 
-    The run's own fill convention (record `185`): `at` is the venue-local wall time of the fill,
-    `selector` the scheduling rule, `trade_price` one of the execution dataset's numeric fields.
-    `fold`/`offset` are the DST proof a stored declaration may carry; a declaration without them
-    resolves the wall time from the zone and refuses an ambiguous one.
+    Absent, a decision fills at the first market-clock instant after it. `at` keeps only the
+    instants whose venue-local wall time (the run's zone) is this one; `after` is a minimum
+    elapsed time; `within` a maximum gap -- a decision with no candidate inside it has no target,
+    which preflight refuses. Durations share `agenda.every`'s grammar: `10m`, `2h`, `1d`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
 
-    selector: Literal["same_day", "next_eligible"] = "same_day"
-    at: time
-    timezone: str
-    trade_price: str
-    fold: int | None = None
-    offset: str | None = None
+    at: time | None = None
+    after: str | None = None
+    within: str | None = None
 
-    @field_validator("selector", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _lowered(cls, value: object) -> object:
-        return value.lower() if isinstance(value, str) else value
+    def _the_retired_shape(cls, raw: object) -> object:
+        if isinstance(raw, Mapping):
+            retired = [key for key in ("selector", "timezone", "trade_price") if key in raw]
+            if retired:
+                raise ValueError(
+                    f"{', '.join(retired)} left `fill:` (design §3.5): a decision fills at the "
+                    "first execution instant after it, narrowed by `at`, `after`, `within`; "
+                    "`trade_price` sits on `execution:` beside `dataset`, and the run's "
+                    "`timezone` reads `at`"
+                )
+        return raw
 
     @field_validator("at")
     @classmethod
-    def _wall_time(cls, value: time) -> time:
+    def _wall_time(cls, value: time | None) -> time | None:
+        return None if value is None else _naive_wall_time(value)
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if self.at is not None:
+            body["at"] = self.at.isoformat()
+        if self.after is not None:
+            body["after"] = self.after
+        if self.within is not None:
+            body["within"] = self.within
+        return body
+
+
+class RunAgenda(BaseModel):
+    """`runs.<id>.agenda`: the strategy clock, as a trading-day filter and a within-day rule.
+
+    Design §3.4: `every` (`1d`, `2d`, `1w`, `1M` select days and pair with `at`; `1m`, `5m`,
+    `1h` select instants inside each day between `from` and `to`). Which days are trading days
+    comes from data (§3.3): for a strategy run, the days its execution table has rows for --
+    nothing to declare; for a datamodel run, which has no venue, the dataset named by
+    `days_from`. The rule is validated by the domain's `AgendaRule`, which is also what
+    preflight expands.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False, populate_by_name=True)
+
+    every: Annotated[str, Field(min_length=2)]
+    at: tuple[time, ...] = ()
+    from_: time | None = Field(default=None, alias="from")
+    to: time | None = None
+    days_from: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_or_many(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "at" in raw and not isinstance(raw["at"], (list, tuple)):
+            body = dict(raw)
+            body["at"] = () if body["at"] is None else (body["at"],)
+            return body
+        return raw
+
+    @field_validator("at", "from_", "to")
+    @classmethod
+    def _wall_times(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            return tuple(_naive_wall_time(item) for item in value)
         return _naive_wall_time(value)
 
-    @field_serializer("at")
-    def _at_as_text(self, value: time) -> str:
-        return value.isoformat()
+    @field_validator("days_from")
+    @classmethod
+    def _dataset_name(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("days_from must be a non-empty dataset id")
+        return value
 
-    def to_convention(self) -> FillConvention:
-        return FillConvention(
-            FillSelector[self.selector.upper()],
-            self.at,
-            self.timezone,
-            self.trade_price,
-            self.fold,
-            self.offset,
-        )
+    @model_validator(mode="after")
+    def _a_rule(self) -> RunAgenda:
+        self.rule  # noqa: B018 -- the domain refuses an inconsistent every/at/from/to here
+        return self
+
+    @property
+    def rule(self) -> AgendaRule:
+        return AgendaRule(self.every, self.at, self.from_, self.to)
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"every": self.every}
+        if self.at:
+            body["at"] = [value.isoformat() for value in self.at]
+        if self.from_ is not None:
+            body["from"] = self.from_.isoformat()
+        if self.to is not None:
+            body["to"] = self.to.isoformat()
+        if self.days_from is not None:
+            body["days_from"] = self.days_from
+        return body
 
 
 class RunExecution(BaseModel):
-    """`runs.<id>.execution`: the registered execution dataset and this run's fill on it."""
+    """`runs.<id>.execution`: the registered execution dataset, the price this run fills at, and
+    the optional fill handles."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
 
     dataset: Annotated[str, Field(min_length=1)]
-    fill: RunFill
+    trade_price: Annotated[str, Field(min_length=1)]
+    fill: RunFill | None = None
 
-    @property
-    def convention(self) -> FillConvention:
-        return self.fill.to_convention()
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"dataset": self.dataset, "trade_price": self.trade_price}
+        if self.fill is not None:
+            stored = self.fill.model_dump(mode="json")
+            if stored:
+                body["fill"] = stored
+        return body
+
+    def rule(self, timezone: str) -> FillRule:
+        """The domain rule, read in the run's zone; refuses an inconsistent `after`/`within`."""
+        fill = self.fill or RunFill()
+        return FillRule(
+            trade_price=self.trade_price,
+            timezone=timezone,
+            at=fill.at,
+            after=fill.after,
+            within=fill.within,
+        )
 
 
 def _naive_wall_time(value: object) -> time:
@@ -363,21 +463,89 @@ def _naive_wall_time(value: object) -> time:
     return value
 
 
+def _singular_block(body: dict[str, Any], singular: str, plural: str) -> object:
+    """The member block under either spelling, normalised to `{component_id: fields}`.
+
+    Stored today as `strategy: {component: id, ...}` / `datamodel: {component: id, ...}` -- one
+    model, named as a block. Read yesterday's `strategies: {id: {...}}` too, so a workspace written
+    before 2026-09-09 opens; `_the_one_member` refuses it if it named two.
+    """
+    if plural in body:
+        return body.pop(plural)
+    block = body.get(singular)
+    if isinstance(block, Mapping) and ("component" in block or "component_id" in block):
+        fields = dict(block)
+        name = fields.pop("component", None) or fields.pop("component_id")
+        fields.pop("component_id", None)
+        return {str(name): fields}
+    return block
+
+
+def _the_one_member[Entry](
+    declared: object,
+    *,
+    build: Callable[[str, dict[str, Any]], Entry],
+    plural: str,
+) -> Entry | None:
+    """The single member a run names, from any of the spellings a document may carry it in.
+
+    A run is one arrow of the project's dataset graph and so runs one model
+    (`docs/design/two-clocks-and-the-wiring-table.md` §2.3). The stored block is still the
+    `plural: {component_id: {...}}` mapping it has always been, holding exactly one entry, so a
+    workspace written before this rule reads back unchanged unless it actually declared two --
+    and then it is refused by name rather than half-run.
+    """
+    if declared is None:
+        return None
+    if isinstance(declared, Mapping):
+        items = list(declared.items())
+    elif isinstance(declared, (tuple, list)):
+        items = [(getattr(entry, "component_id", ""), entry) for entry in declared]
+    else:
+        return declared  # type: ignore[return-value]
+    if not items:
+        return None
+    if len(items) > 1:
+        named = ", ".join(sorted(str(name) for name, _ in items))
+        raise ValueError(
+            f"a run names exactly one model; `{plural}:` named {len(items)} ({named}). "
+            "Register one run per model -- they share nothing a run has to hold them together "
+            "for, and independent runs parallelise where a run's members could not"
+        )
+    name, entry = items[0]
+    if isinstance(entry, (StrategyEntry, DataModelEntry)):
+        return entry  # type: ignore[return-value]
+    if entry is None:
+        return build(str(name), {})
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"`{plural}.{name}` must be a block of fields")
+    return build(str(name), dict(entry))
+
+
 class RunDefinition(BaseModel):
     """A registered run: what every model in it shares, and which models it runs.
 
-    A run holds one kind of model (record `148`): `strategies`, each with its own account and
-    venue, or `datamodels`, each writing one dataset and touching no account. Everything here is
-    an id or a value; the workspace resolves ids at preflight. Pairing rules are enforced here so
-    a document cannot half-declare a venue or a period.
+    A run runs ONE model of one kind (record `148`; `docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3): a `strategy`, with its own account and venue, or a `datamodel`, writing one dataset and
+    touching no account. Everything here is an id or a value; the workspace resolves ids at
+    preflight. Pairing rules are enforced here so a document cannot half-declare a venue or a
+    period.
+
+    **One model, because a run is one arrow of the project's dataset graph.** It held several
+    until 2026-09-09. The reason given was that members must share a frozen layer to be
+    comparable -- but determinism already guarantees that two runs declaring the same inputs
+    freeze identically, so sharing was an optimisation and not a meaning. What it cost was real:
+    parallelism lived inside a run instead of across independent runs, and two strategies run on
+    different days could not be compared at all.
 
     This is also the `runs.<run_id>` entry of `workspace.yaml` and of a declaration, read and
     written through `model_validate` / `model_dump(mode="json")`. The stored spelling differs
     from the field names in four places, and the before-validator and serializer below are the
-    one place that difference is written: `strategies`/`datamodels` are keyed by component id on
-    disk and are tuples of entries here; `execution` on disk is a `RunExecution`; one
-    `initial_account` block is a snapshot and a mode; and `run_id` is the key the entry sits
-    under, not a field of it.
+    one place that difference is written: `strategy`/`datamodel` are a block naming its
+    `component` on disk and an entry here (the pre-2026-09-09 `strategies: {id: {...}}` mapping
+    is still read); `execution` on disk is a `RunExecution`; one `initial_account` block is a
+    snapshot and a mode; and `run_id` is the key the entry sits under, not a field of it.
+    `writes` is spelled the same in both.
     """
 
     model_config = ConfigDict(
@@ -385,25 +553,32 @@ class RunDefinition(BaseModel):
     )
 
     run_id: Annotated[str, Field(min_length=1)]
-    strategies: tuple[StrategyEntry, ...] = ()
+    writes: Annotated[str, Field(min_length=1)]
+    """The dataset this run puts in the warehouse. Required: a run is one arrow of the project's
+    dataset graph, and an arrow that makes nothing is not a rule of it. A strategy publishes its
+    allocation under this name; a datamodel its computed rows. The name only -- the schema is
+    what the consumer declares (`DataRequirement`), and saying it twice would let it disagree."""
+    strategy: StrategyEntry | None = None
+    """The one strategy this run executes, when it is a strategy run. Never beside `datamodel`."""
     instruments: tuple[Annotated[str, Field(min_length=1)], ...]
-    datamodels: tuple[DataModelEntry, ...] = ()
-    """The datamodels a run computes, when it is a datamodel run. Never beside `strategies`."""
+    datamodel: DataModelEntry | None = None
+    """The one dataset this run computes, when it is a datamodel run. Never beside `strategy`."""
     timezone: str
     """The venue zone every wall time below is expressed in. Required: a run without one is not
     run-ready, and the dataclass's `""` default only deferred that refusal to the zone check."""
-    at: time | None = None
-    """When, on each session, every model is called. A strategy decides for itself whether to
-    act; the book is valued at the instant the venue fills, and monitored right after each
-    commit, so this is the one wall time a run declares (record `148`)."""
-    sessions_from: str | None = None
-    """The dataset whose distinct `available_at` days are the run's sessions."""
-    sessions: tuple[date, ...] = ()
-    """Or the sessions listed literally. Exactly one of the two is declared."""
+    agenda: RunAgenda
+    """When the model is called: the strategy clock (design §3.4). The trading days it is
+    expanded over come from the execution table for a strategy run and from `days_from` for a
+    datamodel run; the book is valued at the instant the venue fills and monitored right after
+    each commit, so this is the one clock a run declares."""
     exchange: str | None = None
     execution: RunExecution | None = None
     """Which registered execution dataset the run fills against, and how: the session instant
     and the price (record `185`). The table is registered once; the price is this run's."""
+    compliance: tuple[Annotated[str, Field(min_length=1)], ...] = ()
+    """The registered Compliance rules that observe this run's committed book at every
+    market-clock instant (design §7.2). On the run, beside the venue, because a rule's parameters
+    are its own and not the strategy's. A datamodel run has no book and declares none."""
     start: datetime | None = None
     end: datetime | None = None
     initial_account_snapshot: AccountSnapshot | None = None
@@ -418,20 +593,52 @@ class RunDefinition(BaseModel):
         if not isinstance(raw, Mapping):
             return raw
         body = dict(raw)
-        strategies = body.get("strategies")
-        if isinstance(strategies, Mapping):
-            body["strategies"] = tuple(
-                StrategyEntry(component_id=name, **(entry or {}))
-                if isinstance(entry, Mapping) or entry is None
-                else entry
-                for name, entry in strategies.items()
+        retired = [key for key in ("at", "sessions", "sessions_from") if key in body]
+        if retired:
+            raise ValueError(
+                f"{', '.join(retired)} moved into `agenda:` (design §3.4): declare "
+                "`agenda: {every: 1d, at: HH:MM}`; a strategy run takes its trading days from "
+                "its execution table, a datamodel run names them with `agenda.days_from`"
             )
-        datamodels = body.get("datamodels")
-        if isinstance(datamodels, Mapping):
-            body["datamodels"] = tuple(
-                DataModelEntry(component_id=name, **entry) if isinstance(entry, Mapping) else entry
-                for name, entry in datamodels.items()
-            )
+        strategy = _singular_block(body, "strategy", "strategies")
+        if isinstance(strategy, Mapping):
+            for entry in strategy.values():
+                if isinstance(entry, Mapping) and "constraints" in entry:
+                    raise ValueError(
+                        "`constraints:` left the strategy entry (design §7.1-7.2): the box a "
+                        "strategy builds inside is its own kit call (`no_short`, "
+                        "`single_name_cap`, `intersect`), and the rules that watch the committed "
+                        "book are declared on the RUN as `compliance: [rule-component-id, ...]`"
+                    )
+        datamodel = _singular_block(body, "datamodel", "datamodels")
+        # A datamodel block written before `writes` moved to the run carried `dataset_id`
+        # inside the entry. Hoist it, so a workspace from then reads back unchanged.
+        if isinstance(datamodel, Mapping):
+            for name, entry in datamodel.items():
+                if isinstance(entry, Mapping) and "dataset_id" in entry:
+                    entry = dict(entry)
+                    hoisted = entry.pop("dataset_id")
+                    declared = body.get("writes")
+                    if declared is not None and declared != hoisted:
+                        raise ValueError(
+                            f"writes {declared!r} and the datamodel's dataset_id {hoisted!r} "
+                            "disagree; `dataset_id` moved to the run as `writes` -- declare it once"
+                        )
+                    body["writes"] = hoisted
+                    # Replace this entry only. Collapsing the mapping to it would hide a second
+                    # member from the one-model rule below.
+                    datamodel = {**datamodel, name: entry}
+                    break
+        body["strategy"] = _the_one_member(
+            strategy,
+            build=lambda name, fields: StrategyEntry(component_id=name, **fields),
+            plural="strategies",
+        )
+        body["datamodel"] = _the_one_member(
+            datamodel,
+            build=lambda name, fields: DataModelEntry(component_id=name, **fields),
+            plural="datamodels",
+        )
         if "execution_table" in body or "execution_input_id" in body:
             raise ValueError(
                 "execution_table is retired (record 185): register the venue table as a dataset "
@@ -449,9 +656,8 @@ class RunDefinition(BaseModel):
                     version=declared.version, cash=declared.cash, positions=declared.positions
                 )
                 body["initial_account_mode"] = declared.mode
-        for name in ("strategies", "datamodels", "sessions", "instruments"):
-            if name in body and body[name] is None:
-                body[name] = ()
+        if "instruments" in body and body["instruments"] is None:
+            body["instruments"] = ()
         return body
 
     @model_serializer(mode="plain")
@@ -467,10 +673,13 @@ class RunDefinition(BaseModel):
             "start": None if self.start is None else self.start.isoformat(),
             "end": None if self.end is None else self.end.isoformat(),
             "timezone": self.timezone,
-            "at": None if self.at is None else self.at.isoformat(),
+            "agenda": self.agenda.model_dump(mode="json"),
+            "writes": self.writes,
             "exchange": self.exchange,
             "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
         }
+        if self.compliance:
+            ordered["compliance"] = list(self.compliance)
         if self.initial_account_snapshot is not None and self.initial_account_mode is not None:
             ordered["initial_account"] = _InitialAccount(
                 cash=self.initial_account_snapshot.cash,
@@ -478,50 +687,19 @@ class RunDefinition(BaseModel):
                 positions=dict(self.initial_account_snapshot.positions),
                 version=self.initial_account_snapshot.version,
             ).model_dump(mode="json")
-        if self.strategies:
-            ordered["strategies"] = {
-                entry.component_id: _entry_body(entry, ("constraints", "initial_model_memory"))
-                for entry in self.strategies
+        if self.strategy is not None:
+            ordered["strategy"] = {
+                "component": self.strategy.component_id,
+                **_entry_body(self.strategy, ("initial_model_memory",)),
             }
-        if self.datamodels:
-            ordered["datamodels"] = {
-                entry.component_id: _entry_body(
-                    entry, ("dataset_id", "value_fields", "initial_model_memory")
-                )
-                for entry in self.datamodels
+        if self.datamodel is not None:
+            ordered["datamodel"] = {
+                "component": self.datamodel.component_id,
+                **_entry_body(self.datamodel, ("value_fields", "initial_model_memory")),
             }
-        if self.sessions_from is not None:
-            ordered["sessions_from"] = self.sessions_from
-        if self.sessions:
-            ordered["sessions"] = [day.isoformat() for day in self.sessions]
         return ordered
 
     # ---- this package's rules ----------------------------------------------------------------
-
-    @field_validator("at")
-    @classmethod
-    def _wall_time(cls, value: time | None) -> time | None:
-        return None if value is None else _naive_wall_time(value)
-
-    @field_validator("sessions", mode="before")
-    @classmethod
-    def _declared_sessions(cls, value: object) -> object:
-        # `None` on disk is "not declared", and so is the domain's `()` default. An explicit
-        # empty LIST is a declaration of nothing -- a declaration writes lists -- which the
-        # document refused by name and this keeps refusing by name.
-        if value is None:
-            return ()
-        if isinstance(value, list) and not value:
-            raise ValueError("sessions must list at least one date")
-        return value
-
-    @field_validator("sessions")
-    @classmethod
-    def _dates_only(cls, value: tuple[date, ...]) -> tuple[date, ...]:
-        for day in value:
-            if isinstance(day, datetime) or not isinstance(day, date):
-                raise ValueError("sessions must be a tuple of dates")
-        return value
 
     @field_validator("start", "end")
     @classmethod
@@ -532,21 +710,47 @@ class RunDefinition(BaseModel):
             )
         return value
 
+    @field_validator("compliance")
+    @classmethod
+    def _unique_rules(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _no_repeats(value, "compliance")
+        return value
+
     @model_validator(mode="after")
     def _whole_declaration(self) -> RunDefinition:
-        if bool(self.strategies) == bool(self.datamodels):
+        if (self.strategy is None) == (self.datamodel is None):
             raise ValueError(
-                "must name at least one model under exactly one of `strategies:` or "
-                "`datamodels:` -- a run names at least one strategy or at least one datamodel, "
-                "not both (record 148: a run holds one kind)"
+                "must name one model under exactly one of `strategies:` or `datamodels:` -- a "
+                "run runs one strategy or one datamodel, not both and not neither "
+                "(record 148: a run holds one kind; a run is one arrow of the graph)"
             )
-        ids = [entry.component_id for entry in (*self.strategies, *self.datamodels)]
-        if len(set(ids)) != len(ids):
-            raise ValueError("a run names each model at most once")
-        outputs = [entry.dataset_id for entry in self.datamodels]
-        if len(set(outputs)) != len(outputs):
-            raise ValueError("a run writes each output dataset at most once")
-        if self.datamodels:
+        if self.agenda.days_from is not None and self.writes == self.agenda.days_from:
+            raise ValueError(
+                f"writes {self.writes!r} is also agenda.days_from: a run cannot take its trading "
+                "days from the dataset it is about to write"
+            )
+        if self.strategy is not None and self.agenda.days_from is not None:
+            raise ValueError(
+                "a strategy run declares no agenda.days_from: its trading days are the days its "
+                "execution table has rows for (design §3.3)"
+            )
+        if self.datamodel is not None and self.agenda.days_from is None:
+            raise ValueError(
+                "a datamodel run declares agenda.days_from: it has no execution table, so it "
+                "names the dataset whose days are its trading days (design §3.3)"
+            )
+        if self.execution is not None:
+            self.execution.rule(self.timezone)  # refuses an after/within pair no instant satisfies
+        if self.execution is not None and self.writes == self.execution.dataset:
+            raise ValueError(
+                f"writes {self.writes!r} is also the execution dataset: a run cannot fill "
+                "against the dataset it is about to write"
+            )
+        if self.datamodel is not None and self.compliance:
+            raise ValueError(
+                "a datamodel run declares no compliance: it has no account for a rule to observe"
+            )
+        if self.datamodel is not None:
             declared = [
                 key
                 for key, value in (
@@ -564,12 +768,6 @@ class RunDefinition(BaseModel):
                     "because a datamodel sees no account and passes through no venue"
                 )
         _require_timezone(self.timezone)
-        if self.at is None:
-            raise ValueError("at must be declared")
-        if (self.sessions_from is None) == (not self.sessions):
-            raise ValueError("declare exactly one of sessions_from or sessions")
-        if self.sessions_from is not None and not self.sessions_from:
-            raise ValueError("sessions_from must be a non-empty identifier")
         if self.exchange is not None and not self.exchange:
             raise ValueError("exchange must be a non-empty identifier")
         if (self.exchange is None) != (self.execution is None):
@@ -582,20 +780,26 @@ class RunDefinition(BaseModel):
     # ---- what the flow asks a run ------------------------------------------------------------
 
     def spoken(self) -> list[str]:
-        """The point-in-time meaning of this declaration, in one sentence (`docs/issues/archive/027`)."""
-        when = "" if self.at is None else f" at {self.at.isoformat()} {self.timezone}"
+        """The point-in-time meaning of this declaration, in one sentence
+        (`docs/issues/archive/027`).
+        """
+        when = f" {self.agenda.rule.describe()} {self.timezone}"
         sentences: list[str] = []
         if self.execution is not None:
-            fill = self.execution.fill
+            rule = self.execution.rule(self.timezone)
             sentences.append(
                 f"run {self.run_id!r} fills against dataset {self.execution.dataset!r}: "
-                f"{fill.selector} at {fill.at.isoformat()} {fill.timezone}, at its "
-                f"{fill.trade_price!r} price"
+                f"{rule.describe()}, at its {rule.trade_price!r} price"
             )
+        days = (
+            "the days its execution table has rows for"
+            if self.agenda.days_from is None
+            else f"the days dataset {self.agenda.days_from!r} has rows for"
+        )
         sentences.append(
-            f"run {self.run_id!r}: every model is called{when} on each session and sees only "
-            "rows knowable before that instant; the book fills later, at the execution dataset's "
-            "own instant"
+            f"run {self.run_id!r}: the model is called{when}, over {days}, and sees only rows "
+            "knowable before each instant; the book fills later, at the execution dataset's own "
+            "instant"
         )
         return sentences
 
@@ -612,51 +816,29 @@ class RunDefinition(BaseModel):
 
     @property
     def agenda_id(self) -> str:
-        """The id of the one agenda preflight derives: every session, at `at`."""
-        return f"{self.run_id}.sessions"
+        """The id of the one agenda preflight derives from `agenda:` (design §3.4)."""
+        return f"{self.run_id}.agenda"
 
     @property
     def kind(self) -> str:
         """`"strategy"` or `"datamodel"`: which kind of model this run holds."""
-        return "datamodel" if self.datamodels else "strategy"
+        return "datamodel" if self.datamodel is not None else "strategy"
 
     @property
-    def members(self) -> tuple[StrategyEntry | DataModelEntry, ...]:
-        """The models the run names, whichever kind it holds."""
-        return (*self.strategies, *self.datamodels)
-
-    def strategy(self, component_id: str) -> StrategyEntry:
-        for entry in self.strategies:
-            if entry.component_id == component_id:
-                return entry
-        raise KeyError(
-            f"run {self.run_id!r} does not name strategy {component_id!r}; it names "
-            f"{', '.join(entry.component_id for entry in self.members)}"
-        )
-
-    def datamodel(self, component_id: str) -> DataModelEntry:
-        for entry in self.datamodels:
-            if entry.component_id == component_id:
-                return entry
-        raise KeyError(
-            f"run {self.run_id!r} does not name datamodel {component_id!r}; it names "
-            f"{', '.join(entry.component_id for entry in self.members)}"
-        )
-
-    def member(self, component_id: str) -> StrategyEntry | DataModelEntry:
-        """The named model of whichever kind the run holds."""
-        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
+    def member(self) -> StrategyEntry | DataModelEntry:
+        """The one model the run names, whichever kind it holds."""
+        one = self.strategy if self.strategy is not None else self.datamodel
+        if one is None:  # pragma: no cover -- `_whole_declaration` refuses this
+            raise ValueError(f"run {self.run_id!r} names no model")
+        return one
 
 
 def _entry_body(entry: object, names: Sequence[str]) -> dict[str, Any]:
     """An entry's declared fields as its stored block: only what was declared, in the stored
-    order, `constraints` and `initial_model_memory` omitted when empty (as the document always
-    wrote them)."""
+    order, `initial_model_memory` omitted when empty (as the document always wrote it)."""
     body: dict[str, Any] = {}
     for name in names:
         value = getattr(entry, name)
-        if name == "constraints" and not value:
-            continue
         if name == "initial_model_memory" and value is None:
             continue
         body[name] = list(value) if isinstance(value, tuple) else value

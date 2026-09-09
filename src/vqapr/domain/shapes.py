@@ -69,7 +69,10 @@ class Grain(StrEnum):
     """One value per field per (available_at, instrument). A panel can be built."""
 
     INSTANT = "instant"
-    """One value per available_at; no instrument axis (`docs/issues/archive/038`). A one-column panel."""
+    """One value per available_at; no instrument axis (`docs/issues/archive/038`).
+
+    A one-column panel.
+    """
 
     ROWS = "rows"
     """The vendor's grain: long / EAV. Unique on the declared `key_fields`. No panel."""
@@ -149,12 +152,12 @@ class Observation:
     """One PIT row returned from a declared, aliased read.
 
     Constructing one by hand validates every field: the instrument id is a non-empty identifier,
-    `available_at` is tz-aware, every value key is an identifier and every value a portable
-    scalar. A row the framework itself produced is built through `_framework_row` instead and
-    skips all of that -- `docs/issues/archive/054` measured the per-row re-check at 70% of a `rows` read,
-    proving per value what the registration proved once (`docs/issues/035`: validation happens at
-    registration, and the read path is trusted). The distinction is who built the row, not
-    whether rows are checked: an author's `Observation(values={"a b": 1})` is still refused.
+    `available_at` is tz-aware, every value key is an identifier and every value a portable scalar.
+    A row the framework itself produced is built through `_framework_row` instead and skips all of
+    that -- `docs/issues/archive/054` measured the per-row re-check at 70% of a `rows` read, proving
+    per value what the registration proved once (`docs/issues/035`: validation happens at
+    registration, and the read path is trusted). The distinction is who built the row, not whether
+    rows are checked: an author's `Observation(values={"a b": 1})` is still refused.
     """
 
     instrument_id: str
@@ -261,8 +264,8 @@ class CrossSection[T](Mapping[str, T]):
     ) -> CrossSection[U]:
         """`fn` applied name by name across this and `others`, which must cover the same names.
 
-        What `merged_constraint_bounds` does with `max` and `min`: a projection that misses a name
-        is refused rather than defaulted, because a missing bound would silently widen the box.
+        What `vqapr.portfolio.bounds.intersect` does with `max` and `min`: a box that misses a
+        name is refused rather than defaulted, because a missing bound would silently widen it.
         """
         for other in others:
             if set(other) != set(self._keys):

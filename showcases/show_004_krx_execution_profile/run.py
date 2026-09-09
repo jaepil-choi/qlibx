@@ -52,6 +52,7 @@ from vqapr.public import (
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -131,25 +132,21 @@ def _definition(
     """
     return RunDefinition(
         run_id=exchange.component_id,
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        at=time(8, 30),
+        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
         exchange=exchange.component_id,
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes=f"{exchange.component_id}-weights",
     )
 
 
@@ -384,14 +381,13 @@ def main() -> None:
     register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
     score_definition = RunDefinition(
         run_id="momentum-score",
-        strategies=(),
         instruments=universe,
-        datamodels=(DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),),
+        datamodel=DataModelEntry("momentum-model", ("score", "eligible")),
         timezone=VENUE,
-        at=time(16, 0),
-        sessions=tuple(score_days),
+        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        writes="momentum_score",
     )
     run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 

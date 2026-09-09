@@ -1,10 +1,13 @@
-"""`vqapr run <run-id>` — freeze a registered run, preflight it, and execute its strategies.
+"""`vqapr run <run-id>` — freeze a registered run, preflight it, and execute the model it names.
 
 A run is a registered declaration since record `139` (`runs:` in a declaration document, design
 §4.1): the reusable unit is a name in the workspace, not a file. This verb looks the run up,
-makes the same judgments `vqapr check` makes, freezes it once, and runs each strategy it names --
-or those named with `--strategy` -- each in its own flow with its own account and its own record.
-A datamodel run (record `148`) is the same verb: its members write datasets instead of tables.
+makes the same judgments `vqapr check` makes, freezes it, and runs its one model in its own flow
+with its own account and its own record. A datamodel run (record `148`) is the same verb: its
+model writes a dataset instead of tables.
+
+**One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3), so
+there is no member to select and `--strategy` is gone. Several models means several runs.
 """
 
 from __future__ import annotations
@@ -29,7 +32,12 @@ from vqapr.domain.errors import (
 )
 from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.flow.engine.run_state import FILL_TABLE
-from vqapr.flow.orchestration import COMPLETED, FAILED
+from vqapr.flow.orchestration import (
+    COMPLETED,
+    FAILED,
+    in_workers,
+    run_registered_strategy,
+)
 from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.public import RunDefinition, Workspace, preflight_run
 from vqapr.public import run as execute_run
@@ -44,21 +52,15 @@ from vqapr.record import (
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "target",
-        help="the id of a registered run (`vqapr list runs`)",
-    )
-    parser.add_argument(
-        "--strategy",
-        dest="strategies",
-        action="append",
-        default=None,
-        help="run only this model of the run (repeatable); default: every model it names",
+        nargs="+",
+        help="the id of a registered run (`vqapr list runs`); several ids run several runs",
     )
     parser.add_argument(
         "--jobs",
         dest="jobs",
         type=int,
         default=1,
-        help="run the strategies in this many processes; each builds its own panels",
+        help="run the given runs in this many processes; each builds its own panels",
     )
     parser.add_argument(
         "--force",
@@ -121,9 +123,9 @@ def _chain(error: BaseException) -> str:
 def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     """A bare TypeError or ValueError from a framework invariant, given an envelope.
 
-    ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and `run`
-    called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded refusal
-    from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
+    ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and
+    `run` called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded
+    refusal from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
 
     The two codes are written literally rather than selected into a variable so the refusal-code
     inventory's constant folding can see them. Both carry the exception whole as `cause`; the
@@ -175,33 +177,16 @@ def refuse_a_path(target: str, *, verb: str) -> None:
     )
 
 
-def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
-    target = str(args.target)
+def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     refuse_a_path(target, verb="run")
 
     workspace = Workspace.open(project_root)
     definition: RunDefinition = workspace.run_definition(target)
-    selected = tuple(getattr(args, "strategies", None) or ())
-    for name in selected:
-        try:
-            definition.member(name)
-        except KeyError as unknown:
-            # Bounded here, before the judgments: a bare KeyError rendered as `stage:
-            # "unhandled"`, and once the judgments moved inside `preflight_run` (record `168`)
-            # a typo in `--strategy` reached this loop first and hid the judgment refusal a
-            # run would otherwise have named (record `170`).
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"`--strategy` names a model the run {target!r} declares",
-                observed=f"{name!r} is not one of them; the run names "
-                + ", ".join(entry.component_id for entry in definition.members),
-                retry=f"vqapr show run {target}, then name one of its models",
-            ) from unknown
-    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/archive/070`):
-    # the judgments, the freeze and the roster read all see the same document. The judgments are
-    # asked inside `preflight_run`, in the order `check` asks them, so this verb and a Python
-    # caller refuse the same run for the same reasons (record `168`); a refusal arrives as the
-    # `VqaprError` below deliberately lets through.
+    # The ONE workspace this command opened goes to preflight and to the run
+    # (`docs/issues/archive/070`): the judgments, the freeze and the roster read all see the same
+    # document. The judgments are asked inside `preflight_run`, in the order `check` asks them, so
+    # this verb and a Python caller refuse the same run for the same reasons (record `168`); a
+    # refusal arrives as the `VqaprError` below deliberately lets through.
     try:
         frozen = preflight_run(workspace, definition)
     except (TypeError, ValueError) as refused:
@@ -225,8 +210,6 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             project_root,
             frozen,
             store_root=store_root,
-            strategies=selected or None,
-            jobs=int(getattr(args, "jobs", 1) or 1),
             replace_record=replace,
             record_account_positions=not getattr(args, "no_account_positions", False),
             workspace=workspace,
@@ -256,19 +239,21 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 "changed run under a new id"
             ),
         ) from changed
-    if frozen.datamodels:
+    if frozen.datamodel is not None:
         return success(
             "run.complete",
             run_id=frozen.run_id,
+            writes=frozen.writes,
             store_root=str(store_root),
             datamodels={
                 component_id: _datamodel_envelope(record)
                 for component_id, record in outcome.records.items()
             },
         )
-    # One line per strategy the run was asked to run, completed or failed (`docs/issues/archive/073`).
-    # A failed strategy's line is the same `simulation.*` payload a refusal used to be the whole
-    # envelope of, so a reader who handled that shape handles this one, per strategy.
+    # One line per strategy the run was asked to run, completed or failed
+    # (`docs/issues/archive/073`). A failed strategy's line is the same `simulation.*` payload a
+    # refusal used to be the whole envelope of, so a reader who handled that shape handles this one,
+    # per strategy.
     strategies: dict[str, dict[str, Any]] = {}
     for component_id, result in outcome.outcomes.items():
         if result.status == COMPLETED:
@@ -284,6 +269,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     return success(
         "run.complete",
         run_id=frozen.run_id,
+        writes=frozen.writes,
         store_root=str(store_root),
         strategies=strategies,
         # What this run knew each instrument to be, or that it knew nothing. Reported on the
@@ -291,6 +277,108 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # was computed against.
         roster=roster,
     )
+
+
+def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    """One registered run, or several.
+
+    A run holds one model since 2026-09-09 (`docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3), so `--jobs` spreads RUNS rather than the members of one. Several targets each get
+    their own envelope under `runs`, keyed by run id, and one target keeps the envelope it has
+    always had -- a caller that names one run sees no change.
+
+    Each run is independent: one refusal is reported in that run's entry rather than ending the
+    others, which is the same rule a run's members used to get (`docs/issues/archive/073`) at the
+    level the unit moved to.
+    """
+    targets = [str(name) for name in args.target]
+    if len(targets) == 1:
+        return _run_one(targets[0], args, project_root=project_root)
+    jobs = int(getattr(args, "jobs", 1) or 1)
+    store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
+    if jobs > 1:
+        return _run_each_in_workers(targets, args, project_root=project_root, jobs=jobs)
+    runs: dict[str, Any] = {}
+    for target in targets:
+        try:
+            runs[target] = _run_one(target, args, project_root=project_root)
+        except (VqaprError, InputError) as refused:
+            runs[target] = _refusal_envelope(refused)
+    return _runs_envelope(runs, store_root)
+
+
+def _run_each_in_workers(
+    targets: list[str], args: argparse.Namespace, *, project_root: Path, jobs: int
+) -> dict[str, Any]:
+    """The runs in `jobs` spawned processes, each freezing its own run (design §2.3)."""
+    store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
+    workspace = Workspace.open(project_root)
+    replace = bool(getattr(args, "force", False))
+    positions = not getattr(args, "no_account_positions", False)
+    strategy_runs = [
+        target
+        for target in targets
+        if workspace.run_definition(target).strategy is not None
+    ]
+    datamodel_runs = [target for target in targets if target not in set(strategy_runs)]
+    runs: dict[str, Any] = {}
+    if strategy_runs:
+        for run_id, outcome in in_workers(
+            strategy_runs,
+            run_registered_strategy,
+            (replace, positions),
+            jobs=jobs,
+            store=Path(store_root),
+            root_path=project_root,
+        ).items():
+            runs[run_id] = _worker_envelope(run_id, outcome, store_root)
+    for target in datamodel_runs:
+        # Sequential: a datamodel worker raises its refusal rather than returning it, so running
+        # it here keeps one bounded refusal per run instead of one exception for the batch.
+        try:
+            runs[target] = _run_one(target, args, project_root=project_root)
+        except (VqaprError, InputError) as refused:
+            runs[target] = _refusal_envelope(refused)
+    return _runs_envelope(runs, store_root)
+
+
+def _worker_envelope(run_id: str, outcome: Any, store_root: Path) -> dict[str, Any]:
+    if outcome.status == COMPLETED:
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "strategies": {
+                outcome.component_id: {
+                    "status": COMPLETED,
+                    **_strategy_envelope(store_root, run_id, outcome.record),
+                }
+            },
+        }
+    return {
+        "ok": False,
+        "run_id": run_id,
+        "strategies": {
+            outcome.component_id: {"status": FAILED, **dict(outcome.failure or {})}
+        },
+    }
+
+
+def _refusal_envelope(refused: Exception) -> dict[str, Any]:
+    """One run's refusal as its entry, so the other runs in the batch still report."""
+    body = getattr(refused, "as_envelope", None)
+    rendered: dict[str, Any] = {"error": str(refused)}
+    if callable(body):
+        produced = body()
+        if isinstance(produced, dict):
+            rendered = produced
+    return {"ok": False, **rendered}
+
+
+def _runs_envelope(runs: dict[str, Any], store_root: Path) -> dict[str, Any]:
+    ok = all(entry.get("ok", True) for entry in runs.values())
+    envelope = success("run.complete", store_root=str(store_root), runs=runs)
+    envelope["ok"] = ok
+    return envelope
 
 
 def _strategy_failed(
@@ -374,11 +462,11 @@ def _held_record(running: RunRecordLive) -> VqaprError:
     Status 423 at stage `record` (record `171`): another process holds it, and the submission is
     not what must change. It was an `InputError`, which told the reader their argument was wrong.
 
-    **What this refusal may not say is that the holder is alive.** The lock proves only that it
-    was touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
+    **What this refusal may not say is that the holder is alive.** The lock proves only that it was
+    touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
     interrogated -- so a run killed seconds ago presents exactly like one that is executing
-    (`docs/issues/archive/037`). `fix` names the self-healing wait FIRST, because it is the remedy that is
-    correct under both readings and costs nothing.
+    (`docs/issues/archive/037`). `fix` names the self-healing wait FIRST, because it is the remedy
+    that is correct under both readings and costs nothing.
     """
     claim = running.claim
     fix = (

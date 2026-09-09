@@ -9,7 +9,7 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
-from vqapr.authoring import Constraint, StrategyModel
+from vqapr.authoring import Compliance, StrategyModel
 from vqapr.data.datasets import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
@@ -27,14 +27,15 @@ from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
-    load_constraint,
+    load_compliance,
     load_data_model,
     load_exchange,
     load_strategy_model,
 )
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.flow.declaration.roster import require_declared_roster
 from vqapr.project.run import (
-    ConstraintSet,
+    ComplianceSet,
     DataModelEntry,
     RunDefinition,
     StrategyConfig,
@@ -44,28 +45,32 @@ from vqapr.project.store import Workspace
 
 
 def derived_agenda(workspace: Workspace, definition: RunDefinition) -> OperationAgenda:
-    """The run's one agenda -- every session, at `at` -- built from what the run declares.
+    """The run's one agenda: its `agenda:` rule expanded over its trading days (design §3.4).
 
-    Record `148`: an agenda is no longer a registered declaration. A run says which sessions
-    (`sessions_from`, a dataset's own days, or `sessions` listed) and at what venue-local wall
-    time every model is called, and this builds the `OperationAgenda` the flow already runs on,
-    id `<run_id>.sessions`. `OperationAgenda.daily` owns the occurrence ids, fold and offset, so
-    a DST session is refused rather than guessed. The book is valued at the instant the venue
-    fills and monitored right after each commit, so there is no second agenda to build.
+    The DAYS come from data and the INSTANTS from the rule (§3.3): a strategy run's trading days
+    are the days its execution table has rows for -- a denser table adds instants to the market
+    clock and not one day to the strategy clock, which is `UC-TIME-002`'s guarantee -- and a
+    datamodel run, having no venue, names the dataset whose days count with `days_from`.
+    `OperationAgenda.expand` owns the occurrence ids, fold and offset, so a DST wall time is
+    refused rather than guessed. The book is valued at the instant the venue fills and monitored
+    right after each commit, so there is no second agenda to build.
     """
-    sessions: Iterable[datetime | date] = (
-        workspace.evaluation_times(definition.sessions_from)
-        if definition.sessions_from is not None
-        else definition.sessions
+    source = (
+        definition.execution.dataset
+        if definition.execution is not None
+        else definition.agenda.days_from
     )
-    assert definition.at is not None
+    if source is None:  # pragma: no cover -- `RunDefinition` refuses both shapes
+        raise ValueError("a run's trading days come from its execution table or agenda.days_from")
+    sessions: Iterable[datetime | date] = workspace.evaluation_times(source)
     if definition.start is not None and definition.end is not None:
-        # Cut on DATES before an occurrence is built, not on occurrences after (`docs/issues/archive/069`:
-        # a run of 15 sessions built 735 occurrences, with their fold and offset proofs and the
-        # agenda's identity over them, three times per command). An occurrence on venue-local
-        # day `d` at `at` lies inside `[start, end]` only if `d` lies between the bounds' local
-        # dates, so this keeps a superset of what `inclusive_slice` keeps and changes nothing
-        # it would have answered. `daily` still owns the date conversion and the DST refusal.
+        # Cut on DATES before an occurrence is built, not on occurrences after
+        # (`docs/issues/archive/069`: a run of 15 sessions built 735 occurrences, with their fold
+        # and offset proofs and the agenda's identity over them, three times per command). An
+        # occurrence on venue-local day `d` at `at` lies inside `[start, end]` only if `d` lies
+        # between the bounds' local dates, so this keeps a superset of what `inclusive_slice` keeps
+        # and changes nothing it would have answered. `daily` still owns the date conversion and the
+        # DST refusal.
         zone = ZoneInfo(definition.timezone)
         first = definition.start.astimezone(zone).date()
         last = definition.end.astimezone(zone).date()
@@ -78,10 +83,10 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
         sessions = tuple(
             session for session in sessions if first <= _local_date(session) <= last
         )
-    return OperationAgenda.daily(
+    return OperationAgenda.expand(
         agenda_id=agenda_id(definition.agenda_id),
-        sessions=sessions,
-        at=definition.at,
+        days=sessions,
+        rule=definition.agenda.rule,
         timezone=definition.timezone,
     )
 
@@ -161,7 +166,7 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
     if registration.instrument_field is None:
         raise ValueError(f"execution dataset {binding.dataset!r} must declare an instrument_field")
     prices = execution_price_fields(registration)
-    fill = binding.convention
+    fill = binding.rule(definition.timezone)
     if fill.trade_price not in prices:
         raise VqaprError(
             stage=Stage.FREEZE,
@@ -539,9 +544,9 @@ def _validate_execution_targets(
     """Prove every strategy callback can bind an accepted intent before the run starts.
 
     A callback may return ``Hold``, but preflight cannot assume that it will. If an
-    occurrence has no exact target under the declared fill convention, an intent accepted there
-    would fail only after every earlier callback had already mutated account state. The horizon,
-    selector, and callback instants are all frozen facts, so that refusal belongs here.
+    occurrence has no exact target under the fill rule, an intent accepted there would fail only
+    after every earlier callback had already mutated account state. The horizon, the rule and
+    the callback instants are all frozen facts, so that refusal belongs here.
 
     The horizon is read once. Calling ``select_target`` without it would rescan the execution
     table once per occurrence -- both slower and vulnerable to observing different bytes while
@@ -564,36 +569,35 @@ def _validate_execution_targets(
     if not missing:
         return
 
-    selector = execution_table.fill.selector.value.lower()
+    rule = execution_table.fill.describe()
     raise VqaprError(
         stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
                 code="execution.target_outside_horizon",
                 requirement=(
-                    "every strategy occurrence must have an exact execution target strictly "
-                    "later than the occurrence and inside the run horizon; extend end through "
-                    "the required execution snapshot, or choose a fill selector whose target "
-                    "exists after that decision"
+                    "every strategy occurrence must have an execution instant after it that the "
+                    "fill rule admits, inside the run horizon; extend end through the required "
+                    "execution instant, or loosen `at`/`after`/`within`"
                 ),
-                observed=(f"selector={selector}, end={end.isoformat()}, unresolved={len(missing)}"),
+                observed=(f"fill={rule}, end={end.isoformat()}, unresolved={len(missing)}"),
                 examples=[
                     f"{occurrence.occurrence_id}: {occurrence.evaluation_time.isoformat()}"
                     for occurrence in missing
                 ],
                 example_total=len(missing),
                 fix=(
-                    f"widen the run end past {end.isoformat()} to cover the required "
-                    f"execution snapshot, or choose a fill selector other than {selector!r} "
-                    "whose target resolves inside the horizon"
+                    f"widen the run end past {end.isoformat()} to cover the required execution "
+                    "instant, move the decision earlier, or loosen the fill's `at`/`after`/"
+                    "`within` so an instant after every decision qualifies"
                 ),
                 status=Status.PRECONDITION,
             )
         ],
         mutation=False,
         retry_precondition=(
-            "extend the run end through the missing execution snapshot, correct the execution "
-            "table, or choose a fill selector that resolves inside the horizon, then retry"
+            "extend the run end through the missing execution instant, correct the execution "
+            "table, or loosen the fill rule, then retry"
         ),
     )
 
@@ -602,12 +606,13 @@ def _freeze_strategy(
     workspace: Workspace,
     entry: StrategyEntry,
     *,
+    compliance: tuple[str, ...],
     decide: OperationAgenda,
     execution_table: ExecutionTable,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
-    """One strategy's layer: its component, its constraints, and the run's decide agenda sliced.
+    """One strategy's layer: its component, the run's Compliance rules, and the decide agenda.
 
     Every strategy of a run is called on the run's sessions at `at` (record `148`); the
     binding that used to be registered per strategy is derived here.
@@ -623,28 +628,58 @@ def _freeze_strategy(
     initial_payload = _validate_initial_model_state(
         workspace, config.component, loaded_strategy, entry.initial_model_memory
     )
-    constraints = tuple(_registered_constraint(workspace, name) for name in entry.constraints)
+    rules = tuple(_registered_compliance(workspace, name) for name in compliance)
     strategy_requirements = tuple(loaded_strategy.requirements())
-    loaded_constraints: tuple[Constraint, ...] = tuple(
-        load_constraint(constraint, project_root=workspace.project_root)
-        for constraint in constraints
+    loaded_rules: tuple[Compliance, ...] = tuple(
+        load_compliance(rule, project_root=workspace.project_root) for rule in rules
     )
-    constraint_requirements = tuple(
-        requirement
-        for constraint in loaded_constraints
-        for requirement in constraint.requirements()
+    compliance_requirements = tuple(
+        requirement for rule in loaded_rules for requirement in rule.requirements()
     )
     agenda = _freeze_agenda(decide, start=start, end=end)
     _validate_execution_targets(execution_table, agenda, start=start, end=end)
     return FrozenStrategy(
         config=config,
-        constraints=ConstraintSet(constraints),
+        compliance=ComplianceSet(rules),
         agenda=agenda,
         requirements=strategy_requirements,
-        constraint_requirements=constraint_requirements,
+        compliance_requirements=compliance_requirements,
         initial_model_memory=entry.initial_model_memory,
         initial_payload=initial_payload,
     )
+
+
+def _refuse_taken_output(workspace: Workspace, *, run_id: str, writes: str) -> None:
+    """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
+
+    Asked here rather than after the last session: a run that computed for an hour and then found
+    its name taken would have wasted the hour, and `check` asks the same question for the same
+    reason (`_judge_outputs`). Re-running a run whose output stands is done by withdrawing the
+    output first (`vqapr rm dataset`), which is how a produced dataset is told from an authored
+    one: only the former names a producer.
+    """
+    taken = next((item for item in workspace.datasets if str(item.dataset_id) == writes), None)
+    # The run's own product is not a taken name: it stands from an earlier run of THIS run,
+    # and whether to replace it is `run`'s question (`replace_record`), the same as its record.
+    # What is refused here is a name that belongs to someone else -- authored, or another run's.
+    if taken is not None and taken.produced_by != run_id:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="run.output_registered",
+                    status=Status.CONFLICT,
+                    requirement="a run writes a dataset that does not exist yet",
+                    observed=f"{writes!r} is already registered",
+                    fix=(
+                        f"declare a new `writes` for run {run_id!r}, or withdraw the existing "
+                        f"{writes} first: vqapr rm dataset {writes}"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="choose a new `writes`, or withdraw the dataset, then retry",
+        )
 
 
 def _freeze_datamodel(
@@ -667,41 +702,23 @@ def _freeze_datamodel(
             f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a datamodel"
         )
-    if any(str(item.dataset_id) == entry.dataset_id for item in workspace.datasets):
-        raise VqaprError(
-            stage=Stage.FREEZE,
-            failures=[
-                Failure.bounded(
-                    code="datamodel.output_registered",
-                    status=Status.CONFLICT,
-                    requirement="a datamodel run writes a dataset that does not exist yet",
-                    observed=f"{entry.dataset_id!r} is already registered",
-                    fix=(
-                        f"declare a new dataset_id for {entry.component_id!r}, or remove the "
-                        f"existing {entry.dataset_id} registration from the workspace first"
-                    ),
-                )
-            ],
-            mutation=False,
-            retry_precondition="choose a new output dataset_id, then retry",
-        )
     model = load_data_model(registered, project_root=workspace.project_root)
     agenda = _freeze_agenda(decide, start=start, end=end)
     return FrozenDataModel(
         component=registered,
         agenda=agenda,
-        dataset_id=entry.dataset_id,
         value_fields=entry.value_fields,
         requirements=tuple(model.requirements()),
         initial_model_memory=entry.initial_model_memory,
     )
 
 
-def _registered_constraint(workspace: Workspace, component_id: str) -> ComponentRef:
+def _registered_compliance(workspace: Workspace, component_id: str) -> ComponentRef:
     ref = workspace.component(component_id)
-    if ref.kind is not ComponentKind.CONSTRAINT:
+    if ref.kind is not ComponentKind.COMPLIANCE:
         raise ValueError(
-            f"constraint {component_id!r} is registered as {ref.kind.value}, not as a constraint"
+            f"compliance rule {component_id!r} is registered as {ref.kind.value}, not as a "
+            "compliance rule"
         )
     return ref
 
@@ -721,7 +738,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     The run layer is resolved once -- venue, execution dataset, sessions, universe, account --
     and each strategy the run names is frozen on top of it (design §4.1). This proves
     that every callback of every strategy has somewhere to execute before any account mutates,
-    and collects the union of everything the strategies and their constraints read: that union
+    and collects the union of everything the strategy and the compliance rules read: that union
     is the panel set the run will build.
 
     *Run-ready* is the promise, so a declaration carrying no execution price is refused here
@@ -734,7 +751,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
-    if definition.datamodels:
+    if definition.datamodel is not None:
         return _preflight_datamodel_run(workspace, definition)
     _require_execution_authority(definition)
     if definition.start is None or definition.end is None:
@@ -750,6 +767,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.
     exchange = _registered_exchange(workspace, definition.exchange or "")
+    # The venue needs to know what every ordered id IS (design §6.2). Which ids get ordered is
+    # the strategy's to decide at run time; that NOTHING is declared is knowable now.
+    require_declared_roster(workspace, run_id=definition.run_id)
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_table = bound_execution_table(workspace, definition)
     validate_execution_table(execution_table).raise_if_failed()
@@ -759,18 +779,26 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
     )
 
-    strategies = tuple(
+    if definition.strategy is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a strategy run declares no strategy")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
+    strategies = (
         _freeze_strategy(
-            workspace, entry, decide=decide, execution_table=execution_table, start=start, end=end
-        )
-        for entry in definition.strategies
+            workspace,
+            definition.strategy,
+            compliance=definition.compliance,
+            decide=decide,
+            execution_table=execution_table,
+            start=start,
+            end=end,
+        ),
     )
     # Valuation subscribes to nothing: it reads the prices the venue already published to fill
-    # against, so it contributes no DataRequirement. The union is what the strategies and their
-    # constraints read, deduplicated, in the order first declared.
+    # against, so it contributes no DataRequirement. The union is what the strategy and the
+    # compliance rules read, deduplicated, in the order first declared.
     requirements: list[DataRequirement] = []
     for layer in strategies:
-        for requirement in (*layer.requirements, *layer.constraint_requirements):
+        for requirement in (*layer.requirements, *layer.compliance_requirements):
             if requirement not in requirements:
                 requirements.append(requirement)
     sources = _freeze_sources(workspace, tuple(requirements), execution_table.table.source)
@@ -782,7 +810,8 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
     return FrozenRun(
         run_id=definition.run_id,
-        strategies=strategies,
+        writes=definition.writes,
+        strategy=strategies[0],
         exchange=exchange,
         execution=execution_table,
         start=start,
@@ -810,9 +839,11 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
     decide = derived_agenda(workspace, definition)
-    datamodels = tuple(
-        _freeze_datamodel(workspace, entry, decide=decide, start=start, end=end)
-        for entry in definition.datamodels
+    if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a datamodel run declares no datamodel")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
+    datamodels = (
+        _freeze_datamodel(workspace, definition.datamodel, decide=decide, start=start, end=end),
     )
     requirements: list[DataRequirement] = []
     for layer in datamodels:
@@ -827,8 +858,8 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
     return FrozenRun(
         run_id=definition.run_id,
-        strategies=(),
-        datamodels=datamodels,
+        writes=definition.writes,
+        datamodel=datamodels[0],
         start=start,
         end=end,
         instruments=definition.instruments,

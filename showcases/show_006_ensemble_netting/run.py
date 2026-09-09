@@ -9,8 +9,8 @@
                                                                                 equal-weights,
                                                                                 rescales to budget,
                                                                                 projects onto
-                                                                                NoShort and
-                                                                                SingleNameCap
+                                                                                no_short and
+                                                                                single_name_cap
 
 All three runs are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real
 order planning and the declared execution profile. `reversal` mutates `self.memory` every
@@ -24,7 +24,7 @@ The ensemble reads **two allocation inputs** — the published `reversal_allocat
 point-in-time window. It measures what combining them implies with `net_members` (ticker-level
 long side, short side, the offset that cancelled, and what survived), combines the members by
 `equal_weight` and matches its own gross-active budget with `rescale`. Long-only is never asked of
-either member: it emerges only from the registered `no_short` and `single_name_cap` constraints the
+either member: it emerges only from the `no_short` and `single_name_cap` box the
 ensemble runs under on the KRX profile.
 
 The fill journal the ensemble run committed is replayed independently against the committed
@@ -56,10 +56,11 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -68,12 +69,12 @@ from vqapr.public import (
     callback_evidence,
     export_roster,
     preflight_run,
-    register_constraint,
+    register_compliance,
     register_dataset,
     register_exchange,
     register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -84,7 +85,8 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
-"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
+"""Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
+the shipped compliance rule of the same name observes the book against its own copy of it."""
 
 MEMBER_BUDGET = Decimal("0.04")
 """Total absolute active weight each member is allowed to express."""
@@ -305,9 +307,12 @@ from vqapr.public import (
     StrategyModel,
     TableSpec,
     equal_weight,
+    intersect,
     net_members,
+    no_short,
     optimize,
     rescale,
+    single_name_cap,
     validate_allocation,
 )
 
@@ -327,12 +332,24 @@ BUDGET = Budget(
 
 
 class EnsembleStrategy(StrategyModel):
-    """desired = equal-weight(reversal, momentum) rescaled to budget, projected onto the shipped
-    constraint set. Long-only is emergent: neither member is filtered before combination."""
+    """desired = equal-weight(reversal, momentum) rescaled to budget, projected onto the box this
+    strategy builds itself -- no short, single-name cap above the index weight (design §7.1).
+    Long-only is emergent: neither member is filtered before combination."""
 
-    def __init__(self, *, reversal_dataset_id: str, momentum_dataset_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        reversal_dataset_id: str,
+        momentum_dataset_id: str,
+        benchmark_dataset_id: str,
+        cap: str,
+        benchmark_tolerance: str,
+    ) -> None:
         self._reversal_dataset_id = reversal_dataset_id
         self._momentum_dataset_id = momentum_dataset_id
+        self._benchmark_dataset_id = benchmark_dataset_id
+        self._cap = Decimal(cap)
+        self._benchmark_tolerance = Decimal(benchmark_tolerance)
 
     def tables(self):
         return (
@@ -346,6 +363,12 @@ class EnsembleStrategy(StrategyModel):
         return (
             DataRequirement.of(self._reversal_dataset_id, "weight", lookback=RowsLookback(1)),
             DataRequirement.of(self._momentum_dataset_id, "weight", lookback=RowsLookback(1)),
+            # The cap is relative to the index, so the index is this strategy's own subscription
+            # (design §7.1): a reader of the run sees the dependency on the strategy, not hidden
+            # inside a rule's inputs.
+            DataRequirement.of(
+                self._benchmark_dataset_id, "benchmark_weight", lookback=RowsLookback(1)
+            ),
         )
 
     def _panel(self, context, requirement):
@@ -358,9 +381,10 @@ class EnsembleStrategy(StrategyModel):
         }
 
     def decide(self, context):
-        reversal_requirement, momentum_requirement = self.requirements()
+        reversal_requirement, momentum_requirement, benchmark_requirement = self.requirements()
         reversal = self._panel(context, reversal_requirement)
         momentum = self._panel(context, momentum_requirement)
+        benchmark = self._panel(context, benchmark_requirement)
         if not reversal or not momentum:
             return Hold(reason="both member allocation inputs must be visible before netting them")
 
@@ -406,8 +430,21 @@ class EnsembleStrategy(StrategyModel):
         combined = equal_weight(net_signal)
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
-        bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower_weights))
+        # The benchmark is validated before it becomes a bound, the way the members are.
+        validate_allocation(
+            benchmark,
+            AllocationInvariants.of(
+                sign=AllocationSign.LONG_ONLY,
+                tolerance=self._benchmark_tolerance,
+                required_coverage=(),
+            ),
+            label="subscribed benchmark allocation",
+        )
+        # The box, built here by the strategy (design §7.1).
+        instruments = tuple(sorted(context.window.instruments))
+        lower, upper = intersect(
+            no_short(instruments), single_name_cap(instruments, benchmark, self._cap)
+        )
         desired = {
             name: desired_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
         }
@@ -415,8 +452,8 @@ class EnsembleStrategy(StrategyModel):
         result = optimize(
             desired=desired,
             current={},
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozenset(),
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -680,25 +717,21 @@ def _member_run(
 ) -> Any:
     definition = RunDefinition(
         run_id=str(strategy_ref.component_id),
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        at=at,
+        agenda=RunAgenda(every="1d", at=(at,)),
         exchange=academic_ref.component_id,
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes=f"{str(strategy_ref.component_id)}-weights",
     )
     return run(project, preflight_run(project, definition), store_root=project / ".vqapr")
 
@@ -800,25 +833,31 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         config={
             "reversal_dataset_id": "reversal_allocation",
             "momentum_dataset_id": "momentum_allocation",
+            "benchmark_dataset_id": "benchmark_weight_daily",
+            "cap": CAP,
+            "benchmark_tolerance": tolerance,
         },
     )
-    register_constraint(
+    # The shipped compliance rules enter through the same door as any user component: a resolved
+    # path, a fingerprint and a config. Their parameters are their own -- the cap below is the
+    # rule's copy, not the strategy's (design §7.2).
+    register_compliance(
         project,
         "no-short",
-        shipped_constraint_path("no_short"),
+        shipped_compliance_path("no_short"),
         "NoShort",
-        config={"constraint_id": "no-short"},
+        config={"compliance_id": "no-short"},
     )
-    register_constraint(
+    register_compliance(
         project,
         "single-name-cap",
-        shipped_constraint_path("single_name_cap"),
+        shipped_compliance_path("single_name_cap"),
         "SingleNameCap",
         config={
             "cap": CAP,
             "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
-            "constraint_id": "single-name-cap",
+            "compliance_id": "single-name-cap",
         },
     )
 
@@ -926,25 +965,22 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_start = datetime.fromisoformat(f"{ensemble_days[0].isoformat()}T00:00:00{OFFSET}")
     ensemble_definition = RunDefinition(
         run_id="show006-ensemble",
-        strategies=(StrategyEntry("show006-ensemble", ("no-short", "single-name-cap")),),
-        sessions=tuple(ensemble_days),
+        strategy=StrategyEntry("show006-ensemble"),
+        compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        at=time(9, 0),
+        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="show006-krx",
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=ensemble_start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes="show006-ensemble-weights",
     )
     ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
 
@@ -1049,7 +1085,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
             "account_mode": AccountMode.LONG_ONLY.value,
             "subscribed_allocation_inputs": sorted(subscribed),
-            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "rebalances": ensemble_memory.get("rebalances"),
             **ensemble_replay,
@@ -1102,7 +1138,7 @@ def main() -> None:
     print(f"subscribed inputs           : {', '.join(ensemble['subscribed_allocation_inputs'])}")
     print(f"crossing occurrences        : {trace['crossing_occurrences']}")
     print(f"max ticker offset_weight    : {trace['max_offset_weight']}")
-    print(f"shipped constraints         : {', '.join(ensemble['shipped_constraints'])}")
+    print(f"shipped compliance          : {', '.join(ensemble['shipped_compliance'])}")
     print(f"rebalances                  : {ensemble['rebalances']}")
     print(f"dealt fills                 : {ensemble['dealt_fills']} (whole shares)")
     print(f"commission / sale tax       : {ensemble['commission']} / {ensemble['sale_tax']}")

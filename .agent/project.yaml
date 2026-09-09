@@ -16,11 +16,13 @@ canonical_documents:
   # 2026-09-04: 삭제 캠페인 완료(records 141-150). 한 모양 캠페인도 완료.
   # 2026-09-08: 레이어링 캠페인(M0-M8, records 190-198) 완료. import 그래프는 DAG이고
   # tests/boundaries/test_the_layers_hold.py가 그것을 지킨다. 순환 4개 -> 0, 평면 모듈 9 -> 1.
-  # 2026-09-09: 현행은 두 시계 캠페인 — Stage 0-5. 레이어링이 "경계가 선명한가"를 닫았고
+  # 2026-09-09: 두 시계 캠페인 — Stage 0-5. 레이어링이 "경계가 선명한가"를 닫았고
   # 이것은 "경계가 옳은가"를 묻는다. 설계 근거는 아래 wiring_design, 착수 순서는 이 파일.
+  # 2026-09-10: 두 시계 캠페인 완료(records 201-214). 설계 §8은 PRD·architecture에 흡수됐다 —
+  # 현행 계약은 그 두 문서가 authority이고 wiring_design은 결정의 근거 기록이다. 현행 캠페인 없음.
   active_campaign: docs/refactoring/2026-09-09-the-two-clocks-campaign.md
-  # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 확정된 계약.
-  # 이 표면을 건드리기 전에 읽는다. PRD/architecture 중 뒤집히는 절은 그 문서 §8에 있다.
+  # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
+  # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.
   wiring_design: docs/design/two-clocks-and-the-wiring-table.md
   # 세션 1~3 인수인계. §7(어디서 막혔는가)만 유효하며, 그 한 절은 값어치가 크다 — 두 번 revert된
   # 마이그레이션이 남긴 "한 단위" 발견이 거기 있다. 나머지, 특히 §8의 작업 순서는 record 104/124가

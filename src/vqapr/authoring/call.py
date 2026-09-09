@@ -6,8 +6,9 @@ reach at that instant, and nothing else. The three are abstract because the engi
 subclass.
 
 What differs between them is exactly what the roles differ in. A `DataCall` has a cutoff and its
-declared reads. A `StrategyCall` adds the account view, the constraint bounds and the recorder. A
-`ConstraintCall` sees the account and the targets under test.
+declared reads. A `StrategyCall` adds the account view and its declared history. A
+`ComplianceCall` adds the instruments the run declared; the committed account it observes is its
+own argument.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 
 from vqapr.authoring.history import AccountHistory
-from vqapr.authoring.view import ConstraintBounds, EconomicAccountView
+from vqapr.authoring.view import EconomicAccountView
 from vqapr.data.panel import PanelWindow
 from vqapr.domain.shapes import Observation
 
@@ -52,9 +53,10 @@ class StrategyCall(ABC):
 
     `StrategyModelContext` is its one implementation, the way `DataModelContext` is of
     `DataCall`. What a Strategy receives beyond a DataModel is what its role needs and nothing
-    else: the committed account, its own declared history, and the bounds every registered
-    Constraint projected. Framework facts -- the account version, the intent id, what was read --
-    are not here; the Flow stamps them onto the intent itself (record `125`).
+    else: the committed account and its own declared history. Framework facts -- the account
+    version, the intent id, what was read -- are not here; the Flow stamps them onto the intent
+    itself (record `125`). The box it builds inside is its own to compute
+    (`vqapr.portfolio.bounds`, design §7.1): nothing projects one for it.
     """
 
     @property
@@ -77,11 +79,6 @@ class StrategyCall(ABC):
     def account_history(self) -> AccountHistory:
         """Committed account history, bounded by this Strategy's own `account_history()`."""
 
-    @property
-    @abstractmethod
-    def constraint_bounds(self) -> ConstraintBounds:
-        """The merged bounds projected from every registered Constraint."""
-
     @abstractmethod
     def read(self, alias: str, field: str) -> PanelWindow:
         """One field of a panel-grain alias declared in `StrategyModel.inputs()`, as a 2d window.
@@ -100,36 +97,27 @@ class StrategyCall(ABC):
         """
 
 
-class ConstraintCall(ABC):
-    """The bounded capability surface for one Constraint invocation.
+class ComplianceCall(ABC):
+    """The bounded capability surface for one Compliance observation.
 
-    **An abstract contract, like `DataCall` and `StrategyCall`, and no longer a value.** It was a
-    concrete frozen dataclass that nothing in `src/` ever built -- only tests -- while the engine
-    handed a Constraint a `ModelWindow` and a tuple of instruments instead.
-    `vqapr.authoring.context` now supplies the one concrete implementation, the same way it does
-    for the other two roles.
-
-    **The account came off it.** It used to carry an `EconomicAccountView`, which meant `project`
-    -- the member that runs before any decision exists, to say what the feasible set is -- was
-    handed the committed account. Nothing needed it and the engine never offered it, so the
-    authoring shape was granting authority the engine did not. Where the two contracts disagreed
-    about how much a member may see, the narrower one is right (architecture 2.2, least
-    authority): `monitor` receives the account as its own argument, and `project` cannot reach one.
+    An abstract contract, like `DataCall` and `StrategyCall`; `vqapr.authoring.context` supplies
+    the one concrete implementation. The committed account the rule observes is `observe`'s own
+    argument rather than a member here, so the capability is present exactly where it is used.
     """
 
     @property
     @abstractmethod
     def evaluation_time(self) -> datetime:
-        """The single frozen point-in-time cutoff this invocation is bounded to."""
+        """The market-clock instant this observation is bounded to: when the book was marked."""
 
     @property
     @abstractmethod
     def instruments(self) -> tuple[str, ...]:
-        """Every instrument this projection must cover, in the run's declared order."""
+        """Every instrument the run declared, in the run's declared order."""
 
     @abstractmethod
     def read(self, alias: str, field: str) -> PanelWindow:
-        """One field of a panel-grain alias declared in `Constraint.inputs()`, as a 2d window.
+        """One field of a panel-grain alias declared in `Compliance.inputs()`, as a 2d window.
 
         `instants` x `instruments`, a slice of the panel the run built once; `current()` is the
         cross-section at the window's last instant, `latest()` the newest value per name anywhere
@@ -138,7 +126,7 @@ class ConstraintCall(ABC):
 
     @abstractmethod
     def rows(self, alias: str) -> tuple[Observation, ...]:
-        """PIT observations for one `rows`-grain alias declared in `Constraint.inputs()`.
+        """PIT observations for one `rows`-grain alias declared in `Compliance.inputs()`.
 
         One `Observation` per (instant, instrument), every declared field on it. Refused on a
         panel-grain alias, which is read with `read(alias, field)`.

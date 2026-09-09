@@ -304,13 +304,13 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
 
 
 _RUN_KEYS = (
-    "strategies",
+    "writes",
+    "strategy",
     "instruments",
     "start",
     "end",
-    "sessions_from",
     "timezone",
-    "at",
+    "agenda",
     "exchange",
     "execution",
     "initial_account",
@@ -319,9 +319,9 @@ _RUN_KEYS = (
 
 `RunDefinition` tolerates an absent period, venue, execution dataset and account because other
 callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
-The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
-`sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
-days are the common case. Pinned as a literal rather than imported: the template is judged
+The strategy clock is the run's own `agenda:` block since the two-clocks campaign (`every`
+with `at`, or with `from`/`to`), expanded over the execution dataset's trading days -- there is
+no day list to declare. Pinned as a literal rather than imported: the template is judged
 against what the reader needs to type, and a constant that moved with the code would make this
 test pass for any template.
 """
@@ -352,7 +352,8 @@ def test_an_emitted_run_declares_every_key_run_requires(
     (run,) = document["runs"].values()
     for key in _RUN_KEYS:
         assert key in run, f"the emitted template does not declare {key}"
-    assert run["strategies"], "a run names at least one strategy"
+    assert run["strategy"]["component"], "a run names the one strategy it executes"
+    assert run["writes"], "a run declares what it writes"
 
 
 def test_an_emitted_run_explains_each_key(tmp_path: Path) -> None:
@@ -543,20 +544,19 @@ def test_a_rejected_enum_value_names_every_permitted_one(
 ) -> None:
     """A bad enum value must not arrive as an unhandled KeyError.
 
-    `fill.selector` was a raw `FillSelector[value.upper()]` lookup, so a wrong value crashed with
-    a traceback instead of a refusal. Measured: a reader spent six consecutive attempts on
-    price vocabulary (close, market, vwap, next_open) because the field name reads as "which
-    price" while the members are scheduling words. Guessing cannot converge on a vocabulary the
-    field name argues against, so the refusal has to carry the list.
+    The since-retired `fill.selector` was a raw `Enum[value.upper()]` lookup, so a wrong value
+    crashed with a traceback instead of a refusal, and a reader spent six consecutive guesses on
+    a vocabulary the field name argued against. The closed set that remains on a run is the
+    account mode; the refusal has to carry its list.
     """
     spec = tmp_path / "runs.yaml"
     spec.write_text(
         "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
-        "    end: \"2024-03-06T23:00:00+09:00\"\n    sessions: [2024-03-05]\n"
-        "    timezone: Asia/Seoul\n    at: \"04:00\"\n    exchange: venue\n"
-        "    execution:\n      dataset: krx\n      fill:\n        selector: next_open\n"
-        "        at: \"15:30\"\n        timezone: Asia/Seoul\n        trade_price: close\n"
-        "    initial_account: {cash: \"1000\", mode: long_only}\n    strategies: {alpha: {}}\n",
+        "    end: \"2024-03-06T23:00:00+09:00\"\n"
+        "    timezone: Asia/Seoul\n    agenda: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
+        "    execution:\n      dataset: krx\n      trade_price: close\n"
+        "      fill:\n        at: \"15:30\"\n"
+        "    initial_account: {cash: \"1000\", mode: long_short}\n    strategies: {alpha: {}}\n",
         encoding="utf-8",
     )
 
@@ -567,7 +567,7 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     assert payload["failures"], "a bad enum value produced no structured failure"
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.value_not_permitted"
-    for member in ("same_day", "next_eligible"):
+    for member in ("long_only", "signed"):
         assert member in failure["requirement"], f"{member} was not named"
     assert failure["examples"], "permitted values must ride as examples"
 
@@ -613,13 +613,11 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
 
     text = target.read_text(encoding="utf-8")
 
-    assert "sessions_from" in text and "sessions:" in text, "both ways to say the sessions"
-    assert "EVERY session" in text, "the template does not say every strategy is called"
-    assert "call.evaluation_time" in text and "self.memory" in text, (
-        "the template does not say where a strategy's own cadence lives"
-    )
+    assert "agenda:" in text and "every:" in text, "the strategy clock is the agenda block"
+    assert "trading days" in text, "the template does not say where the days come from"
+    assert "from" in text and "to" in text, "the template does not show the intraday form"
     assert "nothing here registers them" in text
-    for retired in ("agenda", "strategy_configs"):
+    for retired in ("agendas:", "strategy_configs", "sessions_from", "sessions:"):
         assert retired not in text, f"the template still points at {retired!r}, which is gone"
 
 
@@ -633,7 +631,7 @@ def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
 
     (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
-    decide_at = time.fromisoformat(run["at"])
+    decide_at = time.fromisoformat(run["agenda"]["at"])
     fill_at = time.fromisoformat(run["execution"]["fill"]["at"])
 
     assert decide_at < fill_at

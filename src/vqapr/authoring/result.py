@@ -1,8 +1,8 @@
 """What a Component returns.
 
-A StrategyModel returns a `Hold` or a `Rebalance`; a Constraint returns a `ConstraintFinding`. All
-three are strict, frozen values the author constructs, so a wrong type is refused at the boundary
-the author can see rather than several layers into the engine.
+A StrategyModel returns a `Hold` or a `Rebalance`; a Compliance rule returns a
+`ComplianceFinding`. All three are strict, frozen values the author constructs, so a wrong type
+is refused at the boundary the author can see rather than several layers into the engine.
 
 `Rebalance` is the largest thing on the authoring surface, and deliberately so: naming one complete
 desired portfolio is the decision the framework exists to take, and every way of naming it wrongly
@@ -246,21 +246,19 @@ class Rebalance(BaseModel):
             for instrument, conviction in names.items():
                 weights[instrument] = sign * per_side * conviction / total
 
-        # `rescale` owns quantising and settling, and this constructor stopped owning a second
-        # copy of it (`docs/issues/archive/075`). It quantises onto the grid FIRST and settles each side's
-        # rounding residual afterwards, on that side's largest position by absolute size -- where
-        # the crumb is proportionally smallest, and where it cannot move cash across a bound.
-        #
-        # Settling in CASH is the obvious-looking alternative and is wrong for a measurable
-        # reason: a dollar-neutral signed book nets to zero, so its cash is 1, and three shorts at
-        # -0.5/3 leave -1e-12, which pushes cash to 1.000000000001 -- one crumb ABOVE the
-        # fully-uninvested bound. The book is arithmetically fine and the declaration is refused.
-        #
-        # PER SIDE, not per book, which is what changed here. Settling one book-wide residual on
-        # the single largest position let a crumb from the SHORT side land on a LONG name, so a
-        # book asking for `invested=1` could come out with gross 1.000000000002 -- and `invested`
-        # is documented as gross exposure. Each side now lands exactly on its own target, so gross
-        # is exact and the two sides of a neutral book cancel on the same grid steps.
+        # `rescale` owns quantising and settling, and this constructor stopped owning a second copy
+        # of it (`docs/issues/archive/075`). It quantises onto the grid FIRST and settles each
+        # side's rounding residual afterwards, on that side's largest position by absolute size --
+        # where the crumb is proportionally smallest, and where it cannot move cash across a bound.
+        # Settling in CASH is the obvious-looking alternative and is wrong for a measurable reason:
+        # a dollar-neutral signed book nets to zero, so its cash is 1, and three shorts at -0.5/3
+        # leave -1e-12, which pushes cash to 1.000000000001 -- one crumb ABOVE the fully-uninvested
+        # bound. The book is arithmetically fine and the declaration is refused. PER SIDE, not per
+        # book, which is what changed here. Settling one book-wide residual on the single largest
+        # position let a crumb from the SHORT side land on a LONG name, so a book asking for
+        # `invested=1` could come out with gross 1.000000000002 -- and `invested` is documented as
+        # gross exposure. Each side now lands exactly on its own target, so gross is exact and the
+        # two sides of a neutral book cancel on the same grid steps.
         quantised = dict(
             rescale(
                 dict(sorted(weights.items())),
@@ -314,12 +312,13 @@ class Rebalance(BaseModel):
     ) -> Rebalance:
         """Build a signed book from signed weights, split exactly as the signal produced them.
 
-        This is the market-neutral residual book `docs/issues/archive/075` was filed on, and the thing
-        `of` structurally cannot say. `of` takes two mappings and splits `invested` EVENLY between
-        them, so it tops out at half a textbook $1-long/$1-short book (`docs/issues/archive/018`) and can
-        never express a 130/30 or a book whose signal happened to find more shorts than longs.
-        Here the ratio is the signal's: pass what the signal produced, say how large the book
-        should be, and the long/short split falls out of the weights themselves.
+        This is the market-neutral residual book `docs/issues/archive/075` was filed on, and the
+        thing `of` structurally cannot say. `of` takes two mappings and splits `invested` EVENLY
+        between them, so it tops out at half a textbook $1-long/$1-short book
+        (`docs/issues/archive/018`) and can never express a 130/30 or a book whose signal happened
+        to find more shorts than longs. Here the ratio is the signal's: pass what the signal
+        produced, say how large the book should be, and the long/short split falls out of the
+        weights themselves.
 
         **The sign carries the side.** A negative weight is a short, which is the opposite
         convention to `of` -- there, the side is chosen by WHICH MAPPING a name appears in and a
@@ -448,13 +447,13 @@ class Rebalance(BaseModel):
         return self
 
 
-class ConstraintFinding(BaseModel):
-    """One Constraint's complete, immutable result for one economic observation.
+class ComplianceFinding(BaseModel):
+    """One Compliance rule's complete, immutable result for one economic observation.
 
     **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
     cannot be written without. `docs/implementations/086` is a run that stopped on a 20% cap and
     said only *"economic intent violates projected constraints"*, leaving a first-time user to
-    re-run the strategy without the constraint and read the weight table to find out which name
+    re-run the strategy without the rule and read the weight table to find out which name
     breached it.
     The refusal names them now, and it can only do that if every finding carries them under one
     name -- a convention inside a free-form mapping is not something a message can rely on.

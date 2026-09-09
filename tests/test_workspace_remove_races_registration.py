@@ -30,7 +30,7 @@ registered is derived from the run now, so a run is what names a component.
 from __future__ import annotations
 
 import threading
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -39,7 +39,7 @@ import pytest
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
+from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
 from vqapr.project.store import Workspace
 
 pytestmark = pytest.mark.concurrency
@@ -71,13 +71,13 @@ def _seed(tmp_path: Path) -> Workspace:
 def _run_naming_alpha() -> RunDefinition:
     return RunDefinition(
         run_id="cadence",
-        strategies=(StrategyEntry("alpha"),),
+        strategy=StrategyEntry("alpha"),
         instruments=("A",),
         timezone=ZONE,
-        at=time(9, 0),
-        sessions=(date(2026, 4, 1),),
+        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        writes="cadence-weights",
     )
 
 

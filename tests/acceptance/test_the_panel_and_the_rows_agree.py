@@ -15,7 +15,7 @@ is what makes the two registrations comparable here.
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -23,8 +23,8 @@ import duckdb
 
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.flow.datamodel.loop import DataModelResult
-from vqapr.project.run import DataModelEntry, RunDefinition
+from vqapr.flow.run.loop import DataModelResult
+from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition
 from vqapr.public import preflight_run, register_data_model, register_dataset, run
 from vqapr.project.store import WORKSPACE_DIRECTORY
 
@@ -125,28 +125,40 @@ def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datase
     models.write_text(_MODELS, encoding="utf-8")
     register_data_model(tmp_path, "on-panel", models, "ReversalOnPanel")
     register_data_model(tmp_path, "on-rows", models, "ReversalOnRows")
-    # Three sessions at 16:00, listed literally rather than taken from the table's eight days, so
-    # each model sees a full 3-row window on every session it is called.
-    definition = RunDefinition(
-        run_id="agree",
-        strategies=(),
-        datamodels=(
-            DataModelEntry("on-panel", "reversal_panel", ("score",)),
-            DataModelEntry("on-rows", "reversal_rows", ("score",)),
-        ),
-        instruments=("A", "B", "C"),
-        timezone="Asia/Seoul",
-        at=time(16, 0),
-        sessions=tuple(date(2024, 3, day) for day in (4, 6, 8)),
-        start=datetime(2024, 3, 4, tzinfo=KST),
-        end=datetime(2024, 3, 9, tzinfo=KST),
+    # Every second trading day at 16:00 from 3/4 -- the 4th, 6th and 8th -- so each model sees
+    # a full 3-row window on every day it is called (design §3.4: the day filter is the rule's).
+    # One model per run (design §2.3), so the two readings are two runs. Comparing them is
+    # the point of this test and is exactly what the dataset graph makes possible: what a run
+    # writes is named, and a later reader compares the named things rather than two members of
+    # one execution.
+    def _definition(run_id: str, component: str, dataset: str, reads: str) -> RunDefinition:
+        return RunDefinition(
+            run_id=run_id,
+            datamodel=DataModelEntry(component, ("score",)),
+            instruments=("A", "B", "C"),
+            timezone="Asia/Seoul",
+            # A datamodel run names the dataset whose days are its trading days (design §3.3).
+            agenda=RunAgenda(every="2d", at=(time(16, 0),), days_from=reads),
+            start=datetime(2024, 3, 4, tzinfo=KST),
+            end=datetime(2024, 3, 9, tzinfo=KST),
+            writes=dataset,
+        )
+
+    definitions = (
+        _definition("agree-panel", "on-panel", "reversal_panel", "px_panel"),
+        _definition("agree-rows", "on-rows", "reversal_rows", "px_rows"),
     )
 
-    outcome = run(
-        tmp_path, preflight_run(tmp_path, definition), store_root=tmp_path / WORKSPACE_DIRECTORY
-    )
+    outcomes = [
+        run(
+            tmp_path,
+            preflight_run(tmp_path, definition),
+            store_root=tmp_path / WORKSPACE_DIRECTORY,
+        )
+        for definition in definitions
+    ]
 
-    panel, rows = outcome.result("on-panel"), outcome.result("on-rows")
+    panel, rows = outcomes[0].result("on-panel"), outcomes[1].result("on-rows")
     assert isinstance(panel, DataModelResult) and isinstance(rows, DataModelResult)
     con = duckdb.connect()
     try:

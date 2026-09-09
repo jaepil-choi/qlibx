@@ -54,9 +54,9 @@ class UsageError(BoundedRefusal):
     stdout에서 아무것도 못 받고 exit code만 남으므로, "성공과 실패가 같은 모양"이라는 이 파일의
     계약이 바로 그 지점에서 깨진다. 그래서 usage 거부도 같은 봉투로 나간다.
 
-    Stage `usage`, status 400 (record `171`): the submission -- the command line -- is wrong,
-    and the operation under way was parsing it. Rendered through a real `Failure` like every
-    other refusal; `docs/issues/archive/030` (record `114`) ruled that the first refusal a new user ever
+    Stage `usage`, status 400 (record `171`): the submission -- the command line -- is wrong, and
+    the operation under way was parsing it. Rendered through a real `Failure` like every other
+    refusal; `docs/issues/archive/030` (record `114`) ruled that the first refusal a new user ever
     sees is INSIDE the one documented shape, and now nothing spells that shape by hand.
     """
 

@@ -14,7 +14,7 @@ so a run is the one live declaration a removal has to look for.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -24,7 +24,7 @@ from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.component import ComponentRef
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
+from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
 from vqapr.project.store import Workspace
 
 ZONE = "Asia/Seoul"
@@ -55,13 +55,13 @@ def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
         t.register_run(
             RunDefinition(
                 run_id="daily",
-                strategies=(StrategyEntry(str(ref.component_id)),),
+                strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
-                at=time(9, 0),
-                sessions=(date(2026, 4, 1),),
+                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
             )
         )
 
@@ -177,13 +177,13 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     assert workspace.references_to("component", "mom") == ()
 
 
-def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
+def test_a_dataset_is_blocked_by_the_runs_that_take_their_trading_days_from_it(
     tmp_path: Path,
 ) -> None:
     """`docs/issues/archive/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
     A component's reads live in its code and are refused at its next preflight; a registered
-    run's `sessions_from` lives here, and is the blocker this walk can name.
+    datamodel run's `agenda.days_from` lives here, and is the blocker this walk can name.
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
@@ -197,17 +197,17 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
         t.register_run(
             RunDefinition(
                 run_id="daily",
-                strategies=(StrategyEntry(str(ref.component_id)),),
+                strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
-                at=time(9, 0),
-                sessions=(date(2026, 4, 1),),
+                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
             )
         )
     assert workspace.references_to("dataset", "prices") == ()
-    # `sessions_from` a dataset that is not registered is refused at `register_run`, so the
+    # `agenda.days_from` naming an unregistered dataset is refused at `register_run`, so the
     # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.
 
 

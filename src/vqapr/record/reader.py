@@ -71,7 +71,8 @@ class LockClaim:
     `age` is carried out of the read rather than recomputed by the caller, because it is the one
     fact that separates the two states this claim cannot tell apart: a run that is executing, and a
     run whose process died in the last `LOCK_STALE_AFTER` seconds. Both present as a fresh lock;
-    only the age says how long the operator would have to wait to find out (`docs/issues/archive/037`).
+    only the age says how long the operator would have to wait to find out
+    (`docs/issues/archive/037`).
     """
 
     pid: int
@@ -192,10 +193,10 @@ refusal is reported (`docs/issues/archive/073`, `074`)."""
 def unfinished_strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
     """Every strategy directory of this run WITHOUT `strategy.json`, as `<id>@<fp8>`, sorted.
 
-    The complement of `strategy_refs`. A long run used to be invisible from the surface between
-    its first accepted session and its record (`docs/issues/archive/074`): `list` showed a record only
-    once it was finished, so an author counted parquet files by hand to learn whether a strategy
-    was still advancing.
+    The complement of `strategy_refs`. A long run used to be invisible from the surface between its
+    first accepted session and its record (`docs/issues/archive/074`): `list` showed a record only
+    once it was finished, so an author counted parquet files by hand to learn whether a strategy was
+    still advancing.
     """
     return unfinished_member_refs(root, run_id, kind=STRATEGY_KIND)
 
@@ -229,9 +230,10 @@ def unfinished_member_refs(root: Path, run_id: str, *, kind: str) -> tuple[str, 
 def recorded_run_ids(root: Path) -> tuple[str, ...]:
     """Every run this root holds ANY trace of: a run record, or a member directory of either kind.
 
-    `run_ids` is the finished set. This is the wider one `list runs` needs (`docs/issues/archive/081`):
-    a run whose definition was withdrawn still has records, and a run that was killed before its
-    run record still has member directories, and both are findable only from here.
+    `run_ids` is the finished set. This is the wider one `list runs` needs
+    (`docs/issues/archive/081`): a run whose definition was withdrawn still has records, and a run
+    that was killed before its run record still has member directories, and both are findable only
+    from here.
     """
     directory = root / RUNS_DIRECTORY
     if not directory.is_dir():
@@ -522,11 +524,12 @@ def read_record(root: Path, run_id: str) -> dict[str, Any]:
 class RunRecordMissing(ValueError):
     """No record where the caller pointed: the wrong root, run id or strategy ref.
 
-    `docs/issues/archive/057`. `read_table` returned an empty iterator for a root that was the project
-    directory rather than its `.vqapr`, for a run id nothing had written, and for a `strategy_ref`
-    that named no directory -- and the user's code failed three steps later on an empty frame. An
-    empty TABLE is a fact about a run (a declared table nobody wrote); a missing RECORD is a
-    wrong argument, and the refusal names the directory it looked in and what it found beside it.
+    `docs/issues/archive/057`. `read_table` returned an empty iterator for a root that was the
+    project directory rather than its `.vqapr`, for a run id nothing had written, and for a
+    `strategy_ref` that named no directory -- and the user's code failed three steps later on an
+    empty frame. An empty TABLE is a fact about a run (a declared table nobody wrote); a missing
+    RECORD is a wrong argument, and the refusal names the directory it looked in and what it found
+    beside it.
     """
 
 

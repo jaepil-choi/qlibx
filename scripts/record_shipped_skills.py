@@ -108,8 +108,11 @@ def main(argv: list[str] | None = None) -> int:
 
     for key, digest in missing.items():
         table.setdefault(key, {})[digest] = release
+    # LF on every platform: `.gitattributes` keeps the shipped skill bytes identical everywhere,
+    # and a table written with the platform newline on Windows would put CR bytes into the wheel
+    # built right after it (caught at the 0.10.0 build).
     TABLE.write_text(
-        json.dumps(table, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(table, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
     )
     print(f"recorded {len(missing)} new content hash(es) under release {release} in {TABLE}")
     return 0

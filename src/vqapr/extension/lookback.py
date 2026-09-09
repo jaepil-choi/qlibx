@@ -7,8 +7,8 @@ caller is `cli/new.py`, and it reads `ComponentKind` from this package.
 
 **Moved out of `cli/new.py` by record `114`.** This is a domain rule, not an argparse concern: the
 strategy scaffold takes rows only, because its emitted `len(values) >= LOOKBACK` guard counts
-observations and a calendar window would make that guard count observations against a number of
-days (`docs/issues/archive/033`). A second surface that scaffolds a component has to apply the same rule,
+observations and a calendar window would make that guard count observations against a number of days
+(`docs/issues/archive/033`). A second surface that scaffolds a component has to apply the same rule,
 and while it lived beside the flag parsing it could only be reached by building a `Namespace`.
 
 Takes the two values rather than a `Namespace`, so a caller that never saw argparse can use it.

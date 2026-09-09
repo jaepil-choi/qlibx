@@ -510,9 +510,9 @@ class FlowContext:
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.
 
-        Every package table stamps `event_time` in that zone (`docs/issues/archive/058`): the execution
-        table normalises targets to UTC, and a reader lining a fill up against the NAV or the
-        monitoring row that followed it was converting by hand.
+        Every package table stamps `event_time` in that zone (`docs/issues/archive/058`): the
+        execution table normalises targets to UTC, and a reader lining a fill up against the NAV or
+        the monitoring row that followed it was converting by hand.
         """
         zone = self.layer.agenda.timezone
         return instant.astimezone(ZoneInfo(zone)) if zone else instant

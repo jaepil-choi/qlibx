@@ -60,12 +60,13 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
     )
     assert definition.at is not None
     if definition.start is not None and definition.end is not None:
-        # Cut on DATES before an occurrence is built, not on occurrences after (`docs/issues/archive/069`:
-        # a run of 15 sessions built 735 occurrences, with their fold and offset proofs and the
-        # agenda's identity over them, three times per command). An occurrence on venue-local
-        # day `d` at `at` lies inside `[start, end]` only if `d` lies between the bounds' local
-        # dates, so this keeps a superset of what `inclusive_slice` keeps and changes nothing
-        # it would have answered. `daily` still owns the date conversion and the DST refusal.
+        # Cut on DATES before an occurrence is built, not on occurrences after
+        # (`docs/issues/archive/069`: a run of 15 sessions built 735 occurrences, with their fold
+        # and offset proofs and the agenda's identity over them, three times per command). An
+        # occurrence on venue-local day `d` at `at` lies inside `[start, end]` only if `d` lies
+        # between the bounds' local dates, so this keeps a superset of what `inclusive_slice` keeps
+        # and changes nothing it would have answered. `daily` still owns the date conversion and the
+        # DST refusal.
         zone = ZoneInfo(definition.timezone)
         first = definition.start.astimezone(zone).date()
         last = definition.end.astimezone(zone).date()

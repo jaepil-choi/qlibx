@@ -575,10 +575,10 @@ class Workspace:
             state = self._read()
             # The reference check runs HERE, against the state the lock already read, rather than
             # before the lock against a state that can be stale by the time the write lands.
-            # `docs/issues/archive/043`: it was two reads with no lock across them, and the consequence is
-            # worse than a lost update -- `_decode` validates forward references, so a document
-            # holding a config whose component was removed makes `Workspace.open()` raise and every
-            # command in the project fail until the file is hand-repaired.
+            # `docs/issues/archive/043`: it was two reads with no lock across them, and the
+            # consequence is worse than a lost update -- `_decode` validates forward references, so
+            # a document holding a config whose component was removed makes `Workspace.open()` raise
+            # and every command in the project fail until the file is hand-repaired.
             blockers = references_in(state, kind, identity)
             if blockers:
                 raise _workspace_error(

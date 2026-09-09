@@ -8,8 +8,8 @@ own declared history, the bounds every registered Constraint projected. The diff
 the roles is that list and nothing else (`docs/issues/archive/036`).
 
 **One alias is one scan.** An alias over several fields is several `DataRequirement`s
-(`docs/issues/archive/049`: a requirement names one field), and `ModelWindow.declared` reads them in one
-statement -- the store's window SQL ranks each field's own last N rows, so the rows come back
+(`docs/issues/archive/049`: a requirement names one field), and `ModelWindow.declared` reads them in
+one statement -- the store's window SQL ranks each field's own last N rows, so the rows come back
 already joined on `(instant, instrument)` (record `136`).
 
 **Every read goes through `ModelWindow`.** Nothing here holds a store handle. The window is
@@ -57,9 +57,9 @@ def observations(
     to skip: dropping it silently would turn a broken declaration into a thin result.
 
     The observations are built through `Observation._framework_row`, without per-row validation.
-    `fields` are the alias's declared names, checked once when the `DatasetInput` was declared;
-    the scan already returned `available_at` from a `TIMESTAMPTZ` column and the instrument as
-    text. `docs/issues/archive/054` measured the validated constructor at 70% of a `rows` read -- 14.6M
+    `fields` are the alias's declared names, checked once when the `DatasetInput` was declared; the
+    scan already returned `available_at` from a `TIMESTAMPTZ` column and the instrument as text.
+    `docs/issues/archive/054` measured the validated constructor at 70% of a `rows` read -- 14.6M
     whitespace checks for 159k rows -- re-proving per row what registration proved once.
     """
     declared = tuple(fields)
@@ -106,8 +106,9 @@ def _unbounded() -> ConstraintBounds:
 class _DeclaredReads:
     """`read(alias, field)` and `rows(alias)` over the aliases a Model declared in `inputs()`.
 
-    Shared by all three contexts because all three roles read the same way -- that sameness is
-    the point (`docs/issues/archive/036`), so it is one implementation rather than three that agree today.
+    Shared by all three contexts because all three roles read the same way -- that sameness is the
+    point (`docs/issues/archive/036`), so it is one implementation rather than three that agree
+    today.
 
     **The grain decides the verb** (design §2.5, owner ruling 2026-09-02). A panel-grain alias is
     read with `read(alias, field)` and returns a 2d `PanelWindow` -- instants x instruments, a
@@ -156,8 +157,8 @@ class _DeclaredReads:
                 f"{alias!r} is a panel-grain dataset; read a field of it with read({alias!r}, "
                 "<field>), which returns the instants x instruments window"
             )
-        # An alias is one requirement per declared field (`docs/issues/archive/049`) and ONE scan: the
-        # window reads every field in one statement and the rows come back already joined on
+        # An alias is one requirement per declared field (`docs/issues/archive/049`) and ONE scan:
+        # the window reads every field in one statement and the rows come back already joined on
         # `(instant, instrument)`. The author declared one thing and reads one thing.
         return observations(
             self.window.declared(requirements).rows,

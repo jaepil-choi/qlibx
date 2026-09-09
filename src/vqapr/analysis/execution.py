@@ -2,8 +2,8 @@
 
 **Moved out of `cli/run.py` by record `114`.** `_fill_summary` was added there under time pressure
 in the 0.2.0a2 batch and acknowledged as misplaced. It is not a rendering concern: it is an
-aggregate over fill rows, and it is the aggregate `docs/issues/archive/039` shows nobody could compute by
-hand in time.
+aggregate over fill rows, and it is the aggregate `docs/issues/archive/039` shows nobody could
+compute by hand in time.
 
 Takes rows rather than a `SimulationResult`, deliberately. That keeps it a pure function of data --
 testable with a list of dicts, no run, no flow types, and no inversion of the kind record `113` had
@@ -57,8 +57,8 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
         filled = abs(Decimal(str(row.get("dealt_quantity") or "0")))
         if filled < requested:
             partial += 1
-    # The axis `reasons` cannot see (`docs/issues/archive/085`): one row missing on each of 200 names is
-    # what a market looks like, the same name missing on every one of 82 rebalances is a
+    # The axis `reasons` cannot see (`docs/issues/archive/085`): one row missing on each of 200
+    # names is what a market looks like, the same name missing on every one of 82 rebalances is a
     # configuration error, and both fold into one `absent: N`. A name ordered in a run that never
     # dealt once cannot be produced by ordinary market behaviour at any length of run, so it is
     # stated by instrument, on the success path -- nothing failed. Most-ordered first, so the

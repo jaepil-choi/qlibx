@@ -70,9 +70,9 @@ class DatasetCodec(Document):
 
     Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
     `field_types`. Measured: `aggregated`, `span`; `produced_by` is stamped by a datamodel run.
-    `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a declaration
-    since (`docs/issues/archive/088`); an entry written under the old shape carries the value duckdb
-    measured, which is what the author would have declared, so it decodes as declared.
+    `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a
+    declaration since (`docs/issues/archive/088`); an entry written under the old shape carries the
+    value duckdb measured, which is what the author would have declared, so it decodes as declared.
 
     A measurement cannot be invented for an entry that predates it: an entry without `span`
     decodes into a QUARANTINED registration -- enumerable, removable, re-registrable, refused on

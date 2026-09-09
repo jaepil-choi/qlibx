@@ -173,7 +173,8 @@ class _Record(BaseModel):
 class RunRecord(_Record):
     """`run.json`: the configuration every strategy of this run shares (record `139`) --
     architecture §17.3.1's missing rows: the universe, the venue and the execution dataset with its
-    fill convention (`docs/issues/archive/034`), the initial account declaration, the datasets and their
+    fill convention (`docs/issues/archive/034`), the initial account declaration, the datasets and
+    their
     source digests (A7), and which strategies the run names."""
 
     run_id: str

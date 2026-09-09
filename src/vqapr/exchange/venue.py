@@ -13,10 +13,10 @@ signature was not the framework's to change. With a `Call` the roster rides in a
 bound once by the handler, and the venue stores nothing the run handed it.
 
 The academic profile is defined here. Before changing a profile, read
-`docs/issues/archive/002-execution-profiles-share-no-base.md`: what every profile checks about a call --
-the batch, the snapshot rows, the requests against the listings -- lives once in
-`execution_table` (`accepted_requests`, `requested_rows`, `validate_requests`); a profile owns
-only how it fills.
+`docs/issues/archive/002-execution-profiles-share-no-base.md`: what every profile checks about a
+call -- the batch, the snapshot rows, the requests against the listings -- lives once in
+`execution_table` (`accepted_requests`, `requested_rows`, `validate_requests`); a profile owns only
+how it fills.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """What a datamodel run leaves behind: the output contract, and the dataset it registers.
 
 The sessions' rows, typed as they come and held in memory, land as one parquet file under
-`.vqapr/materialized/<dataset_id>/` when the last session completes (`docs/issues/archive/087`; a file per
-session was a physical write per loop), and the dataset registers right after, through the
+`.vqapr/materialized/<dataset_id>/` when the last session completes (`docs/issues/archive/087`; a
+file per session was a physical write per loop), and the dataset registers right after, through the
 registration path every other dataset takes. A run that fails first leaves no readable output -- a
 partial dataset registers with nothing -- and a re-run starts clean.
 """
@@ -311,10 +311,10 @@ class DataModelOutput:
     def _declarable(self, schema: pa.Schema) -> dict[str, ColumnType]:
         """The field types this output will declare, read off what the first session wrote.
 
-        The producer states the types, as any author does (`docs/issues/archive/088`), and states them
-        from the schema it is about to write so that registration's DESCRIBE agrees by
-        construction. A type that no declaration may carry -- a `Decimal` value field above all
-        -- is refused here, at the first session, rather than after every session has run.
+        The producer states the types, as any author does (`docs/issues/archive/088`), and states
+        them from the schema it is about to write so that registration's DESCRIBE agrees by
+        construction. A type that no declaration may carry -- a `Decimal` value field above all --
+        is refused here, at the first session, rather than after every session has run.
         """
         declared: dict[str, ColumnType] = {}
         offending: list[str] = []
@@ -371,14 +371,13 @@ class DataModelOutput:
                 ) from error
             # The schema is whatever pyarrow inferred from the first non-empty session, and this
             # session's rows did not fit it. That is all this code knows. It used to call this
-            # `type_drift` and tell the author to "return the same scalar type on every session"
-            # -- which was already true in the run that filed `docs/issues/archive/079`: the type was
-            # `Decimal` throughout and what moved was its SCALE, inferred as 27 decimal places
-            # from one session's ratios and 28 from the next's. A refusal that names a cause it
-            # did not measure sends the reader the wrong way; pyarrow's own sentence, beside the
-            # schema the first session fixed, is the accurate statement (owner ruling
-            # 2026-09-05: the data and its types are the author's, and the framework asserts
-            # nothing it cannot tell).
+            # `type_drift` and tell the author to "return the same scalar type on every session" --
+            # which was already true in the run that filed `docs/issues/archive/079`: the type was
+            # `Decimal` throughout and what moved was its SCALE, inferred as 27 decimal places from
+            # one session's ratios and 28 from the next's. A refusal that names a cause it did not
+            # measure sends the reader the wrong way; pyarrow's own sentence, beside the schema the
+            # first session fixed, is the accurate statement (owner ruling 2026-09-05: the data and
+            # its types are the author's, and the framework asserts nothing it cannot tell).
             established = ", ".join(f"{field.name}: {field.type}" for field in self._schema)
             raise refusal(
                 Stage.RUN,

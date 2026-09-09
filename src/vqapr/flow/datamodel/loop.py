@@ -1,10 +1,10 @@
 """A datamodel run: the same loop as a strategy's, with compute where the callback was.
 
-Record `148` closes `docs/issues/archive/059`. A DataModel used to be run by `materialize()`: its own loop
-over a list of instants from a spec file, every row of every evaluation held in memory until the
-end, one parquet and a lineage file written at once, and a `record.json` of its own kind. It is a
-run now, registered under `runs:` like a strategy run, frozen by the same preflight, walked by the
-same `EventLoop`, recorded under the same `runs/<run-id>/` directory -- with a
+Record `148` closes `docs/issues/archive/059`. A DataModel used to be run by `materialize()`: its
+own loop over a list of instants from a spec file, every row of every evaluation held in memory
+until the end, one parquet and a lineage file written at once, and a `record.json` of its own kind.
+It is a run now, registered under `runs:` like a strategy run, frozen by the same preflight, walked
+by the same `EventLoop`, recorded under the same `runs/<run-id>/` directory -- with a
 `ComputeHandler` in the callback handler's place and no execution or valuation handler, because a
 datamodel sees no account and passes through no venue (architecture 4.4).
 

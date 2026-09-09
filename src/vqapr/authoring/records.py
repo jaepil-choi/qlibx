@@ -123,8 +123,8 @@ class InvocationRecorder:
         try:
             spec = self._specs[table_id]
         except KeyError as exc:
-            # Names the repair and the declared set beside the breach (`docs/issues/archive/019`): an
-            # author who declared `ff3.formations` and wrote `ff3.formation` sees both spellings.
+            # Names the repair and the declared set beside the breach (`docs/issues/archive/019`):
+            # an author who declared `ff3.formations` and wrote `ff3.formation` sees both spellings.
             declared = ", ".join(sorted(self._specs)) or "nothing"
             raise KeyError(
                 f"undeclared recorder table {table_id!r}; a table is declared by returning a "

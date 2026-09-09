@@ -49,9 +49,9 @@ DEFAULT_RELATIVE_TOLERANCE = Decimal("0.01")
 DEFAULT_ABSOLUTE_TOLERANCE = Decimal("0.001")
 """The framework's default tolerance: ``max(bound * 1%, 10bp of NAV)``.
 
-Owner ruling, 2026-09-05 (`docs/issues/archive/086`). A book executes in whole lots and is marked after
-its fills, so the realised weight lands a little off the target the optimiser put on the grid; a
-strict comparison then files that residue as a violation, in the same counter as a real one. The
+Owner ruling, 2026-09-05 (`docs/issues/archive/086`). A book executes in whole lots and is marked
+after its fills, so the realised weight lands a little off the target the optimiser put on the grid;
+a strict comparison then files that residue as a violation, in the same counter as a real one. The
 run that filed the issue measured the two populations: the worst residue was 1bp, the real breach
 489bp -- 489x apart -- so a generous line separates them with room on both sides and needs no
 precision. Expressed as a share of NAV it needs no currency either; vqapr has none. An author who
@@ -77,12 +77,12 @@ class StampedConstraintFinding:
     """One author's measurement under the id the framework registered it as, and the framework's
     verdict on it.
 
-    **The tolerance is judged here, once, for every constraint** (`docs/issues/archive/086`). Not on the
-    author's `ConstraintFinding` -- every author would re-derive the same distinction, and the
+    **The tolerance is judged here, once, for every constraint** (`docs/issues/archive/086`). Not on
+    the author's `ConstraintFinding` -- every author would re-derive the same distinction, and the
     shipped `single_name_cap` and the scaffold both compare strictly -- and not on
     `ConstraintBounds`, the one place it could leak into `project` and widen the feasible set the
-    optimiser works in. The author keeps comparing strictly and keeps reporting `measured`,
-    `bound` and `excess`; the framework says whether the excess is inside the line.
+    optimiser works in. The author keeps comparing strictly and keeps reporting `measured`, `bound`
+    and `excess`; the framework says whether the excess is inside the line.
     """
 
     constraint_id: str
@@ -380,11 +380,11 @@ def build_account_view(
     """The marked account as an author sees it.
 
     Built here, once per monitoring occurrence, rather than by each Constraint out of an
-    `AccountSnapshot` and a `MarkBatch`: `nav = marks.total_value + account.cash` and
-    `weight = value / nav` are the two derivations every weight rule needs and neither is a
-    judgement, so a rule that got either subtly different from its neighbour would report a
-    breach its neighbour permitted. `docs/issues/archive/014` is that defect measured on one constraint
-    disagreeing with itself.
+    `AccountSnapshot` and a `MarkBatch`: `nav = marks.total_value + account.cash` and `weight =
+    value / nav` are the two derivations every weight rule needs and neither is a judgement, so a
+    rule that got either subtly different from its neighbour would report a breach its neighbour
+    permitted. `docs/issues/archive/014` is that defect measured on one constraint disagreeing with
+    itself.
 
     `observed_at` is this monitoring occurrence's own cutoff, which is the instant these marks
     are the account's value at. `MarkBatch` does not carry one: a `Mark` is a quantity, a price

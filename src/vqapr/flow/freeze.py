@@ -178,9 +178,9 @@ def freeze_strategy_record(
         contract=contract_report(result),
         # What ran, not what was registered -- PER COMPONENT rather than folded (design §4.2).
         # `fingerprint` above is what was registered; this is the fingerprint of the bytes on disk
-        # when they were loaded. They agree unless the component was edited after registration,
-        # and that difference is the whole signal (`docs/issues/archive/009`, `023`): a strategy that ran
-        # 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
+        # when they were loaded. They agree unless the component was edited after registration, and
+        # that difference is the whole signal (`docs/issues/archive/009`, `023`): a strategy that
+        # ran 47 times under 12 distinct loaded fingerprints was edited 11 times, which is a direct
         # overfitting tell that a new component_id per edit would have scattered.
         source_digest=dict(as_loaded),
         # The declaration this strategy froze against: its own identity, not the run's.

@@ -182,10 +182,10 @@ def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
                     source=FailureSource(file=str(spec.source.path), key_path=field),
                 )
             )
-    # DECIMAL is admitted here and refused on a dataset (`docs/issues/archive/088`): an execution price
-    # never reaches a model, it is read once at the boundary and converted explicitly
-    # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the
-    # venue table carries.
+    # DECIMAL is admitted here and refused on a dataset (`docs/issues/archive/088`): an execution
+    # price never reaches a model, it is read once at the boundary and converted explicitly
+    # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the venue
+    # table carries.
     numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE, scan.ColumnType.DECIMAL}
     # A price may be an expression (`CAST(close AS DOUBLE)` over a DECIMAL column, as the
     # observation side declares it); its type is the composed projection's, read off

@@ -163,10 +163,10 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         model = load_strategy_model(ref, project_root=project_root)
     else:
         # A registered id of a kind this verb does not describe. It used to fall through to the
-        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then
-        # left as `stage: unhandled` -- a sentence that is false (this verb reads three kinds,
-        # and had just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is
-        # the same one as an unregistered id, one line up, and gets the same answer.
+        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then left
+        # as `stage: unhandled` -- a sentence that is false (this verb reads three kinds, and had
+        # just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is the
+        # same one as an unregistered id, one line up, and gets the same answer.
         shown = ", ".join(
             cli_kind(item)
             for item in (

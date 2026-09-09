@@ -126,7 +126,8 @@ def declaration(panel: dict[str, Any], second_session: str) -> dict[str, Any]:
                 "grain": "instrument_instant",
                 "key_fields": ["available_at", "instrument"],
                 "fields": {name: name for name in ("open", "high", "low", "close", "volume")},
-                # What each field IS (`docs/issues/archive/088`): prices are DOUBLE, the count is INTEGER.
+                # What each field IS (`docs/issues/archive/088`): prices are DOUBLE, the count is
+                # INTEGER.
                 "field_types": {
                     "open": "DOUBLE",
                     "high": "DOUBLE",

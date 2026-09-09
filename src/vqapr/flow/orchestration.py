@@ -137,13 +137,13 @@ class StrategyOutcome:
 class RunResult:
     """What one call to `run` produced: an outcome per strategy it ran, and their records.
 
-    `results` holds the in-process `SimulationResult` of every strategy this process ran to the
-    end. `records` holds each strategy's `strategy.json` as written, for every strategy run under
-    a store -- including those run by worker processes, whose in-process result never crosses the
-    process boundary and is read back from the record instead. `outcomes` has an entry for EVERY
-    strategy the run was asked to run, completed or failed (`docs/issues/archive/073`): a refusal of one
-    strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps
-    the `SimulationFailure` itself for a strategy that failed in this process.
+    `results` holds the in-process `SimulationResult` of every strategy this process ran to the end.
+    `records` holds each strategy's `strategy.json` as written, for every strategy run under a store
+    -- including those run by worker processes, whose in-process result never crosses the process
+    boundary and is read back from the record instead. `outcomes` has an entry for EVERY strategy
+    the run was asked to run, completed or failed (`docs/issues/archive/073`): a refusal of one
+    strategy's decision is that strategy's outcome and does not stop the others. `errors` keeps the
+    `SimulationFailure` itself for a strategy that failed in this process.
     """
 
     run_id: str
@@ -304,10 +304,10 @@ def run(
                 roster=roster,
             )
         except SimulationFailure as failed:
-            # One strategy's refusal is that strategy's outcome (`docs/issues/archive/073`, `071`). It
-            # has its own flow and its own account (design section 7-4); the strategies after it
-            # in the run have nothing to learn from its decision being declined, and stopping
-            # them left a comparison run with three records and no word about the other five.
+            # One strategy's refusal is that strategy's outcome (`docs/issues/archive/073`, `071`).
+            # It has its own flow and its own account (design section 7-4); the strategies after it
+            # in the run have nothing to learn from its decision being declined, and stopping them
+            # left a comparison run with three records and no word about the other five.
             errors[layer.component_id] = failed
             outcomes[layer.component_id] = _failed_outcome(layer.component_id, failed)
             continue
@@ -567,8 +567,8 @@ def _run_strategy(
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
-    `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is written
-    from it rather than from a read of this strategy's own.
+    `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is
+    written from it rather than from a read of this strategy's own.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
     # `run` refused a strategy run frozen without a venue or an initial account before

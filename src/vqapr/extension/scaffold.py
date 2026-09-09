@@ -197,9 +197,9 @@ _LOOKBACK_FLAVOURS = {
 }
 """The three lookback members, and the four places in the template that differ between them.
 
-One template rather than two files, because everything else about the two scaffolds is identical
-and a second copy would drift. What differs is exactly what an author has to understand: which
-class, what the number means, and which completeness guard follows from it (`docs/issues/archive/033`).
+One template rather than two files, because everything else about the two scaffolds is identical and
+a second copy would drift. What differs is exactly what an author has to understand: which class,
+what the number means, and which completeness guard follows from it (`docs/issues/archive/033`).
 """
 
 _CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.

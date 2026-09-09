@@ -582,7 +582,9 @@ class RunDefinition(BaseModel):
     # ---- what the flow asks a run ------------------------------------------------------------
 
     def spoken(self) -> list[str]:
-        """The point-in-time meaning of this declaration, in one sentence (`docs/issues/archive/027`)."""
+        """The point-in-time meaning of this declaration, in one sentence
+        (`docs/issues/archive/027`).
+        """
         when = "" if self.at is None else f" at {self.at.isoformat()} {self.timezone}"
         sentences: list[str] = []
         if self.execution is not None:

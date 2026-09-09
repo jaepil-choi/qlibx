@@ -240,13 +240,13 @@ def _nearest_workspace_above(start: Path) -> Path | None:
 def _resolve_project_root(explicit: Path | None) -> Path:
     """The root every command works in, refusing an implicit one that would shadow an ancestor.
 
-    `docs/issues/archive/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
-    the project's real workspace and the next `check` refused for datasets registered five
-    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written
-    to, and silently choosing the parent would put the caller's files in a directory they did
-    not name. So an implicit root that has no workspace while an ancestor has one is refused,
-    naming both; an explicit `--project-root` is never second-guessed, so a nested workspace is
-    still one command away when it is meant.
+    `docs/issues/archive/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr`
+    beside the project's real workspace and the next `check` refused for datasets registered five
+    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written to,
+    and silently choosing the parent would put the caller's files in a directory they did not name.
+    So an implicit root that has no workspace while an ancestor has one is refused, naming both; an
+    explicit `--project-root` is never second-guessed, so a nested workspace is still one command
+    away when it is meant.
     """
     if explicit is not None:
         return Path(explicit)

@@ -8,8 +8,8 @@ surface over this logic; it *was* this logic.
 `docs/vqapr-architecture.md` §10.2 defines the CLI as a product surface rather than a layer, and a
 surface that owns rules costs twice. The rules cannot be tested without driving argparse, and they
 cannot be reached from another entry point -- so a second entry point grows its own copy and the two
-diverge. `docs/issues/archive/012` is exactly that: `check` refused a spec `run` completed, because each
-verb decided for itself.
+diverge. `docs/issues/archive/012` is exactly that: `check` refused a spec `run` completed, because
+each verb decided for itself.
 
 `cli/register.py` keeps argparse wiring, one call into this module, and envelope rendering.
 """
@@ -945,10 +945,10 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
     `inputs()` and `sessions_from` are resolved at registration, so a document holding two runs
     where the second takes its sessions from the first's output cannot be registered at all: the
     dataset does not exist until the first has run, and the first cannot run until the document is
-    registered. The workspace refusal says only that the dataset is unregistered, and
-    `vqapr new run --out` scaffolds a `runs:` block that holds several runs and invites exactly
-    this. The reporter of `docs/issues/archive/084` split one file per run and lost ten minutes. This
-    refusal can see the producer -- it is in the same document -- and names it.
+    registered. The workspace refusal says only that the dataset is unregistered, and `vqapr new run
+    --out` scaffolds a `runs:` block that holds several runs and invites exactly this. The reporter
+    of `docs/issues/archive/084` split one file per run and lost ten minutes. This refusal can see
+    the producer -- it is in the same document -- and names it.
     """
     produced: dict[str, str] = {}
     for run_id, definition in definitions:

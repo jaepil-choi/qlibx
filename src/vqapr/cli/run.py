@@ -121,9 +121,9 @@ def _chain(error: BaseException) -> str:
 def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     """A bare TypeError or ValueError from a framework invariant, given an envelope.
 
-    ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and `run`
-    called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded refusal
-    from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
+    ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and
+    `run` called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded
+    refusal from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
 
     The two codes are written literally rather than selected into a variable so the refusal-code
     inventory's constant folding can see them. Both carry the exception whole as `cause`; the
@@ -197,11 +197,11 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 + ", ".join(entry.component_id for entry in definition.members),
                 retry=f"vqapr show run {target}, then name one of its models",
             ) from unknown
-    # The ONE workspace this command opened goes to preflight and to the run (`docs/issues/archive/070`):
-    # the judgments, the freeze and the roster read all see the same document. The judgments are
-    # asked inside `preflight_run`, in the order `check` asks them, so this verb and a Python
-    # caller refuse the same run for the same reasons (record `168`); a refusal arrives as the
-    # `VqaprError` below deliberately lets through.
+    # The ONE workspace this command opened goes to preflight and to the run
+    # (`docs/issues/archive/070`): the judgments, the freeze and the roster read all see the same
+    # document. The judgments are asked inside `preflight_run`, in the order `check` asks them, so
+    # this verb and a Python caller refuse the same run for the same reasons (record `168`); a
+    # refusal arrives as the `VqaprError` below deliberately lets through.
     try:
         frozen = preflight_run(workspace, definition)
     except (TypeError, ValueError) as refused:
@@ -266,9 +266,10 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 for component_id, record in outcome.records.items()
             },
         )
-    # One line per strategy the run was asked to run, completed or failed (`docs/issues/archive/073`).
-    # A failed strategy's line is the same `simulation.*` payload a refusal used to be the whole
-    # envelope of, so a reader who handled that shape handles this one, per strategy.
+    # One line per strategy the run was asked to run, completed or failed
+    # (`docs/issues/archive/073`). A failed strategy's line is the same `simulation.*` payload a
+    # refusal used to be the whole envelope of, so a reader who handled that shape handles this one,
+    # per strategy.
     strategies: dict[str, dict[str, Any]] = {}
     for component_id, result in outcome.outcomes.items():
         if result.status == COMPLETED:
@@ -374,11 +375,11 @@ def _held_record(running: RunRecordLive) -> VqaprError:
     Status 423 at stage `record` (record `171`): another process holds it, and the submission is
     not what must change. It was an `InputError`, which told the reader their argument was wrong.
 
-    **What this refusal may not say is that the holder is alive.** The lock proves only that it
-    was touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
+    **What this refusal may not say is that the holder is alive.** The lock proves only that it was
+    touched within `LOCK_STALE_AFTER`, and the pid is copied out of the file rather than
     interrogated -- so a run killed seconds ago presents exactly like one that is executing
-    (`docs/issues/archive/037`). `fix` names the self-healing wait FIRST, because it is the remedy that is
-    correct under both readings and costs nothing.
+    (`docs/issues/archive/037`). `fix` names the self-healing wait FIRST, because it is the remedy
+    that is correct under both readings and costs nothing.
     """
     claim = running.claim
     fix = (

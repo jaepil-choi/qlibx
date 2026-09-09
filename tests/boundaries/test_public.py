@@ -212,6 +212,7 @@ def test_public_exports_are_fixed() -> None:
         "InstrumentRoster",
         "IntentSourceRef",
         "KrxExchange",
+        "KrxSettings",
         "KrxTradeRule",
         "ListingAccess",
         "LocalInstantDeclaration",

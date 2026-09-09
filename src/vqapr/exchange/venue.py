@@ -9,8 +9,14 @@ the account those orders are sized against. That list is on `ExecutionCall`, and
 
 Before this the venue received three positional arguments and the framework reached into it to
 plant the project's roster (`object.__setattr__(venue, "_registry", ...)`), because `execute`'s
-signature was not the framework's to change. With a `Call` the roster rides in as `call.rules`,
-bound once by the handler, and the venue stores nothing the run handed it.
+signature was not the framework's to change. With a `Call` the roster rides in as
+`call.instruments` -- the instrument dictionary design §6.1 names as the fourth thing a venue is
+handed -- and `call.rules` is the venue's own view bound to it. The venue stores nothing the run
+handed it.
+
+**The contract is narrow, and the venue's inside is its own** (design §6.1). What a venue models
+-- which costs, which regimes, on or off -- is the venue's *settings*, a mapping it declares and
+the run records beside its fingerprint. The framework knows only that a venue has settings.
 
 The academic profile is defined here. Before changing a profile, read
 `docs/issues/archive/002-execution-profiles-share-no-base.md`: what every profile checks about a
@@ -31,9 +37,9 @@ from typing import ClassVar
 from vqapr.authoring import Component
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.domain.instruments import InstrumentKind
+from vqapr.domain.instruments import InstrumentKind, InstrumentRoster
 from vqapr.domain.orders import OrderBatch
-from vqapr.domain.values import require_tz_aware, side_of
+from vqapr.domain.values import ModelMemory, require_tz_aware, side_of
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
     accepted_requests,
@@ -50,22 +56,40 @@ from vqapr.exchange.listings import (
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ExecutionCall:
-    """What an Exchange is handed at a fill instant: orders, the book, the venue rows, its rules.
+    """What an Exchange is handed at a market-clock instant (design §6.1):
 
-    `at` is the fill instant -- the due event's time. `snapshot` is the execution table read
-    exactly at that instant for the names the batch and the book name. `rules` is the venue's own
-    `ExchangeRulesView`, bound to the project's roster when the run registered one, so a fill's
-    category and its cost come from the project's answer rather than a venue's copy of it.
+        the order batch            `orders`
+        the market state then      `snapshot` -- the execution table read exactly at `at`
+        the account snapshot       `account`
+        the instrument dictionary  `instruments` -- what every id the batch or the book names IS
+
+    and its own `rules`, bound to that dictionary. The dictionary is the project's roster, whole
+    (design §6.4: it has no time axis, so it is read entire rather than through a window); a
+    fill's category and its cost come from it rather than from a venue's copy. `rules` may be
+    handed in unbound -- the venue's own view -- and is bound here; a view already bound to a
+    different dictionary is refused rather than silently rebound.
     """
 
     at: datetime
     orders: OrderBatch
     account: AccountSnapshot
     snapshot: ExactExecutionSnapshot
+    instruments: InstrumentRoster
     rules: ExchangeRulesView
 
     def __post_init__(self) -> None:
         require_tz_aware(self.at, name="at")
+        if not isinstance(self.instruments, InstrumentRoster):
+            raise TypeError("instruments must be an InstrumentRoster")
+        if not isinstance(self.rules, ExchangeRulesView):
+            raise TypeError("rules must be an ExchangeRulesView")
+        bound = self.rules.registry
+        if bound is None:
+            object.__setattr__(self, "rules", self.rules.with_registry(self.instruments))
+        elif bound.instruments != self.instruments.instruments:
+            raise ValueError(
+                "rules are bound to a different instrument dictionary than the call carries"
+            )
 
 
 class Exchange(Component):
@@ -85,6 +109,19 @@ class Exchange(Component):
     @abstractmethod
     def rules(self) -> ExchangeRulesView:
         """The venue's own quantity and cost rules, read by order planning."""
+
+    @property
+    def settings(self) -> Mapping[str, ModelMemory]:
+        """What this venue models, as data (design §6.1): its regimes and switches, declared.
+
+        The schema is the venue's own -- KRX says whether its price band is on and what it
+        charges; another venue says something else -- and the framework knows only that a venue
+        has settings. They are recorded in `strategy.json` under `exchange.settings`, so which of
+        two configurations a past run measured is read from the record rather than recovered by
+        opening the venue's source at its digest. Strict JSON (`ModelMemory`); the loader refuses
+        anything else. Empty by default.
+        """
+        return {}
 
     def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
         """The execution-table prices this venue needs beside the trade price. None by default."""
@@ -133,6 +170,11 @@ class AcademicExchange(Exchange):
     """
 
     @property
+    def settings(self) -> Mapping[str, ModelMemory]:
+        """Frictionless by declaration: no cost, no band, every accepted order filled whole."""
+        return {"profile": "academic", "costs": "none", "partial_fills": "never"}
+
+    @property
     def rules(self) -> ExchangeRulesView:
         """Academic listings with no declared cost band, so this profile charges nothing.
 
@@ -142,8 +184,8 @@ class AcademicExchange(Exchange):
         a cost band gets it applied without replacing any matching behaviour.
 
         The venue never DECLARES a roster -- there is no constructor parameter for one, so an
-        author has no channel to state a category. The roster reaches a fill through
-        `ExecutionCall.rules`, bound by the handler at run assembly (record `184`); this view is
+        author has no channel to state a category. The roster reaches a fill as
+        `ExecutionCall.instruments`, and `call.rules` is this view bound to it; this view is
         unbound.
 
         Rebuilt per access rather than cached because a subclass overriding this property is how a

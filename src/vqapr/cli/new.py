@@ -569,7 +569,7 @@ A run with no registered roster is refused here rather than charged one flat rat
 is no honest answer for an instrument nobody described.
 """
 
-from vqapr.public import KrxExchange, krx_listings
+from vqapr.public import KrxExchange
 
 # The ids this venue trades. What each one IS comes from the roster.
 INSTRUMENTS = (
@@ -584,22 +584,29 @@ class Venue(KrxExchange):
     This one charges; the academic one does not.
     """
 
-    def __init__(self) -> None:
-        # Costs are on. The limit-up/limit-down band is not, and that is the one thing here you
-        # may want to change.
+    def __init__(self, *, sale_tax_rate: str = "0.002", commission_rate: str = "0.0003") -> None:
+        # The venue's SETTINGS: what it models, on record. Costs are on at KRX's rates; the
+        # limit-up/limit-down band is off. Every run records `exchange.settings` in its
+        # `strategy.json` -- `vqapr show strategy` shows it -- so which configuration a past run
+        # measured under is read from the record, never recovered from this file.
+        #
+        # The two rates are constructor arguments so a registration can set them from `config:`
+        # -- `sale_tax_rate: "0"` is a tax-free KRX, a different venue with a different
+        # fingerprint, kept apart in the warehouse from the taxed one.
         #
         # `price_limits=True` models KRX's daily band, computed from the session base price, and
         # it REQUIRES your execution dataset to carry that price. Preflight refuses the run by name
         # if it does not -- it will not quietly produce limit-unaware numbers. The venue-table
         # dataset a run fills against carries a trade price only by default, so this scaffold
         # ships with the band off in order to run as emitted rather than refusing on first use.
-        #
         # To switch it on: add the session base price to your execution table's `price_fields`,
-        # then set this to True. The setting lives in THIS FILE, which the run record fingerprints
-        # as `source_digest` -- so which of the two a past run measured is recoverable by reading
-        # the venue at that digest. It is not a field in the record; do not expect to see it in
-        # `vqapr show run`.
-        super().__init__(krx_listings(INSTRUMENTS, price_limits=False))
+        # then set it to True.
+        super().__init__(
+            INSTRUMENTS,
+            sale_tax_rate=sale_tax_rate,
+            commission_rate=commission_rate,
+            price_limits=False,
+        )
 '''
 
 _EXCHANGE_DECLARATION = """\

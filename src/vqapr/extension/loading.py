@@ -16,11 +16,13 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
+from vqapr.domain.values import normalize_memory
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.venue import AcademicExchange, Exchange
 from vqapr.exchange.venues.krx import KrxExchange
@@ -417,5 +419,25 @@ def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) 
             fix="expose a `rules` attribute that is an ExchangeRulesView on the Exchange subclass",
             status=Status.CONTRACT,
         )
+    # The venue's settings are recorded with the run (design §6.1), so they must be the portable
+    # mapping a record can hold. Refused here, before a run is spent on a venue whose declaration
+    # cannot be written down.
+    declared = getattr(exchange, "settings", None)
+    try:
+        if not isinstance(declared, Mapping):
+            raise TypeError(f"settings must be a mapping; got {type(declared).__name__}")
+        normalize_memory(dict(declared))
+    except Exception as error:
+        raise _failure(
+            "component.execution_profile_invalid",
+            "an Exchange's settings must be a portable mapping (strict JSON) the record can carry",
+            f"{type(exchange).__name__}.settings: {type(error).__name__}: {error}",
+            fix=(
+                "return a mapping of plain values from `settings` -- spell a Decimal as a string "
+                "-- so the run can record what the venue models"
+            ),
+            status=Status.CONTRACT,
+            cause=error,
+        ) from error
     _requirements(exchange, label="Exchange", required=False)
     return exchange

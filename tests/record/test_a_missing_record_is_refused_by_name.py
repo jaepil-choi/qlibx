@@ -35,6 +35,7 @@ def _member(root: Path, run_id: str, ref: str, rows: int) -> None:
             "component": {},
             "agenda": {},
             "compliance": [],
+            "exchange": None,
             "account": {"version": rows, "cash": "1000", "positions": {}},
             "tables": {"vqapr.account": {"rows": rows, "instants": rows}},
             "contract": {},

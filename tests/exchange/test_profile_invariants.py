@@ -23,7 +23,7 @@ from decimal import Decimal
 
 import pytest
 
-from tests.exchange.support import execution_call
+from tests.exchange.support import bound, execution_call
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import InstrumentRoster, instrument
@@ -38,14 +38,20 @@ _PRICE = Decimal("70000")
 _NAMES = ("A005930", "A069500")
 
 
-def _academic() -> AcademicExchange:
-    return AcademicExchange(
-        {
-            name: TradeRule(
-                name, Decimal("0.000001"), Decimal("0.000001"), True, ListingAccess.SIGNED
-            )
-            for name in _NAMES
-        }
+def _academic():
+    # Bound to a dictionary calling every name a factor -- fractional and signed, which is what
+    # these listings are. The call carries the dictionary (design §6.1), so a venue test binds
+    # one the way the Flow does.
+    return bound(
+        AcademicExchange(
+            {
+                name: TradeRule(
+                    name, Decimal("0.000001"), Decimal("0.000001"), True, ListingAccess.SIGNED
+                )
+                for name in _NAMES
+            }
+        ),
+        InstrumentRoster({name: instrument(name, "factor") for name in _NAMES}),
     )
 
 

@@ -77,7 +77,10 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     for name in STRATEGIES:
         register_run(
             project,
-            journey.definition(panel, run_id=name).replace(strategy=StrategyEntry(name)),
+            # Three runs, three outputs: a run writes a dataset nobody else writes (design §2).
+            journey.definition(panel, run_id=name).replace(
+                strategy=StrategyEntry(name), writes=f"{name}-weights"
+            ),
         )
     return project, tmp_path / "store"
 

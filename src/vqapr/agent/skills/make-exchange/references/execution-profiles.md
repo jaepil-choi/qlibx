@@ -44,7 +44,10 @@ not the whole execution table.
 ## The name is not the claim
 
 *"KRX"* does not mean the exchange is reproduced. Only the rules actually implemented and the
-limitations actually stated are claimed, and the result records them.
+limitations actually stated are claimed, and the result records them -- as `exchange.settings` in
+`strategy.json`: `quantity_unit`, `commission_rate`, `sale_tax_rate`, `price_limits`,
+`short_sales`, `partial_fills`, and `not_modelled` (price ticks, auction microstructure, queue
+position, liquidity-limited partial fills, borrow and locate, margin, intraday behaviour).
 
 When reporting to a user, say what the profile did: which rules applied, what was zero, and what
 was not modelled. A realism claim that comes from the label rather than from the record is the

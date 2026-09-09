@@ -50,6 +50,39 @@ signed book.
 [references/access-and-account.md](references/access-and-account.md) has both, with what to check
 before running.
 
+## The venue owns its settings, and the run records them
+
+What a venue models -- which costs, which regimes, on or off -- is the venue's **settings**: a
+mapping it declares (`Exchange.settings`) whose schema is its own. `KrxExchange` takes its rates
+as constructor arguments, so a registration sets them from `config:`:
+
+```yaml
+components:
+  krx-taxed:
+    kind: exchange
+    path: venue.py
+    object_name: Venue
+  krx-untaxed:
+    kind: exchange
+    path: venue.py
+    object_name: Venue
+    config: {sale_tax_rate: "0"}
+```
+
+Same file, two venues, two fingerprints, two run identities: a tax-free KRX is a different
+experiment and the warehouse keeps it apart. Every run records `exchange.settings` in its
+`strategy.json` (`vqapr show strategy`), including `not_modelled` -- what the profile does not do
+-- so a reader learns what a past run measured under from the record, never from the source.
+
+Rates are decimal **strings** in config (`"0.002"`), never floats.
+
+## What a venue is handed
+
+`ExecutionCall`: the order batch, the market state at that instant (`snapshot`), the account
+snapshot, and the **instrument dictionary** (`instruments`) -- what every ordered or held id is,
+from the project's roster. `call.rules` is the venue's own rules bound to that dictionary. A venue
+receives nothing else and stores nothing it is handed.
+
 ## Declaring cost, two ways, and the choice matters
 
 - **A per-instrument fee** — give each listing its own `buy` / `sell` `SideCost`. Right when the

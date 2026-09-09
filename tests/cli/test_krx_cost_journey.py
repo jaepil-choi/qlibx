@@ -189,7 +189,10 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, emitted
     source = Path(emitted["path"])
     body = source.read_text(encoding="utf-8")
-    assert "krx_listings" in body, "the krx profile builds its trading facts from ids alone"
+    assert "KrxExchange" in body and "INSTRUMENTS" in body, (
+        "the krx profile builds its trading facts from ids alone"
+    )
+    assert "sale_tax_rate" in body, "the rates are the venue's settings, set from config"
     # THE POINT: the emitted venue names no category anywhere. What each instrument is comes from
     # the registered roster at fill time, so there is nothing here to edit and nothing to keep in
     # step. A venue holding its own copy could disagree with the roster, and a fill would then say

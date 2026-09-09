@@ -102,6 +102,7 @@
     "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
   },
   "make-exchange/SKILL.md": {
+    "2a7fd6065ed15a19f7a82a2fde653026a629eb75e8f6699c6b212a837daf7e6a": "0.9.0.dev1",
     "3f3aedc2af43b7a1f7e508a22cb3ec0c2d17984877d4f94eb4da811c1b6e1754": "0.8.0"
   },
   "make-exchange/references/access-and-account.md": {
@@ -112,7 +113,8 @@
   },
   "make-exchange/references/execution-profiles.md": {
     "9fdbf4e8ee9366ca6e65cee5c6c914ace9b2dbf0e53c61793a928980d6528a8f": "0.9.0.dev1",
-    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0"
+    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0",
+    "e8bc59712f221335a797e908190311cfdba1bc913a047566bcdbe58b41cc3a97": "0.9.0.dev1"
   },
   "make-exchange/references/fill-timing.md": {
     "1b303aa9a32616e06ab2c7a50a05d5475dac67a0f7d57e4c22660fd730ea0819": "0.8.0"

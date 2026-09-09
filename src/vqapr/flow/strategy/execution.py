@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.domain.instruments import require_declared
+from vqapr.domain.instruments import InstrumentRoster, require_declared
 from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.planning import plan_orders
@@ -145,9 +145,9 @@ class ExecutionHandler:
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             # The venue is a Component (record `184`): its memory is restored from the root
-            # before it is called, the call carries the orders, the book, the venue rows and the
-            # rules bound to the project's roster, and what `execute` left in memory is
-            # committed with the account commit below.
+            # before it is called, the call carries the orders, the book, the venue rows, the
+            # instrument dictionary (design §6.1) and the rules bound to it, and what `execute`
+            # left in memory is committed with the account commit below.
             self._context.restore_component_memory(self._context.visible_component_memory())
             fills = self._context.exchange.execute(
                 ExecutionCall(
@@ -155,6 +155,7 @@ class ExecutionHandler:
                     orders=orders,
                     account=before,
                     snapshot=snapshot,
+                    instruments=self._context.registry or InstrumentRoster({}),
                     rules=self._bound_rules(),
                 )
             )

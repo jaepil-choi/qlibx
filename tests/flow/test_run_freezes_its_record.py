@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from vqapr.domain.errors import VqaprError
+
 import tests.sample.journey as journey
 from vqapr.cli.show import RECORD_FIELDS, STRATEGY_FIELDS, record_view
 from vqapr.record import (
@@ -139,8 +141,12 @@ def test_a_second_run_of_the_same_strategy_refuses_without_replace(tmp_path: Pat
     frozen = _frozen(project)
     execute_run(project, frozen, store_root=store)
 
-    with pytest.raises(RunRecordExists):
+    # The run's own earlier output stands in the warehouse, so the second run is refused by the
+    # own-output rule (design §2.1, record `202`) before the record's lock is even asked; both
+    # say the same thing -- one producer, one artifact -- and `replace_record` lifts both.
+    with pytest.raises(VqaprError) as refused:
         execute_run(project, frozen, store_root=store)
+    assert [failure.code for failure in refused.value.failures] == ["run.output_registered"]
     execute_run(project, frozen, store_root=store, replace_record=True)
     assert len(strategy_refs(store, journey.RUN_ID)) == 1
 

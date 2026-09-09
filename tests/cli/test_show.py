@@ -140,6 +140,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "component",
         "agenda",
         "compliance",
+        "exchange",
         "account",
         "tables",
         "contract",

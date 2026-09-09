@@ -203,6 +203,10 @@ class StrategyRecord(_Record):
     component: dict[str, Any]
     agenda: dict[str, Any]
     compliance: list[dict[str, Any]]
+    exchange: dict[str, Any] | None
+    """The venue this strategy filled on: its component id, its registered fingerprint and its
+    `settings` -- what it declared it models (design §6.1), so a reader learns which regimes a
+    past run measured under without opening the venue's source at its digest."""
     account: dict[str, Any] | None
     tables: dict[str, Any]
     contract: dict[str, Any]

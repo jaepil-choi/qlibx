@@ -6,7 +6,7 @@ from typing import ClassVar
 
 import pytest
 
-from tests.exchange.support import execution_call
+from tests.exchange.support import bound, execution_call
 from vqapr.account.marking import ValuationService
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.costs import SideCost
@@ -42,19 +42,26 @@ def _request(
     )
 
 
-def _venue() -> AcademicExchange:
-    return AcademicExchange(
-        {
-            instrument: TradeRule(
-                instrument_id=instrument,
-                quantity_step=Decimal("0.001"),
-                minimum_quantity=Decimal("0.001"),
-                fractional_allowed=True,
-                access=ListingAccess.SIGNED,
-            )
-            for instrument in ("A", "B", "C")
-        }
-    )
+_ROSTER = {name: instrument(name, "factor") for name in ("A", "B", "C")}
+"""What the three ids ARE: fractional, signed -- a factor. The call carries this dictionary
+(design §6.1), as the Flow's would."""
+
+
+def _listings() -> dict[str, TradeRule]:
+    return {
+        name: TradeRule(
+            instrument_id=name,
+            quantity_step=Decimal("0.001"),
+            minimum_quantity=Decimal("0.001"),
+            fractional_allowed=True,
+            access=ListingAccess.SIGNED,
+        )
+        for name in ("A", "B", "C")
+    }
+
+
+def _venue():
+    return bound(AcademicExchange(_listings()), _ROSTER)
 
 
 def _snapshot(*rows: ExactExecutionRow, missing: tuple[str, ...] = ()) -> ExactExecutionSnapshot:
@@ -209,7 +216,7 @@ def test_a_subclass_prices_by_category_from_the_roster_and_not_from_its_own_copy
     legitimate when they are not standing in for a category -- so the defence is a reachable
     correct channel, and this is it.
     """
-    venue = _CategoryPricedAcademic(_venue().listings)
+    venue = _CategoryPricedAcademic(_listings())
     notional = Decimal("1000")
 
     as_declared = venue.rules.with_registry(
@@ -228,7 +235,7 @@ def test_a_subclass_prices_by_category_from_the_roster_and_not_from_its_own_copy
 
     # And the base profile is untouched: no `terms_by_kind`, so it charges its listings and still
     # answers without a roster.
-    plain = _venue().rules
+    plain = AcademicExchange(_listings()).rules
     assert plain.registry is None
     assert plain.charge(Side.SELL, notional, "A").total == Decimal("0")
 
@@ -240,7 +247,7 @@ def test_a_declared_cost_band_is_charged_without_replacing_execute() -> None:
     rule carries an unverified realism claim. Charging what `rules` declares is therefore the
     only way a subclass can price a trade at all.
     """
-    venue = _CostedAcademic(_venue().listings)
+    venue = bound(_CostedAcademic(_listings()), _ROSTER)
 
     fills = venue.execute(execution_call(venue, 
         _orders(_request("A", "10"), _request("B", "-10")),

@@ -1,24 +1,23 @@
 """KRX execution profile.
 
 This profile implements a declared, deliberately partial set of KRX rules. It claims exactly what
-it implements and nothing else (PRD 6.3):
+it implements and nothing else (PRD 6.3) -- **and it claims it as data.** `KrxExchange.settings`
+is the declaration: the quantity unit, the commission and sale-tax rates in force, whether the
+daily price band is on, how a short is answered, how an unaffordable buy is answered, and
+`not_modelled`, the list of what this venue does not do. A run records that mapping beside the
+venue's fingerprint, so a reader of the record learns what was modelled without opening this file
+(design §6.1: *the schema is the venue's; the framework knows only that a venue has settings*).
 
-Implemented
-    whole-share quantity unit, brokerage commission on both sides, sale tax on sells only and only
-    for the categories that owe it, halted instruments producing typed zero-dealt results, refusal
-    of any order that would open or deepen a short position, and full execution of the remainder at
-    the exact selected price.
-
-Not implemented, and therefore not claimed
-    price ticks, daily price limits, auction microstructure, queue position, partial fills from
-    liquidity or participation limits, borrow and locate for short sales, margin, and any intraday
-    behaviour. Costs other than the declared commission and tax are absent, not zero by measurement.
+What the settings switch is the venue's own business. The rates are constructor parameters, so
+the same class registered twice with different config is two venues with two fingerprints and two
+identities -- a tax-free KRX is a different experiment, and the warehouse keeps it apart.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from decimal import Decimal
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from pydantic import field_validator
 
@@ -27,7 +26,7 @@ from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instruments import Instrument, InstrumentKind
 from vqapr.domain.instruments import instruments as build_instruments
 from vqapr.domain.orders import OrderRequest
-from vqapr.domain.values import Side, side_of
+from vqapr.domain.values import ModelMemory, Side, side_of
 from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.listings import (
     ExchangeRulesView,
@@ -40,10 +39,23 @@ from vqapr.exchange.listings import (
 from vqapr.exchange.venue import Exchange, ExecutionCall
 
 COMMISSION_RATE = Decimal("0.0003")
-"""Brokerage commission charged on both sides."""
+"""Brokerage commission charged on both sides, unless the venue is constructed with another."""
 
 SALE_TAX_RATE = Decimal("0.002")
-"""Securities transaction tax charged on sells only."""
+"""Securities transaction tax charged on sells only, unless the venue is constructed with another.
+`Decimal("0")` is how a venue switches it off -- an explicit zero, recorded as such."""
+
+KRX_NOT_MODELLED: tuple[str, ...] = (
+    "price ticks",
+    "auction microstructure",
+    "queue position",
+    "partial fills from liquidity or participation limits",
+    "borrow and locate for short sales",
+    "margin",
+    "intraday behaviour",
+)
+"""What this profile does not do, declared so a record can say so. Costs other than the declared
+commission and tax are absent, not zero by measurement."""
 
 SHARE_UNIT = Decimal("1")
 """KRX equities trade in whole shares."""
@@ -174,7 +186,72 @@ KRX_TERMS: Mapping[InstrumentKind, TradeTerms] = {
     InstrumentKind.STOCK: krx_stock_terms(),
     InstrumentKind.ETF: krx_etf_terms(),
 }
-"""The two categories KRX trades. A factor or an index is simply not listed here."""
+"""The two categories KRX trades, at the default rates. A factor or an index is simply not listed
+here. A venue constructed with other rates builds its own pair through `KrxSettings.terms`."""
+
+
+def _rate(value: object, *, name: str) -> Decimal:
+    """A rate from a constructor argument: a Decimal, or the string a registered config carries.
+
+    Component configuration is ordinary model memory, which has no `Decimal`, so a configured
+    `0.002` would arrive as a binary float and quietly poison every exactness claim downstream. A
+    decimal string is the accepted spelling from config; a `Decimal` is the accepted spelling from
+    code.
+    """
+    if isinstance(value, Decimal):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = Decimal(value.strip())
+        except InvalidOperation as error:
+            raise ValueError(f"{name} is not a valid decimal string: {value!r}") from error
+    else:
+        raise TypeError(f"{name} must be a Decimal or a decimal string; got {type(value).__name__}")
+    if not parsed.is_finite() or parsed < 0:
+        raise ValueError(f"{name} must be finite and non-negative; got {value!r}")
+    return parsed
+
+
+@dataclass(frozen=True, slots=True)
+class KrxSettings:
+    """The rates this venue charges: its own declaration, folded into its fingerprint via config."""
+
+    commission_rate: Decimal = COMMISSION_RATE
+    sale_tax_rate: Decimal = SALE_TAX_RATE
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "commission_rate", _rate(self.commission_rate, name="commission_rate")
+        )
+        object.__setattr__(self, "sale_tax_rate", _rate(self.sale_tax_rate, name="sale_tax_rate"))
+
+    @classmethod
+    def of(cls, commission_rate: Decimal | str, sale_tax_rate: Decimal | str) -> KrxSettings:
+        """From code (`Decimal`) or from a registered config (decimal strings)."""
+        return cls(
+            _rate(commission_rate, name="commission_rate"),
+            _rate(sale_tax_rate, name="sale_tax_rate"),
+        )
+
+    def terms(self) -> Mapping[InstrumentKind, TradeTerms]:
+        """The per-category terms at these rates: a share pays the tax, an ETF does not."""
+        return {
+            InstrumentKind.STOCK: krx_stock_terms(self.commission_rate, self.sale_tax_rate),
+            InstrumentKind.ETF: krx_etf_terms(self.commission_rate),
+        }
+
+    def declared(self, *, price_limits: bool) -> dict[str, ModelMemory]:
+        """The venue's settings as the record carries them (strict JSON)."""
+        return {
+            "profile": "krx",
+            "quantity_unit": "share",
+            "commission_rate": str(self.commission_rate),
+            "sale_tax_rate": str(self.sale_tax_rate),
+            "price_limits": price_limits,
+            "short_sales": "refused",
+            "partial_fills": "cash-limited",
+            "not_modelled": list(KRX_NOT_MODELLED),
+        }
 
 
 def krx_listings(
@@ -269,11 +346,19 @@ class KrxExchange(Exchange):
         self,
         listings: Mapping[str, TradeRule] | Sequence[str],
         exchange_id: str = "krx",
+        *,
+        commission_rate: Decimal | str = COMMISSION_RATE,
+        sale_tax_rate: Decimal | str = SALE_TAX_RATE,
+        price_limits: bool | None = None,
     ) -> None:
-        """Declare what this venue trades -- which ids, and on what terms.
+        """Declare what this venue trades -- which ids, on what terms, at what rates.
 
-        ``listings`` may be a bare sequence of ids, which get the stock terms, or explicit
-        ``TradeRule`` values.
+        ``listings`` may be a bare sequence of ids, which get the KRX trading facts (whole shares,
+        long-only, the daily band on or off per ``price_limits``, off by default), or explicit
+        ``TradeRule`` values, in which case each rule carries its own band and ``price_limits``
+        must be left unset -- one source of truth. ``commission_rate`` and ``sale_tax_rate`` are
+        this venue's settings (design §6.1): a decimal string when they come from a registered
+        config, a `Decimal` from code; a zero switches the charge off, explicitly and on record.
 
         **It no longer accepts `instruments`.** What an id IS belongs to the project, not to a
         venue: `kind` does not vary by venue, so a venue declaring it was declaring a fact that
@@ -291,18 +376,29 @@ class KrxExchange(Exchange):
         resolved per fill from `KRX_TERMS` against the roster's category, so this venue holds no
         category of its own and has nothing to disagree with.
         """
+        self._settings = KrxSettings.of(commission_rate, sale_tax_rate)
         resolved: Mapping[str, TradeRule]
         if isinstance(listings, Mapping):
+            if price_limits is not None:
+                raise ValueError(
+                    "price_limits is decided by the listings when they are given as TradeRules; "
+                    "build them with krx_listings(..., price_limits=...) or pass ids"
+                )
             resolved = dict(listings)
         else:
-            resolved = {instrument: krx_listing(instrument) for instrument in listings}
+            resolved = krx_listings(listings, price_limits=bool(price_limits))
         for instrument_id, rule in resolved.items():
             if not isinstance(rule, TradeRule) or instrument_id != rule.instrument_id:
                 raise ValueError("each listing key must match its TradeRule instrument_id")
             if rule.fractional_allowed:
                 raise ValueError(f"KRX listing {instrument_id!r} must not be fractional")
         self.exchange_id = exchange_id
-        self._rules = ExchangeRulesView(exchange_id, resolved, terms_by_kind=KRX_TERMS)
+        self._rules = ExchangeRulesView(exchange_id, resolved, terms_by_kind=self._settings.terms())
+
+    @property
+    def settings(self) -> Mapping[str, ModelMemory]:
+        """This venue's declaration of what it models -- the docstring's claim, as data."""
+        return self._settings.declared(price_limits=self.execution_requirements() != ())
 
     def execution_requirements(self) -> tuple[ExecutionFieldRequirement, ...]:
         """The execution-table prices this venue needs, given what its rules actually declare.

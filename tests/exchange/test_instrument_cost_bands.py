@@ -383,7 +383,10 @@ def test_a_rosterless_run_is_refused_by_a_categorised_venue_and_served_by_a_flat
         at, (ExactExecutionRow(at, "A005930", True, price),), (), (), ()
     )
 
-    with pytest.raises(ValueError, match="no instrument roster reached"):
+    # The call always carries a dictionary (design §6.1); a run with no roster carries an empty
+    # one, and a categorised venue refuses the first id it has to charge rather than assuming a
+    # share.
+    with pytest.raises(KeyError, match="no registered instrument describes"):
         venue = KrxExchange(["A005930"])
         venue.execute(execution_call(venue, batch, account, snapshot))
 

@@ -120,8 +120,12 @@ def freeze_strategy_record(
     layer: FrozenStrategy,
     as_loaded: Mapping[str, str],
     roster: dict[str, object] | None,
+    exchange: Mapping[str, object] | None = None,
 ) -> None:
     """Write one strategy's rows and its own facts, so a later process can read them.
+
+    `exchange` is the venue block -- component id, registered fingerprint and the venue's own
+    `settings` (design §6.1) -- built by the caller that loaded the venue.
 
     The rows go first and the record last, because `strategy.json` existing is what marks the
     record complete. A reader that finds one knows the strategy reached its end; one killed midway
@@ -164,6 +168,7 @@ def freeze_strategy_record(
             {"component_id": str(rule.component_id), "fingerprint": rule.fingerprint}
             for rule in layer.compliance.rules
         ],
+        exchange=None if exchange is None else dict(exchange),
         account=(
             None
             if snapshot is None

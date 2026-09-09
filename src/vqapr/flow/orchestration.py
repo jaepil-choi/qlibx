@@ -14,7 +14,7 @@ independent runs, which is both more general and the unit the graph will schedul
 from __future__ import annotations
 
 import multiprocessing
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -72,6 +72,7 @@ from vqapr.record import (
     RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
+    read_table,
 )
 
 
@@ -285,6 +286,7 @@ def run(
                 replace_record=replace_record,
                 record_account_positions=record_account_positions,
                 roster=roster,
+                workspace=workspace,
             )
         except SimulationFailure as failed:
             # The run's refusal is its outcome, reported rather than raised
@@ -545,11 +547,14 @@ def _run_strategy(
     replace_record: bool,
     record_account_positions: bool,
     roster: RegisteredRoster | None,
+    workspace: Workspace | None = None,
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
     `roster` is the one read `run` made at its start (`docs/issues/archive/070`); the record is
-    written from it rather than from a read of this strategy's own.
+    written from it rather than from a read of this strategy's own. `workspace` is the document
+    the command opened, when it did, so publishing the allocation registers through that one
+    open rather than a second.
     """
     strategy = load_strategy_model(layer.config.component, project_root=root_path)
     # `run` refused a strategy run frozen without a venue or an initial account before
@@ -665,11 +670,33 @@ def _run_strategy(
             # stale marker rather than as `null`, which this record's own contract defines as
             # "no roster was ever read".
             freeze_strategy_record(
-                writer, result, frozen, layer, as_loaded, _roster_report_or_stale(roster)
+                writer,
+                result,
+                frozen,
+                layer,
+                as_loaded,
+                _roster_report_or_stale(roster),
+                # The venue as this run had it: which one, which bytes, and what it declared it
+                # models (design §6.1). Recorded so a reader can tell a tax-free KRX from a
+                # taxed one without opening the source at its digest.
+                exchange={
+                    "component_id": str(frozen.exchange.component_id),
+                    "fingerprint": frozen.exchange.fingerprint,
+                    "settings": normalize_memory(dict(exchange.settings)),
+                },
             )
         # The record first -- it is the run -- and then the warehouse: what the run promised
-        # under `writes` (design §2), through the same door a datamodel's rows take.
-        _publish_allocation(root_path, frozen, result)
+        # under `writes` (design §2), through the same door a datamodel's rows take. A stored
+        # run streamed its rows to the record and keeps none on its roots, so the allocation is
+        # read back from the record it just wrote; a run without a store still holds them.
+        _publish_allocation(
+            root_path,
+            frozen,
+            result.final_state.recorder_rows.get(WEIGHT_TABLE, ())
+            if writer is None
+            else read_table(writer.root, frozen.run_id, WEIGHT_TABLE, layer.record_ref),
+            workspace=workspace,
+        )
     except BaseException:
         # A strategy that died still holds its record's lock. Releasing here turns a crash into
         # an ordinary retry instead of stranding the directory until the lock goes stale.
@@ -739,8 +766,16 @@ def _own_output_or_refuse(
     workspace.remove("dataset", frozen.writes)
 
 
+WEIGHT_TABLE = f"{DEFAULT_TABLE_PREFIX}weight"
+"""The package table a strategy's allocation is published from."""
+
+
 def _publish_allocation(
-    root_path: Path, frozen: FrozenRun, result: SimulationResult
+    root_path: Path,
+    frozen: FrozenRun,
+    recorded: Iterable[Mapping[str, object]],
+    *,
+    workspace: Workspace | None = None,
 ) -> str | None:
     """Put the strategy's allocation in the warehouse under the run's `writes` (design §2).
 
@@ -756,15 +791,20 @@ def _publish_allocation(
     dataset cannot be typed, and a typed nothing would be a lie. The run still completes; `writes`
     then names a dataset that does not appear, and `vqapr list runs` beside `list datasets` shows
     exactly that.
+
+    `recorded` is the `vqapr.weight` table -- off the roots for a run without a store, read back
+    from the record for a stored run. Until record `210` this read the roots only, and a stored
+    run streams every row to its record and keeps none there, so `vqapr run` published nothing
+    while an in-process `run()` did (the showcases registered their allocations by hand from the
+    record, which is why nothing noticed).
     """
-    table = f"{DEFAULT_TABLE_PREFIX}weight"
     rows = [
         {
             "available_at": row["event_time"],
             "instrument": row["instrument"],
             "weight": float(Decimal(str(row["weight"]))),
         }
-        for row in result.final_state.recorder_rows.get(table, ())
+        for row in recorded
     ]
     if not rows:
         return None
@@ -773,7 +813,7 @@ def _publish_allocation(
     )
     output.open()
     output.append(rows)
-    output.register(Workspace.open(root_path))
+    output.register(workspace if workspace is not None else Workspace.open(root_path))
     return frozen.writes
 
 

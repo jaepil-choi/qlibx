@@ -467,8 +467,8 @@ class Workspace:
 
         if definition.strategy is not None:
             component(definition.strategy.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
-            for name in definition.strategy.constraints:
-                component(name, ComponentKind.CONSTRAINT, "constraint")
+        for name in definition.compliance:
+            component(name, ComponentKind.COMPLIANCE, "compliance rule")
         if definition.datamodel is not None:
             component(definition.datamodel.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:

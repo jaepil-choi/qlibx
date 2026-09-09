@@ -1,8 +1,9 @@
-"""The valuation phase: mark -> account, and monitoring.
+"""The VALUATION stage: mark -> account.
 
-Record `147`. What was `StrategyEventLoop._value_due`, `_dispatch_valuation`, `_dispatch_monitoring`
-and their helpers, moved verbatim; `_marks_from_execution_snapshot` lives here because the
-execution phase values the book from the snapshot it just filled against."""
+Record `147`. What was `StrategyEventLoop._value_due`, `_dispatch_valuation` and their helpers,
+moved verbatim; `_marks_from_execution_snapshot` lives here because the execution phase values
+the book from the snapshot it just filled against. Record `209` moved monitoring out to
+`compliance.py`: it is the next stage of the market-clock instant, not part of this one."""
 
 from __future__ import annotations
 
@@ -12,18 +13,10 @@ from decimal import Decimal
 
 from vqapr.account.marking import SelectedMark
 from vqapr.authoring.records import InvocationRecorder
-from vqapr.constraints.evaluation import (
-    ConstraintReport,
-    evaluate_constraints,
-    project_constraints,
-)
-from vqapr.domain.account_state import AccountMark, AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import MarkBatch
+from vqapr.domain.account_state import AccountMark, AccountSnapshot
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.engine.artifacts import (
     MarkEvidence,
-    MonitoringEvidence,
     SimulationFailureKind,
     SimulationStage,
     ValuationEvidence,
@@ -33,13 +26,10 @@ from vqapr.flow.strategy.context import (
     _ACCOUNT_IDENTITY,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
-    MONITORING_STAGE,
     VALUATION_STAGE,
     Filled,
     FlowContext,
     Marked,
-    MonitoringResult,
-    ValuationResult,
 )
 
 
@@ -379,129 +369,3 @@ class ValuationHandler:
         if root.account != self._context.account.state:
             raise RuntimeError("Account mark root does not mirror Account authority")
         return root
-
-    def _committed_marks(self, state: AccountState) -> MarkBatch:
-        """The valuation the Account already committed, or an empty one before the first mark.
-
-        A run values its book where it executes. Between execution instants nothing about the
-        valuation can have changed, because no new price has been published to change it.
-        """
-        latest = state.latest_mark
-        if latest is None:
-            return self._context.valuation_service.mark(state.snapshot, ())
-        return latest.marks
-
-    def monitor_at(
-        self, cutoff: datetime, *, occurrence: OperationOccurrence | None
-    ) -> MonitoringResult | None:
-        """Judge the committed, marked book at the market-clock instant it was just marked at.
-
-        Design §3.1 (COMPLIANCE): monitoring has no occurrence of its own. It runs right after
-        each mark -- a fill's or a held book's -- reading the committed mark rather than valuing
-        the book a second time, and the constraints read their data as of that instant. A run
-        that declared no constraint has nothing to judge and records nothing. `occurrence` is
-        the decision a fill settled, when there was one, for the evidence.
-        """
-        if not self._context.constraints:
-            return None
-        with self._context.due_boundary(
-            stage=SimulationStage.MONITORING,
-            cutoff=cutoff,
-            owner=self._context.layer.agenda,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            return self._monitor(occurrence, cutoff)
-
-    def _monitor(
-        self, occurrence: OperationOccurrence | None, cutoff: datetime
-    ) -> MonitoringResult:
-        state = self._context.state.current.account
-        if state is None:
-            raise RuntimeError("monitoring requires an AccountState root")
-        current = state.snapshot
-        window = self._context.constraint_window_at(cutoff)
-        # Restored before, committed after, with the findings (record `181`): what `project`
-        # and `monitor` leave in a constraint's memory is published in the monitoring root.
-        self._context.restore_component_memory(self._context.visible_component_memory())
-        projected = project_constraints(self._context.constraints, window)
-        # Monitoring judges the account the run actually committed, so it reads the committed
-        # mark rather than valuing the book a second time.
-        marks = self._committed_marks(state)
-        valuation_evidence = ValuationEvidence(
-            run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=occurrence,
-            cutoff=cutoff,
-            account=current,
-            marks=marks,
-            root_version=self._context.state.current.version,
-            account_version=current.version,
-        )
-        valuation = ValuationResult(current, marks, valuation_evidence)
-        report = evaluate_constraints(self._context.constraints, window, current, marks, projected)
-        evidence = MonitoringEvidence(
-            run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=occurrence,
-            cutoff=cutoff,
-            account=current,
-            valuation=valuation_evidence,
-            report=report,
-            root_version=self._context.state.current.version,
-        )
-        if report.findings:
-            self._record_findings(
-                occurrence, report, cutoff, self._context.candidate_component_memory()
-            )
-        return MonitoringResult(valuation, report, evidence)
-
-    def _record_findings(
-        self,
-        occurrence: OperationOccurrence | None,
-        report: ConstraintReport,
-        cutoff: datetime,
-        component_memory: Mapping[str, object],
-    ) -> None:
-        """Write what monitoring measured into the package's own table, and publish it.
-
-        Through the same accept funnel as a valuation's rows, so a run with a store streams
-        these to disk as each occurrence passes and a run killed midway keeps every finding it
-        made. A run that declared no constraint writes nothing here rather than an empty
-        occurrence: there is no finding to record, and a lifecycle entry saying so would be
-        noise on every monitoring day.
-
-        `event_time` is the monitoring cutoff -- when the account was judged -- and `offenders`
-        is the breaching names joined by a single space, which no instrument id may contain, so
-        a reader splits on it without a quoting rule.
-        """
-        recorder = InvocationRecorder(
-            DEFAULT_TABLES,
-            run_id=self._context.frozen_run.identity,
-            producer_id=str(self._context.layer.config.component.component_id),
-            stage=MONITORING_STAGE,
-            event_time=self._context.in_agenda_zone(cutoff),
-        )
-        for finding in report.findings:
-            recorder.append(
-                f"{DEFAULT_TABLE_PREFIX}monitoring",
-                {
-                    "constraint": finding.constraint_id,
-                    "passed": finding.passed,
-                    "measured": finding.measured,
-                    "bound": finding.bound,
-                    "excess": finding.excess,
-                    # The framework's verdict beside the author's `passed`
-                    # (`docs/issues/archive/086`): `held`, `within_tolerance` or `breached`, and the
-                    # tolerance it was judged against, so a reader of this table can split the
-                    # populations the way the record's `contract` block does.
-                    "verdict": finding.verdict,
-                    "tolerance": finding.tolerance,
-                    "offenders": " ".join(finding.offenders),
-                    "account_version": report.account_version,
-                },
-            )
-        self._context.state.publish_monitoring(
-            self._context.state.prepare_monitoring(
-                recorder=recorder, component_memory=component_memory
-            )
-        )

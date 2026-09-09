@@ -42,7 +42,7 @@ _ENVELOPE_RESERVED_FIELDS = frozenset(
         "version",
         "state_ref",
         "state_reference",
-        "constraint_id",
+        "compliance_id",
         "correlation_id",
     }
 )

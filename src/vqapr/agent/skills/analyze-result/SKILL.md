@@ -47,7 +47,7 @@ cannot give it. What each holds, and the traps in reading them, is in
 | `attribution` | P&L per period by name and by side, plus `residual` |
 | `trading` | realised and intended turnover, costs from fills, holding periods |
 | `intent` | each decision's weights against the book that followed |
-| `compliance` | per constraint: held / within tolerance / breached / unmeasured |
+| `compliance` | per compliance rule: held / within tolerance / breached / unmeasured |
 
 A `RunReport` adds `headline` (one row per strategy), `correlation` of period returns over the
 instants every strategy shares, and `relative` against a `benchmark` **strategy of the same run** —

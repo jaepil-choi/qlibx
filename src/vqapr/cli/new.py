@@ -18,7 +18,7 @@ run fills against is a dataset with an `execution:` role), an exchange and the r
 is no agenda to declare (record `148`): the run
 says which sessions it fires on and at what wall time, every strategy is called on every
 session and decides for itself, the book is valued at the instant the venue fills, and the
-declared constraints judge it right after each commit.
+declared Compliance rules observe it at every instant of the market clock.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspa
 _KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "strategy": ComponentKind.STRATEGY_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
 }
 
 _LOOKBACK_DEFAULT = 6
@@ -57,7 +57,7 @@ asked for rows" from "the user left the default alone and asked for calendar day
 _DECLARATION_KIND = {
     ComponentKind.DATA_MODEL: "datamodel",
     ComponentKind.STRATEGY_MODEL: "strategy",
-    ComponentKind.CONSTRAINT: "constraint",
+    ComponentKind.COMPLIANCE: "compliance",
 }
 """The declaration spelling for each authored kind.
 
@@ -143,8 +143,8 @@ _RUN_TEMPLATE = f"""\
 # on (`agenda`), the venue, the execution dataset, the initial account, and the one strategy it
 # runs. The clock is expanded over the trading days the execution dataset has rows for -- a
 # denser table adds fill instants, never decision days -- and the strategy is called at every
-# instant of it, deciding for itself whether to act. The book is valued at the instant the venue
-# fills and the declared constraints judge it right after each commit; there is no separate
+# instant of it, deciding for itself whether to act. The book is valued at every instant of the
+# market clock and the declared compliance rules observe it right after; there is no separate
 # valuation or monitoring time to declare. The run's record lives under .vqapr/runs/RUN_ID/.
 # Ids below name registered declarations; nothing here registers them.
 
@@ -171,6 +171,9 @@ runs:
         # after: "10m"               #   this wall time (run timezone) -- STRICTLY LATER than the
         # within: "1d"               #   decision. `after`: minimum gap. `within`: maximum gap,
                                      #   else the run is refused before it starts
+    # compliance: [no-short]          # registered Compliance rules that observe the committed
+                                     #   book at every market-clock instant; their parameters are
+                                     #   their own, never the strategy's
     initial_account:
       cash: "1000000"                # quoted to preserve precision (parsed as Decimal)
       # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
@@ -181,7 +184,6 @@ runs:
                                      #   one row per instrument per decision. Other runs read it
     strategy:                        # the ONE registered StrategyModel this run executes
       component: my-alpha
-      # constraints: [constraint-component-id]
       # initial_model_memory: {{}}
 """
 
@@ -260,7 +262,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             "sample",
         ),
         help=(
-            "scaffold a component (datamodel/strategy/constraint) or emit a template "
+            "scaffold a component (datamodel/strategy/compliance) or emit a template "
             "(instruments/dataset/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
             "that registers it. Every kind reports the file to hand `vqapr register` as "
@@ -339,7 +341,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cap",
         default="0.2",
-        help="largest share of the book any one name may be (constraint scaffold)",
+        help="largest share of the book any one name may be (compliance scaffold)",
     )
     parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
@@ -365,7 +367,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     kind = _KINDS[args.kind]
     # `render` refuses an id that cannot become a Python class name. Caught here rather than left
     # to escape, because a bare `ValueError` reaches the envelope as `stage: "unhandled"` -- and
-    # it did: `vqapr new constraint '123-bad!'` emitted an unparseable file and then failed on
+    # it did: `vqapr new compliance '123-bad!'` emitted an unparseable file and then failed on
     # re-reading it, reporting a SyntaxError about the framework's own output.
     try:
         _class_name(args.component_id)
@@ -377,10 +379,10 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             retry="choose an id like `position-cap`, then retry",
         ) from unusable
     # Per kind, not per command. A DataModel and a StrategyModel are defined by what they read; a
-    # Constraint is a rule about weights and reads nothing -- the shipped `NoShort` returns an
+    # Compliance rule is about the book and reads nothing -- the shipped `NoShort` returns an
     # empty `requirements()`. Demanding `--dataset` from all three would make an author invent a
     # dataset to scaffold a rule that never opens one.
-    if kind is ComponentKind.CONSTRAINT:
+    if kind is ComponentKind.COMPLIANCE:
         source = render(kind, args.component_id, cap=str(getattr(args, "cap", "0.2")))
     else:
         if not args.dataset:

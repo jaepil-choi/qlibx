@@ -262,9 +262,7 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
             removed["datasets"].append(dataset_id)
             if materialized is not None:
                 shutil.rmtree(materialized, ignore_errors=True)
-    named: list[str] = [definition.member.component_id]
-    if definition.strategy is not None:
-        named.extend(definition.strategy.constraints)
+    named: list[str] = [definition.member.component_id, *definition.compliance]
     if definition.exchange is not None:
         named.append(definition.exchange)
     for component_id in dict.fromkeys(named):

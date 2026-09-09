@@ -160,9 +160,9 @@ def freeze_strategy_record(
             "content_identity": layer.agenda.content_identity,
             "occurrences": len(layer.agenda.occurrences),
         },
-        constraints=[
-            {"component_id": str(constraint.component_id), "fingerprint": constraint.fingerprint}
-            for constraint in layer.constraints.constraints
+        compliance=[
+            {"component_id": str(rule.component_id), "fingerprint": rule.fingerprint}
+            for rule in layer.compliance.rules
         ],
         account=(
             None
@@ -263,25 +263,25 @@ def freeze_datamodel_record(
 
 
 def contract_report(result: SimulationResult) -> dict[str, object]:
-    """What the strategy's constraints promised, and how often each was actually observed to hold.
+    """What the run's Compliance rules watched, and how often each was actually observed to hold.
 
     `held` and `checked` are two different numbers, and conflating them hides the case that matters
     most: a declaration checked zero times is not a declaration that held. It is one nobody asked
     about, and reporting that as `ok` would be the strongest false assurance this record could
-    carry. So a constraint with `checked == 0` reports `ok: false` with a `cause` saying exactly
-    that.
+    carry. So a rule with `checked == 0` reports `ok: false` with a `cause` saying exactly that.
 
-    **These count monitoring observations of the committed account.** They used to be meant to
-    count judgements of the decision, and that member no longer exists: whether a limit held is a
-    question about the book, not about the plan (PRD 7.1).
+    **These count observations of the committed account, on the market clock.** They used to be
+    meant to count judgements of the decision, and that member no longer exists: whether a limit
+    held is a question about the book, not about the plan (PRD 7.1; design §7.2).
 
     **And they used to count nothing at all.** This walked the run's lifecycle entries asking each
     for an `evidence` attribute, but a lifecycle entry carries `kind` and `detail` and the evidence
     is the `detail` -- so the lookup returned `None` every time and the loop never ran
     (`docs/issues/archive/051`).
 
-    Scope, stated rather than implied: this reports the CONSTRAINTS a strategy declared. AC-R6 also
-    names `weights`/`forms`/`records`, which are the authoring contract's declarations -- they do
+    Scope, stated rather than implied: this reports the Compliance RULES the run declared.
+    AC-R6 also names `weights`/`forms`/`records`, which are the authoring contract's
+    declarations -- they do
     not exist yet, and inventing entries for them here would report a promise nobody made.
     """
 
@@ -294,11 +294,11 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     for trace in getattr(result, "occurrences", ()):
         occurrence_report = getattr(getattr(trace, "result", None), "report", None)
         for stamped in getattr(occurrence_report, "findings", ()) or ():
-            constraint_id = str(getattr(stamped, "constraint_id", "") or "")
-            if not constraint_id:
+            rule_id = str(getattr(stamped, "rule_id", "") or "")
+            if not rule_id:
                 continue
             counts = findings.setdefault(
-                constraint_id,
+                rule_id,
                 {
                     "held": 0,
                     "within_tolerance": 0,
@@ -329,7 +329,7 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
         if getattr(entry, "kind", None) is LifecycleKind.ACCEPTED_INTENT
     )
     report: dict[str, object] = {}
-    for constraint_id, counts in sorted(findings.items()):
+    for rule_id, counts in sorted(findings.items()):
         checked = int(counts["checked"])  # type: ignore[call-overload]
         breached = int(counts["breached"])  # type: ignore[call-overload]
         entry: dict[str, object] = {
@@ -350,16 +350,16 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
                 f"{counts['tolerance']} (worst excess {counts['worst_breached']})"
             )
             entry["fix"] = (
-                f"change the strategy so what it holds satisfies {constraint_id}, loosen the "
+                f"change the strategy so what it holds satisfies {rule_id}, loosen the "
                 "bound, or -- if these are execution residue and not intent -- raise the "
-                "constraint's `tolerance`"
+                "rule's `tolerance`"
             )
         elif checked == 0:
             entry["cause"] = "declared but never checked, so nothing was proven about it"
             entry["fix"] = "remove the declaration, or run over a period where it is exercised"
-        report[constraint_id] = entry
+        report[rule_id] = entry
 
-    # A run that accepted intents while checking no constraint is not a clean run; it is a run
+    # A run that accepted intents while checking no rule is not a clean run; it is a run
     # nobody constrained. Saying so is the point of reporting counts rather than a verdict.
     report["accepted_intents"] = accepted
     return report

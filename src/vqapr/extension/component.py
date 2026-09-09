@@ -30,7 +30,7 @@ class ComponentKind(StrEnum):
     DATA_MODEL = "data_model"
     STRATEGY_MODEL = "strategy_model"
     EXCHANGE = "exchange"
-    CONSTRAINT = "constraint"
+    COMPLIANCE = "compliance"
 
 
 class ComponentRef(BaseModel):

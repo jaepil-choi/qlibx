@@ -43,7 +43,7 @@ from vqapr.public import (
     SourceSpec,
     StrategyEntry,
     preflight_run,
-    register_constraint,
+    register_compliance,
     register_data_model,
     register_dataset,
     register_exchange,
@@ -230,34 +230,28 @@ class ShowcaseExchange(AcademicExchange):
         encoding="utf-8",
     )
 
-    constraint = components / "constraint.py"
-    constraint.write_text(
+    compliance = components / "compliance.py"
+    compliance.write_text(
         '''from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding, Rebalance
+from vqapr.public import Compliance, ComplianceFinding
 
 CAP = Decimal("0.30")
 
 
-class SingleNameCap(Constraint):
-    """One shared absolute single-name cap for projection, intent and monitoring."""
+class SingleNameCap(Compliance):
+    """An absolute single-name cap, observed on the marked book at every market-clock instant."""
 
     @property
-    def constraint_id(self):
-        return "showcase-constraint"
+    def compliance_id(self):
+        return "showcase-cap"
 
     def inputs(self):
         return {}
 
-    def project(self, call):
-        return ConstraintBounds(
-            lower_weights={instrument: -CAP for instrument in call.instruments},
-            upper_weights={instrument: CAP for instrument in call.instruments},
-        )
-
-    def monitor(self, call, account, bounds):
+    def observe(self, call, account):
         # `account.weights()` is each name's marked value over NAV, and NAV is cash plus the
         # marked total. The arithmetic used to be written out here from a MarkBatch; doing it in
         # one place is what keeps every rule measuring the same book the same way.
@@ -265,7 +259,7 @@ class SingleNameCap(Constraint):
         measured = max((abs(w) for w in weights.values()), default=Decimal("0"))
         excess = measured - CAP if measured > CAP else Decimal("0")
         offenders = tuple(sorted(n for n, w in weights.items() if abs(w) > CAP))
-        return ConstraintFinding(
+        return ComplianceFinding(
             passed=not offenders,
             measured=measured,
             bound=CAP,
@@ -276,7 +270,7 @@ class SingleNameCap(Constraint):
 ''',
         encoding="utf-8",
     )
-    return {"model": model, "strategy": strategy, "exchange": exchange, "constraint": constraint}
+    return {"model": model, "strategy": strategy, "exchange": exchange, "compliance": compliance}
 
 
 def _json_value(value: Any) -> Any:
@@ -428,12 +422,13 @@ def main() -> None:
     # universe is index constituents, so every name is a share.
     register_instruments(PROJECT, {name: "stock" for name in universe})
     register_exchange(PROJECT, "showcase-exchange", paths["exchange"], "ShowcaseExchange")
-    register_constraint(PROJECT, "showcase-constraint", paths["constraint"], "SingleNameCap")
+    register_compliance(PROJECT, "showcase-cap", paths["compliance"], "SingleNameCap")
 
 
     definition = RunDefinition(
         run_id="show003",
-        strategy=StrategyEntry("showcase-strategy", ("showcase-constraint",)),
+        strategy=StrategyEntry("showcase-strategy"),
+        compliance=("showcase-cap",),
         timezone=VENUE,
         agenda=RunAgenda(every="1d", at=(time(8, 30),)),
         exchange="showcase-exchange",

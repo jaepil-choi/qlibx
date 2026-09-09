@@ -1,4 +1,4 @@
-"""What monitoring measured reaches the record, one row per constraint per commit.
+"""What compliance measured reaches the record, one row per rule per commit.
 
 Before record `140` a monitoring occurrence's findings lived on its trace and nowhere else. The
 strategy record's `contract` block counted them (`held` / `checked`), so a run could say THAT a
@@ -7,19 +7,19 @@ limit was breached and never WHICH name, against WHAT bound, by HOW MUCH -- the 
 accept funnel every other package table uses, so a run with a store streams them to disk as it
 goes.
 
-Record `148` moved WHEN they arrive. Monitoring has no occurrence of its own any more: the
-declared constraints judge the committed, marked book right after each commit -- a fill's, or a
-held book's valuation at its execution instant -- and the findings are dated by that instant.
+Record `148` moved WHEN they arrive, and record `209` said who: the declared Compliance rules
+observe the committed, marked book at every market-clock instant -- a fill's, or a held book's
+valuation at its execution instant -- and the findings are dated by that instant.
 The flow here holds on every session, so every session reaches the venue's 15:30 print, is
 valued there, and is judged there.
 
 Three properties, asserted directly:
 
-- a run with a store writes one row per declared constraint per commit, typed -- a `Decimal`
+- a run with a store writes one row per declared rule per commit, typed -- a `Decimal`
   reads back a `Decimal`, `passed` a bool, `offenders` the breaching ids joined by a space --
   stage `MONITORING`, `event_time` the fill instant, and keeps none of them on its roots;
 - without a sink the rows sit on the roots, as every package table's do;
-- a run that declared no constraint writes no such table at all.
+- a run that declared no rule writes no such table at all.
 """
 
 from __future__ import annotations
@@ -33,10 +33,9 @@ import duckdb
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
-    Constraint,
-    ConstraintBounds,
-    ConstraintCall,
-    ConstraintFinding,
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
     EconomicAccountView,
     Hold,
     StrategyModel,
@@ -51,7 +50,7 @@ from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ConstraintSet, StrategyConfig
+from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.strategy.loop import DueExecutionTrace, StrategyEventLoop
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
@@ -83,30 +82,22 @@ class _Exchange:
         raise AssertionError("no order is placed")
 
 
-class _Rule(Constraint):
+class _Rule(Compliance):
     """A rule whose finding is fixed, so the test knows exactly what should land on disk."""
 
-    def __init__(self, constraint_id: str, finding: ConstraintFinding) -> None:
-        self._constraint_id = constraint_id
+    def __init__(self, compliance_id: str, finding: ComplianceFinding) -> None:
+        self._compliance_id = compliance_id
         self._finding = finding
 
     @property
-    def constraint_id(self) -> str:
-        return self._constraint_id
+    def compliance_id(self) -> str:
+        return self._compliance_id
 
-    def project(self, call: ConstraintCall) -> ConstraintBounds:
-        return ConstraintBounds(
-            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
-            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
-        )
-
-    def monitor(
-        self, call: ConstraintCall, account: EconomicAccountView, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
+    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
         return self._finding
 
 
-BREACH = ConstraintFinding(
+BREACH = ComplianceFinding(
     passed=False,
     measured=Decimal("0.35"),
     bound=Decimal("0.10"),
@@ -114,7 +105,7 @@ BREACH = ConstraintFinding(
     details={},
     offenders=("B", "A"),
 )
-HELD = ConstraintFinding(
+HELD = ComplianceFinding(
     passed=True, measured=Decimal("0"), bound=Decimal("0"), excess=Decimal("0"), details={}
 )
 RULES = (_Rule("single-name-cap", BREACH), _Rule("no-short", HELD))
@@ -178,7 +169,7 @@ def _flow(
     root: Path,
     state: RunStateRepository,
     sessions: tuple[date, ...],
-    rules: tuple[Constraint, ...] = RULES,
+    rules: tuple[Compliance, ...] = RULES,
 ) -> StrategyEventLoop:
     occurrences = _callbacks(sessions)
     frozen = FrozenRun(
@@ -188,10 +179,8 @@ def _flow(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
                 ),
-                constraints=ConstraintSet(
-                    tuple(
-                        _component(rule.constraint_id, ComponentKind.CONSTRAINT) for rule in rules
-                    )
+                compliance=ComplianceSet(
+                    tuple(_component(rule.compliance_id, ComponentKind.COMPLIANCE) for rule in rules)
                 ),
                 agenda=FrozenAgenda(
                     "strategy", occurrences, timezone="Asia/Seoul"
@@ -216,23 +205,31 @@ def _flow(
             consumer_id="test-consumer",
         )
 
+    def window_at(instant: datetime) -> ModelWindow:
+        return ModelWindow(
+            evaluation_time=instant,
+            instruments=("A", "B"),
+            store=DuckDbObservationStore(_Catalog()),
+            allowed_requirements=(),
+        )
+
     return StrategyEventLoop(
         frozen,
         _Holds(),
         state,
         strategy_window_for_occurrence=window_for_occurrence,
-        constraint_window_for_occurrence=window_for_occurrence,
+        compliance_window_at=window_at,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
-        constraints=rules,
+        compliance=rules,
     )
 
 
-def _state(row_sink=None, rules: tuple[Constraint, ...] = RULES) -> RunStateRepository:
+def _state(row_sink=None, rules: tuple[Compliance, ...] = RULES) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
         row_sink=row_sink,
-        initial_component_memory={rule.constraint_id: rule.memory for rule in rules},
+        initial_component_memory={rule.compliance_id: rule.memory for rule in rules},
     )
 
 
@@ -245,10 +242,10 @@ def test_each_finding_reaches_the_record_typed_and_the_roots_keep_none(tmp_path:
     writer.release()
 
     rows = list(read_typed_table(tmp_path, "monitored", TABLE))
-    assert len(rows) == 2 * len(RULES), "one row per declared constraint per commit"
+    assert len(rows) == 2 * len(RULES), "one row per declared rule per commit"
     assert result.final_state.recorder_rows == {}, "a streamed run retains no rows on its roots"
 
-    by_key = {(row["event_time"], row["constraint"]): row for row in rows}
+    by_key = {(row["event_time"], row["rule"]): row for row in rows}
     first = _fill_instant(sessions[0])
     breach = by_key[(first, "single-name-cap")]
     assert breach["passed"] is False
@@ -275,7 +272,7 @@ def test_each_finding_reaches_the_record_typed_and_the_roots_keep_none(tmp_path:
     due = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
     assert len(due) == 2
     assert all(
-        [finding.constraint_id for finding in trace.result.report.findings]
+        [finding.rule_id for finding in trace.result.report.findings]
         == ["single-name-cap", "no-short"]
         for trace in due
     )
@@ -286,17 +283,17 @@ def test_without_a_sink_the_rows_stay_on_the_roots(tmp_path: Path) -> None:
 
     rows = result.final_state.recorder_rows[TABLE]
     assert len(rows) == 3 * len(RULES)
-    assert {row["constraint"] for row in rows} == {"single-name-cap", "no-short"}
+    assert {row["rule"] for row in rows} == {"single-name-cap", "no-short"}
     assert {row["stage"] for row in rows} == {"MONITORING"}
     assert {row["event_time"] for row in rows} == {
         _fill_instant(session) for session in _sessions(3)
     }, "one judgement per commit, each at its own fill instant"
     # The counts the `contract` block reports come from the same findings, so they agree.
     breaches = [row for row in rows if row["passed"] is False]
-    assert len(breaches) == 3 and all(row["constraint"] == "single-name-cap" for row in breaches)
+    assert len(breaches) == 3 and all(row["rule"] == "single-name-cap" for row in breaches)
 
 
-def test_a_run_that_declared_no_constraint_writes_no_monitoring_table(tmp_path: Path) -> None:
+def test_a_run_that_declared_no_rule_writes_no_monitoring_table(tmp_path: Path) -> None:
     writer = RunRecordWriter(tmp_path, "monitored")
     writer.open()
 

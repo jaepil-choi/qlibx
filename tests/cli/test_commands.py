@@ -32,7 +32,7 @@ _ZONE = ZoneInfo("Asia/Seoul")
 OCCURRENCES = 6
 """What the fixture run dispatches: three sessions, so three callbacks, and one execution each.
 
-The book is valued at the instant the venue fills and the declared constraints judge it right
+The book is valued at the instant the venue fills and the declared Compliance rules observe it right
 after each commit (record 148), so neither valuation nor monitoring is an occurrence of its own
 any more. Before 148 this was 12: three days times callback, valuation and monitoring, plus the
 three executions.
@@ -193,18 +193,19 @@ components:
 def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Path:
     """A `runs:` declaration for one run over this workspace, exactly as a user would write it.
 
-    `constraints=[...]` is the one convenience: it lands on the single strategy the run names.
-    Any other keyword replaces the run's key of that name -- `at="15:30"` is how a test declares
+    `compliance=[...]` names the run's Compliance rules (design §7.2: on the run, beside the
+    venue). Any other keyword replaces the run's key of that name -- `at="15:30"` is how a test declares
     a look-ahead, since the run's own `at` is the decision time (record 148).
 
     The strategy decides at 04:00 on every day the `prices` dataset has a row for: the rows
     become available at 03:00, and the venue fills at 15:30.
     """
-    constraints = overrides.pop("constraints", None)
+    compliance = overrides.pop("compliance", None)
     body: dict[str, object] = {
         # A run declares what it writes (design §2); a test that cares overrides it.
         "writes": f"{run_id}-weights",
-        "strategies": {"my-alpha": {} if constraints is None else {"constraints": constraints}},
+        "strategy": {"component": "my-alpha"},
+        **({} if compliance is None else {"compliance": compliance}),
         "timezone": "Asia/Seoul",
         "agenda": {"every": "1d", "at": "04:00"},
         "exchange": "venue",
@@ -496,16 +497,16 @@ def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
     assert code == 0, emitted
     _cli(capsys, "--project-root", str(tmp_path), "register", emitted["declaration"])
 
-    # And a constraint, which fell through to the StrategyModel loader and raised a bare TypeError
-    # as `stage: "unhandled"` -- so the component a reader most needs to inspect before trusting it
-    # could not be inspected at all. Found by a journey whose run a cap had just refused.
-    code, cap = _cli(capsys, "--project-root", str(tmp_path), "new", "constraint", "cap20")
+    # And a compliance rule, which fell through to the StrategyModel loader and raised a bare
+    # TypeError as `stage: "unhandled"` -- so the component a reader most needs to inspect before
+    # trusting it could not be inspected at all.
+    code, cap = _cli(capsys, "--project-root", str(tmp_path), "new", "compliance", "cap20")
     _cli(capsys, "--project-root", str(tmp_path), "register", cap["declaration"])
     code, rule = _cli(capsys, "--project-root", str(tmp_path), "show", "model", "cap20")
     assert code == 0, rule
-    assert rule["kind"] == "constraint"
-    assert rule["constraint_id"] == "cap20"
-    assert "weight" in rule["decides"], "what a constraint decides is stated, not left blank"
+    assert rule["kind"] == "compliance"
+    assert rule["compliance_id"] == "cap20"
+    assert "book" in rule["decides"], "what a rule decides is stated, not left blank"
 
     code, described = _cli(capsys, "--project-root", str(tmp_path), "show", "model", "derived")
 
@@ -517,7 +518,7 @@ def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
     code, listed = _cli(capsys, "--project-root", str(tmp_path), "list", "components")
     assert {row["component_id"]: row["kind"] for row in listed["items"]}["derived"] == "datamodel"
     assert all(
-        row["kind"] in {"strategy", "datamodel", "constraint", "exchange"}
+        row["kind"] in {"strategy", "datamodel", "compliance", "exchange"}
         for row in listed["items"]
     ), "every reported kind must be one the CLI accepts, or the enum value where it takes none"
     # What it reads is the question a reader opens this command to answer.
@@ -577,30 +578,28 @@ def test_a_yaml_path_handed_to_run_or_check_is_refused_by_name(
     assert not (tmp_path / ".vqapr" / "materialized").exists()
 
 
-def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
+def test_new_compliance_emits_a_rule_that_registers_and_runs_unedited(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The run spec advertised `constraints:` and nothing said what went in it.
+    """The run spec advertised `compliance:` and nothing said what went in it.
 
-    `Constraint` has five abstract members and had no scaffold, `register --help` named only
-    datamodel and strategy, and the skill never mentioned constraints. The only way to learn the
-    shapes was to register an empty subclass and read the `TypeError` -- and `project` is a
-    semantic contract that cannot be guessed from a signature, so an agent asked for a 20% position
-    cap correctly refused to guess and the requirement went unmet.
+    The observing role had no scaffold, `register --help` named only datamodel and strategy, and
+    the skill never mentioned it. The only way to learn the shapes was to register an empty
+    subclass and read the `TypeError`.
     """
     _workspace_for_run(tmp_path, capsys)
 
-    # No --dataset: a Constraint is a rule about weights and reads nothing. Requiring one would
-    # make an author invent a dataset to scaffold a rule that never opens it.
-    code, emitted = _cli(capsys, "--project-root", str(tmp_path), "new", "constraint", "cap20")
+    # No --dataset: a rule about the book reads nothing. Requiring one would make an author
+    # invent a dataset to scaffold a rule that never opens it.
+    code, emitted = _cli(capsys, "--project-root", str(tmp_path), "new", "compliance", "cap20")
     assert code == 0, emitted
     assert emitted["object_name"] == "Cap20"
 
     source = Path(emitted["path"]).read_text(encoding="utf-8")
-    for member in ("constraint_id", "inputs", "project", "monitor"):
+    for member in ("compliance_id", "inputs", "observe"):
         assert f"def {member}" in source, f"{member} must be present, not left to a TypeError"
-    # `project` is the member that cannot be guessed, so the template states its contract.
-    assert "the box the optimiser must stay inside" in source
+    # The template states what a rule is: an observer, not a gate and not a box.
+    assert "A rule observes" in source
 
     code, registered = _cli(
         capsys, "--project-root", str(tmp_path), "register", emitted["declaration"]
@@ -608,24 +607,24 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     assert code == 0, registered
     assert registered["registered"]["components"] == ["cap20"]
 
-    # The scaffold cannot reproduce the crash T1 fixed: its `constraint_id` is fixed to the id it
+    # The scaffold cannot reproduce the crash T1 fixed: its `compliance_id` is fixed to the id it
     # was scaffolded under, so registering it as anything else is refused rather than crashing at
     # run assembly.
     code, mismatched = _cli(
-        capsys, "--project-root", str(tmp_path), "register", "constraint", "cap20b",
+        capsys, "--project-root", str(tmp_path), "register", "compliance", "cap20b",
         emitted["path"],
     )
     assert code == 1
-    assert mismatched["failures"][0]["code"] == "component.constraint_id_mismatch"
+    assert mismatched["failures"][0]["code"] == "component.compliance_id_mismatch"
 
     # The rule BITES, and the run FINISHES. This workspace holds one instrument, so the scaffold
-    # strategy proposes 100% of the book in it, which a 20% cap forbids.
+    # strategy proposes 100% of the book in it, which a 20% cap reports.
     #
-    # A breach used to end the run here. It does not, and that is the ruling: construction is best
-    # effort, and whether a limit actually held is a question about the committed account, which
-    # monitoring answers (PRD 7.1). Stopping also hid what the strategy went on to do, and could
-    # never have seen the breach that only appears once whole shares are filled.
-    code, registered_run = _register_run(tmp_path, capsys, "capped", constraints=["cap20"])
+    # A breach never ends the run: whether a limit held is a question about the committed account,
+    # which Compliance answers on the market clock (PRD 7.1, design §7.2). Stopping would hide
+    # what the strategy went on to do, and could never see the breach that only appears once
+    # whole shares are filled.
+    code, registered_run = _register_run(tmp_path, capsys, "capped", compliance=["cap20"])
     assert code == 0, registered_run
     code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "capped")
     assert code == 0, ran
@@ -637,21 +636,21 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
         capsys, "--project-root", str(tmp_path), "show", "strategy", "capped/my-alpha",
     )
     assert code == 0, shown
-    assert [entry["component_id"] for entry in shown["constraints"]] == ["cap20"], (
-        "the strategy record names the constraints it ran under"
+    assert [entry["component_id"] for entry in shown["compliance"]] == ["cap20"], (
+        "the strategy record names the compliance rules the run declared"
     )
     contract = shown["contract"]
-    assert "cap20" in contract, f"the record names which constraint was observed: {contract}"
+    assert "cap20" in contract, f"the record names which rule observed: {contract}"
     entry = contract["cap20"]
-    assert entry["checked"] > 0, "a constraint nobody checked proves nothing"
+    assert entry["checked"] > 0, "a rule nobody checked proves nothing"
     assert entry["ok"] is False, "the book breached the cap, and the record says so"
     assert entry["held"] < entry["checked"]
 
     # And it PERMITS. `--cap` is the marked place to change, exposed as a flag the way `--lookback`
     # is for a strategy, so the same scaffold runs clean where the book satisfies it. Without this
-    # half, a constraint that refused everything would pass the assertion above just as well.
+    # half, a rule that reported everything would pass the assertion above just as well.
     code, wide = _cli(
-        capsys, "--project-root", str(tmp_path), "new", "constraint", "cap-any", "--cap", "1.0"
+        capsys, "--project-root", str(tmp_path), "new", "compliance", "cap-any", "--cap", "1.0"
     )
     assert code == 0, wide
     code, registered_wide = _cli(
@@ -659,7 +658,7 @@ def test_new_constraint_emits_a_rule_that_registers_and_runs_unedited(
     )
     assert code == 0, registered_wide
 
-    code, registered_run = _register_run(tmp_path, capsys, "uncapped", constraints=["cap-any"])
+    code, registered_run = _register_run(tmp_path, capsys, "uncapped", compliance=["cap-any"])
     assert code == 0, registered_run
     code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "uncapped")
     assert code == 0, ran
@@ -836,7 +835,7 @@ def test_a_run_says_where_its_time_went(
     assert read_strategy_record(tmp_path / ".vqapr", "timed", ref)["timing"] == timing
 
 
-def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_a_crash(
+def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_crash(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The reported crash, driven through the two verbs a user actually types.
@@ -858,16 +857,14 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
 
     source = tmp_path / "mislabelled.py"
     source.write_text(
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'position-cap'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -875,24 +872,24 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
         t.register_component(
             ComponentRef.of(
                 "limit",
-                ComponentKind.CONSTRAINT,
+                ComponentKind.COMPLIANCE,
                 source,
                 "Limit",
                 fingerprint=fingerprint_component(
-                    source, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+                    source, kind=ComponentKind.COMPLIANCE, object_name="Limit"
                 ),
             )
         )
-    # Registering the run is a reference check only -- `limit` IS a registered constraint -- so
+    # Registering the run is a reference check only -- `limit` IS a registered rule -- so
     # the mismatch is still the two verbs' to refuse, exactly as before.
-    code, registered_run = _register_run(tmp_path, capsys, "limited", constraints=["limit"])
+    code, registered_run = _register_run(tmp_path, capsys, "limited", compliance=["limit"])
     assert code == 0, registered_run
 
     code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", "limited")
 
     assert code == 1, checked
     assert checked["ok"] is False
-    assert "component.constraint_id_mismatch" in [
+    assert "component.compliance_id_mismatch" in [
         failure["code"] for failure in checked["failures"]
     ]
 
@@ -904,12 +901,12 @@ def test_a_constraint_that_slipped_past_registration_is_refused_by_check_not_by_
     # empty `failures[]`, which tells a user the framework broke when their registration was wrong.
     assert ran["stage"] != "unhandled"
     assert ran["failures"], "a refusal must carry its failures, not an empty list"
-    assert "component.constraint_id_mismatch" in [
+    assert "component.compliance_id_mismatch" in [
         failure["code"] for failure in ran["failures"]
     ]
 
 
-def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
+def test_a_rule_registered_under_the_id_it_answers_to_still_runs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The other half of the reported case, which a refusal test alone cannot prove.
@@ -919,14 +916,14 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     so this carries the accepted spelling all the way through `check` and `run` and asserts the
     counts are the ones the unconstrained run produces.
     """
-    from vqapr.constraints.builtin import shipped_constraint_path
+    from vqapr.compliance.builtin import shipped_compliance_path
 
     _workspace_for_run(tmp_path, capsys)
 
-    declaration = tmp_path / "constraint.yaml"
+    declaration = tmp_path / "compliance.yaml"
     declaration.write_text(
-        "components:\n  no-short:\n    kind: constraint\n"
-        f"    path: {shipped_constraint_path('no_short').as_posix()}\n"
+        "components:\n  no-short:\n    kind: compliance\n"
+        f"    path: {shipped_compliance_path('no_short').as_posix()}\n"
         "    object_name: NoShort\n",
         encoding="utf-8",
     )
@@ -939,13 +936,13 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     # compared against the unconstrained spec's failures instead and said so. The judgment now
     # measures at the first decision rather than at `start`, the two verbs agree, and the weaker
     # comparison is gone with the defect it worked around.
-    code, registered_run = _register_run(tmp_path, capsys, "no-short-run", constraints=["no-short"])
+    code, registered_run = _register_run(tmp_path, capsys, "no-short-run", compliance=["no-short"])
     assert code == 0, registered_run
 
     code, checked = _cli(capsys, "--project-root", str(tmp_path), "check", "no-short-run")
     assert code == 0, checked
     assert checked["ok"] is True, (
-        "naming a correctly-registered constraint must add no refusal of its own"
+        "naming a correctly-registered rule must add no refusal of its own"
     )
     assert checked.get("failures", []) == []
     assert checked["blocked"] == []
@@ -959,7 +956,7 @@ def test_a_constraint_registered_under_the_id_it_answers_to_still_runs(
     assert ran["stage"] == "run.complete"
     # Identical to the unconstrained end-to-end run above: a long-only strategy never proposes a
     # short, so no-short binds nothing and must change no number. A different count here would
-    # mean the constraint altered the book rather than merely permitting it.
+    # mean the rule altered the book rather than merely observing it.
     strategy = ran["strategies"]["my-alpha"]
     assert strategy["occurrences"] == OCCURRENCES
     assert strategy["account_version"] == 2

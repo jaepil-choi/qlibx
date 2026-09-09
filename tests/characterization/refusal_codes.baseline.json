@@ -6,6 +6,7 @@
     "account.mode",
     "account.quantity_step",
     "account.unlisted_holding",
+    "compliance.identity_mismatch",
     "component.execution_profile_invalid",
     "component.import_failed",
     "component.method_missing",
@@ -16,7 +17,6 @@
     "component.requirements_invalid",
     "component.requirements_missing",
     "component.unregistered",
-    "constraint.identity_mismatch",
     "datamodel.chunk_failed",
     "datamodel.compute_failed",
     "datamodel.output.available_at_owned",
@@ -89,7 +89,7 @@
     "workspace.write_failed"
   ],
   "runtime_codes": [
-    "component.constraint_id_mismatch",
+    "component.compliance_id_mismatch",
     "component.construction_failed",
     "component.signature_invalid",
     "component.source_unreadable",
@@ -180,7 +180,7 @@
       "workspace.missing"
     ],
     "409": [
-      "constraint.identity_mismatch",
+      "compliance.identity_mismatch",
       "dataset.registered",
       "dataset.source_conflict",
       "dataset.source_mismatch",
@@ -207,7 +207,7 @@
       "weights.venue_conflict"
     ],
     "422": [
-      "component.constraint_id_mismatch",
+      "component.compliance_id_mismatch",
       "component.execution_profile_invalid",
       "component.method_missing",
       "component.method_not_callable",

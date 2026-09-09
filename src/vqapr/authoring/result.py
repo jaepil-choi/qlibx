@@ -1,8 +1,8 @@
 """What a Component returns.
 
-A StrategyModel returns a `Hold` or a `Rebalance`; a Constraint returns a `ConstraintFinding`. All
-three are strict, frozen values the author constructs, so a wrong type is refused at the boundary
-the author can see rather than several layers into the engine.
+A StrategyModel returns a `Hold` or a `Rebalance`; a Compliance rule returns a
+`ComplianceFinding`. All three are strict, frozen values the author constructs, so a wrong type
+is refused at the boundary the author can see rather than several layers into the engine.
 
 `Rebalance` is the largest thing on the authoring surface, and deliberately so: naming one complete
 desired portfolio is the decision the framework exists to take, and every way of naming it wrongly
@@ -447,13 +447,13 @@ class Rebalance(BaseModel):
         return self
 
 
-class ConstraintFinding(BaseModel):
-    """One Constraint's complete, immutable result for one economic observation.
+class ComplianceFinding(BaseModel):
+    """One Compliance rule's complete, immutable result for one economic observation.
 
     **`offenders` is a field and not a `details` key**, because it is the one thing a refusal
     cannot be written without. `docs/implementations/086` is a run that stopped on a 20% cap and
     said only *"economic intent violates projected constraints"*, leaving a first-time user to
-    re-run the strategy without the constraint and read the weight table to find out which name
+    re-run the strategy without the rule and read the weight table to find out which name
     breached it.
     The refusal names them now, and it can only do that if every finding carries them under one
     name -- a convention inside a free-form mapping is not something a message can rely on.

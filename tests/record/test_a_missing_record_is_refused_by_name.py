@@ -34,7 +34,7 @@ def _member(root: Path, run_id: str, ref: str, rows: int) -> None:
             "fingerprint": ref.split("@")[1] * 8,
             "component": {},
             "agenda": {},
-            "constraints": [],
+            "compliance": [],
             "account": {"version": rows, "cash": "1000", "positions": {}},
             "tables": {"vqapr.account": {"rows": rows, "instants": rows}},
             "contract": {},

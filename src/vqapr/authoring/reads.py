@@ -1,8 +1,9 @@
 """What a Component declares it reads from a registered dataset, and that as engine requirements.
 
-`inputs()` is how every role -- a DataModel, a StrategyModel, a Constraint -- says what it needs,
-and it says it the same way: a `DatasetInput` per alias the author names. `requirements_for` is the
-translation the engine applies to one of those, one `DataRequirement` per field.
+`inputs()` is how every role -- a DataModel, a StrategyModel, a Compliance rule -- says what it
+needs, and it says it the same way: a `DatasetInput` per alias the author names.
+`requirements_for` is the translation the engine applies to one of those, one `DataRequirement`
+per field.
 
 This module sits below `component.py` rather than beside it, because `Component.requirements()`
 reads a `DatasetInput` and `DataModel` is a `Component`: keeping the declaration below the class

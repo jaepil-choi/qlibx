@@ -9,6 +9,7 @@ the one wall time a run declares, and the valuation and monitoring declarations 
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -17,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.project.run import ConstraintSet, RunAgenda, RunDefinition, StrategyConfig, StrategyEntry
+from vqapr.project.run import ComplianceSet, RunAgenda, RunDefinition, StrategyConfig, StrategyEntry
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -36,7 +37,8 @@ def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "r",
         "writes": "r-weights",
-        "strategy": StrategyEntry("strategy", ("no-short",)),
+        "strategy": StrategyEntry("strategy"),
+        "compliance": ("no-short",),
         "instruments": ("ABC",),
         "timezone": "Asia/Seoul",
         "agenda": {"every": "1d", "at": time(15, 29)},
@@ -55,20 +57,29 @@ def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
     assert not hasattr(config, "agenda_role")
     with pytest.raises(ValueError, match="STRATEGY_MODEL"):
         StrategyConfig(
-            _component(ComponentKind.CONSTRAINT, "limit"),
+            _component(ComponentKind.COMPLIANCE, "limit"),
             "r.agenda",
         )
 
 
-def test_a_run_names_one_strategy_and_that_strategy_its_constraints() -> None:
-    """A run runs one model; constraints belong to the strategy under it."""
-    run = _definition(strategy=StrategyEntry("a", ("no-short",)))
+def test_a_run_names_one_strategy_and_its_own_compliance_rules() -> None:
+    """A run runs one model; the rules that watch its book are the run's, not the strategy's
+    (design §7.2), and the old `constraints:` under the strategy is refused by name."""
+    run = _definition(strategy=StrategyEntry("a"), compliance=("no-short",))
 
     assert run.strategy is not None
     assert run.strategy.component_id == "a"
-    assert run.strategy.constraints == ("no-short",)
+    assert run.compliance == ("no-short",)
     assert run.member is run.strategy
-    assert "constraints" not in set(RunDefinition.model_fields)
+    assert "constraints" not in {field.name for field in fields(StrategyEntry)}
+    with pytest.raises(ValueError, match="left the strategy entry"):
+        _definition(strategy={"component": "a", "constraints": ["no-short"]})
+    with pytest.raises(ValueError, match="declares no compliance"):
+        _definition(
+            strategy=None,
+            datamodel={"component": "d", "value_fields": ["v"]},
+            agenda={"every": "1d", "at": time(15, 29), "days_from": "prices"},
+        )
     assert "strategies" not in set(RunDefinition.model_fields)
 
 
@@ -83,15 +94,15 @@ def test_a_run_names_exactly_one_model() -> None:
         _definition(strategy=None)
 
 
-def test_a_strategy_entry_is_ids_and_memory_only() -> None:
-    entry = StrategyEntry("a", ("x", "y"), {"cadence": [1]})
+def test_a_strategy_entry_is_an_id_and_memory_only() -> None:
+    entry = StrategyEntry("a", {"cadence": [1]})
     assert entry.initial_model_memory == {"cadence": [1]}
     with pytest.raises(ValueError, match="repeat"):
-        StrategyEntry("a", ("x", "x"))
+        _definition(compliance=("x", "x"))
     # pydantic owns the shape now (one-shape campaign Step 5): a ComponentRef where an id belongs
     # is pydantic's own shape error, not a hand-written TypeError.
     with pytest.raises(ValidationError, match="valid string"):
-        StrategyEntry("a", (_component(ComponentKind.CONSTRAINT, "x"),))  # type: ignore[arg-type]
+        _definition(compliance=(_component(ComponentKind.COMPLIANCE, "x"),))
 
 
 def test_the_run_layer_pairs_its_declarations() -> None:
@@ -170,6 +181,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
         "agenda",
         "exchange",
         "execution",
+        "compliance",
         "start",
         "end",
         "initial_account_snapshot",
@@ -177,11 +189,11 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
     }
 
 
-def test_constraint_set_holds_constraint_refs_only() -> None:
-    constraints = ConstraintSet((_component(ComponentKind.CONSTRAINT, "no-short"),))
-    assert constraints.constraints[0].component_id == "no-short"
-    with pytest.raises(ValueError, match="CONSTRAINT"):
-        ConstraintSet((_component(ComponentKind.STRATEGY_MODEL, "s"),))
+def test_compliance_set_holds_compliance_refs_only() -> None:
+    rules = ComplianceSet((_component(ComponentKind.COMPLIANCE, "no-short"),))
+    assert rules.rules[0].component_id == "no-short"
+    with pytest.raises(ValueError, match="COMPLIANCE"):
+        ComplianceSet((_component(ComponentKind.STRATEGY_MODEL, "s"),))
 
 
 def test_component_kinds_remain_closed_to_the_existing_four() -> None:
@@ -189,5 +201,5 @@ def test_component_kinds_remain_closed_to_the_existing_four() -> None:
         ComponentKind.DATA_MODEL,
         ComponentKind.STRATEGY_MODEL,
         ComponentKind.EXCHANGE,
-        ComponentKind.CONSTRAINT,
+        ComponentKind.COMPLIANCE,
     )

@@ -30,8 +30,8 @@ decides for itself (`Hold`).
 
 ## No valuation or monitoring time
 
-The book is valued at the instant the venue fills, and declared constraints judge it right after
-each commit. There is nothing to schedule.
+The book is valued at every instant of the market clock, and the run's declared Compliance rules
+observe it right after. There is nothing to schedule.
 
 ## One run, one model, one `writes`
 
@@ -45,7 +45,7 @@ runs:
     writes: my-alpha-weights       # the allocation, one row per instrument per decision
     strategy:
       component: my-alpha
-      # constraints: [no-short]
+    # compliance: [no-short]      # the rules that watch the book: the run's, beside the venue
 ```
 
 Three factor models on one cadence are **three runs** with the same period, venue and account.

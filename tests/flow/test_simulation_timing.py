@@ -7,13 +7,12 @@ import pytest
 
 from vqapr.account.marking import ValuationService
 from vqapr.authoring import (
-    Constraint,
-    ConstraintBounds,
-    ConstraintCall,
-    ConstraintFinding,
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
     EconomicAccountView,
 )
-from vqapr.constraints.evaluation import evaluate_constraints, project_constraints
+from vqapr.compliance.evaluation import evaluate_compliance
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -22,33 +21,22 @@ from vqapr.domain.account_state import AccountSnapshot
 from vqapr.portfolio.intents import PortfolioTarget
 
 
-class _Constraint(Constraint):
-    def __init__(self, constraint_id: str, passed: bool) -> None:
-        self._constraint_id = constraint_id
+class _Rule(Compliance):
+    def __init__(self, compliance_id: str, passed: bool) -> None:
+        self._compliance_id = compliance_id
         self.passed = passed
 
     @property
-    def constraint_id(self) -> str:
-        return self._constraint_id
+    def compliance_id(self) -> str:
+        return self._compliance_id
 
     def requirements(self) -> tuple[DataRequirement, ...]:
         return ()
 
-    def project(self, call: ConstraintCall) -> ConstraintBounds:
-        return ConstraintBounds(
-            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
-            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
-        )
-
-    def monitor(
-        self,
-        call: ConstraintCall,
-        account: EconomicAccountView,
-        bounds: ConstraintBounds,
-    ) -> ConstraintFinding:
+    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
         # No account version and no read provenance in the evidence: both are framework facts,
-        # and `ConstraintReport` carries the version for the whole report rather than per finding.
-        return ConstraintFinding(
+        # and `ComplianceReport` carries the version for the whole report rather than per finding.
+        return ComplianceFinding(
             passed=self.passed,
             measured=Decimal("2"),
             bound=Decimal("1"),
@@ -59,10 +47,10 @@ class _Constraint(Constraint):
 
 class _Catalog:
     def dataset(self, _dataset_id: str) -> object:
-        raise AssertionError("constraint fixture must not query data")
+        raise AssertionError("rule fixture must not query data")
 
     def source(self, _source_id: str) -> object:
-        raise AssertionError("constraint fixture must not query data")
+        raise AssertionError("rule fixture must not query data")
 
 
 def test_portfolio_target_is_a_weight_and_never_a_quantity() -> None:
@@ -76,7 +64,7 @@ def test_portfolio_target_is_a_weight_and_never_a_quantity() -> None:
     assert PortfolioTarget("ABC", weight=Decimal("0")).weight == Decimal("0")
 
 
-def test_closed_constraint_evaluation_preserves_pass_and_violation_without_mutation() -> None:
+def test_closed_compliance_evaluation_preserves_pass_and_violation_without_mutation() -> None:
     account = AccountSnapshot(4, Decimal("10"), {"ABC": Decimal("2")})
     marks = ValuationService().mark(account, {"ABC": Decimal("3")})
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
@@ -87,10 +75,9 @@ def test_closed_constraint_evaluation_preserves_pass_and_violation_without_mutat
         allowed_requirements=(requirement,),
         consumer_id="test-consumer",
     )
-    constraints = (_Constraint("pass", True), _Constraint("violation", False))
-    projected = project_constraints(constraints, window)
+    rules = (_Rule("pass", True), _Rule("violation", False))
 
-    report = evaluate_constraints(constraints, window, account, marks, projected)
+    report = evaluate_compliance(rules, window, account, marks)
 
     assert report.account_version == 4
     assert [finding.passed for finding in report.findings] == [True, False]

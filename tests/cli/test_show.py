@@ -127,7 +127,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
 
     # The strategy record (record 139) answers what a run record answered before -- the account,
     # the tables, the contract, the roster, the period, the digests -- plus what architecture
-    # §17.3.2 found missing: which `.py` ran, under which agenda and constraints, and the
+    # §17.3.2 found missing: which `.py` ran, under which agenda and compliance rules, and the
     # strategy's own fingerprint. Pinned the same way, so a builder added to `_freeze_strategy`
     # without a field here is caught at the writer.
     from vqapr.cli.show import STRATEGY_FIELDS
@@ -139,7 +139,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "fingerprint",
         "component",
         "agenda",
-        "constraints",
+        "compliance",
         "account",
         "tables",
         "contract",
@@ -154,7 +154,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
 
     # The datamodel record (record 148) is the third kind, read by `show datamodel`. It answers
     # what it wrote -- the dataset, its fields, its row count, one entry per session -- and not
-    # an account, tables, a contract or constraints, none of which a datamodel has.
+    # an account, tables, a contract or compliance rules, none of which a datamodel has.
     from vqapr.cli.show import DATAMODEL_FIELDS
 
     assert set(DATAMODEL_FIELDS) == {

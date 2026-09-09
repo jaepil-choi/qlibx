@@ -84,7 +84,7 @@ def _fill(at, version, name, requested, dealt, price, cash_delta, commission, ta
     }
 
 
-def _strategy_record(strategy_ref: str, constraints: list[dict[str, str]]) -> dict[str, object]:
+def _strategy_record(strategy_ref: str, compliance: list[dict[str, str]]) -> dict[str, object]:
     strategy_id = strategy_ref.split("@")[0]
     values: dict[str, object] = dict.fromkeys(record_fields(STRATEGY_KIND))
     values.update(
@@ -96,7 +96,7 @@ def _strategy_record(strategy_ref: str, constraints: list[dict[str, str]]) -> di
             "fingerprint": strategy_ref.split("@")[1] * 8,
             "component": {"component_id": strategy_id},
             "agenda": {},
-            "constraints": constraints,
+            "compliance": compliance,
             "account": {},
             "tables": {},
             "contract": {},
@@ -157,7 +157,7 @@ def store(tmp_path: Path) -> Path:
         [
             {
                 "event_time": T1,
-                "constraint": "cap",
+                "rule": "cap",
                 "passed": True,
                 "measured": "0.5",
                 "bound": "0.6",
@@ -169,7 +169,7 @@ def store(tmp_path: Path) -> Path:
             },
             {
                 "event_time": T1,
-                "constraint": "old",
+                "rule": "old",
                 "passed": True,
                 "measured": "1",
                 "bound": "1",
@@ -194,7 +194,7 @@ def store(tmp_path: Path) -> Path:
         [
             {
                 "event_time": T2,
-                "constraint": "cap",
+                "rule": "cap",
                 "passed": False,
                 "measured": "0.62",
                 "bound": "0.6",
@@ -206,7 +206,7 @@ def store(tmp_path: Path) -> Path:
             },
             {
                 "event_time": T2,
-                "constraint": "old",
+                "rule": "old",
                 "passed": False,
                 "measured": "2",
                 "bound": "1",
@@ -239,7 +239,7 @@ def store(tmp_path: Path) -> Path:
         [
             {
                 "event_time": T3,
-                "constraint": "cap",
+                "rule": "cap",
                 "passed": True,
                 "measured": None,
                 "bound": "0.6",
@@ -251,7 +251,7 @@ def store(tmp_path: Path) -> Path:
             },
             {
                 "event_time": T3,
-                "constraint": "old",
+                "rule": "old",
                 "passed": True,
                 "measured": "0",
                 "bound": "1",
@@ -386,8 +386,8 @@ def test_compliance_splits_checked_into_held_breached_and_unmeasured(store: Path
     compliance = strategy_report(store, RUN, S).compliance
     assert compliance is not None
 
-    cap, old = compliance.constraints
-    assert cap.constraint == "cap" and cap.tolerance_judged is True
+    cap, old = compliance.rules
+    assert cap.rule == "cap" and cap.tolerance_judged is True
     assert (cap.checked, cap.held, cap.within_tolerance, cap.breached, cap.unmeasured) == (
         3,
         1,
@@ -422,7 +422,7 @@ def test_a_book_recorded_without_positions_says_which_sections_it_cannot_give(
     assert report.trading.holding is None
     assert set(report.omitted) == {"book", "attribution", "intent", "trading.holding", "compliance"}
     assert "recorded without positions" in report.omitted["book"]
-    assert "declared no constraint" in report.omitted["compliance"]
+    assert "declared no compliance rule" in report.omitted["compliance"]
     assert report.performance.total_return == Decimal("0.1")
 
 
@@ -521,7 +521,7 @@ def test_a_valuation_without_its_account_row_is_refused_not_read_as_zero() -> No
 
 
 def test_an_unknown_verdict_is_refused() -> None:
-    row = {"event_time": T1, "constraint": "cap", "measured": "1", "verdict": "maybe"}
+    row = {"event_time": T1, "rule": "cap", "measured": "1", "verdict": "maybe"}
     with pytest.raises(ValueError, match="unknown verdict 'maybe'"):
         measure.compliance([row])
 

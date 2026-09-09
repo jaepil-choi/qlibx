@@ -25,8 +25,8 @@ from types import MappingProxyType
 from vqapr.account.account import Account
 from vqapr.authoring import Component
 from vqapr.authoring.history import retained_marks
-from vqapr.constraints.evaluation import (
-    constraint_requirements as declared_constraint_requirements,
+from vqapr.compliance.evaluation import (
+    compliance_requirements as declared_compliance_requirements,
 )
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import ScanSession
@@ -40,7 +40,7 @@ from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
-    load_constraint,
+    load_compliance,
     load_data_model,
     load_exchange,
     load_strategy_model,
@@ -561,9 +561,7 @@ def _run_strategy(
     if initial_snapshot is None or initial_mode is None:
         raise RuntimeError("a frozen strategy run reached execution without an initial account")
     exchange = load_exchange(frozen.exchange, project_root=root_path)
-    constraints = tuple(
-        load_constraint(ref, project_root=root_path) for ref in layer.constraints.constraints
-    )
+    rules = tuple(load_compliance(ref, project_root=root_path) for ref in layer.compliance.rules)
     # What was ACTUALLY loaded, computed beside the loads that read it.
     #
     # Since the drift refusal went (issue 009), an edited component runs instead of being
@@ -586,9 +584,9 @@ def _run_strategy(
         strategy_requirements = strategy.requirements()
         if strategy_requirements != layer.requirements:
             raise ValueError("loaded Strategy requirements drifted from FrozenRun")
-        constraint_requirements = declared_constraint_requirements(constraints)
-        if constraint_requirements != layer.constraint_requirements:
-            raise ValueError("loaded Constraint requirements drifted from FrozenRun")
+        compliance_requirements = declared_compliance_requirements(rules)
+        if compliance_requirements != layer.compliance_requirements:
+            raise ValueError("loaded Compliance requirements drifted from FrozenRun")
         root = AccountState(initial_snapshot)
         strategy.memory = normalize_memory(layer.initial_model_memory)
         strategy.load_payload(BytesIO(layer.initial_payload))
@@ -600,10 +598,10 @@ def _run_strategy(
             initial_account=root,
             initial_model_memory=layer.initial_model_memory,
             initial_payload=layer.initial_payload,
-            # What each constraint holds as loaded -- its constructor's doing, from the config
-            # the fingerprint already folds -- is the memory the run commits from (record `181`).
+            # What each rule holds as loaded -- its constructor's doing, from the config the
+            # fingerprint already folds -- is the memory the run commits from (record `181`).
             initial_component_memory={
-                **{constraint.constraint_id: constraint.memory for constraint in constraints},
+                **{rule.compliance_id: rule.memory for rule in rules},
                 # The venue too, when it is a Component (record `184`); a loader double that
                 # only offers `execute` carries no memory to commit.
                 **(
@@ -633,20 +631,14 @@ def _run_strategy(
                 allowed_requirements=layer.requirements,
                 consumer_id=layer.component_id,
             ),
-            constraint_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=frozen.instruments,
-                store=observation_store,
-                # No consumer: this window serves every loaded constraint, and which one is reading
-                # is known only inside the loop that calls them.
-                allowed_requirements=layer.constraint_requirements,
-            ),
-            # Monitoring reads as of the fill instant it judges (record `148`).
-            constraint_window_at=lambda instant: ModelWindow(
+            # The rules read as of the market-clock instant they observe at (design §7.2). No
+            # consumer: this window serves every loaded rule, and which one is reading is known
+            # only inside the evaluation that calls them.
+            compliance_window_at=lambda instant: ModelWindow(
                 evaluation_time=instant,
                 instruments=frozen.instruments,
                 store=observation_store,
-                allowed_requirements=layer.constraint_requirements,
+                allowed_requirements=layer.compliance_requirements,
             ),
             # Each strategy has its own Account (design §7-4): the run shares the initial
             # DECLARATION, not the book. It retains the marks this strategy declared it would
@@ -656,7 +648,7 @@ def _run_strategy(
                 retained_marks=retained_marks(strategy.account_history()),
             ),
             exchange=exchange,
-            constraints=constraints,
+            compliance=rules,
             scan_session=session,
             # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
             # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
@@ -814,11 +806,11 @@ def _as_loaded_fingerprints(
     """The fingerprint of every component this strategy actually loaded, by component id.
 
     Per component rather than folded (design §4.2): the strategy's own fingerprint is readable on
-    its own, so a change to one constraint does not disguise itself as a change to the strategy.
+    its own, so a change to one rule does not disguise itself as a change to the strategy.
     Only refs that carry a real source are included -- a run assembled in-process may hold a stub
     in place of a registered component, and such a thing has no bytes on disk to fingerprint.
     """
-    candidates = [layer.config.component, frozen.exchange, *layer.constraints.constraints]
+    candidates = [layer.config.component, frozen.exchange, *layer.compliance.rules]
     return {
         str(ref.component_id): as_loaded_fingerprint(ref, project_root=root_path)
         for ref in candidates

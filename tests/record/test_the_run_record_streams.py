@@ -27,10 +27,6 @@ from pathlib import Path
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
-    Constraint,
-    ConstraintBounds,
-    ConstraintCall,
-    ConstraintFinding,
     Hold,
     StrategyModel,
     TableSpec,
@@ -44,7 +40,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ConstraintSet, StrategyConfig
+from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
@@ -86,23 +82,6 @@ class _Exchange:
         raise AssertionError("Hold callbacks must not execute orders")
 
 
-class _Constraint(Constraint):
-    @property
-    def constraint_id(self) -> str:
-        return "constraint"
-
-    def project(self, call: ConstraintCall) -> ConstraintBounds:
-        return ConstraintBounds(
-            lower_weights={instrument: Decimal("0") for instrument in call.instruments},
-            upper_weights={instrument: Decimal("1") for instrument in call.instruments},
-        )
-
-    def monitor(self, call, account, bounds) -> ConstraintFinding:
-        return ConstraintFinding(
-            passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
-        )
-
-
 def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
     return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
 
@@ -124,7 +103,6 @@ def _state(row_sink=None) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})),
         row_sink=row_sink,
-        initial_component_memory={"constraint": None},
     )
 
 
@@ -139,7 +117,7 @@ def _flow(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
                 ),
-                constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
+                compliance=ComplianceSet(()),
                 agenda=FrozenAgenda("strategy", occurrences),
             ),
         start=occurrences[0].evaluation_time,
@@ -164,10 +142,8 @@ def _flow(
         RecordsEveryOccurrence(),
         state,
         strategy_window_for_occurrence=window_for_occurrence,
-        constraint_window_for_occurrence=window_for_occurrence,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
-        constraints=(_Constraint(),),
         on_progress=on_progress,
     )
 

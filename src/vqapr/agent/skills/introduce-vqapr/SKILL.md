@@ -61,7 +61,7 @@ And four things the user writes, which is the whole extension surface:
 | **DataModel** | what a value is |
 | **StrategyModel** | how capital is divided |
 | **Exchange** | where and by what rules an order fills |
-| **Constraint** | what must be respected |
+| **Compliance** | whether what is held respects a limit |
 
 [references/mental-model.md](references/mental-model.md) has what vqapr owns versus what the
 project owns, which is the question behind most "can vqapr do X".
@@ -76,7 +76,7 @@ This skill is orientation. The work happens in nine others:
 | compute a reusable derived panel — a beta, a factor, an ML prediction | **make-datamodel** |
 | write the alpha: signals into weights | **make-strategy** |
 | decide when an order fills, at what price and cost | **make-exchange** |
-| cap, limit or restrict the book | **make-constraint** |
+| cap, limit or restrict the book | **make-compliance** |
 | declare, check and execute a run | **run-backtest** |
 | get returns, costs, tables and paper figures out | **analyze-result** |
 | see what is registered, what a run used, what to delete | **inspect-workspace** |

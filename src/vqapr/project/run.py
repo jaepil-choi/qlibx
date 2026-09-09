@@ -138,23 +138,21 @@ def _encoded_requirements(requirements: tuple[DataRequirement, ...]) -> list[tup
 
 
 @dataclass(frozen=True, slots=True)
-class ConstraintSet:
-    """The single constraint declaration shared by run consumers."""
+class ComplianceSet:
+    """The run's declared Compliance rules, resolved to registered components (design §7.2)."""
 
-    constraints: tuple[ComponentRef, ...]
+    rules: tuple[ComponentRef, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.constraints, tuple):
-            raise TypeError("constraints must be a tuple of ComponentRef values")
-        for constraint in self.constraints:
-            if not isinstance(constraint, ComponentRef):
-                raise TypeError("constraints must contain ComponentRef values")
-            if constraint.kind is not ComponentKind.CONSTRAINT:
-                raise ValueError("constraints must identify CONSTRAINT components")
-        if len({constraint.component_id for constraint in self.constraints}) != len(
-            self.constraints
-        ):
-            raise ValueError("constraints must not contain duplicate component references")
+        if not isinstance(self.rules, tuple):
+            raise TypeError("rules must be a tuple of ComponentRef values")
+        for rule in self.rules:
+            if not isinstance(rule, ComponentRef):
+                raise TypeError("rules must contain ComponentRef values")
+            if rule.kind is not ComponentKind.COMPLIANCE:
+                raise ValueError("rules must identify COMPLIANCE components")
+        if len({rule.component_id for rule in self.rules}) != len(self.rules):
+            raise ValueError("rules must not contain duplicate component references")
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,23 +192,32 @@ def _no_repeats(values: Sequence[str], what: str) -> None:
 
 @pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
 class StrategyEntry:
-    """One strategy a run tries: the component, the constraints it runs under, its opening memory.
+    """One strategy a run executes: the component and its opening memory.
 
     Ids, not refs: the entry is part of a registered document, and the component it names is
     looked up by preflight, which also binds it to the run's own sessions (record `148`).
     A pydantic dataclass rather than a `BaseModel` so it keeps its positional constructor --
-    `StrategyEntry("ou-k0", ("no-short",))` is how every showcase and test spells it.
+    `StrategyEntry("ou-k0")` is how every showcase and test spells it.
+
+    The rules that watch the run's book are the run's, not the strategy's -- `compliance:` on
+    the run (design §7.2: a watcher does not inherit the target of the thing it watches). The
+    `constraints:` list that used to sit here is refused by name.
     """
 
     component_id: Annotated[str, Field(min_length=1)]
-    constraints: tuple[Annotated[str, Field(min_length=1)], ...] = ()
     initial_model_memory: Any = None
 
-    @field_validator("constraints")
+    @model_validator(mode="before")
     @classmethod
-    def _unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        _no_repeats(value, "constraints")
-        return value
+    def _no_constraints(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "constraints" in raw:
+            raise ValueError(
+                "`constraints:` left the strategy entry (design §7.1-7.2): the box a strategy "
+                "builds inside is its own kit call (`no_short`, `single_name_cap`, `intersect`), "
+                "and the rules that watch the committed book are declared on the RUN as "
+                "`compliance: [rule-component-id, ...]`"
+            )
+        return raw
 
     @field_validator("initial_model_memory")
     @classmethod
@@ -568,6 +575,10 @@ class RunDefinition(BaseModel):
     execution: RunExecution | None = None
     """Which registered execution dataset the run fills against, and how: the session instant
     and the price (record `185`). The table is registered once; the price is this run's."""
+    compliance: tuple[Annotated[str, Field(min_length=1)], ...] = ()
+    """The registered Compliance rules that observe this run's committed book at every
+    market-clock instant (design §7.2). On the run, beside the venue, because a rule's parameters
+    are its own and not the strategy's. A datamodel run has no book and declares none."""
     start: datetime | None = None
     end: datetime | None = None
     initial_account_snapshot: AccountSnapshot | None = None
@@ -590,6 +601,15 @@ class RunDefinition(BaseModel):
                 "its execution table, a datamodel run names them with `agenda.days_from`"
             )
         strategy = _singular_block(body, "strategy", "strategies")
+        if isinstance(strategy, Mapping):
+            for entry in strategy.values():
+                if isinstance(entry, Mapping) and "constraints" in entry:
+                    raise ValueError(
+                        "`constraints:` left the strategy entry (design §7.1-7.2): the box a "
+                        "strategy builds inside is its own kit call (`no_short`, "
+                        "`single_name_cap`, `intersect`), and the rules that watch the committed "
+                        "book are declared on the RUN as `compliance: [rule-component-id, ...]`"
+                    )
         datamodel = _singular_block(body, "datamodel", "datamodels")
         # A datamodel block written before `writes` moved to the run carried `dataset_id`
         # inside the entry. Hoist it, so a workspace from then reads back unchanged.
@@ -658,6 +678,8 @@ class RunDefinition(BaseModel):
             "exchange": self.exchange,
             "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
         }
+        if self.compliance:
+            ordered["compliance"] = list(self.compliance)
         if self.initial_account_snapshot is not None and self.initial_account_mode is not None:
             ordered["initial_account"] = _InitialAccount(
                 cash=self.initial_account_snapshot.cash,
@@ -668,7 +690,7 @@ class RunDefinition(BaseModel):
         if self.strategy is not None:
             ordered["strategy"] = {
                 "component": self.strategy.component_id,
-                **_entry_body(self.strategy, ("constraints", "initial_model_memory")),
+                **_entry_body(self.strategy, ("initial_model_memory",)),
             }
         if self.datamodel is not None:
             ordered["datamodel"] = {
@@ -686,6 +708,12 @@ class RunDefinition(BaseModel):
             raise ValueError(
                 "must be timezone-aware: include a UTC offset, a naive datetime is not one instant"
             )
+        return value
+
+    @field_validator("compliance")
+    @classmethod
+    def _unique_rules(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _no_repeats(value, "compliance")
         return value
 
     @model_validator(mode="after")
@@ -717,6 +745,10 @@ class RunDefinition(BaseModel):
             raise ValueError(
                 f"writes {self.writes!r} is also the execution dataset: a run cannot fill "
                 "against the dataset it is about to write"
+            )
+        if self.datamodel is not None and self.compliance:
+            raise ValueError(
+                "a datamodel run declares no compliance: it has no account for a rule to observe"
             )
         if self.datamodel is not None:
             declared = [
@@ -803,13 +835,10 @@ class RunDefinition(BaseModel):
 
 def _entry_body(entry: object, names: Sequence[str]) -> dict[str, Any]:
     """An entry's declared fields as its stored block: only what was declared, in the stored
-    order, `constraints` and `initial_model_memory` omitted when empty (as the document always
-    wrote them)."""
+    order, `initial_model_memory` omitted when empty (as the document always wrote it)."""
     body: dict[str, Any] = {}
     for name in names:
         value = getattr(entry, name)
-        if name == "constraints" and not value:
-            continue
         if name == "initial_model_memory" and value is None:
             continue
         body[name] = list(value) if isinstance(value, tuple) else value

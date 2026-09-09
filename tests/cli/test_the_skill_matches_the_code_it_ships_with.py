@@ -75,9 +75,9 @@ def test_the_skill_does_not_promise_a_register_force_flag(
     assert offending == [], offending
     assert "vqapr remove" not in text, "the verb is `rm`"
 
-    code, cap = _cli(capsys, tmp_path, "new", "constraint", "cap20")
+    code, cap = _cli(capsys, tmp_path, "new", "compliance", "cap20")
     assert code == 0, cap
-    code, refused = _cli(capsys, tmp_path, "register", "constraint", "cap20", cap["path"], "--force")
+    code, refused = _cli(capsys, tmp_path, "register", "compliance", "cap20", cap["path"], "--force")
     assert code == 1
     assert refused["failures"][0]["code"] == "usage.rejected"
     assert "--force" in refused["failures"][0]["requirement"]
@@ -87,21 +87,21 @@ def test_a_plain_re_register_replaces_and_the_payload_says_which_fingerprint_it_
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`067`: the edit loop is the same command twice, and the second answer names the old one."""
-    code, cap = _cli(capsys, tmp_path, "new", "constraint", "cap20")
+    code, cap = _cli(capsys, tmp_path, "new", "compliance", "cap20")
     assert code == 0, cap
     path = Path(cap["path"])
 
-    code, first = _cli(capsys, tmp_path, "register", "constraint", "cap20", str(path))
+    code, first = _cli(capsys, tmp_path, "register", "compliance", "cap20", str(path))
     assert code == 0, first
     assert "replaced" not in first, "a first registration replaced nothing"
     code, listed = _cli(capsys, tmp_path, "list", "components")
     before = {row["component_id"]: row["fingerprint"] for row in listed["items"]}["cap20"]
 
-    code, same = _cli(capsys, tmp_path, "register", "constraint", "cap20", str(path))
+    code, same = _cli(capsys, tmp_path, "register", "compliance", "cap20", str(path))
     assert code == 0 and "replaced" not in same, "unchanged bytes replace nothing"
 
     path.write_text(path.read_text(encoding="utf-8").replace('"0.2"', '"0.25"'), encoding="utf-8")
-    code, edited = _cli(capsys, tmp_path, "register", "constraint", "cap20", str(path))
+    code, edited = _cli(capsys, tmp_path, "register", "compliance", "cap20", str(path))
     assert code == 0, edited
     assert edited["replaced"] == {"fingerprint": before}
     code, listed = _cli(capsys, tmp_path, "list", "components")

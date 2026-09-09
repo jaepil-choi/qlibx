@@ -8,7 +8,7 @@ datasets read and their source digests, and `recorded`, the strategy records the
 `<strategy-id>@<fp8>`.
 
 **`vqapr show strategy <run-id>/<strategy-id>@<fp8>`** — one strategy's **output**: the component
-that ran (path, and its fingerprint both as registered and as loaded), its constraints, the final
+that ran (path, and its fingerprint both as registered and as loaded), the run's compliance rules, the final
 account, the contract report, the roster it read, and per-table row counts.
 
 `<run-id>/<strategy-id>` without the fingerprint works when exactly one record of that strategy

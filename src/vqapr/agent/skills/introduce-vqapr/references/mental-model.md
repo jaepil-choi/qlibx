@@ -8,8 +8,8 @@ between two projects would make their results incomparable.
 Project initialization and the frozen invocation. Dataset registration and capability binding.
 Field semantics — unit, currency, timezone, universe, tradability. Point-in-time materialization
 and bounded access. The contracts for signals, alpha weights, ensembles, intended portfolios and
-artifacts. Order-conversion semantics and its clipping and failure diagnostics. Constraint
-declaration, adjustment, validation and findings. Instrument semantics and execution-policy
+artifacts. Order-conversion semantics and its clipping and failure diagnostics. The box kit
+(`no_short`, `single_name_cap`, `intersect`) and compliance findings. Instrument semantics and execution-policy
 resolution. Portable artifacts, lineage, catalogue and reporting. Model state and its
 working/committed lifecycle. Deterministic callback delivery and the evidence a run ends with.
 Actual-account monitoring. Agent-readable documentation and stage-based errors.
@@ -18,7 +18,7 @@ Actual-account monitoring. Agent-readable documentation and stage-based errors.
 
 The source data **and its economic meaning**. Availability, delivery lag and restatement
 assumptions. Universe, benchmark, sector and factor definitions. The signal model and the alpha
-policy code. Risk, cost, constraint and execution policy. The economic meaning of a constraint
+policy code. Risk, cost, limit and execution policy. The economic meaning of a compliance
 metric and its bound. Whether a compliance reference actually applies. Project-local extensions and
 report composition. A strategy's decision-trigger rules and what its state payload holds. The
 research objective, and the decision to promote.
@@ -36,7 +36,7 @@ or an always-on OMS.**
 | **DataModel** | what a value is | none |
 | **StrategyModel** | how capital is divided | **none** — proprietary alpha does not live in a package |
 | **Exchange** | where and by what rules an order fills | academic, krx |
-| **Constraint** | what must be respected | two |
+| **Compliance** | whether what is held respects a limit | two |
 
 **What the user cannot write**: actual account authority and its state-transition validity,
 valuation and the definition of NAV, the intended → requested conversion, the run lifecycle and

@@ -31,7 +31,7 @@ import pytest
 _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("datamodel", ("dm", "--dataset", "prices")),
     ("strategy", ("st", "--dataset", "prices")),
-    ("constraint", ("c",)),
+    ("compliance", ("c",)),
     ("exchange", ("ex",)),
     ("instruments", ()),
     ("dataset", ()),

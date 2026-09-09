@@ -5,7 +5,7 @@ recorded as violations of a cap the optimiser had respected -- worst excess 0.01
 counter as the one real breach, 4.89%p, and the record's `fix` said to loosen the bound.
 
 Owner ruling, 2026-09-05: a generous tolerance, `max(bound * 1%, 10bp of NAV)`, judged once in
-the framework for every constraint, overridable on the Constraint, with the record split into
+the framework for every rule, overridable on the rule, with the record split into
 `held` / `within_tolerance` / `breached` so a generous default hides nothing.
 """
 
@@ -16,20 +16,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from vqapr.authoring import Constraint, ConstraintFinding
-from vqapr.constraints.evaluation import (
+from vqapr.authoring import Compliance, ComplianceFinding
+from vqapr.compliance.evaluation import (
     VERDICT_BREACHED,
     VERDICT_HELD,
     VERDICT_WITHIN_TOLERANCE,
-    StampedConstraintFinding,
+    StampedFinding,
     _tolerance_override,
     default_tolerance,
 )
 from vqapr.flow.freeze import contract_report
 
 
-def _finding(*, passed: bool, bound: str, excess: str) -> ConstraintFinding:
-    return ConstraintFinding(
+def _finding(*, passed: bool, bound: str, excess: str) -> ComplianceFinding:
+    return ComplianceFinding(
         passed=passed,
         measured=Decimal(bound) + Decimal(excess),
         bound=Decimal(bound),
@@ -50,39 +50,37 @@ def test_the_default_is_one_percent_of_the_bound_floored_at_ten_basis_points() -
 
 
 def test_the_reporters_two_populations_get_two_verdicts() -> None:
-    residue = StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))
-    breach = StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0489"))
-    clean = StampedConstraintFinding("cap", _finding(passed=True, bound="0.10", excess="0"))
+    residue = StampedFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))
+    breach = StampedFinding("cap", _finding(passed=False, bound="0.10", excess="0.0489"))
+    clean = StampedFinding("cap", _finding(passed=True, bound="0.10", excess="0"))
 
     assert residue.tolerance == Decimal("0.0010")
     assert residue.verdict == VERDICT_WITHIN_TOLERANCE and residue.breached is False
     assert breach.verdict == VERDICT_BREACHED and breach.breached is True
     assert clean.verdict == VERDICT_HELD
-    # The author's own comparison is untouched: `passed` still says what the constraint said.
+    # The author's own comparison is untouched: `passed` still says what the rule said.
     assert residue.passed is False and breach.passed is False and clean.passed is True
 
 
 def test_an_authors_tolerance_overrides_the_default_in_both_directions() -> None:
     residue = _finding(passed=False, bound="0.10", excess="0.0001")
-    tight = StampedConstraintFinding("cap", residue, tolerance=Decimal("0.00001"))
-    loose = StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0489"),
-                                     tolerance=Decimal("0.05"))
+    tight = StampedFinding("cap", residue, tolerance=Decimal("0.00001"))
+    loose = StampedFinding(
+        "cap", _finding(passed=False, bound="0.10", excess="0.0489"), tolerance=Decimal("0.05")
+    )
     assert tight.verdict == VERDICT_BREACHED
     assert loose.verdict == VERDICT_WITHIN_TOLERANCE
     with pytest.raises(ValueError, match="finite non-negative"):
-        StampedConstraintFinding("cap", residue, tolerance=Decimal("-0.001"))
+        StampedFinding("cap", residue, tolerance=Decimal("-0.001"))
 
 
-def test_the_override_is_read_off_the_constraint_and_a_wrong_one_is_refused() -> None:
-    class Plain(Constraint):
+def test_the_override_is_read_off_the_rule_and_a_wrong_one_is_refused() -> None:
+    class Plain(Compliance):
         @property
-        def constraint_id(self) -> str:
+        def compliance_id(self) -> str:
             return "plain"
 
-        def project(self, call):  # pragma: no cover - not exercised
-            raise NotImplementedError
-
-        def monitor(self, call, account, bounds):  # pragma: no cover - not exercised
+        def observe(self, call, account):  # pragma: no cover - not exercised
             raise NotImplementedError
 
     class Declared(Plain):
@@ -102,7 +100,7 @@ def test_the_override_is_read_off_the_constraint_and_a_wrong_one_is_refused() ->
         _tolerance_override(Wrong())
 
 
-def _result(*stamped: StampedConstraintFinding) -> SimpleNamespace:
+def _result(*stamped: StampedFinding) -> SimpleNamespace:
     occurrences = [
         SimpleNamespace(result=SimpleNamespace(report=SimpleNamespace(findings=(item,))))
         for item in stamped
@@ -113,11 +111,9 @@ def _result(*stamped: StampedConstraintFinding) -> SimpleNamespace:
 def test_the_contract_block_splits_the_run_that_filed_the_issue() -> None:
     """41 held, 40 within tolerance, 1 breached: `ok: false` because of the one, and the other
     two populations are filed beside it with their worst excess rather than folded into it."""
-    held = [StampedConstraintFinding("cap", _finding(passed=True, bound="0.10", excess="0"))] * 41
-    residues = [
-        StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))
-    ] * 40
-    breach = StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0489"))
+    held = [StampedFinding("cap", _finding(passed=True, bound="0.10", excess="0"))] * 41
+    residues = [StampedFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))] * 40
+    breach = StampedFinding("cap", _finding(passed=False, bound="0.10", excess="0.0489"))
 
     entry = contract_report(_result(*held, *residues, breach))["cap"]
 
@@ -129,13 +125,11 @@ def test_the_contract_block_splits_the_run_that_filed_the_issue() -> None:
     assert entry["cause"] == (
         "1 of 82 check(s) breached beyond the tolerance 0.0010 (worst excess 0.0489)"
     )
-    assert "raise the constraint's `tolerance`" in entry["fix"]
+    assert "raise the rule's `tolerance`" in entry["fix"]
 
 
 def test_a_run_of_residues_alone_is_ok_and_says_how_much_it_tolerated() -> None:
-    residues = [
-        StampedConstraintFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))
-    ] * 40
+    residues = [StampedFinding("cap", _finding(passed=False, bound="0.10", excess="0.0001"))] * 40
 
     entry = contract_report(_result(*residues))["cap"]
 
@@ -145,6 +139,6 @@ def test_a_run_of_residues_alone_is_ok_and_says_how_much_it_tolerated() -> None:
     assert "cause" not in entry and "fix" not in entry
 
 
-def test_a_constraint_nobody_checked_still_proves_nothing() -> None:
+def test_a_rule_nobody_checked_still_proves_nothing() -> None:
     entry = contract_report(_result())
     assert entry == {"accepted_intents": 0}

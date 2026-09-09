@@ -18,32 +18,29 @@ import pytest
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.public import register_constraint
+from vqapr.public import register_compliance
 from vqapr.extension.conformance import STAGE, conformance
 
-GOOD_CONSTRAINT = """
-from vqapr.public import Constraint, ConstraintBounds
+GOOD_RULE = """
+from vqapr.public import Compliance
 
-class Limit(Constraint):
+class Limit(Compliance):
     @property
-    def constraint_id(self):
+    def compliance_id(self):
         return "limit"
 
     def inputs(self):
         return {}
 
-    def project(self, call):
-        return ConstraintBounds(lower_weights={}, upper_weights={})
-
-    def monitor(self, call, account, bounds):
+    def observe(self, call, account):
         return None
 """
 
-STALE_MONITOR = GOOD_CONSTRAINT.replace(
-    "def monitor(self, call, account, bounds):",
-    "def monitor(self, account, marks):",
+STALE_OBSERVE = GOOD_RULE.replace(
+    "def observe(self, call, account):",
+    "def observe(self, account):",
 )
-"""A constraint written against an older `monitor` contract.
+"""A rule written against an older observing contract.
 
 This is not hypothetical: three fixtures in this repository were written this way and registered
 without complaint, because loading only constructs the object. They would have failed at the first
@@ -56,42 +53,42 @@ def _ref(root: Path, source: str, *, name: str = "limit") -> ComponentRef:
     path.write_text(source, encoding="utf-8")
     return ComponentRef.of(
         name,
-        ComponentKind.CONSTRAINT,
+        ComponentKind.COMPLIANCE,
         path,
         "Limit",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+            path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
         ),
     )
 
 
 def test_a_conforming_component_passes(tmp_path: Path) -> None:
-    assert conformance(_ref(tmp_path, GOOD_CONSTRAINT)).ok
+    assert conformance(_ref(tmp_path, GOOD_RULE)).ok
 
 
 def test_a_stale_callback_signature_is_caught_though_it_constructs(tmp_path: Path) -> None:
     """The gap between "loads" and "conforms", in one component.
 
-    The object builds and implements `Constraint`, so every load-time check passes. Flow calls
+    The object builds and implements `Compliance`, so every load-time check passes. Flow calls
     `evaluate(window, account, marks, bounds)` positionally, and this class cannot receive it.
     """
-    diagnosis = conformance(_ref(tmp_path, STALE_MONITOR))
+    diagnosis = conformance(_ref(tmp_path, STALE_OBSERVE))
 
     assert not diagnosis.ok
     failure = diagnosis.failures[0]
     assert failure.code == "component.signature_invalid"
-    assert "monitor() must accept 4 positional arguments" in failure.requirement
+    assert "observe() must accept 3 positional arguments" in failure.requirement
 
 
 def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Path) -> None:
     """Spelling is not a contract. Arity is.
 
-    Flow calls `project(window, instruments)` positionally, so a component that names them
-    `w` and `names` receives exactly the same call. Failing it would punish a legal rename and
+    Flow calls `observe(call, account)` positionally, so a component that names them
+    `c` and `book` receives exactly the same call. Failing it would punish a legal rename and
     teach that the contract is about words rather than the shape of the call.
     """
-    source = GOOD_CONSTRAINT.replace(
-        "def project(self, call):", "def project(self, w):"
+    source = GOOD_RULE.replace(
+        "def observe(self, call, account):", "def observe(self, c, book):"
     )
 
     assert conformance(_ref(tmp_path, source)).ok
@@ -99,30 +96,30 @@ def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Pa
 
 def test_a_star_args_component_passes_and_a_short_one_does_not(tmp_path: Path) -> None:
     """`*args` can absorb the call; a method one parameter short cannot."""
-    absorbing = GOOD_CONSTRAINT.replace(
-        "def monitor(self, call, account, bounds):", "def monitor(self, *args):"
+    absorbing = GOOD_RULE.replace(
+        "def observe(self, call, account):", "def observe(self, *args):"
     )
     assert conformance(_ref(tmp_path, absorbing)).ok
 
-    short = GOOD_CONSTRAINT.replace(
-        "def monitor(self, call, account, bounds):",
-        "def monitor(self, call, account):",
+    short = GOOD_RULE.replace(
+        "def observe(self, call, account):",
+        "def observe(self, call):",
     )
     assert not conformance(_ref(tmp_path, short)).ok
 
 
 def test_an_optional_extra_parameter_passes(tmp_path: Path) -> None:
     """A default-valued extra is not a break: Flow's call still lands."""
-    source = GOOD_CONSTRAINT.replace(
-        "def project(self, call):",
-        "def project(self, call, scale=1):",
+    source = GOOD_RULE.replace(
+        "def observe(self, call, account):",
+        "def observe(self, call, account, scale=1):",
     )
 
     assert conformance(_ref(tmp_path, source)).ok
 
 
 def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
-    source = GOOD_CONSTRAINT.replace("def project(self, call):", "def unused(self):")
+    source = GOOD_RULE.replace("def observe(self, call, account):", "def unused(self):")
 
     diagnosis = conformance(_ref(tmp_path, source))
 
@@ -130,19 +127,6 @@ def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
     # Abstract enforcement refuses instantiation first; either way it is refused before a run,
     # which is the contract. What must never happen is registering and failing mid-run.
     assert diagnosis.failures
-
-
-def test_every_problem_is_reported_at_once(tmp_path: Path) -> None:
-    """An agent fixes its component once, not once per run."""
-    source = GOOD_CONSTRAINT.replace(
-        "def project(self, call):", "def project(self):"
-    ).replace("def monitor(self, call, account, bounds):", "def monitor(self):")
-
-    diagnosis = conformance(_ref(tmp_path, source))
-
-    codes = [failure.code for failure in diagnosis.failures]
-    assert len(codes) == 2, codes
-    assert set(codes) == {"component.signature_invalid"}
 
 
 def test_a_load_failure_rides_through_with_its_own_verdict(tmp_path: Path) -> None:
@@ -190,13 +174,13 @@ def test_registration_calls_this_suite_rather_than_its_own_checks(tmp_path: Path
     One implementation with two entrances means a component cannot pass one and fail another.
     """
     path = tmp_path / "stale.py"
-    path.write_text(STALE_MONITOR, encoding="utf-8")
+    path.write_text(STALE_OBSERVE, encoding="utf-8")
 
     # Registered as `limit`, which is what this `Limit` answers to. The stale `evaluate` signature
     # is the one defect under test; registering it under `stale` would add an id mismatch that
-    # `load_constraint` refuses first, and this test is about which suite runs, not about ids.
+    # `load_compliance` refuses first, and this test is about which suite runs, not about ids.
     with pytest.raises(Exception) as failure:
-        register_constraint(tmp_path, "limit", path, "Limit")
+        register_compliance(tmp_path, "limit", path, "Limit")
 
     error = failure.value
     assert getattr(error, "stage", None) == STAGE, "registration must report the conformance stage"

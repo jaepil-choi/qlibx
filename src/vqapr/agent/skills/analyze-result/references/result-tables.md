@@ -35,17 +35,17 @@ null in a record written since the two-clocks campaign.
 `instrument`, `weight`. Per evaluation, **before execution**. Comparing it with `vqapr.account` is
 what `intent.gap` does.
 
-## `vqapr.monitoring` — what each constraint measured
+## `vqapr.monitoring` — what each compliance rule measured
 
-Present when the strategy declared constraints. `constraint`, `passed` (the author's own
+Present when the run declared compliance rules. `rule`, `passed` (the author's own
 comparison), `measured`, `bound`, `excess`, `verdict` (the framework's: `held`,
 `within_tolerance`, `breached`), `tolerance`, `offenders` (breaching instrument ids,
-space-separated), `account_version`. `event_time` is the fill instant the book was committed and
-judged at.
+space-separated), `account_version`. `event_time` is the market-clock instant the book was marked
+and observed at.
 
 **This is the table compliance questions are asked of.** The strategy record's `contract` block
-only counts; which name breached which limit by how much is here, one row per constraint per
-commit.
+only counts; which name breached which limit by how much is here, one row per rule per
+instant.
 
 ## The five fields every row carries
 

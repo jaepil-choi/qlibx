@@ -213,23 +213,21 @@ def test_a_component_declaration_resolves_its_path_beside_the_document(
     nested = tmp_path / "components"
     nested.mkdir()
     (nested / "limit.py").write_text(
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n",
         encoding="utf-8",
     )
     document = _write(
         nested.parent / "components",
         "declare.yaml",
-        "components:\n  limit:\n    kind: constraint\n    path: limit.py\n    object_name: Limit\n",
+        "components:\n  limit:\n    kind: compliance\n    path: limit.py\n    object_name: Limit\n",
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -243,23 +241,21 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
 ) -> None:
     """Registration runs `conformance()`, so a component that cannot be called never lands."""
     (tmp_path / "broken.py").write_text(
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, account, marks):\n"  # the contract passes four
+        "    def observe(self, account):\n"  # the contract passes two
         "        return None\n",
         encoding="utf-8",
     )
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  limit:\n    kind: constraint\n"
+        "components:\n  limit:\n    kind: compliance\n"
         "    path: broken.py\n    object_name: Limit\n",
     )
 
@@ -287,7 +283,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     `strategy_configs`, record `185` folded `execution_inputs` into `datasets`, so it is these
     two, and the test asserts that rather than restating it.
     """
-    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    (tmp_path / "limit.py").write_text(_rule_source("'limit'"), encoding="utf-8")
     sections = {
         "datasets": (
             "datasets:\n  {key}:\n    source_id: s\n    path: x.parquet\n"
@@ -297,7 +293,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
             "    field_types: {{close: DOUBLE}}\n"
         ),
         "components": (
-            "components:\n  {key}:\n    kind: constraint\n"
+            "components:\n  {key}:\n    kind: compliance\n"
             "    path: limit.py\n    object_name: Limit\n"
         ),
     }
@@ -326,7 +322,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
         'datasets:\n  " ":\n    source_id: s\n    path: x.parquet\n'
         "    instrument_field: i\n    available_at: a\n    key_fields: [a]\n"
         "    fields: {c: c}\n"
-        'components:\n  "":\n    kind: constraint\n    path: limit.py\n'
+        'components:\n  "":\n    kind: compliance\n    path: limit.py\n'
         "    object_name: Limit\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -339,23 +335,21 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     }
 
 
-def _constraint_source(returns: str) -> str:
+def _rule_source(returns: str) -> str:
     return (
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         f"        return {returns}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n"
     )
 
 
-def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
+def test_a_rule_registered_under_an_id_it_does_not_answer_to_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The crash `check` could not see, moved to the door that can.
@@ -368,11 +362,11 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
     A refusal here is worth more than a refusal at `check`, because it costs the user nothing: the
     mismatch cannot enter the workspace, so no spec can be written against it.
     """
-    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    (tmp_path / "limit.py").write_text(_rule_source("'limit'"), encoding="utf-8")
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  position-cap:\n    kind: constraint\n"
+        "components:\n  position-cap:\n    kind: compliance\n"
         "    path: limit.py\n    object_name: Limit\n",
     )
 
@@ -380,7 +374,7 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.constraint_id_mismatch"
+    assert failure["code"] == "component.compliance_id_mismatch"
     # Both strings, in the refusal itself. A reader must not have to open the file to learn which
     # two ids disagreed.
     assert "'position-cap'" in failure["observed"]
@@ -392,22 +386,22 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
     ).read_text(encoding="utf-8")
 
 
-def test_a_constraint_id_computed_at_runtime_is_still_checked(
+def test_a_compliance_id_computed_at_runtime_is_still_checked(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The loaded object is asked, not the source text.
 
-    A `constraint_id` assembled at runtime is invisible to any static read of the file, so a check
+    A `compliance_id` assembled at runtime is invisible to any static read of the file, so a check
     that parsed the source would pass this and leave the crash exactly where it was. Asking the
     constructed object is what makes the guard total rather than merely usual.
     """
     (tmp_path / "limit.py").write_text(
-        _constraint_source("'-'.join(['position', 'cap'])"), encoding="utf-8"
+        _rule_source("'-'.join(['position', 'cap'])"), encoding="utf-8"
     )
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  limit:\n    kind: constraint\n"
+        "components:\n  limit:\n    kind: compliance\n"
         "    path: limit.py\n    object_name: Limit\n",
     )
 
@@ -415,7 +409,7 @@ def test_a_constraint_id_computed_at_runtime_is_still_checked(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.constraint_id_mismatch"
+    assert failure["code"] == "component.compliance_id_mismatch"
     assert "'position-cap'" in failure["observed"], "the computed id must be reported as computed"
 
 
@@ -428,24 +422,24 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     `no-short` ran clean, with nothing anywhere saying why. `NoShort` takes its id as a constructor
     argument defaulting to `no-short`, so config is a real third repair and the refusal says so.
     """
-    from vqapr.constraints.builtin import shipped_constraint_path
+    from vqapr.compliance.builtin import shipped_compliance_path
 
-    source = shipped_constraint_path("no_short").as_posix()
+    source = shipped_compliance_path("no_short").as_posix()
 
     refused = _write(
         tmp_path,
         "bad.yaml",
-        f"components:\n  noshort:\n    kind: constraint\n"
+        f"components:\n  noshort:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", refused)
     assert code == 1
-    assert payload["failures"][0]["code"] == "component.constraint_id_mismatch"
+    assert payload["failures"][0]["code"] == "component.compliance_id_mismatch"
 
     accepted = _write(
         tmp_path,
         "good.yaml",
-        f"components:\n  no-short:\n    kind: constraint\n"
+        f"components:\n  no-short:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", accepted)
@@ -455,9 +449,9 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     configured = _write(
         tmp_path,
         "configured.yaml",
-        f"components:\n  noshort:\n    kind: constraint\n"
+        f"components:\n  noshort:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n"
-        f"    config:\n      constraint_id: noshort\n",
+        f"    config:\n      compliance_id: noshort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", configured)
     assert code == 0, payload
@@ -582,7 +576,7 @@ def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.value_not_permitted"
     assert failure["observed"] == "model"
-    assert set(failure["examples"]) == {"datamodel", "strategy", "constraint", "exchange"}
+    assert set(failure["examples"]) == {"datamodel", "strategy", "compliance", "exchange"}
 
 
 def test_an_agenda_wall_time_that_is_not_a_time_is_refused_with_a_stage(

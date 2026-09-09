@@ -69,7 +69,7 @@ LAYERS: dict[str, int] = {
     # 40 -- what installs a Component, and what evaluates one. Both load user code, so both
     # sit above every contract that code is written against.
     "extension": 40,
-    "constraints": 40,
+    "compliance": 40,
     # 50 -- what a project accumulates between commands, and how a document enters it.
     "project": 50,
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.

@@ -1,18 +1,18 @@
-"""A Constraint is a Component: it keeps memory between callbacks, and the run commits it.
+"""A Compliance rule is a Component: it keeps memory between observations, and the run commits it.
 
 Owner ruling, 2026-09-08: *"constraint가 기억이 필요없다는 전제 자체가 잘못된거야"* -- a rule such as
 "out after three breaches" has to count, and counting is memory. Record `181` put `memory` on
-the one base every authored kind shares and made the run state commit a constraint's memory the
-way it commits the Strategy's: restored before `project` and before `monitor`, and what each
-callback left published with that callback's root.
+the one base every authored kind shares; design §7.2 is why it matters here: *"위반은 세는 것이고
+세는 것은 기억한다."* The run restores a rule's memory before `observe` and commits what it left
+with the findings, at every market-clock instant.
 
 Three properties, asserted on one run of four sessions:
 
-- what `monitor` counts is visible to the next `project`, so the rule can act on it;
-- the count is committed on the roots -- a fresh instance restored from the final root reads
-  the same number, and the constraint's own attribute is not the authority;
-- a callback that fails after `project` mutated the memory leaves the root, and the
-  instance, exactly as they were.
+- what one observation counted is visible to the next, so a rule can act on it;
+- the count is committed on the roots -- a fresh instance restored from the final root reads the
+  same number, and the rule's own attribute is not the authority;
+- an observation that fails after mutating its memory commits nothing: the root keeps the mark
+  the instant made and none of what the rule left.
 """
 
 from __future__ import annotations
@@ -27,10 +27,9 @@ import pytest
 
 from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
-    Constraint,
-    ConstraintBounds,
-    ConstraintCall,
-    ConstraintFinding,
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
     EconomicAccountView,
     Hold,
     StrategyModel,
@@ -44,11 +43,11 @@ from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ConstraintSet, StrategyConfig
-from vqapr.flow.engine.run_state import RunStateRepository
+from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage
+from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
+from vqapr.project.run import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
 RULE = "three-strikes"
@@ -72,57 +71,44 @@ class _Exchange:
         raise AssertionError("a holding strategy never executes")
 
 
-class ThreeStrikes(Constraint):
-    """Counts its own breaches in memory and closes the box once it has seen three.
+class ThreeStrikes(Compliance):
+    """Counts its own breaches in memory. Every observation is a breach here, so the count is the
+    number of observations so far; what the test asserts is the plumbing, not the economics."""
 
-    `monitor` always reports a breach here, so the count is the number of judgements so far;
-    `project` reads that count and returns a zero box once it reaches three. What the test
-    asserts is the plumbing between the two, not the economics.
-    """
-
-    projected_with: list[int]
-    """The count `project` saw on each callback, in order: the property under test."""
+    observed_with: list[int]
+    """The count `observe` saw on each call, in order: the property under test."""
 
     def __init__(self) -> None:
-        self.projected_with = []
+        self.observed_with = []
 
     @property
-    def constraint_id(self) -> str:
+    def compliance_id(self) -> str:
         return RULE
 
     def _count(self) -> int:
         memory = self.memory if isinstance(self.memory, dict) else {}
         return int(memory.get("breaches", 0))
 
-    def project(self, call: ConstraintCall) -> ConstraintBounds:
+    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
         seen = self._count()
-        self.projected_with.append(seen)
-        ceiling = Decimal("0") if seen >= 3 else Decimal("1")
-        return ConstraintBounds(
-            lower_weights={name: Decimal("0") for name in call.instruments},
-            upper_weights={name: ceiling for name in call.instruments},
-        )
-
-    def monitor(
-        self, call: ConstraintCall, account: EconomicAccountView, bounds: ConstraintBounds
-    ) -> ConstraintFinding:
-        self.memory = {"breaches": self._count() + 1}
-        return ConstraintFinding(
+        self.observed_with.append(seen)
+        self.memory = {"breaches": seen + 1}
+        return ComplianceFinding(
             passed=False,
             measured=Decimal("1"),
             bound=Decimal("0"),
             excess=Decimal("1"),
-            details={},
+            details={"strikes": seen + 1},
             offenders=("A",),
         )
 
 
-class ProjectThenFail(ThreeStrikes):
-    """Mutates memory inside `project`, then the callback fails downstream."""
+class MutateThenFail(ThreeStrikes):
+    """Mutates memory inside `observe`, then fails."""
 
-    def project(self, call: ConstraintCall) -> ConstraintBounds:
+    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
         self.memory = {"breaches": 99}
-        return super().project(call)
+        raise RuntimeError("observe fault after the mutation")
 
 
 def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
@@ -184,15 +170,10 @@ def _flow(
     frozen = FrozenRun(
         run_id="remembered",
         strategy=FrozenStrategy(
-                config=StrategyConfig(
-                    _component("strategy", ComponentKind.STRATEGY_MODEL),
-                    "strategy",
-                ),
-                constraints=ConstraintSet((_component(RULE, ComponentKind.CONSTRAINT),)),
-                agenda=FrozenAgenda(
-                    "strategy", occurrences, timezone="Asia/Seoul"
-                ),
-            ),
+            config=StrategyConfig(_component("strategy", ComponentKind.STRATEGY_MODEL), "strategy"),
+            compliance=ComplianceSet((_component(RULE, ComponentKind.COMPLIANCE),)),
+            agenda=FrozenAgenda("strategy", occurrences, timezone="Asia/Seoul"),
+        ),
         exchange=_component("exchange", ComponentKind.EXCHANGE),
         execution=_execution_input(root, sessions),
         start=occurrences[0].evaluation_time,
@@ -203,67 +184,68 @@ def _flow(
         writes="remembered-weights",
     )
 
-    def window_for_occurrence(occurrence: object) -> ModelWindow:
+    def window_at(instant: datetime) -> ModelWindow:
         return ModelWindow(
-            evaluation_time=occurrence.evaluation_time,  # type: ignore[attr-defined]
+            evaluation_time=instant,
             instruments=("A", "B"),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(),
-            consumer_id="test-consumer",
         )
 
     return StrategyEventLoop(
         frozen,
         _Holds(),
         state,
-        strategy_window_for_occurrence=window_for_occurrence,
-        constraint_window_for_occurrence=window_for_occurrence,
+        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
+            evaluation_time=occurrence.evaluation_time,
+            instruments=("A", "B"),
+            store=DuckDbObservationStore(_Catalog()),
+            allowed_requirements=(),
+            consumer_id="test-consumer",
+        ),
+        compliance_window_at=window_at,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
-        constraints=(rule,),
+        compliance=(rule,),
     )
 
 
-def _state(rule: Constraint) -> RunStateRepository:
+def _state(rule: Compliance) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
-        initial_component_memory={rule.constraint_id: rule.memory},
+        initial_component_memory={rule.compliance_id: rule.memory},
     )
 
 
-def test_what_monitor_counted_is_what_the_next_project_reads(tmp_path: Path) -> None:
+def test_what_one_observation_counted_is_what_the_next_reads(tmp_path: Path) -> None:
     rule = ThreeStrikes()
     result = _flow(tmp_path, rule, _sessions(4), _state(rule)).run()
 
-    # `project` runs twice per session: at the callback, and again at the fill instant right
-    # before `monitor` judges the book (record `148`). Both read the count monitoring committed on
-    # the sessions before, and monitoring's own increment lands after its projection -- so each
-    # session's pair sees the same number, and that number is the breaches so far.
-    assert rule.projected_with == [0, 0, 1, 1, 2, 2, 3, 3]
+    # One observation per market-clock instant -- the venue's 15:30 print, four sessions -- and
+    # each reads the count the one before it committed.
+    assert rule.observed_with == [0, 1, 2, 3]
 
     # The count lives on the root, not on the instance: a fresh instance restored from what the
-    # run committed reads the same number. Four judgements, four breaches.
+    # run committed reads the same number. Four observations, four strikes.
     fresh = ThreeStrikes()
     fresh.memory = result.final_state.component_memory()[RULE]
     assert fresh.memory == {"breaches": 4}
     assert set(result.final_state.component_state_refs) == {RULE}
+    assert [
+        entry.kind for entry in result.final_state.lifecycle_trace
+    ].count(LifecycleKind.MONITORED) == 4
 
 
-def test_the_root_and_the_instance_carry_no_memory_a_failed_callback_left(tmp_path: Path) -> None:
-    rule = ProjectThenFail()
+def test_a_failed_observation_commits_nothing_the_rule_left(tmp_path: Path) -> None:
+    rule = MutateThenFail()
     state = _state(rule)
     flow = _flow(tmp_path, rule, _sessions(2), state)
 
-    # `project` runs before `decide` in a callback, so a `decide` that raises fails the
-    # callback after the constraint has already mutated its memory.
-    def failing_decide(call):
-        raise RuntimeError("decide fault after project")
-
-    flow._context.strategy.decide = failing_decide  # type: ignore[method-assign]
-
-    with pytest.raises(SimulationFailure, match="decide fault after project"):
+    with pytest.raises(SimulationFailure, match="observe fault after the mutation") as raised:
         flow.run()
 
-    assert state.current.component_memory() == {RULE: None}, "nothing was committed"
-    assert rule.memory is None, "the instance was restored to what the root holds"
-    assert state.current.lifecycle_trace == ()
+    assert raised.value.stage is SimulationStage.MARKET_COMPLIANCE
+    assert state.current.component_memory() == {RULE: None}, "nothing the rule left was committed"
+    kinds = [entry.kind for entry in state.current.lifecycle_trace]
+    assert LifecycleKind.MARKED in kinds, "the mark the instant made before COMPLIANCE stands"
+    assert LifecycleKind.MONITORED not in kinds

@@ -42,21 +42,18 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
         if kind is ComponentKind.STRATEGY_MODEL
-        else "from vqapr.authoring import Constraint\n"
-        f"class {identifier.title().replace('-', '')}(Constraint):\n"
+        else "from vqapr.authoring import Compliance\n"
+        f"class {identifier.title().replace('-', '')}(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
-        # The id the component is REGISTERED under, not a fixed string. A Constraint must answer
-        # to its own component id -- `StrategyEventLoop` has always required it and `load_constraint`
-        # now refuses the mismatch -- so a helper that hardcoded `'fixture'` built components that
-        # could never have run. These fixtures never assembled a Flow, which is the only reason
-        # the invariant went unnoticed here.
+        "    def compliance_id(self):\n"
+        # The id the component is REGISTERED under, not a fixed string. A rule must answer to
+        # its own component id -- `StrategyEventLoop` has always required it and `load_compliance`
+        # refuses the mismatch -- so a helper that hardcoded `'fixture'` built components that
+        # could never have run.
         f"        return {identifier!r}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return None\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n"
     )
     path.write_text(
@@ -93,8 +90,8 @@ def _setup(
     """
     workspace = Workspace.create(root)
     strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
-    constraint_component = _component(root, "limit", ComponentKind.CONSTRAINT)
-    for component in (strategy_component, constraint_component):
+    rule_component = _component(root, "limit", ComponentKind.COMPLIANCE)
+    for component in (strategy_component, rule_component):
         with Workspace.transaction(workspace) as t:
             t.register_component(component)
     # Registered through the public entry point, which measures the span persistence requires.
@@ -130,7 +127,8 @@ def _setup(
     )
     return workspace, RunDefinition(
         run_id="preflight",
-        strategy=StrategyEntry("strategy", ("limit",), {"cadence": [1]}),
+        strategy=StrategyEntry("strategy", {"cadence": [1]}),
+        compliance=("limit",),
         timezone="Asia/Seoul",
         agenda=RunAgenda(every="1d", at=(at,)),
         exchange=None if exchange_component is None else str(exchange_component.component_id),
@@ -258,10 +256,10 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     assert occurrence.evaluation_time == datetime(2024, 3, 5, 9, tzinfo=_ZONE)
     assert frozen.dispatch_order(layer) == layer.agenda.occurrences
     assert not hasattr(frozen, "valuation_agenda") and not hasattr(frozen, "monitoring_agenda")
-    assert layer.constraints.constraints[0].component_id == "limit"
+    assert layer.compliance.rules[0].component_id == "limit"
     assert frozen.instruments == definition.instruments
     assert layer.requirements == ()
-    assert layer.constraint_requirements == ()
+    assert layer.compliance_requirements == ()
     assert (
         layer.initial_model_state_ref
         == prepare_model_state(layer.initial_model_memory, layer.initial_payload).ref
@@ -498,7 +496,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
 
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
-    definition = definition.replace(strategy=StrategyEntry('strategy', ('limit',), memory))
+    definition = definition.replace(strategy=StrategyEntry('strategy', memory))
     frozen = preflight_run(workspace, definition)
     memory["nested"].append(2)
     assert definition.strategy.initial_model_memory == {"nested": [1]}
@@ -706,36 +704,34 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     # Valuation no longer declares a requirement -- it reads the execution table -- so the
-    # missing-requirement contract is proved by a consumer that still has one: a Constraint.
-    workspace, definition = _setup(tmp_path / "constraint-requirement", model_price_parquet)
-    constraint_path = tmp_path / "constraint-requirement" / "limit.py"
-    constraint_path.write_text(
-        "from vqapr.authoring import Constraint\n"
+    # missing-requirement contract is proved by a consumer that still has one: a Compliance rule.
+    workspace, definition = _setup(tmp_path / "rule-requirement", model_price_parquet)
+    rule_path = tmp_path / "rule-requirement" / "limit.py"
+    rule_path.write_text(
+        "from vqapr.authoring import Compliance\n"
         "from vqapr.data.lookback import RowsLookback\n"
         "from vqapr.data.requirements import DataRequirement\n"
-        "class Limit(Constraint):\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return (DataRequirement.of('absent', 'close', "
         "lookback=RowsLookback(1)),)\n"
-        "    def project(self, call):\n"
-        "        return None\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n",
         encoding="utf-8",
     )
-    constraint = ComponentRef.of(
+    rule = ComponentRef.of(
         "limit",
-        ComponentKind.CONSTRAINT,
-        constraint_path,
+        ComponentKind.COMPLIANCE,
+        rule_path,
         "Limit",
         fingerprint=fingerprint_component(
-            constraint_path, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+            rule_path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
         ),
     )
-    workspace._components[constraint.component_id] = constraint
+    workspace._components[rule.component_id] = rule
     with pytest.raises(VqaprError):
         preflight_run(workspace, definition)
 
@@ -746,7 +742,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     with pytest.raises(ValueError, match="declared together"):
         definition.replace(initial_account_mode=None)
     with pytest.raises(TypeError, match="Model memory"):
-        StrategyEntry("strategy", (), ("not-json",))  # type: ignore[arg-type]
+        StrategyEntry("strategy", ("not-json",))  # type: ignore[arg-type]
 
 
 def test_the_derived_agenda_fires_once_per_trading_day_at_the_declared_wall_time(
@@ -882,7 +878,7 @@ def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
         preflight_run(workspace, skipped)
 
 
-def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
+def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     """`vqapr check` runs this phase, so refusing here is refusing before a run is spent.
@@ -892,32 +888,30 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
     Python surface does. Preflight is the last gate before `StrategyEventLoop.__init__`, where the
     same disagreement used to surface as `stage: "unhandled"` with an empty `failures` list.
 
-    The check is on the loaded object, so a `constraint_id` assembled at runtime is caught too.
+    The check is on the loaded object, so a `compliance_id` assembled at runtime is caught too.
     """
     root = tmp_path / "mismatch"
     workspace, definition = _setup(root, model_price_parquet)
     path = root / "drifted.py"
     path.write_text(
-        "from vqapr.authoring import Constraint\n"
-        "class Drifted(Constraint):\n"
+        "from vqapr.authoring import Compliance\n"
+        "class Drifted(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return '-'.join(['position', 'cap'])\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return None\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call, account):\n"
         "        return None\n",
         encoding="utf-8",
     )
     drifted = ComponentRef.of(
         "limit",
-        ComponentKind.CONSTRAINT,
+        ComponentKind.COMPLIANCE,
         path,
         "Drifted",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.CONSTRAINT, object_name="Drifted"
+            path, kind=ComponentKind.COMPLIANCE, object_name="Drifted"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -929,7 +923,7 @@ def test_a_constraint_that_does_not_answer_to_its_id_is_refused_before_the_run(
     error = caught.value
     assert error.stage is Stage.LOAD
     assert [failure.code for failure in error.failures] == [
-        "component.constraint_id_mismatch"
+        "component.compliance_id_mismatch"
     ]
     assert "'limit'" in error.failures[0].observed
     assert "'position-cap'" in error.failures[0].observed

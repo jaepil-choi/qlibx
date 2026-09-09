@@ -42,6 +42,21 @@ plausible.
 These are library calls, not CLI verbs. Use them inside `decide()`, or in your own preparation
 code before a run.
 
+## The box: `no_short`, `single_name_cap`, `intersect`
+
+The limits a strategy builds inside are its own (a constraint is not an extension point). Three
+pure functions, each returning `(lower, upper)` — a bound per name on each side — which is what
+`optimize(lower=..., upper=...)` takes:
+
+```python
+names = tuple(sorted(call.window.instruments))
+lower, upper = intersect(no_short(names), single_name_cap(names, benchmark, Decimal("0.10")))
+```
+
+`single_name_cap` needs the index weight per name: read it through your own `inputs()` and
+validate it (`validate_allocation`) before it becomes a bound. Whether the book *actually* stayed
+inside a limit is a different question, on a different clock — the `make-compliance` skill.
+
 ## What these helpers deliberately will not do
 
 They are pure, and the constraints are what keep them from becoming a second, invisible strategy:

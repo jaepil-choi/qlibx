@@ -19,6 +19,14 @@
     "digest": "59afff3d766428bb",
     "kind": "facts"
   },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/datamodels/showcase-model@ec7d081d/datamodel.json": {
+    "digest": "02c188cb4cb74637",
+    "kind": "facts"
+  },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/run.json": {
+    "digest": "3e3bd1b006adb209",
+    "kind": "facts"
+  },
   "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/datamodels/momentum-model@549831eb/datamodel.json": {
     "digest": "4075dd0800b5308d",
     "kind": "facts"
@@ -32,7 +40,7 @@
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
-    "digest": "e29685f71d3840f8",
+    "digest": "4b6b48dea41aefcc",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
@@ -109,7 +117,7 @@
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
-    "digest": "3e710442825416bc",
+    "digest": "7815bd15cbedac57",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
@@ -186,7 +194,7 @@
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
-    "digest": "807b10a972fb6543",
+    "digest": "bc612f0ad93db4b4",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
@@ -249,7 +257,7 @@
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
-    "digest": "dc9be875beea1e99",
+    "digest": "0277bf11953c4989",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -312,7 +320,7 @@
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
-    "digest": "1ff013d0a725efac",
+    "digest": "45814e6aff48cd39",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
@@ -375,7 +383,7 @@
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
-    "digest": "edbd0a765bfca1b2",
+    "digest": "a40fdd599037e392",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -438,7 +446,7 @@
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "7eed1faa1f64388c",
+    "digest": "4a114bc4a2db50aa",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -516,7 +524,7 @@
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "dd703c03b5a7e879",
+    "digest": "4e34d0a627c076cb",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -594,7 +602,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
-    "digest": "2fdf7034fb8d2552",
+    "digest": "2433cfed4c2efa8c",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/tables/vqapr.account/all.parquet": {
@@ -657,7 +665,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
-    "digest": "ce130ea7eb0f0806",
+    "digest": "4adbc936de8e01bd",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/tables/vqapr.account/all.parquet": {
@@ -720,7 +728,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
-    "digest": "84aaeb1b7efc7ead",
+    "digest": "08035b5d6856caa1",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -783,7 +791,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
-    "digest": "26ed206b9f9ba8e2",
+    "digest": "8ea074ce84791d5b",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/tables/vqapr.account/all.parquet": {
@@ -846,7 +854,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
-    "digest": "12e4e2fe0612a89c",
+    "digest": "5b1287615ea5b196",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/tables/vqapr.account/all.parquet": {
@@ -909,7 +917,7 @@
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
-    "digest": "91ef5b1716cca4c7",
+    "digest": "599fb23b17d24ad0",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {

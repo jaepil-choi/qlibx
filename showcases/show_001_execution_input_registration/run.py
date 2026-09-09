@@ -285,7 +285,7 @@ def main() -> None:
         run_id="show001",
         # The legacy showcase generated a Constraint whose methods were unconditionally-passing
         # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so the
-        # strategy entry names no constraints rather than an inert one authored to keep a field
+        # run declares no compliance rule rather than an inert one authored to keep a field
         # non-empty. See README.
         strategy=StrategyEntry("showcase-strategy"),
         timezone=KST,

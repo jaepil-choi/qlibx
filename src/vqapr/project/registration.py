@@ -54,7 +54,7 @@ from vqapr.project.store import Transaction, Workspace
 _COMPONENT_KINDS = {
     "datamodel": ComponentKind.DATA_MODEL,
     "strategy": ComponentKind.STRATEGY_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
     "exchange": ComponentKind.EXCHANGE,
 }
 """확장점 넷 전부. canon §10.2가 닫아두지 말라고 한 목록이다.
@@ -1071,7 +1071,7 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     base = {
         ComponentKind.STRATEGY_MODEL: "StrategyModel",
         ComponentKind.DATA_MODEL: "DataModel",
-        ComponentKind.CONSTRAINT: "Constraint",
+        ComponentKind.COMPLIANCE: "Compliance",
     }[kind]
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1149,7 +1149,7 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
 AUTHORED_KINDS = {
     "strategy": ComponentKind.STRATEGY_MODEL,
     "datamodel": ComponentKind.DATA_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "compliance": ComponentKind.COMPLIANCE,
 }
 """The component kinds an author writes as a `.py` and registers directly.
 
@@ -1245,7 +1245,7 @@ def register_strategy_model(
     )
 
 
-def register_constraint(
+def register_compliance(
     project_root: str | Path,
     raw_component_id: str,
     path: str | Path,
@@ -1253,18 +1253,19 @@ def register_constraint(
     *,
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
-    """Register a project-local Constraint after proving it loads.
+    """Register a project-local Compliance rule after proving it loads.
 
-    `load_constraint` checks the public Constraint contract and that the component declares its
-    data requirements, so a constraint that cannot state what it reads is refused here rather
-    than at the first occurrence that projects it.
+    `load_compliance` checks the public Compliance contract, that the component declares its
+    reads, and that it answers to the id it is registered under -- so a rule that cannot say what
+    it reads, or is registered under the wrong name, is refused here rather than at the first
+    market-clock instant that observes with it.
     """
     return register_component(
         project_root,
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.CONSTRAINT,
+        kind=ComponentKind.COMPLIANCE,
         config=config,
     )
 

@@ -41,7 +41,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ConstraintSet, StrategyConfig
+from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.strategy.loop import StrategyEventLoop
 
@@ -462,7 +462,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
                 ),
-                constraints=ConstraintSet(()),
+                compliance=ComplianceSet(()),
                 agenda=FrozenAgenda("strategy", (occurrence,)),
             ),
         start=occurrence.evaluation_time,
@@ -488,10 +488,9 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         _Holds(),
         state,
         strategy_window_for_occurrence=window_for_occurrence,
-        constraint_window_for_occurrence=window_for_occurrence,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
-        constraints=(),
+        compliance=(),
     ).run()
 
     rows = [

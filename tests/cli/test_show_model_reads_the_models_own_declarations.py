@@ -106,7 +106,7 @@ def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused
     assert refused["stage"] != "unhandled", refused
     (failure,) = refused["failures"]
     assert failure["code"] == "argument.value_invalid"
-    assert "strategy, datamodel, constraint" in failure["requirement"]
+    assert "strategy, datamodel, compliance" in failure["requirement"]
     assert failure["observed"] == "'venue' is registered as exchange"
     assert "list components --kind" in refused["retry_precondition"]
 

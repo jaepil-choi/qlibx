@@ -66,7 +66,7 @@ class AcceptedRunState:
     feedback: tuple[object, ...] = ()
     finalization: RunFinalization | None = None
     model_state_commit_count: int = 0
-    # Every Component carries memory (records `181`, `184`): a Constraint's and the venue's are
+    # Every Component carries memory (records `181`, `184`): a Compliance rule's and the venue's are
     # committed here beside the Strategy's: one ref per component id, into the same map, proved the
     # same way. `current_model_state_ref` stays the Strategy's own; it is the one with a payload.
     component_state_refs: Mapping[str, ModelStateRef] = MappingProxyType({})
@@ -154,8 +154,8 @@ class AcceptedRunState:
     def component_memory(self) -> dict[str, ModelMemory]:
         """Every stateful component's visible memory, by id: what a callback restores."""
         return {
-            constraint_id: normalize_memory(self._model_states[ref])
-            for constraint_id, ref in self.component_state_refs.items()
+            component_id: normalize_memory(self._model_states[ref])
+            for component_id, ref in self.component_state_refs.items()
         }
 
 
@@ -180,11 +180,11 @@ def _component_states(
         )
     refs: dict[str, ModelStateRef] = {}
     proved: set[ModelStateRef] = set()
-    for constraint_id, memory in component_memory.items():
+    for component_id, memory in component_memory.items():
         candidate = prepare_model_state(memory, b"")
         states[candidate.ref] = candidate.memory
         payloads[candidate.ref] = candidate.payload
-        refs[constraint_id] = candidate.ref
+        refs[component_id] = candidate.ref
         proved.add(candidate.ref)
     return refs, frozenset(proved)
 
@@ -289,22 +289,23 @@ class RunStateRepository:
         row_sink: Callable[[str, Sequence[Mapping[str, object]]], None] | None = None,
         initial_component_memory: Mapping[str, object] | None = None,
     ) -> None:
-        """`initial_component_memory` is each loaded constraint's memory as assembled, by id;
-        the run commits what every constraint callback leaves from there (record `181`)."""
+        """`initial_component_memory` is each loaded stateful component's memory as assembled,
+        by id -- the Compliance rules', the venue's -- and the run commits what every callback
+        leaves from there (record `181`)."""
         if row_sink is not None and not callable(row_sink):
             raise TypeError("row_sink must be callable")
         prepared = prepare_model_state(initial_model_memory, initial_payload)
         states = {prepared.ref: prepared.memory}
         payloads = {prepared.ref: prepared.payload}
         current_ref = prepared.ref
-        constraint_refs: dict[str, ModelStateRef] = {}
-        for constraint_id, memory in dict(initial_component_memory or {}).items():
-            if not constraint_id:
-                raise ValueError("initial_component_memory keys must be constraint ids")
+        component_refs: dict[str, ModelStateRef] = {}
+        for component_id, memory in dict(initial_component_memory or {}).items():
+            if not component_id:
+                raise ValueError("initial_component_memory keys must be component ids")
             seed = prepare_model_state(memory, b"")
             states[seed.ref] = seed.memory
             payloads[seed.ref] = seed.payload
-            constraint_refs[constraint_id] = seed.ref
+            component_refs[component_id] = seed.ref
         self._root = AcceptedRunState(
             version=0,
             _model_states=states,
@@ -313,7 +314,7 @@ class RunStateRepository:
             account=initial_account,
             pending_accepted_intent=pending_accepted_intent,
             model_state_commit_count=0,
-            component_state_refs=constraint_refs,
+            component_state_refs=component_refs,
         )
         self._before_swap = before_swap
         # Where accepted recorder rows go, when they go anywhere but the root. `orchestration.run`
@@ -382,8 +383,8 @@ class RunStateRepository:
     ) -> PreparedRunState:
         """Validate and serialize all callback effects without changing visibility.
 
-        `component_memory` is what each constraint's `project` left, by id, committed in the
-        same root as the Strategy's memory; `None` carries the constraints' refs over unchanged.
+        `component_memory` is what each stateful component left, by id, committed in the same
+        root as the Strategy's memory; `None` carries the refs over unchanged.
         """
         root = self._root
         if root.finalization is not None:
@@ -396,7 +397,7 @@ class RunStateRepository:
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
-        constraint_refs, proved = _component_states(root, component_memory, states, payloads)
+        component_refs, proved = _component_states(root, component_memory, states, payloads)
         chunks = dict(root._recorder_chunks)
         manifests = root.recorder_manifests
         new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
@@ -411,7 +412,7 @@ class RunStateRepository:
             # construction; the rest were proved by the root we are extending.
             _verified=root._verified | {candidate.ref} | proved,
             current_model_state_ref=candidate.ref,
-            component_state_refs=constraint_refs,
+            component_state_refs=component_refs,
             account=root.account,
             pending_accepted_intent=(
                 root.pending_accepted_intent
@@ -625,14 +626,14 @@ class RunStateRepository:
 
         Monitoring changes nothing it observes: no fill, no mark, no decision, and the pending
         slot is left exactly as found -- it runs right after a commit (record `148`), and the
-        commit already settled that slot. What it adds is rows -- one per constraint, saying what
+        commit already settled that slot. What it adds is rows -- one per rule, saying what
         was measured against which limit -- and until this path existed those rows had nowhere to
         go. The report sat
         on the occurrence trace, the record counted it (`contract`), and the values themselves
         never reached disk: a run whose book breached a limit could say *that* it did, and not
         *by how much*.
 
-        `component_memory` is what each constraint's `monitor` left (record `181`): a rule that
+        `component_memory` is what each rule's `observe` left (record `181`): a rule that
         counts its breaches commits the count here, with the findings it counted.
         """
         root = self._root
@@ -640,7 +641,7 @@ class RunStateRepository:
         new_rows = self._stage_rows(chunks, recorder.staged_rows())
         states = dict(root._model_states)
         payloads = dict(root._payloads)
-        constraint_refs, proved = _component_states(root, component_memory, states, payloads)
+        component_refs, proved = _component_states(root, component_memory, states, payloads)
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -649,7 +650,7 @@ class RunStateRepository:
                 _payloads=payloads,
                 _verified=root._verified | proved,
                 current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=constraint_refs,
+                component_state_refs=component_refs,
                 account=root.account,
                 pending_accepted_intent=root.pending_accepted_intent,
                 lifecycle_trace=(

@@ -202,11 +202,13 @@ a second copy would drift. What differs is exactly what an author has to underst
 what the number means, and which completeness guard follows from it (`docs/issues/archive/033`).
 """
 
-_CONSTRAINT_TEMPLATE = '''"""A Constraint capping how much of the book any one name may be.
+_COMPLIANCE_TEMPLATE = '''"""A Compliance rule reporting any name above `CAP` of the book.
 
-The run spec offers a `constraints:` list and nothing said what went in it. Guessing `project`
-wrong produces a backtest that looks correct and is not, so it is written out below rather than
-left as a signature.
+A rule observes. It does not shape the portfolio -- the strategy does that itself, calling the
+box kit (`no_short`, `single_name_cap`, `intersect`) before `Rebalance`. What a rule
+does is look at the book the venue actually left, at every instant of the market clock, right
+after it is marked, and say whether it is inside the limit this rule watches. A breach never
+stops the run; it is recorded, named, in `vqapr.monitoring`.
 
 Edit `CAP`. Everything else runs as written.
 """
@@ -218,24 +220,22 @@ from vqapr import authoring as va
 CAP = Decimal("{cap}")  # THE RULE. No single name may exceed this share of the book.
 FLOOR = Decimal("0")
 
-# A cap on SIZE, measured on absolute weight, so a -0.30 short is as much a violation as a +0.30
-# long. It says nothing about sign: shorting within the cap is permitted here, and forbidding it
-# is a separate rule. Constraints intersect -- lower bounds take the max, upper bounds the min --
-# so declaring the shipped `no-short` alongside this gives long-only-with-a-cap without either
-# rule knowing about the other.
+# A cap on SIZE, measured on absolute weight, so a -0.30 short is as much a finding as a +0.30
+# long. It says nothing about sign: reporting a short is the shipped `no-short` rule's job, and a
+# run may declare both under `compliance:`.
 
 
-class {class_name}(va.Constraint):
-    """No single instrument may exceed `CAP` of the book, long or short.
+class {class_name}(va.Compliance):
+    """No single instrument may exceed `CAP` of the marked book, long or short.
 
-    Two members, and they do different jobs. `project` says what is permitted, and construction
-    does its best inside that. `monitor` says whether what you actually hold went over. A decision
-    that goes over does not stop the run -- it is a breach, and this is where breaches are seen.
+    The rule's parameters are its own. It does not inherit the cap the strategy built inside --
+    a watcher that inherits the target of the thing it watches is grading itself -- so the two
+    numbers may differ, and their differing is what the report shows.
     """
 
     @property
-    def constraint_id(self) -> str:
-        """The id this constraint answers to.
+    def compliance_id(self) -> str:
+        """The id this rule answers to.
 
         It must equal the id you register it under, character for character. Registration refuses
         a mismatch, so this is fixed to the id `vqapr new` was given rather than left as a string
@@ -244,33 +244,20 @@ class {class_name}(va.Constraint):
         return "{component_id}"
 
     def inputs(self):
-        """What this constraint reads. Nothing: the rule is a property of the weight.
+        """What this rule reads. Nothing: the limit is a property of the weight itself.
 
-        A constraint comparing against a benchmark would return a `va.DatasetInput` here, and
-        `call.read("<your alias>", "<field>")` inside `project` would hand back its window --
-        `current()` is the benchmark's weight per name at the window's last instant.
+        A rule comparing against a benchmark would return a `va.DatasetInput` here, and
+        `call.read("<your alias>", "<field>")` inside `observe` would hand back its window as of
+        the instant observed -- `latest()` is the benchmark's newest weight per name.
         """
         return {{}}
 
-    def project(self, call) -> va.ConstraintBounds:
-        """**The feasible set.** Return the lower and upper bound for EVERY instrument in
-        `call.instruments`.
-
-        Not the offenders, not a correction -- the box the optimiser must stay inside. Both bounds
-        are mandatory for every name: a projection that misses one is refused, because a missing
-        bound would silently widen the feasible set rather than fail.
-        """
-        return va.ConstraintBounds(
-            lower_weights={{instrument: -CAP for instrument in call.instruments}},
-            upper_weights={{instrument: CAP for instrument in call.instruments}},
-        )
-
-    def monitor(self, call, account: va.EconomicAccountView, bounds) -> va.ConstraintFinding:
+    def observe(self, call, account: va.EconomicAccountView) -> va.ComplianceFinding:
         """Judge the book that was actually committed, after it was marked.
 
-        This is the only member that judges. It sees what `project` could not: execution does not
-        always fill what was intended, and rounding a weight into whole shares can push a position
-        over a limit that the decision itself respected.
+        Execution does not always fill what was intended, and rounding a weight into whole shares
+        can push a position over a limit that the decision itself respected. Compare strictly:
+        the framework judges the excess against its tolerance, once, for every rule.
         """
         # `account.weights()` is each name's marked value over NAV. It refuses rather than
         # returning zeros when the account has not been marked, so an unmarked book cannot look
@@ -278,7 +265,7 @@ class {class_name}(va.Constraint):
         weights = account.weights() if account.nav else {{}}
         offenders = tuple(sorted(name for name, w in weights.items() if abs(w) > CAP))
         worst = max((abs(w) for w in weights.values()), default=FLOOR)
-        return va.ConstraintFinding(
+        return va.ComplianceFinding(
             passed=not offenders,
             measured=worst,
             bound=CAP,
@@ -291,7 +278,7 @@ class {class_name}(va.Constraint):
 _TEMPLATES = {
     ComponentKind.STRATEGY_MODEL: _STRATEGY_TEMPLATE,
     ComponentKind.DATA_MODEL: _DATA_MODEL_TEMPLATE,
-    ComponentKind.CONSTRAINT: _CONSTRAINT_TEMPLATE,
+    ComponentKind.COMPLIANCE: _COMPLIANCE_TEMPLATE,
 }
 
 
@@ -339,8 +326,8 @@ def render(
     """Return a runnable component source for `kind`.
 
     `dataset_id` is optional because not every authored kind reads one. A DataModel and a
-    StrategyModel are defined by what they read; a Constraint is a rule about weights, and the
-    shipped `NoShort` returns an empty `requirements()` for exactly that reason. Requiring a
+    StrategyModel are defined by what they read; a Compliance rule is a rule about the book, and
+    the shipped `NoShort` returns an empty `requirements()` for exactly that reason. Requiring a
     dataset here would make the caller invent one to scaffold a rule that never opens it.
 
     `lookback_kind` selects which member of the lookback pair a DataModel declares. `rows` is the
@@ -351,13 +338,13 @@ def render(
     """
     if kind not in _TEMPLATES:
         raise ValueError(
-            f"no template for {kind}; user authoring covers datamodel, strategy and constraint"
+            f"no template for {kind}; user authoring covers datamodel, strategy and compliance"
         )
     if lookback <= 0:
         raise ValueError("lookback must be positive")
     if lookback_kind not in _LOOKBACK_FLAVOURS:
         raise ValueError(f"lookback_kind must be one of: {', '.join(_LOOKBACK_FLAVOURS)}")
-    if kind is ComponentKind.CONSTRAINT:
+    if kind is ComponentKind.COMPLIANCE:
         return _TEMPLATES[kind].format(
             component_id=component_id,
             class_name=_class_name(component_id),

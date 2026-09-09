@@ -3,7 +3,8 @@
 Record `147` (deletion campaign Step 6) split `StrategyEventLoop` -- 2,200 lines, 55 methods -- into
 the loop (`simulation.py`), the callback phase (`callback.py`: decide -> intent), the execution
 phase (`execution.py`: intent -> fill -> commit) and the valuation phase (`valuation.py`: mark ->
-account, and monitoring). The phases share this module: the dataclasses every phase produces or
+account) and, since record `209`, the compliance phase (`compliance.py`: the declared rules
+observe the marked book). The phases share this module: the dataclasses every phase produces or
 consumes, the package tables, and `FlowContext`, the one object holding the run's state and the
 failure envelope (`guard`, `failure`, `due_boundary`).
 """
@@ -22,9 +23,9 @@ from zoneinfo import ZoneInfo
 
 from vqapr.account.account import Account, PreparedAccountFill
 from vqapr.account.marking import SelectedMark, ValuationService
-from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
+from vqapr.authoring import AccountHistoryInput, Compliance, Component, Hold, StrategyModel
 from vqapr.authoring.records import TableSpec
-from vqapr.constraints.evaluation import ConstraintReport
+from vqapr.compliance.evaluation import ComplianceReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountMark, AccountSnapshot
@@ -167,8 +168,8 @@ def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
 class DueExecutionResult:
     """Evidence returned only after the complete post-decision account chain.
 
-    `monitoring` is what the declared constraints found on the committed, marked book right
-    after this commit (record `148`), or `None` when the run declared none.
+    `monitoring` is what the declared Compliance rules found on the committed, marked book right
+    after this commit (record `148`; design §7.2), or `None` when the run declared none.
     """
 
     consumed_pending_id: str
@@ -177,8 +178,8 @@ class DueExecutionResult:
     monitoring: MonitoringResult | None = None
 
     @property
-    def report(self) -> ConstraintReport | None:
-        """The constraint report, where `contract_report` looks for one."""
+    def report(self) -> ComplianceReport | None:
+        """The compliance report, where `contract_report` looks for one."""
         return None if self.monitoring is None else self.monitoring.report
 
     def __post_init__(self) -> None:
@@ -212,16 +213,16 @@ class HeldResult:
     monitoring: MonitoringResult | None = None
 
     @property
-    def report(self) -> ConstraintReport | None:
+    def report(self) -> ComplianceReport | None:
         return None if self.monitoring is None else self.monitoring.report
 
 
 @dataclass(frozen=True, slots=True)
 class MonitoringResult:
-    """Constraint evidence over exactly the AccountSnapshot just marked."""
+    """Compliance evidence over exactly the AccountSnapshot just marked."""
 
     valuation: ValuationResult
-    report: ConstraintReport
+    report: ComplianceReport
     evidence: MonitoringEvidence
 
     def __post_init__(self) -> None:
@@ -272,14 +273,14 @@ DEFAULT_TABLES = (
         f"{DEFAULT_TABLE_PREFIX}account",
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
-    # One row per declared constraint per monitoring occurrence: which rule, the limit it held
-    # the book to, the value it measured, and the names that breached. PRD 7.1 asks a breach to
-    # leave exactly those behind, and the `contract` block of the strategy record only ever
+    # One row per declared Compliance rule per market-clock instant: which rule, the limit it
+    # held the book to, the value it measured, and the names that breached. PRD 7.1 asks a breach
+    # to leave exactly those behind, and the `contract` block of the strategy record only ever
     # counted them -- `held` and `checked` say how often, not what or by how much.
     TableSpec(
         f"{DEFAULT_TABLE_PREFIX}monitoring",
         (
-            "constraint",
+            "rule",
             "passed",
             "measured",
             "bound",
@@ -314,8 +315,8 @@ DEFAULT_TABLES = (
 FRAMEWORK_TABLES = tuple(spec.table_id for spec in DEFAULT_TABLES)
 """The tables the package records on a strategy's behalf, which nobody declares -- derived from
 `DEFAULT_TABLES` rather than listed again (`flow/reporting.py` listed them a second time; one-shape
-Step 6 folded it here). `vqapr.monitoring` is written only by a strategy that declared a
-constraint, but it is the package's table either way."""
+Step 6 folded it here). `vqapr.monitoring` is written only by a run that declared a Compliance
+rule, but it is the package's table either way."""
 """What every run records without the Strategy asking.
 
 Canon 9.2 makes these defaults rather than opt-in because both are package-computed -- the weights
@@ -331,31 +332,28 @@ follow-up rather than something this table quietly approximates.
 """
 
 
-def _require_constraint_identity(
-    constraints: tuple[Constraint, ...], declared: tuple[ComponentRef, ...]
+def _require_compliance_identity(
+    rules: tuple[Compliance, ...], declared: tuple[ComponentRef, ...]
 ) -> None:
-    """Refuse an assembly whose loaded constraints are not the ones the run froze.
+    """Refuse an assembly whose loaded Compliance rules are not the ones the run froze.
 
     Both halves were bare `ValueError`s, and a bare exception here has no structured body, so it
     surfaced as `stage: "unhandled"` with an empty `failures` list -- the framework announcing its
     own breakage when the real cause was a component registered under the wrong id.
 
-    `load_constraint` refuses a mismatch at registration, so a constraint with a STABLE id can no
-    longer reach here from the CLI. A constraint whose `constraint_id` is **volatile** — one that
-    returns a different string on each access — still can, and does: it matches on the access
+    `load_compliance` refuses a mismatch at registration, so a rule with a STABLE id can no
+    longer reach here from the CLI. A rule whose `compliance_id` is **volatile** -- one that
+    returns a different string on each access -- still can, and does: it matches on the access
     `register` makes, matches again under `check`, and disagrees by the time the run is assembled.
     Red-teaming found exactly that, so this is a live gate rather than defence in depth, and it is
     the last place the disagreement can be caught.
-
-    It says what it found because an invariant nobody can read is indistinguishable from a crash,
-    which is the defect this whole change is about.
     """
-    loaded_ids = tuple(constraint.constraint_id for constraint in constraints)
+    loaded_ids = tuple(rule.compliance_id for rule in rules)
     declared_ids = tuple(str(component.component_id) for component in declared)
     if loaded_ids == declared_ids:
         return
     requirement = (
-        "the constraints handed to a run must be exactly the ones its FrozenRun declared, "
+        "the compliance rules handed to a run must be exactly the ones its FrozenRun declared, "
         "in the same order and answering to the same ids"
     )
     observed = f"loaded {loaded_ids!r}, FrozenRun declared {declared_ids!r}"
@@ -363,18 +361,18 @@ def _require_constraint_identity(
         stage=Stage.RUN,
         failures=[
             Failure.bounded(
-                code="constraint.identity_mismatch",
+                code="compliance.identity_mismatch",
                 status=Status.CONFLICT,
                 requirement=requirement,
                 observed=observed,
                 fix=(
-                    "register each Constraint under the id its own constraint_id returns, then "
-                    "re-run; vqapr check reports this before a run is spent"
+                    "register each Compliance rule under the id its own compliance_id returns, "
+                    "then re-run; vqapr check reports this before a run is spent"
                 ),
             )
         ],
         mutation=False,
-        retry_precondition="re-register the mismatched Constraint, then retry",
+        retry_precondition="re-register the mismatched Compliance rule, then retry",
     )
 
 
@@ -383,7 +381,7 @@ def _raise_callback_return_type(returned: object) -> None:
 
     `decide` returns `Hold | Rebalance` since record `125`, and until now nothing checked.
     A Strategy that returned a stamped `EconomicPortfolioIntent` -- the shape the contract used to
-    take -- fell through every branch and surfaced as a complaint from inside constraint
+    take -- fell through every branch and surfaced as a complaint from inside intent
     validation, three frames from the callback that caused it. Refusing here names the contract
     and the type that missed it.
     """
@@ -453,11 +451,12 @@ class FlowContext:
     account: Account
     exchange: Exchange
     strategy: StrategyModel
-    constraints: tuple[Constraint, ...]
+    compliance: tuple[Compliance, ...]
     valuation_service: ValuationService
     strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
-    constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
-    constraint_window_at: Callable[[datetime], ModelWindow]
+    compliance_window_at: Callable[[datetime], ModelWindow]
+    """The window the Compliance rules read at a market-clock instant (design §7.2): what they
+    subscribed to, as of the instant the book was marked."""
     scan_session: ScanSession | None = None
     registry: InstrumentRoster | None = None
     reference_price: str | None = None
@@ -478,20 +477,20 @@ class FlowContext:
         finally:
             self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
 
-    # Component memory (records `181`, `184`). Every Component carries memory; a constraint's is
-    # restored from the root before `project` and before `monitor`, the exchange's before
-    # `execute`, and what each callback left is committed with that callback's publication. One
-    # implementation here, because three handlers do it. The Strategy's own memory has a payload
-    # beside it and its own ref; it is not in this map.
+    # Component memory (records `181`, `184`). Every Component carries memory; a Compliance
+    # rule's is restored from the root before `observe`, the exchange's before `execute`, and
+    # what each callback left is committed with that callback's publication. One implementation
+    # here, because three handlers do it. The Strategy's own memory has a payload beside it and
+    # its own ref; it is not in this map.
 
     def stateful_components(self) -> tuple[tuple[str, Component], ...]:
         """The components whose memory this run commits beside the Strategy's, by id.
 
-        Every loaded constraint, and the venue when it is a `Component` -- a test double that
-        only offers `execute` carries no memory and is left alone.
+        Every loaded Compliance rule, and the venue when it is a `Component` -- a test double
+        that only offers `execute` carries no memory and is left alone.
         """
         pairs: list[tuple[str, Component]] = [
-            (constraint.constraint_id, constraint) for constraint in self.constraints
+            (rule.compliance_id, rule) for rule in self.compliance
         ]
         if isinstance(self.exchange, Component):
             pairs.append((self.exchange.exchange_id, self.exchange))

@@ -41,10 +41,9 @@ def test_module_exports_are_exact() -> None:
         "AccountHistory",
         "AccountHistoryInput",
         "CalendarLookback",
-        "Constraint",
-        "ConstraintBounds",
-        "ConstraintCall",
-        "ConstraintFinding",
+        "Compliance",
+        "ComplianceCall",
+        "ComplianceFinding",
         "DataCall",
         "DataModel",
         "DatasetInput",
@@ -276,42 +275,6 @@ def test_economic_account_view_has_no_version_or_mutation_escape() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# ConstraintBounds.
-# --------------------------------------------------------------------------------------
-
-
-def test_constraint_bounds_requires_matching_instrument_coverage() -> None:
-    authoring.ConstraintBounds(lower_weights={"A": Decimal("0")}, upper_weights={"A": Decimal("1")})
-    with pytest.raises(ValueError):
-        authoring.ConstraintBounds(
-            lower_weights={"A": Decimal("0")}, upper_weights={"B": Decimal("1")}
-        )
-    with pytest.raises(ValueError):
-        authoring.ConstraintBounds(
-            lower_weights={"A": Decimal("1")}, upper_weights={"A": Decimal("0")}
-        )
-
-
-def test_constraint_bounds_accessors_raise_for_uncovered_instrument() -> None:
-    bounds = authoring.ConstraintBounds(
-        lower_weights={"A": Decimal("0")}, upper_weights={"A": Decimal("1")}
-    )
-    assert bounds.lower_weight("A") == Decimal("0")
-    assert bounds.upper_weight("A") == Decimal("1")
-    with pytest.raises(KeyError):
-        bounds.lower_weight("ABSENT")
-
-
-def test_constraint_bounds_mapping_is_copied_and_immutable() -> None:
-    lower = {"A": Decimal("0")}
-    bounds = authoring.ConstraintBounds(lower_weights=lower, upper_weights={"A": Decimal("1")})
-    lower["A"] = Decimal("999")
-    assert bounds.lower_weight("A") == Decimal("0")
-    with pytest.raises(TypeError):
-        bounds.lower_weights["A"] = Decimal("1")  # type: ignore[index]
-
-
-# --------------------------------------------------------------------------------------
 # Hold / Rebalance.
 # --------------------------------------------------------------------------------------
 
@@ -400,10 +363,6 @@ class _FakeStrategyCall(authoring.StrategyCall):
     def account_history(self) -> authoring.AccountHistory:
         return authoring.AccountHistory((), None)
 
-    @property
-    def constraint_bounds(self) -> authoring.ConstraintBounds:
-        return authoring.ConstraintBounds(lower_weights={}, upper_weights={})
-
     def read(self, alias: str, field: str) -> authoring.PanelWindow:
         raise TypeError("this fake serves a rows grain only")
 
@@ -444,33 +403,30 @@ def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
 
 
 # --------------------------------------------------------------------------------------
-# ConstraintCall / ConstraintFinding / Constraint abstract contracts.
+# ComplianceCall / ComplianceFinding / Compliance abstract contracts.
 # --------------------------------------------------------------------------------------
 
 
-def test_constraint_call_is_a_contract_and_carries_no_account() -> None:
-    """It was a value nothing in `src/` ever built, and it carried the committed account.
-
-    Both are gone. It is a contract like the other two roles' calls, supplied by the framework;
-    and `project` -- the member that runs before any decision exists -- can no longer reach an
-    account it never needed. `monitor` receives one as its own argument instead.
-    """
-    assert isinstance(authoring.ConstraintCall, type)
+def test_compliance_call_is_a_contract_and_carries_no_account() -> None:
+    """A contract like the other two roles' calls, supplied by the framework. The committed
+    account a rule observes is `observe`'s own argument, so the capability is present exactly
+    where it is used and absent everywhere else."""
+    assert isinstance(authoring.ComplianceCall, type)
     with pytest.raises(TypeError):
-        authoring.ConstraintCall()  # type: ignore[abstract]
+        authoring.ComplianceCall()  # type: ignore[abstract]
 
-    members = set(authoring.ConstraintCall.__abstractmethods__)
+    members = set(authoring.ComplianceCall.__abstractmethods__)
     assert members == {"evaluation_time", "instruments", "read", "rows"}, members
     assert "account" not in members
 
 
-def test_constraint_finding_bounds_details_to_32_keys() -> None:
-    authoring.ConstraintFinding(
+def test_compliance_finding_bounds_details_to_32_keys() -> None:
+    authoring.ComplianceFinding(
         passed=True, measured=Decimal("0.1"), bound=Decimal("0.2"), excess=Decimal("0"), details={}
     )
     too_many = {f"k{i}": Decimal("1") for i in range(33)}
     with pytest.raises(ValueError):
-        authoring.ConstraintFinding(
+        authoring.ComplianceFinding(
             passed=True,
             measured=Decimal("0.1"),
             bound=Decimal("0.2"),
@@ -479,54 +435,48 @@ def test_constraint_finding_bounds_details_to_32_keys() -> None:
         )
 
 
-def test_constraint_finding_rejects_reserved_detail_keys() -> None:
+def test_compliance_finding_rejects_reserved_detail_keys() -> None:
     with pytest.raises(ValueError):
-        authoring.ConstraintFinding(
+        authoring.ComplianceFinding(
             passed=True,
             measured=Decimal("0.1"),
             bound=Decimal("0.2"),
             excess=Decimal("0"),
-            details={"constraint_id": "x"},
+            details={"compliance_id": "x"},
         )
 
 
-def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
+def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
+    """One member, `observe` (design §7.2); the id declared once and never restated on a
+    finding; the tolerance left to the framework unless the author overrides it."""
     with pytest.raises(TypeError):
-        authoring.Constraint()  # type: ignore[abstract]
+        authoring.Compliance()  # type: ignore[abstract]
 
-    class Cap(authoring.Constraint):
-        def project(self, call: authoring.ConstraintCall) -> authoring.ConstraintBounds:
-            return authoring.ConstraintBounds(
-                lower_weights={i: Decimal("0") for i in call.instruments},
-                upper_weights={i: Decimal("0.1") for i in call.instruments},
-            )
-
+    class Cap(authoring.Compliance):
         @property
-        def constraint_id(self) -> str:
+        def compliance_id(self) -> str:
             return "cap"
 
-        def monitor(
-            self,
-            call: authoring.ConstraintCall,
-            account: authoring.EconomicAccountView,
-            bounds: authoring.ConstraintBounds,
-        ) -> authoring.ConstraintFinding:
-            return authoring.ConstraintFinding(
-                passed=True,
-                measured=Decimal("0"),
+        def observe(
+            self, call: authoring.ComplianceCall, account: authoring.EconomicAccountView
+        ) -> authoring.ComplianceFinding:
+            worst = max((abs(q) for q in account.positions.values()), default=Decimal("0"))
+            return authoring.ComplianceFinding(
+                passed=worst <= Decimal("0.1"),
+                measured=worst,
                 bound=Decimal("0.1"),
-                excess=Decimal("0"),
+                excess=max(worst - Decimal("0.1"), Decimal("0")),
                 details={},
             )
 
-    constraint = Cap()
-    assert constraint.inputs() == {}
-    # Declared once, here, and checked at load against the id it was registered under. What was
-    # removed is the repetition: a finding no longer restates it.
-    assert constraint.constraint_id == "cap"
-    assert not hasattr(authoring.ConstraintFinding, "constraint_id")
+    rule = Cap()
+    assert rule.inputs() == {}
+    assert rule.compliance_id == "cap"
+    assert rule.tolerance is None
+    assert not hasattr(authoring.ComplianceFinding, "compliance_id")
+    assert not hasattr(rule, "project"), "the box is the strategy's kit call, not a member here"
 
-    class _Call(authoring.ConstraintCall):
+    class _Call(authoring.ComplianceCall):
         evaluation_time = UTC_NOW
         instruments = ("A",)
 
@@ -536,8 +486,11 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
         def rows(self, alias: str):
             raise AssertionError("this rule declared no reads")
 
-    bounds = constraint.project(_Call())
-    assert bounds.upper_weight("A") == Decimal("0.1")
+    view = authoring.EconomicAccountView(
+        cash=Decimal("100"), positions={"A": Decimal("0.2")}, nav=None, nav_observed_at=None
+    )
+    finding = rule.observe(_Call(), view)
+    assert finding.passed is False and finding.excess == Decimal("0.1")
 
 
 # --------------------------------------------------------------------------------------
@@ -546,11 +499,11 @@ def test_constraint_is_abstract_and_declares_its_identity_once() -> None:
 
 
 def test_no_public_type_exposes_account_version_or_recorder_or_memory() -> None:
-    forbidden = {"account_version", "version", "recorder", "memory", "constraint_id"}
+    forbidden = {"account_version", "version", "recorder", "memory", "compliance_id"}
     for name in authoring.__all__:
         if name in {"Component", "StrategyModel"}:
             # `Component` carries `memory` on purpose: it is the small strict-JSON state every role
-            # shares (architecture 4.4; a Constraint too, owner ruling 2026-09-08), and it arrived on
+            # shares (architecture 4.4; a Compliance rule too, owner ruling 2026-09-08), and it arrived on
             # this surface with the base class in record `131`. `StrategyModel` carries `recorder`
             # the same way (5.1, record `132`). What this test guards is that no VALUE type -- a call,
             # a finding, a decision -- smuggles framework state in through an annotation.

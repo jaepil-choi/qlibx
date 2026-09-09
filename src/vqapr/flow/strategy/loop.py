@@ -18,7 +18,7 @@ from datetime import datetime
 
 from vqapr.account.account import Account
 from vqapr.account.marking import ValuationService
-from vqapr.authoring import AccountHistoryInput, Component, Constraint, StrategyModel
+from vqapr.authoring import AccountHistoryInput, Compliance, Component, StrategyModel
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
@@ -36,6 +36,7 @@ from vqapr.flow.engine.run_state import (
 )
 from vqapr.flow.strategy.accrual import AccrualHandler
 from vqapr.flow.strategy.callback import CallbackHandler
+from vqapr.flow.strategy.compliance import ComplianceHandler
 from vqapr.flow.strategy.context import (
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
@@ -49,7 +50,7 @@ from vqapr.flow.strategy.context import (
     OccurrenceTrace,
     SimulationResult,
     ValuationResult,
-    _require_constraint_identity,
+    _require_compliance_identity,
     callback_evidence,
 )
 
@@ -77,13 +78,8 @@ __all__ = [
 ]
 
 
-class _InstantOccurrence:
-    """What a per-occurrence window factory reads when handed a bare instant."""
-
-    __slots__ = ("evaluation_time",)
-
-    def __init__(self, evaluation_time: datetime) -> None:
-        self.evaluation_time = evaluation_time
+def _no_compliance_window(instant: datetime) -> ModelWindow:
+    raise RuntimeError("a run that declared no Compliance rule never asks for their window")
 
 
 class StrategyEventLoop(
@@ -95,9 +91,9 @@ class StrategyEventLoop(
 
     The Flow owns timestamp stamping, exact execution, account mutation, and marking. The walk
     itself is `EventLoop`'s, shared with a datamodel run (record `148`); what this adds is the
-    market clock -- every instant the execution table has inside the run -- and the three
-    handlers: a market instant fills the pending intent due there or values the held book, and
-    judges the result; an occurrence asks the strategy to decide.
+    market clock -- every instant the execution table has inside the run -- and the handlers:
+    a market instant accrues, fills the pending intent due there, values the book and has the
+    declared Compliance rules observe it; an occurrence asks the strategy to decide.
     """
 
     def __init__(
@@ -108,11 +104,10 @@ class StrategyEventLoop(
         *,
         layer: FrozenStrategy | None = None,
         strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
-        constraint_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
         account: Account,
-        constraint_window_at: Callable[[datetime], ModelWindow] | None = None,
+        compliance_window_at: Callable[[datetime], ModelWindow] | None = None,
         exchange: Exchange,
-        constraints: tuple[Constraint, ...],
+        compliance: tuple[Compliance, ...] = (),
         valuation_service: ValuationService | None = None,
         scan_session: ScanSession | None = None,
         on_progress: Callable[[], None] | None = None,
@@ -128,12 +123,11 @@ class StrategyEventLoop(
             raise ValueError("layer must be the frozen run's strategy")
         if not callable(strategy_window_for_occurrence):
             raise TypeError("strategy_window_for_occurrence must be callable")
-        if not callable(constraint_window_for_occurrence):
-            raise TypeError("constraint_window_for_occurrence must be callable")
+        if compliance and not callable(compliance_window_at):
+            raise TypeError("compliance_window_at must be callable when rules are loaded")
         if not callable(getattr(exchange, "execute", None)):
             raise TypeError("exchange must provide execute")
-        declared = layer.constraints.constraints
-        _require_constraint_identity(constraints, declared)
+        _require_compliance_identity(compliance, layer.compliance.rules)
         cutoff = frozen_run.start or frozen_run.end
         if cutoff is None:
             raise RuntimeError("simulation start requires a frozen boundary")
@@ -152,13 +146,13 @@ class StrategyEventLoop(
         if frozen_run.initial_account_mode != account.mode:
             raise ValueError("Account mode must match FrozenRun initial account mode")
         carried = set(state.current.component_state_refs)
-        stateful = {constraint.constraint_id for constraint in constraints}
+        stateful = {rule.compliance_id for rule in compliance}
         if isinstance(exchange, Component):
             stateful.add(exchange.exchange_id)
         if carried != stateful:
             raise ValueError(
                 "state must carry the initial memory of exactly the loaded components -- every "
-                "constraint, and the venue when it is a Component (RunStateRepository "
+                "compliance rule, and the venue when it is a Component (RunStateRepository "
                 f"initial_component_memory): carrying {sorted(carried)!r}, loaded "
                 f"{sorted(stateful)!r}"
             )
@@ -175,17 +169,10 @@ class StrategyEventLoop(
             account=account,
             exchange=exchange,
             strategy=strategy,
-            constraints=constraints,
+            compliance=compliance,
             valuation_service=valuation_service or ValuationService(),
             strategy_window_for_occurrence=strategy_window_for_occurrence,
-            constraint_window_for_occurrence=constraint_window_for_occurrence,
-            # Direct flow callers may provide only the per-occurrence window factory.
-            constraint_window_at=constraint_window_at
-            or (
-                lambda instant: constraint_window_for_occurrence(
-                    _InstantOccurrence(instant)  # type: ignore[arg-type]
-                )
-            ),
+            compliance_window_at=compliance_window_at or _no_compliance_window,
             scan_session=scan_session,
             registry=registry,
             reference_price=next(iter(prices), None),
@@ -194,6 +181,7 @@ class StrategyEventLoop(
         )
         self._accrual = AccrualHandler(self._context)
         self._valuation = ValuationHandler(self._context)
+        self._compliance = ComplianceHandler(self._context)
         self._callback = CallbackHandler(self._context)
         self._execution = ExecutionHandler(self._context)
         account.bind(initial)
@@ -251,7 +239,7 @@ class StrategyEventLoop(
             1. ACCRUE      what the holding period up to now earned         (a place, for now)
             2. EXECUTE     the pending intent whose target is this instant  (when there is one)
             3. VALUATION   the committed book, from the fill's snapshot or a fresh one
-            4. COMPLIANCE  the declared constraints on the committed, marked book
+            4. COMPLIANCE  the declared Compliance rules observe the committed, marked book
             (5. DECIDE     a decision at this same instant is a separate event, sorted after)
 
         A pending intent whose target has already passed is a broken invariant, not a late fill:
@@ -280,9 +268,7 @@ class StrategyEventLoop(
                 if filled is None
                 else self._valuation.mark_fill(filled)
             )
-            monitoring = self._valuation.monitor_at(
-                instant, occurrence=None if filled is None else filled.pending.occurrence
-            )
+            monitoring = self._compliance.observe(instant)
             result: DueExecutionResult | HeldResult = (
                 HeldResult(marked.evidence, monitoring)  # type: ignore[arg-type]
                 if filled is None

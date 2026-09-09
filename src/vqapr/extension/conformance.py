@@ -8,7 +8,7 @@ type, and it declares its data requirements.
 
 Loading is not conformance. A component can construct perfectly and still be unusable, because the
 methods Flow will call are not the methods it defined. Renaming a parameter of
-`Constraint.project`, or dropping `DataModel.compute` onto a class that inherits an abstract stub,
+`Compliance.observe`, or dropping `DataModel.compute` onto a class that inherits an abstract stub,
 produces an object that registers cleanly and fails in the middle of a run — where the reported
 stage names the run rather than the component that caused it.
 
@@ -50,13 +50,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from vqapr.authoring import Constraint, DataModel, StrategyModel
+from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.domain.errors import Diagnosis, Failure, Stage, Status, collector
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
     accepts_contract_call,
-    load_constraint,
+    load_compliance,
     load_data_model,
     load_exchange,
     load_strategy_model,
@@ -74,10 +74,7 @@ _CONTRACT_METHODS: dict[ComponentKind, tuple[tuple[type, str], ...]] = {
         (StrategyModel, "decide"),
         (StrategyModel, "requirements"),
     ),
-    ComponentKind.CONSTRAINT: (
-        (Constraint, "project"),
-        (Constraint, "monitor"),
-    ),
+    ComponentKind.COMPLIANCE: ((Compliance, "observe"),),
     ComponentKind.EXCHANGE: ((Exchange, "execute"),),
 }
 """Every method Flow calls on each kind, and the contract that declares its shape.
@@ -90,7 +87,7 @@ so the check is stated in one table rather than depending on which contract happ
 _LOADERS = {
     ComponentKind.DATA_MODEL: load_data_model,
     ComponentKind.STRATEGY_MODEL: load_strategy_model,
-    ComponentKind.CONSTRAINT: load_constraint,
+    ComponentKind.COMPLIANCE: load_compliance,
     ComponentKind.EXCHANGE: load_exchange,
 }
 
@@ -117,7 +114,7 @@ def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
     Annotations are not compared: narrowing a return type is legitimate, and most components
     declare no annotation at all. Whether a callback returns the *right type* is not decidable
     here — an annotation can lie — so the Flow enforces it at the call site instead
-    (`validate_economic_intent`, `_validated_output`, `Constraint.project`'s isinstance check).
+    (`validate_economic_intent`, `_validated_output`, `Compliance.observe`'s isinstance check).
     """
     for base, name in _CONTRACT_METHODS[kind]:
         implementation = getattr(type(component), name, None)

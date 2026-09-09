@@ -17,10 +17,10 @@ from vqapr.analysis.signal import (
     rank_information_coefficient,
 )
 from vqapr.authoring import (
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
     Component,
-    Constraint,
-    ConstraintBounds,
-    ConstraintFinding,
     DataModel,
     DatasetInput,
     Hold,
@@ -29,8 +29,8 @@ from vqapr.authoring import (
 )
 from vqapr.authoring.context import DataModelContext, StrategyModelContext
 from vqapr.authoring.records import TableSpec
-from vqapr.constraints.builtin import SHIPPED_CONSTRAINTS, shipped_constraint_path
-from vqapr.constraints.evaluation import ConstraintReport
+from vqapr.compliance.builtin import SHIPPED_COMPLIANCE, shipped_compliance_path
+from vqapr.compliance.evaluation import ComplianceReport
 from vqapr.data.datasets import DatasetRegistration, ExecutionRole
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.panel import PanelWindow
@@ -103,6 +103,7 @@ from vqapr.portfolio.allocation import (
     AllocationViolation,
     validate_allocation,
 )
+from vqapr.portfolio.bounds import intersect, no_short, single_name_cap
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.diagnostics import TickerNetting, net_members
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef, PortfolioTarget
@@ -127,7 +128,7 @@ from vqapr.portfolio.weighting import (
 # `docs/design/agent-first-surface.md`, and `tests/boundaries/test_internal_has_one_door.py`
 # enforces it).
 from vqapr.project.registration import (
-    register_constraint,
+    register_compliance,
     register_data_model,
     register_exchange,
     register_instruments,
@@ -135,7 +136,7 @@ from vqapr.project.registration import (
 )
 from vqapr.project.registration import register_dataset as register_dataset
 from vqapr.project.run import (
-    ConstraintSet,
+    ComplianceSet,
     DataModelEntry,
     RunAgenda,
     RunDefinition,
@@ -160,7 +161,7 @@ from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
 
 __all__ = (
     "QUANTUM",
-    "SHIPPED_CONSTRAINTS",
+    "SHIPPED_COMPLIANCE",
     "AcademicExchange",
     "AccountMode",
     "AccountSnapshot",
@@ -169,14 +170,14 @@ __all__ = (
     "AllocationViolation",
     "Budget",
     "CalendarLookback",
+    "Compliance",
+    "ComplianceCall",
+    "ComplianceFinding",
+    "ComplianceReport",
+    "ComplianceSet",
     "Component",
     "ComponentKind",
     "ComponentRef",
-    "Constraint",
-    "ConstraintBounds",
-    "ConstraintFinding",
-    "ConstraintReport",
-    "ConstraintSet",
     "CrossSection",
     "DataModel",
     "DataModelContext",
@@ -221,7 +222,7 @@ __all__ = (
     # method a DataModel author can call, and it was reachable only by opening installed source:
     # not in `__all__`, absent from the skill, and with no docstring naming its row keys or
     # ordering (`docs/issues/archive/031`). `ModelWindow` was importable but undeclared, while the
-    # constraint scaffold has always emitted `from vqapr.public import ... ModelWindow`.
+    # component scaffolds have always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
     "OperationOccurrence",
     "OptimizeRefusal",
@@ -273,11 +274,13 @@ __all__ = (
     "information_coefficient",
     "instrument",
     "instruments",
+    "intersect",
     "krx_listings",
     "krx_rules",
     "nav_series",
     "net_members",
     "neutralize",
+    "no_short",
     "optimize",
     "preflight_run",
     "proportional_weight",
@@ -286,7 +289,7 @@ __all__ = (
     "read_run_record",
     "read_strategy_record",
     "read_strategy_table",
-    "register_constraint",
+    "register_compliance",
     "register_data_model",
     "register_dataset",
     "register_exchange",
@@ -298,8 +301,9 @@ __all__ = (
     "run",
     "run_ids",
     "run_report",
-    "shipped_constraint_path",
+    "shipped_compliance_path",
     "signal_weight",
+    "single_name_cap",
     "strategy_refs",
     "strategy_report",
     "trade_rules_by_kind",

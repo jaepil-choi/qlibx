@@ -11,7 +11,7 @@ the reader nothing.
 
 ## Write the strict comparison
 
-In `monitor`, compare exactly. Do not add your own epsilon, do not round, do not "allow a bit".
+In `observe`, compare exactly. Do not add your own epsilon, do not round, do not "allow a bit".
 
 The framework judges each finding's `excess` against:
 
@@ -32,24 +32,24 @@ nothing is hidden by the classification.
 
 ## Why one place
 
-If each constraint applied its own tolerance, two constraints on the same book would disagree about
+If each rule applied its own tolerance, two rules on the same book would disagree about
 what "close enough" means, and a report combining them would be comparing different rulers. Judging
 in one place is what makes the three counts addable.
 
-It also means a reader can find the rule. An epsilon buried in a user's `monitor` is invisible in
+It also means a reader can find the line. An epsilon buried in a user's `observe` is invisible in
 the record; the framework's line is stated with every finding as `tolerance`.
 
 ## Overriding it
 
-A `tolerance` property on your Constraint returning a `Decimal` share of NAV replaces the
-framework's line for that constraint. `None` — the default — keeps it.
+A `tolerance` property on your rule returning a `Decimal` share of NAV replaces the
+framework's line for that rule. `None` — the default — keeps it.
 
 Override when the mandate itself states a tolerance. Do not override to make a breach go away: the
 `within_tolerance` count exists precisely so a nearly-breaching book is visible rather than
 laundered into `held`.
 
 When you do override, say so when reporting — the number is in the record, but a reader comparing
-two constraints will assume the same ruler unless told.
+two rules will assume the same ruler unless told.
 
 ## Reporting these three
 
@@ -57,5 +57,5 @@ Never collapse them. *"No breaches"* is a different statement from *"no findings
 bound"*, and a book that spent a year at `within_tolerance` is a book that was at its limit the
 whole time.
 
-`compliance.constraints` in a `StrategyReport` keeps the split, with the worst excess and when it
+`compliance.rules` in a `StrategyReport` keeps the split, with the worst excess and when it
 happened, and the offending names by count.

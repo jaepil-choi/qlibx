@@ -1,6 +1,6 @@
 ---
 name: run-backtest
-description: Declares, checks, and executes a vqapr run: choosing sessions and decision times, binding strategies to an exchange and constraints, proving readiness with `vqapr check`, then executing with `vqapr run`. Use when the user wants to run, execute, or backtest something already registered, asks why a run refuses to start, or asks what a long run is doing while it executes.
+description: Declares, checks, and executes a vqapr run: choosing sessions and decision times, binding a strategy to an exchange and compliance rules, proving readiness with `vqapr check`, then executing with `vqapr run`. Use when the user wants to run, execute, or backtest something already registered, asks why a run refuses to start, or asks what a long run is doing while it executes.
 ---
 
 # Run a vqapr backtest
@@ -27,8 +27,8 @@ always name the declaration that produced it.
 to act.** `every: 1d` with `at` is one decision a day; `every: 1M` the first trading day of each
 month; `every: 5m` with `from`/`to` every five minutes inside each day. The days come from the
 execution dataset, never from a list. There is no valuation or monitoring time to declare: the
-book is valued at the instant the venue fills, and the declared constraints judge it right after
-each commit.
+book is valued at every instant of the market clock, and the declared compliance rules observe it
+right after.
 
 **Three factor models on one cadence are one run with three strategies, not three runs.** Each
 strategy runs with its own account and writes its own record.

@@ -4,15 +4,15 @@
                                                                 |
     committed benchmark panel  ------------------------------- + -->  enhanced index run (KRX)
                                                                           desired = bench + s·active
-                                                                          projected onto NoShort
-                                                                          and SingleNameCap
+                                                                          built inside no_short
+                                                                          and single_name_cap
 
 Both halves are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real order
 planning and the declared execution profile. The enhanced-index Strategy reads **two allocation
 inputs** — the committed benchmark and the published alpha — through ordinary `DataRequirement`
 subscriptions inside its point-in-time window, so the combination is proved on the subscription
 path rather than by reading parquet beside it. Its bounds are the ones the registered shipped
-constraint set projected for that occurrence, not a second copy of the same rule.
+box the strategy builds for that occurrence, not a second copy of the same rule.
 
 The fill journal the second run committed is replayed independently against the committed
 `Account`, the monitoring findings over every marked account version are read back rather than
@@ -44,7 +44,7 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
@@ -57,12 +57,12 @@ from vqapr.public import (
     ZeroDealtReason,
     export_roster,
     preflight_run,
-    register_constraint,
+    register_compliance,
     register_dataset,
     register_exchange,
     register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -73,7 +73,8 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
-"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
+"""Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
+the shipped compliance rule of the same name observes the book against its own copy of it."""
 
 VERIFIED_AGAINST = "vqapr-0.8.0"
 LAST_VERIFIED_AT = "2026-09-08"
@@ -234,7 +235,10 @@ from vqapr.public import (
     Rebalance,
     RowsLookback,
     StrategyModel,
+    intersect,
+    no_short,
     optimize,
+    single_name_cap,
     validate_allocation,
 )
 
@@ -254,11 +258,16 @@ BUDGET = Budget(
 
 
 class EnhancedIndex(StrategyModel):
-    """desired = benchmark + SCALE·active, projected onto the projected constraint set."""
+    """desired = benchmark + SCALE·active, projected onto the box this strategy builds itself:
+    no short, and no name above `max(cap, index weight)` (design §7.1)."""
 
-    def __init__(self, *, benchmark_dataset_id: str, alpha_dataset_id: str) -> None:
+    def __init__(
+        self, *, benchmark_dataset_id: str, alpha_dataset_id: str, cap: str, benchmark_tolerance: str
+    ) -> None:
         self._benchmark_dataset_id = benchmark_dataset_id
         self._alpha_dataset_id = alpha_dataset_id
+        self._cap = Decimal(cap)
+        self._benchmark_tolerance = Decimal(benchmark_tolerance)
 
     def requirements(self):
         return (
@@ -295,8 +304,23 @@ class EnhancedIndex(StrategyModel):
             label="subscribed alpha allocation",
         )
 
-        bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower_weights))
+        # The benchmark is this callback's own subscription too, and the cap is relative to it, so
+        # it is validated here -- before it becomes a bound -- the way the alpha is.
+        validate_allocation(
+            benchmark,
+            AllocationInvariants.of(
+                sign=AllocationSign.LONG_ONLY,
+                tolerance=self._benchmark_tolerance,
+                required_coverage=(),
+            ),
+            label="subscribed benchmark allocation",
+        )
+        # The box, built here by the strategy (design §7.1): a floor at zero intersected with a
+        # symmetric single-name cap lifted to the index weight where the index is heavier.
+        instruments = tuple(sorted(context.window.instruments))
+        lower, upper = intersect(
+            no_short(instruments), single_name_cap(instruments, benchmark, self._cap)
+        )
         desired = {
             name: (
                 benchmark.get(name, Decimal(0)) + SCALE * active.get(name, Decimal(0))
@@ -332,9 +356,9 @@ class EnhancedIndex(StrategyModel):
         # as a constraint violation and fails the callback -- see README, "Known gap".
         frozen = frozenset()
         if current:
-            pinned = max(current, key=lambda name: (bounds.upper_weights[name] - current[name], name))
+            pinned = max(current, key=lambda name: (upper[name] - current[name], name))
             frozen = frozenset({pinned})
-        result = self._solve(desired, current, bounds, frozen)
+        result = self._solve(desired, current, lower, upper, frozen)
         reported = len(result.frozen_outside_box)
 
         for name in frozen:
@@ -355,12 +379,12 @@ class EnhancedIndex(StrategyModel):
             budget=BUDGET,
         )
 
-    def _solve(self, desired, current, bounds, frozen):
+    def _solve(self, desired, current, lower, upper, frozen):
         return optimize(
             desired=desired,
             current=current,
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozen,
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -520,12 +544,12 @@ def _replay(result: Any) -> dict[str, Any]:
 
 
 def _monitoring(result: Any) -> dict[str, Any]:
-    """Read back the monitoring verdict the run produced over every marked account version.
+    """Read back what the compliance rules found over every marked account version.
 
-    Registering a constraint set proves nothing by itself. The set is *enforced* at the decision:
-    an intent that fails its projected bounds is refused and the run stops, so 21 completed
-    rebalances are 21 compliant intents. Monitoring is the other half, and it is evidence rather
-    than a gate -- a failing finding does not stop anything, so it has to be read to exist.
+    Declaring compliance rules proves nothing by itself. A rule observes; it does not gate -- a
+    failing finding stops nothing, so it has to be read to exist. And the rules are independent of
+    the box the strategy built inside (design §7.2): the strategy's cap and the rule's cap are two
+    declarations of the same number, and the report is where they meet.
 
     A drift finding here is not a defect. `single_name_cap` is defined relative to the index, and
     the index moves: the book is built at 09:00 against the previous session's weight and marked at
@@ -550,15 +574,15 @@ def _monitoring(result: Any) -> dict[str, Any]:
         for finding in report.findings:
             if finding.passed:
                 continue
-            if finding.constraint_id == "no-short":
+            if finding.rule_id == "no-short":
                 raise AssertionError(
                     "a long-only account marked a short position: "
                     f"{finding.measured} against {finding.bound}"
                 )
             drift_findings += 1
-            seen = drift.get(finding.constraint_id)
+            seen = drift.get(finding.rule_id)
             if seen is None or finding.excess > seen[0]:
-                drift[finding.constraint_id] = (finding.excess, finding.measured, finding.bound)
+                drift[finding.rule_id] = (finding.excess, finding.measured, finding.bound)
     return {
         "monitoring_occurrences": len(reports),
         "monitoring_drift_findings": drift_findings,
@@ -826,27 +850,30 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         config={
             "benchmark_dataset_id": "benchmark_weight_daily",
             "alpha_dataset_id": "alpha_allocation",
+            "cap": CAP,
+            "benchmark_tolerance": tolerance,
         },
     )
-    # The shipped constraints enter through the same door as any user component: a resolved path,
-    # a fingerprint and a config. Nothing about them bypasses registration.
-    register_constraint(
+    # The shipped compliance rules enter through the same door as any user component: a resolved
+    # path, a fingerprint and a config. Their parameters are their own -- the cap below is the
+    # rule's copy, not the strategy's (design §7.2).
+    register_compliance(
         project,
         "no-short",
-        shipped_constraint_path("no_short"),
+        shipped_compliance_path("no_short"),
         "NoShort",
-        config={"constraint_id": "no-short"},
+        config={"compliance_id": "no-short"},
     )
-    register_constraint(
+    register_compliance(
         project,
         "single-name-cap",
-        shipped_constraint_path("single_name_cap"),
+        shipped_compliance_path("single_name_cap"),
         "SingleNameCap",
         config={
             "cap": CAP,
             "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
-            "constraint_id": "single-name-cap",
+            "compliance_id": "single-name-cap",
         },
     )
 
@@ -892,7 +919,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     index_definition = RunDefinition(
         run_id="show005-index",
-        strategy=StrategyEntry("show005-index", ("no-short", "single-name-cap")),
+        strategy=StrategyEntry("show005-index"),
+        compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
         agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="show005-krx",
@@ -1035,7 +1063,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
             "account_mode": AccountMode.LONG_ONLY.value,
             "subscribed_allocation_inputs": ["alpha_allocation", "benchmark_weight_daily"],
-            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "rebalances": index_memory.get("rebalances"),
             "frozen_occurrences": index_memory.get("frozen_occurrences"),
@@ -1074,7 +1102,7 @@ def main() -> None:
     print(f"alpha views published   : {trace['alpha_run']['published_occurrences']} occurrences")
     print(f"recorded signal rows    : {trace['recorder']['rows']} (first real-spine recorder use)")
     print(f"subscribed inputs       : {', '.join(index['subscribed_allocation_inputs'])}")
-    print(f"shipped constraints     : {', '.join(index['shipped_constraints'])}")
+    print(f"shipped compliance      : {', '.join(index['shipped_compliance'])}")
     print(f"rebalances              : {index['rebalances']}")
     print(
         f"frozen / drifted out    : {index['frozen_occurrences']} / {index['frozen_outside_box']}"

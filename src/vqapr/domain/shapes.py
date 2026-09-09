@@ -264,8 +264,8 @@ class CrossSection[T](Mapping[str, T]):
     ) -> CrossSection[U]:
         """`fn` applied name by name across this and `others`, which must cover the same names.
 
-        What `merged_constraint_bounds` does with `max` and `min`: a projection that misses a name
-        is refused rather than defaulted, because a missing bound would silently widen the box.
+        What `vqapr.portfolio.bounds.intersect` does with `max` and `min`: a box that misses a
+        name is refused rather than defaulted, because a missing bound would silently widen it.
         """
         for other in others:
             if set(other) != set(self._keys):

@@ -957,27 +957,24 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     from vqapr.domain.errors import VqaprError
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.public import register_constraint
+    from vqapr.public import register_compliance
     from vqapr.extension.conformance import conformance
 
     codes: list[str] = []
 
     good = textwrap.dedent(
         """
-        from vqapr.public import Constraint, ConstraintBounds
+        from vqapr.public import Compliance
 
-        class Limit(Constraint):
+        class Limit(Compliance):
             @property
-            def constraint_id(self):
+            def compliance_id(self):
                 return "limit"
 
             def requirements(self):
                 return ()
 
-            def project(self, call):
-                return ConstraintBounds(lower_weights={}, upper_weights={})
-
-            def monitor(self, call, account, bounds):
+            def observe(self, call, account):
                 return None
         """
     )
@@ -985,16 +982,14 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     # instantiation fails and `component.load.construction_failed` fires before the signature
     # check this fixture exists to provoke ever runs -- the exact silent-weakening this file's
     # own comment below warns about.
-    stale = good.replace(
-        "def monitor(self, call, account, bounds):", "def monitor(self, account, marks):"
-    )
-    missing = good.replace("def project(self, call):", "def unused(self):")
+    stale = good.replace("def observe(self, call, account):", "def observe(self, account):")
+    missing = good.replace("def observe(self, call, account):", "def unused(self):")
     broken = "class Limit:\n    pass\n"
 
     def _ref(source: str, name: str, *, component_id: str | None = None) -> ComponentRef:
-        # The filename and the registered id are separate arguments on purpose. `load_constraint`
-        # refuses a Constraint registered under an id its own `constraint_id` does not return, and
-        # every source below derives from `good`, whose `constraint_id` is `limit`. Registering
+        # The filename and the registered id are separate arguments on purpose. `load_compliance`
+        # refuses a rule registered under an id its own `compliance_id` does not return, and
+        # every source below derives from `good`, whose `compliance_id` is `limit`. Registering
         # them as `stale`/`missing` would trip that identity refusal FIRST, and because
         # `conformance` folds a loader exception into its collector and returns before
         # `_check_methods` runs, the defect each fixture exists to provoke would never be reached.
@@ -1005,11 +1000,11 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
         path.write_text(source, encoding="utf-8")
         return ComponentRef.of(
             component_id or name,
-            ComponentKind.CONSTRAINT,
+            ComponentKind.COMPLIANCE,
             path,
             "Limit",
             fingerprint=fingerprint_component(
-                path, kind=ComponentKind.CONSTRAINT, object_name="Limit"
+                path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
             ),
         )
 
@@ -1026,7 +1021,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
         codes.extend(failure.code for failure in diagnosis.failures)
 
     try:
-        register_constraint(tmp_path, "again", tmp_path / "does-not-exist.py", "Limit")
+        register_compliance(tmp_path, "again", tmp_path / "does-not-exist.py", "Limit")
     except VqaprError as error:
         codes.extend(failure.code for failure in error.failures)
     except OSError:

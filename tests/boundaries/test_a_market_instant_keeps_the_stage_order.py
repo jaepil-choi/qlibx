@@ -31,7 +31,7 @@ _ZONE = ZoneInfo("Asia/Seoul")
 def test_the_dispatcher_writes_the_stage_order_down_once() -> None:
     """The order is a fact about the code, checked as text so a reordering is a visible diff."""
     source = inspect.getsource(StrategyEventLoop._handle_market)
-    calls = ["._accrual.accrue(", "._execution.fill(", ".mark_", ".monitor_at(", "._execution.close("]
+    calls = ["._accrual.accrue(", "._execution.fill(", ".mark_", "._compliance.observe(", "._execution.close("]
     positions = [source.index(call) for call in calls]
     assert positions == sorted(positions), (
         "ACCRUE, EXECUTE, VALUATION, COMPLIANCE and the fill's epilogue must be called in that order"

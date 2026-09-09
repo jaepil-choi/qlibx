@@ -40,7 +40,7 @@ drawdown. Add `relative` columns when a benchmark book is in the run.
 `annualized_realized_turnover` beside `annualized_intended_turnover` — that second pair is the size
 of what did not execute, and it is usually the most interesting row on the page.
 
-**Table 4 — compliance.** `compliance.constraints`: checked / held / within tolerance / breached,
+**Table 4 — compliance.** `compliance.rules`: checked / held / within tolerance / breached,
 worst excess, top offenders.
 
 **Figure 1 — cumulative return with drawdown beneath.** `performance.nav` normalised to 1 (or

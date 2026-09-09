@@ -58,7 +58,7 @@ def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError
 _LABELS = {
     ComponentKind.DATA_MODEL: "DataModel",
     ComponentKind.STRATEGY_MODEL: "StrategyModel",
-    ComponentKind.CONSTRAINT: "Constraint",
+    ComponentKind.COMPLIANCE: "Compliance",
     ComponentKind.EXCHANGE: "Exchange",
 }
 

@@ -202,7 +202,7 @@ class StrategyRecord(_Record):
     fingerprint: str
     component: dict[str, Any]
     agenda: dict[str, Any]
-    constraints: list[dict[str, Any]]
+    compliance: list[dict[str, Any]]
     account: dict[str, Any] | None
     tables: dict[str, Any]
     contract: dict[str, Any]

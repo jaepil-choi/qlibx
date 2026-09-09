@@ -41,7 +41,7 @@ def test_the_component_names_callers_import_still_resolve(name: str) -> None:
     [
         "load_data_model",
         "load_strategy_model",
-        "load_constraint",
+        "load_compliance",
         "load_exchange",
         "positional_arity",
         "accepts_contract_call",

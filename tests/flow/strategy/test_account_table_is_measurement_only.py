@@ -33,7 +33,7 @@ def test_the_package_owns_exactly_four_default_tables() -> None:
     the initial account, which `FrozenRun` already carries, and nothing read it. Machinery whose
     only user is its own test is not a feature.
 
-    `vqapr.monitoring` is the fourth (record `140`): what each declared constraint measured on the
+    `vqapr.monitoring` is the fourth (record `140`): what each declared compliance rule measured on the
     committed account, which until then reached the record only as a count.
     """
     assert {spec.table_id for spec in DEFAULT_TABLES} == {
@@ -58,12 +58,12 @@ def test_the_account_table_carries_what_dates_a_measurement() -> None:
 def test_every_default_row_is_keyed_by_its_subject() -> None:
     """The three tables about the book are keyed by instrument; the one about rules, by rule.
 
-    A monitoring finding is one constraint's verdict over the whole account -- the names that
+    A monitoring finding is one rule's verdict over the whole account -- the names that
     breached are a field on it, not its key -- so keying it by instrument would either fabricate
     a synthetic identity or repeat one worst-case measurement under each offender's name.
     """
     for spec in DEFAULT_TABLES:
-        key = "constraint" if spec.table_id == MONITORING else "instrument"
+        key = "rule" if spec.table_id == MONITORING else "instrument"
         assert key in spec.fields, spec.table_id
 
 

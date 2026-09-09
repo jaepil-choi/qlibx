@@ -18,7 +18,7 @@ import inspect
 import sys
 from pathlib import Path
 
-from vqapr.authoring import Constraint, DataModel, StrategyModel
+from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.exchange.listings import ExchangeRulesView
@@ -316,62 +316,60 @@ def load_strategy_model(
 
 
 
-def load_constraint(ref: ComponentRef, *, project_root: str | Path | None = None) -> Constraint:
-    constraint = _load(ref, kind=ComponentKind.CONSTRAINT, project_root=project_root)
-    if not isinstance(constraint, Constraint):
+def load_compliance(ref: ComponentRef, *, project_root: str | Path | None = None) -> Compliance:
+    rule = _load(ref, kind=ComponentKind.COMPLIANCE, project_root=project_root)
+    if not isinstance(rule, Compliance):
         raise _failure(
             "component.wrong_type",
-            "registered Constraint object must implement the public Constraint contract",
-            type(constraint).__name__,
-            fix="make the registered object a subclass of vqapr.authoring.Constraint",
+            "registered Compliance object must implement the public Compliance contract",
+            type(rule).__name__,
+            fix="make the registered object a subclass of vqapr.authoring.Compliance",
             status=Status.CONTRACT,
         )
-    # Not `_requirements(...)`: a Constraint declares its reads with `inputs()` like every other
-    # Model role does since record `128`, and declaring nothing is legitimate -- `NoShort` is a
-    # rule about a weight's sign and reads no data at all. Requiring a non-empty
-    # `requirements()` here made the shipped constraint that needs no data the one shape the
-    # loader could not accept.
-    _constraint_identity(ref, constraint)
-    return constraint
+    # Not `_requirements(...)`: a rule declares its reads with `inputs()` like every other Model
+    # role does since record `128`, and declaring nothing is legitimate -- `NoShort` is a rule
+    # about a holding's sign and reads no data at all.
+    _compliance_identity(ref, rule)
+    return rule
 
 
-def _constraint_identity(ref: ComponentRef, constraint: Constraint) -> None:
-    """Refuse a Constraint registered under an id it does not answer to.
+def _compliance_identity(ref: ComponentRef, rule: Compliance) -> None:
+    """Refuse a Compliance rule registered under an id it does not answer to.
 
-    `StrategyEventLoop` requires the loaded constraints to carry exactly the ids the FrozenRun
-    declared, and it enforced that with a bare `ValueError` at assembly. Nothing before it looked,
-    so `check` returned `ok:true` on all five phases and `run` then died with `stage: unhandled`
-    and an empty `failures` list -- the framework reporting itself broken when the registration was
-    wrong. Registering `NoShort` as `noshort` crashed; the same file as `no-short` ran clean, and
-    nothing said so.
+    `StrategyEventLoop` requires the loaded rules to carry exactly the ids the FrozenRun declared,
+    and it enforced that with a bare `ValueError` at assembly. Nothing before it looked, so `check`
+    returned `ok:true` on all five phases and `run` then died with `stage: unhandled` and an empty
+    `failures` list -- the framework reporting itself broken when the registration was wrong.
+    Registering `NoShort` as `noshort` crashed; the same file as `no-short` ran clean, and nothing
+    said so.
 
     This is the one place that can answer the question for every caller. `conformance` dispatches
-    here for `ComponentKind.CONSTRAINT`, so `vqapr register` refuses at registration; `preflight`
-    loads constraints through here, so `vqapr check` refuses before a run is spent and `vqapr run`
+    here for `ComponentKind.COMPLIANCE`, so `vqapr register` refuses at registration; `preflight`
+    loads rules through here, so `vqapr check` refuses before a run is spent and `vqapr run`
     refuses before assembly. Checking the LOADED object rather than the source is what catches a
-    `constraint_id` computed at runtime, which no static read of the file can see.
+    `compliance_id` computed at runtime, which no static read of the file can see.
 
-    It cannot be the ONLY place, because it can only ask once per load. A `constraint_id` that
+    It cannot be the ONLY place, because it can only ask once per load. A `compliance_id` that
     returns a different string on each access satisfies this check at registration and again at
-    `check`, and still disagrees by run assembly; `_require_constraint_identity` in
-    `flow/strategy/loop.py` is what catches that, and red-teaming confirmed the path is live.
+    `check`, and still disagrees by run assembly; `_require_compliance_identity` in
+    `flow/strategy/context.py` is what catches that, and red-teaming confirmed the path is live.
     """
     declared = str(ref.component_id)
-    answered = constraint.constraint_id
+    answered = rule.compliance_id
     if answered == declared:
         return
     raise _failure(
-        "component.constraint_id_mismatch",
-        "a Constraint must be registered under the id its own constraint_id returns",
-        f"registered as {declared!r}, constraint_id returns {answered!r}",
+        "component.compliance_id_mismatch",
+        "a Compliance rule must be registered under the id its own compliance_id returns",
+        f"registered as {declared!r}, compliance_id returns {answered!r}",
         # Three remedies, because which one is right depends on the component. A class with a
         # hardcoded id has two; one that takes its id as a constructor argument -- as the shipped
         # `NoShort` does -- has a third, and omitting it would send that user to edit a file the
         # package ships.
         fix=(
-            f"register the component as {answered!r}; or change the class's constraint_id to "
+            f"register the component as {answered!r}; or change the class's compliance_id to "
             f"return {declared!r}; or, if the class takes its id as a constructor argument "
-            f"(the shipped NoShort takes `constraint_id`), pass {declared!r} to it through the "
+            f"(the shipped NoShort takes `compliance_id`), pass {declared!r} to it through the "
             f"registration's config mapping"
         ),
         status=Status.CONTRACT,

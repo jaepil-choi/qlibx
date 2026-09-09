@@ -57,7 +57,8 @@ def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "krx-2024",
         "writes": "krx-2024-weights",
-        "strategy": StrategyEntry("ou-k0", ("no-short",)),
+        "strategy": StrategyEntry("ou-k0"),
+        "compliance": ("no-short",),
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
         "agenda": {"every": "1d", "at": time(15, 29)},
@@ -83,7 +84,7 @@ def workspace(tmp_path: Path) -> Workspace:
     for name, kind in (
         ("ou-k0", ComponentKind.STRATEGY_MODEL),
         ("ou-ff5", ComponentKind.STRATEGY_MODEL),
-        ("no-short", ComponentKind.CONSTRAINT),
+        ("no-short", ComponentKind.COMPLIANCE),
         ("venue", ComponentKind.EXCHANGE),
     ):
         with Workspace.transaction(space) as t:
@@ -124,7 +125,8 @@ def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> N
     document = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))
     written = document["runs"]["krx-2024"]
     assert written["writes"] == "krx-2024-weights"
-    assert written["strategy"] == {"component": "ou-k0", "constraints": ["no-short"]}
+    assert written["strategy"] == {"component": "ou-k0"}
+    assert written["compliance"] == ["no-short"], "the rules are the run's, beside the venue"
     assert "strategies" not in written, "the singular block replaced the keyed mapping"
     # The sessions and the one wall time are the run's own keys, in the shape an author writes.
     assert written["timezone"] == "Asia/Seoul"
@@ -161,7 +163,7 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     [
         ({"strategy": StrategyEntry("absent")}, "strategy 'absent'"),
         ({"strategy": StrategyEntry("venue")}, "strategy 'venue'"),
-        ({"strategy": StrategyEntry("ou-k0", ("ou-ff5",))}, "constraint 'ou-ff5'"),
+        ({"compliance": ("ou-ff5",)}, "compliance rule 'ou-ff5'"),
         ({"exchange": "ou-k0"}, "exchange 'ou-k0'"),
         (
             {
@@ -219,7 +221,8 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                 },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
                 "writes": "krx-2024-weights",
-                "strategies": {"ou-k0": {"constraints": ["no-short"]}},
+                "strategies": {"ou-k0": {}},
+                "compliance": ["no-short"],
             }
         }
     }

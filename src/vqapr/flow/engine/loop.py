@@ -5,8 +5,8 @@ A strategy run and a datamodel run are the same loop (record `148`, owner: *"dat
 `206`) the loop has two static sources and no dynamic one: the STRATEGY clock -- the occurrences
 frozen at preflight, where a model decides -- and the MARKET clock -- every instant the
 execution table has inside the run, where a pending decision fills, the book is valued and the
-declared constraints judge it. Both are known in full before the first step, so the walk is one
-sorted merge and nothing is minted while it runs: two runs of the same frozen inputs produce the
+declared Compliance rules observe it. Both are known in full before the first step, so the walk is
+one sorted merge and nothing is minted while it runs: two runs of the same frozen inputs produce the
 same traces (architecture 3.2). At one instant the market clock goes first (§3.1: what was
 decided earlier is settled and valued before anything new is decided).
 

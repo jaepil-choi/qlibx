@@ -9,8 +9,8 @@
                                                                            nets per ticker,
                                                                            equal-weights,
                                                                            rescales to budget,
-                                                                           projects onto NoShort
-                                                                           and SingleNameCap
+                                                                           builds inside no_short
+                                                                           and single_name_cap
 
 This is show_006's two-member shape carried to three, which is the point: `UC-ENSEMBLE-001` is
 stated for "여러 stored alpha-weight result", and two members cannot distinguish a helper that
@@ -61,7 +61,7 @@ import duckdb
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     QUANTUM,
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
@@ -76,12 +76,12 @@ from vqapr.public import (
     information_coefficient,
     preflight_run,
     rank_information_coefficient,
-    register_constraint,
+    register_compliance,
     register_dataset,
     register_exchange,
     register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -92,7 +92,8 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
-"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
+"""Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
+the shipped compliance rule of the same name observes the book against its own copy of it."""
 
 MEMBER_BUDGET = Decimal("0.04")
 """Total absolute active weight each member is allowed to express."""
@@ -446,9 +447,12 @@ from vqapr.public import (
     StrategyModel,
     TableSpec,
     equal_weight,
+    intersect,
     net_members,
+    no_short,
     optimize,
     rescale,
+    single_name_cap,
     validate_allocation,
 )
 
@@ -469,7 +473,8 @@ BUDGET = Budget(
 
 class FamilyEnsembleStrategy(StrategyModel):
     """desired = equal-weight(reversal, momentum, low-vol) rescaled to budget, projected onto the
-    shipped constraint set. Long-only is emergent: no member is filtered before combination."""
+    box this strategy builds itself -- no short, single-name cap above the index weight (design
+    §7.1). Long-only is emergent: no member is filtered before combination."""
 
     def __init__(
         self,
@@ -477,12 +482,18 @@ class FamilyEnsembleStrategy(StrategyModel):
         reversal_dataset_id: str,
         momentum_dataset_id: str,
         lowvol_dataset_id: str,
+        benchmark_dataset_id: str,
+        cap: str,
+        benchmark_tolerance: str,
     ) -> None:
         self._member_dataset_ids = (
             reversal_dataset_id,
             momentum_dataset_id,
             lowvol_dataset_id,
         )
+        self._benchmark_dataset_id = benchmark_dataset_id
+        self._cap = Decimal(cap)
+        self._benchmark_tolerance = Decimal(benchmark_tolerance)
 
     def tables(self):
         return (
@@ -500,9 +511,16 @@ class FamilyEnsembleStrategy(StrategyModel):
         )
 
     def requirements(self):
-        return tuple(
-            DataRequirement.of(dataset_id, "weight", lookback=RowsLookback(1))
-            for dataset_id in self._member_dataset_ids
+        return (
+            *(
+                DataRequirement.of(dataset_id, "weight", lookback=RowsLookback(1))
+                for dataset_id in self._member_dataset_ids
+            ),
+            # The cap is relative to the index, so the index is this strategy's own subscription
+            # (design §7.1).
+            DataRequirement.of(
+                self._benchmark_dataset_id, "benchmark_weight", lookback=RowsLookback(1)
+            ),
         )
 
     def _panel(self, context, requirement):
@@ -515,8 +533,9 @@ class FamilyEnsembleStrategy(StrategyModel):
         }
 
     def decide(self, context):
-        requirements = self.requirements()
-        panels = [self._panel(context, requirement) for requirement in requirements]
+        *member_requirements, benchmark_requirement = self.requirements()
+        panels = [self._panel(context, requirement) for requirement in member_requirements]
+        benchmark = self._panel(context, benchmark_requirement)
         if not all(panels):
             return Hold(reason="every member allocation input must be visible before netting them")
 
@@ -563,8 +582,21 @@ class FamilyEnsembleStrategy(StrategyModel):
         combined = equal_weight(net_signal)
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
-        bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower_weights))
+        # The benchmark is validated before it becomes a bound, the way the members are.
+        validate_allocation(
+            benchmark,
+            AllocationInvariants.of(
+                sign=AllocationSign.LONG_ONLY,
+                tolerance=self._benchmark_tolerance,
+                required_coverage=(),
+            ),
+            label="subscribed benchmark allocation",
+        )
+        # The box, built here by the strategy (design §7.1).
+        instruments = tuple(sorted(context.window.instruments))
+        lower, upper = intersect(
+            no_short(instruments), single_name_cap(instruments, benchmark, self._cap)
+        )
         desired = {
             name: desired_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
         }
@@ -572,8 +604,8 @@ class FamilyEnsembleStrategy(StrategyModel):
         result = optimize(
             desired=desired,
             current={},
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozenset(),
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -1104,25 +1136,31 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "reversal_dataset_id": "reversal_allocation",
             "momentum_dataset_id": "momentum_allocation",
             "lowvol_dataset_id": "lowvol_allocation",
+            "benchmark_dataset_id": "benchmark_weight_daily",
+            "cap": CAP,
+            "benchmark_tolerance": tolerance,
         },
     )
-    register_constraint(
+    # The shipped compliance rules enter through the same door as any user component: a resolved
+    # path, a fingerprint and a config. Their parameters are their own -- the cap below is the
+    # rule's copy, not the strategy's (design §7.2).
+    register_compliance(
         project,
         "no-short",
-        shipped_constraint_path("no_short"),
+        shipped_compliance_path("no_short"),
         "NoShort",
-        config={"constraint_id": "no-short"},
+        config={"compliance_id": "no-short"},
     )
-    register_constraint(
+    register_compliance(
         project,
         "single-name-cap",
-        shipped_constraint_path("single_name_cap"),
+        shipped_compliance_path("single_name_cap"),
         "SingleNameCap",
         config={
             "cap": CAP,
             "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
-            "constraint_id": "single-name-cap",
+            "compliance_id": "single-name-cap",
         },
     )
 
@@ -1172,7 +1210,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_start = datetime.fromisoformat(f"{ensemble_days[0].isoformat()}T00:00:00{OFFSET}")
     ensemble_definition = RunDefinition(
         run_id="show008-ensemble",
-        strategy=StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),
+        strategy=StrategyEntry("show008-ensemble"),
+        compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
         agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="show008-krx",
@@ -1339,7 +1378,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
             "account_mode": AccountMode.LONG_ONLY.value,
             "subscribed_allocation_inputs": sorted(subscribed),
-            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "member_count": 3,
             "rebalances": ensemble_memory.get("rebalances"),
@@ -1391,7 +1430,7 @@ def main() -> None:
         f"low-vol IC                  : mean {measurement['mean_ic']} over "
         f"{measurement['scored_occurrences']} scored occurrences"
     )
-    print(f"shipped constraints         : {', '.join(ensemble['shipped_constraints'])}")
+    print(f"shipped compliance          : {', '.join(ensemble['shipped_compliance'])}")
     print(f"rebalances                  : {ensemble['rebalances']}")
     print(f"dealt fills                 : {ensemble['dealt_fills']} (whole shares)")
     print(f"commission / sale tax       : {ensemble['commission']} / {ensemble['sale_tax']}")

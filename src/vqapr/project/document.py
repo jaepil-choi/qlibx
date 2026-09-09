@@ -228,7 +228,7 @@ class InstrumentsDeclaration(Document):
 class ComponentDeclaration(Document):
     """`components.<component_id>`: where the code is and what it is, in the CLI's spelling."""
 
-    kind: Literal["datamodel", "strategy", "constraint", "exchange"]
+    kind: Literal["datamodel", "strategy", "compliance", "exchange"]
     path: str
     object_name: str
     config: dict[str, Any] | None = None
@@ -365,10 +365,10 @@ def _linked(raw: object) -> tuple[dict, ...]:
             component = components.get(component_id(strategy.component_id))
             if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered strategy")
-            for name in strategy.constraints:
-                constraint = components.get(component_id(name))
-                if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
-                    raise ValueError(f"run {raw_id!r} names an unregistered constraint")
+        for name in definition.compliance:
+            rule = components.get(component_id(name))
+            if rule is None or rule.kind is not ComponentKind.COMPLIANCE:
+                raise ValueError(f"run {raw_id!r} names an unregistered compliance rule")
         if (datamodel := definition.datamodel) is not None:
             component = components.get(component_id(datamodel.component_id))
             if component is None or component.kind is not ComponentKind.DATA_MODEL:

@@ -1,7 +1,7 @@
 """Portable values every layer shares and none owns.
 
 Folded from five modules (one-shape Step 7, record 162): typed valuation results
-(`valuation/marks` -- `Mark`/`MarkBatch`, imported by `account/` and `constraints/` below
+(`valuation/marks` -- `Mark`/`MarkBatch`, imported by `account/` and `compliance/` below
 `flow/`), timezone-aware instants and the local
 instant declaration (`timestamps`), row and scalar normalisation at the Model boundary (`rows`),
 the detached Model memory committed at a callback (`memory`), and `Side` (`enums`). Each section

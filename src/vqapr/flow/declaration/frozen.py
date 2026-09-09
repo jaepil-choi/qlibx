@@ -26,7 +26,7 @@ from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (
     FINGERPRINT_PREFIX,
-    ConstraintSet,
+    ComplianceSet,
     StrategyConfig,
     _encoded_requirements,
     _identity,
@@ -93,15 +93,15 @@ def merged_occurrences(*agendas: FrozenAgenda | None) -> tuple[OperationOccurren
 class FrozenStrategy:
     """One strategy's layer of a frozen run: what is its own and not the run's.
 
-    Its identity folds the component fingerprint, its constraints, its agenda slice, its opening
-    memory and what it reads. Two strategies in one run differ here and nowhere else.
+    Its identity folds the component fingerprint, the run's Compliance rules, its agenda slice,
+    its opening memory and what it and the rules read.
     """
 
     config: StrategyConfig
-    constraints: ConstraintSet
+    compliance: ComplianceSet
     agenda: FrozenAgenda
     requirements: tuple[DataRequirement, ...] = ()
-    constraint_requirements: tuple[DataRequirement, ...] = ()
+    compliance_requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = None
     initial_payload: bytes = b""
     initial_model_state_ref: ModelStateRef = field(init=False)
@@ -111,7 +111,7 @@ class FrozenStrategy:
         if self.agenda.agenda_id != self.config.agenda_id:
             raise ValueError("agenda must match the strategy config's agenda_id")
         _require_requirements("requirements", self.requirements)
-        _require_requirements("constraint_requirements", self.constraint_requirements)
+        _require_requirements("compliance_requirements", self.compliance_requirements)
         memory = normalize_memory(self.initial_model_memory)
         object.__setattr__(self, "initial_model_memory", memory)
         object.__setattr__(
@@ -145,17 +145,16 @@ class FrozenStrategy:
                             self.component_id,
                             self.config.component.fingerprint,
                         ),
-                        "constraints": [
-                            (constraint.component_id, constraint.fingerprint)
-                            for constraint in self.constraints.constraints
+                        "compliance": [
+                            (rule.component_id, rule.fingerprint) for rule in self.compliance.rules
                         ],
                         "agenda": self.agenda.encoded(),
                         "initial_model_memory": self.initial_model_memory,
                         "initial_model_state_ref": self.initial_model_state_ref.digest,
                         "initial_payload": self.initial_payload.hex(),
                         "requirements": _encoded_requirements(self.requirements),
-                        "constraint_requirements": _encoded_requirements(
-                            self.constraint_requirements
+                        "compliance_requirements": _encoded_requirements(
+                            self.compliance_requirements
                         ),
                     }
                 ),
@@ -168,7 +167,7 @@ class FrozenDataModel:
     """One datamodel's layer of a frozen run: the component, its agenda slice, and its output.
 
     The datamodel counterpart of `FrozenStrategy`, minus what a datamodel has none of: no
-    constraints, no account, no payload. Its identity folds the component fingerprint, the
+    compliance rules, no account, no payload. Its identity folds the component fingerprint, the
     agenda slice, the output declaration, its opening memory and what it reads.
     """
 
@@ -222,7 +221,7 @@ class FrozenRun:
 
     The run layer -- period, venue, data -- plus the one frozen model. `identity` is the
     run layer's alone, so adding a strategy to a run does not rename the rows the others wrote;
-    `requirements`, `datasets` and `sources` are the union every strategy and constraint reads,
+    `requirements`, `datasets` and `sources` are the union the strategy and the rules read,
     which is the panel set (design §4.1).
     """
 

@@ -17,11 +17,7 @@ from vqapr.authoring import EconomicAccountView, Hold, Rebalance
 from vqapr.authoring.context import StrategyModelContext
 from vqapr.authoring.history import AccountHistory
 from vqapr.authoring.records import InvocationRecorder, TableSpec
-from vqapr.constraints.evaluation import (
-    build_account_view,
-    merged_constraint_bounds,
-    project_constraints,
-)
+from vqapr.compliance.evaluation import build_account_view
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
@@ -76,9 +72,8 @@ class CallbackHandler:
             current_ref, before, payload_before = self._visible_callback_state()
         previous_recorder = self._context.strategy.recorder
         # Every Component's memory is restored before its callback and what the callback left
-        # is committed with the publication (record `181`). The constraints' goes in the same
-        # root as the Strategy's, so a rule that counts commits its count with the decision.
-        # Read before the try: a failure anywhere inside restores it.
+        # is committed with the publication (record `181`). Read before the try: a failure
+        # anywhere inside restores it on every stateful component.
         component_before = self._context.visible_component_memory()
         try:
             with self._context.guard(
@@ -110,34 +105,9 @@ class CallbackHandler:
                 owner=recorder,
             ):
                 self._set_callback_recorder(recorder)
-            projected = ()
-            component_candidate: dict[str, ModelMemory] | None = None
-            if self._context.constraints:
-                with self._context.guard(
-                    SimulationStage.CALLBACK_STATE,
-                    occurrence.evaluation_time,
-                    owner=self._context.layer.constraints,
-                ):
-                    self._context.restore_component_memory(component_before)
-                with self._context.guard(
-                    SimulationStage.CALLBACK_WINDOW,
-                    occurrence.evaluation_time,
-                    owner=self._context.layer.constraint_requirements,
-                ):
-                    constraint_window = self._constraint_window(occurrence)
-                projections = []
-                for constraint in self._context.constraints:
-                    with self._callback_intent_boundary(occurrence, constraint):
-                        projections.append(project_constraints((constraint,), constraint_window)[0])
-                projected = tuple(projections)
-                with self._context.guard(
-                    SimulationStage.CALLBACK_STATE,
-                    occurrence.evaluation_time,
-                    owner=self._context.layer.constraints,
-                ):
-                    component_candidate = self._context.candidate_component_memory()
-            with self._callback_intent_boundary(occurrence, projected):
-                constraint_bounds = merged_constraint_bounds(projected)
+            # No projection here (design §7.1, record `208`): the box a strategy builds inside is
+            # its own kit call, made inside `decide`. Nothing in this callback touches another
+            # component's memory, so nothing but the Strategy's is committed with it.
             with self._callback_intent_boundary(
                 occurrence, self._context.layer.config, data_owner=self._context.layer.requirements
             ):
@@ -147,17 +117,12 @@ class CallbackHandler:
                         window=window,
                         account=self._callback_account_view(state_account),
                         reads=self._context.strategy.inputs(),
-                        constraint_bounds=constraint_bounds,
                         account_history=self._account_history(),
                     )
                 )
             # The envelope, stamped here rather than asked of the callback. Every field it
             # adds is one the Flow already had to derive in order to check the author's copy of
             # it, so this replaces a comparison rather than adding a step. Record `125`.
-            #
-            # The decision is kept beside the intent stamped from it, because a Constraint judges
-            # the decision: the five fields stamping adds are facts about the run, and a rule
-            # about weights has no business reading any of them.
             if not isinstance(result, (Hold, Rebalance)):
                 with self._callback_intent_boundary(occurrence, self._context.layer.config):
                     _raise_callback_return_type(result)
@@ -175,10 +140,10 @@ class CallbackHandler:
                     intent = validate_economic_intent(result)
                 with self._callback_intent_boundary(occurrence, intent):
                     self._validate_intent_authority(intent, account, window)
-                # No constraint check here, deliberately. Construction had the projected bounds
-                # and did its best inside them; whether the book actually breached a limit is a
-                # question about the committed account, and monitoring asks it (PRD 7.1,
-                # architecture 5.7). Judging the decision here also could not see the breach that
+                # No limit check here, deliberately. Construction did its best inside whatever box
+                # the strategy built; whether the book actually breached a limit is a question
+                # about the committed account, and Compliance asks it on the market clock (PRD
+                # 7.1, design §7.2). Judging the decision here also could not see the breach that
                 # matters most -- rounding a weight into whole shares moves it, and no fills exist
                 # yet.
                 with self._callback_intent_boundary(
@@ -199,7 +164,7 @@ class CallbackHandler:
                 )
             with self._callback_intent_boundary(occurrence, accepted):
                 evidence, lifecycle = self._callback_evidence(
-                    occurrence, account, current_ref, committed_ref, window, accepted, projected
+                    occurrence, account, current_ref, committed_ref, window, accepted
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -212,7 +177,7 @@ class CallbackHandler:
                     lifecycle,
                     recorder,
                     accepted,
-                    component_memory=component_candidate,
+                    component_memory=None,
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -234,8 +199,7 @@ class CallbackHandler:
         return OccurrenceTrace(occurrence, result, root)
 
     def load_visible_state(self) -> None:
-        """Load every component's visible memory before any callback mutation: the Strategy's
-        pair, and each constraint's (record `181`)."""
+        """Load the Strategy's visible memory pair before any callback mutation (record `181`)."""
         current_ref = self._context.state.current.current_model_state_ref
         if current_ref is None:
             raise RuntimeError("run state has no current Strategy root")
@@ -416,7 +380,7 @@ class CallbackHandler:
 
         A callback fires before the occurrence it decides for is executed or valued, so the
         marks it can see are the previous valuation's -- committed, and therefore point-in-time.
-        The same builder a monitoring Constraint's view comes from (record `130`), so `nav` and
+        The same builder a Compliance rule's view comes from (record `130`), so `nav` and
         `weights()` mean one thing on both sides of a decision. Before the first valuation there
         is no mark, and the view says so with `nav=None` rather than a fabricated zero.
         """
@@ -450,9 +414,6 @@ class CallbackHandler:
 
     def _strategy_window(self, occurrence: OperationOccurrence) -> ModelWindow:
         return self._context.strategy_window_for_occurrence(occurrence)
-
-    def _constraint_window(self, occurrence: OperationOccurrence) -> ModelWindow:
-        return self._context.constraint_window_for_occurrence(occurrence)
 
     def _callback_recorder(self, occurrence: OperationOccurrence) -> InvocationRecorder:
         tables = self._context.strategy.tables()
@@ -495,7 +456,6 @@ class CallbackHandler:
         committed_ref: ModelStateRef,
         window: ModelWindow,
         accepted: Hold | AcceptedIntent,
-        projected: tuple[object, ...],
     ) -> tuple[CallbackEvidence, LifecycleTrace]:
         evidence = CallbackEvidence(
             run_identity=self._context.frozen_run.identity,
@@ -511,10 +471,6 @@ class CallbackHandler:
             actual_source_refs=self._callback_actual_source_refs(occurrence, window),
             decision=accepted,
             pending=None if isinstance(accepted, Hold) else accepted,
-            # The projections only. What a callback's evidence carries about constraints is
-            # what the rules permitted at that instant, not a verdict on the decision -- there is
-            # no verdict at this point, by design (PRD 7.1). The verdict is monitoring's.
-            constraints=projected,
         )
         lifecycle = LifecycleTrace(
             LifecycleKind.NO_DECISION

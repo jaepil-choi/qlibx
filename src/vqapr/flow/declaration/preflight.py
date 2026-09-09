@@ -9,7 +9,7 @@ from io import BytesIO
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
-from vqapr.authoring import Constraint, StrategyModel
+from vqapr.authoring import Compliance, StrategyModel
 from vqapr.data.datasets import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
@@ -27,7 +27,7 @@ from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import (
-    load_constraint,
+    load_compliance,
     load_data_model,
     load_exchange,
     load_strategy_model,
@@ -35,7 +35,7 @@ from vqapr.extension.loading import (
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.roster import require_declared_roster
 from vqapr.project.run import (
-    ConstraintSet,
+    ComplianceSet,
     DataModelEntry,
     RunDefinition,
     StrategyConfig,
@@ -606,12 +606,13 @@ def _freeze_strategy(
     workspace: Workspace,
     entry: StrategyEntry,
     *,
+    compliance: tuple[str, ...],
     decide: OperationAgenda,
     execution_table: ExecutionTable,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
-    """One strategy's layer: its component, its constraints, and the run's decide agenda sliced.
+    """One strategy's layer: its component, the run's Compliance rules, and the decide agenda.
 
     Every strategy of a run is called on the run's sessions at `at` (record `148`); the
     binding that used to be registered per strategy is derived here.
@@ -627,25 +628,22 @@ def _freeze_strategy(
     initial_payload = _validate_initial_model_state(
         workspace, config.component, loaded_strategy, entry.initial_model_memory
     )
-    constraints = tuple(_registered_constraint(workspace, name) for name in entry.constraints)
+    rules = tuple(_registered_compliance(workspace, name) for name in compliance)
     strategy_requirements = tuple(loaded_strategy.requirements())
-    loaded_constraints: tuple[Constraint, ...] = tuple(
-        load_constraint(constraint, project_root=workspace.project_root)
-        for constraint in constraints
+    loaded_rules: tuple[Compliance, ...] = tuple(
+        load_compliance(rule, project_root=workspace.project_root) for rule in rules
     )
-    constraint_requirements = tuple(
-        requirement
-        for constraint in loaded_constraints
-        for requirement in constraint.requirements()
+    compliance_requirements = tuple(
+        requirement for rule in loaded_rules for requirement in rule.requirements()
     )
     agenda = _freeze_agenda(decide, start=start, end=end)
     _validate_execution_targets(execution_table, agenda, start=start, end=end)
     return FrozenStrategy(
         config=config,
-        constraints=ConstraintSet(constraints),
+        compliance=ComplianceSet(rules),
         agenda=agenda,
         requirements=strategy_requirements,
-        constraint_requirements=constraint_requirements,
+        compliance_requirements=compliance_requirements,
         initial_model_memory=entry.initial_model_memory,
         initial_payload=initial_payload,
     )
@@ -715,11 +713,12 @@ def _freeze_datamodel(
     )
 
 
-def _registered_constraint(workspace: Workspace, component_id: str) -> ComponentRef:
+def _registered_compliance(workspace: Workspace, component_id: str) -> ComponentRef:
     ref = workspace.component(component_id)
-    if ref.kind is not ComponentKind.CONSTRAINT:
+    if ref.kind is not ComponentKind.COMPLIANCE:
         raise ValueError(
-            f"constraint {component_id!r} is registered as {ref.kind.value}, not as a constraint"
+            f"compliance rule {component_id!r} is registered as {ref.kind.value}, not as a "
+            "compliance rule"
         )
     return ref
 
@@ -739,7 +738,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     The run layer is resolved once -- venue, execution dataset, sessions, universe, account --
     and each strategy the run names is frozen on top of it (design §4.1). This proves
     that every callback of every strategy has somewhere to execute before any account mutates,
-    and collects the union of everything the strategies and their constraints read: that union
+    and collects the union of everything the strategy and the compliance rules read: that union
     is the panel set the run will build.
 
     *Run-ready* is the promise, so a declaration carrying no execution price is refused here
@@ -787,6 +786,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         _freeze_strategy(
             workspace,
             definition.strategy,
+            compliance=definition.compliance,
             decide=decide,
             execution_table=execution_table,
             start=start,
@@ -794,11 +794,11 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         ),
     )
     # Valuation subscribes to nothing: it reads the prices the venue already published to fill
-    # against, so it contributes no DataRequirement. The union is what the strategies and their
-    # constraints read, deduplicated, in the order first declared.
+    # against, so it contributes no DataRequirement. The union is what the strategy and the
+    # compliance rules read, deduplicated, in the order first declared.
     requirements: list[DataRequirement] = []
     for layer in strategies:
-        for requirement in (*layer.requirements, *layer.constraint_requirements):
+        for requirement in (*layer.requirements, *layer.compliance_requirements):
             if requirement not in requirements:
                 requirements.append(requirement)
     sources = _freeze_sources(workspace, tuple(requirements), execution_table.table.source)

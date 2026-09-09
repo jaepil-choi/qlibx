@@ -75,8 +75,7 @@ LAYERS: dict[str, int] = {
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.
     "flow.engine": 60,
     "flow.declaration": 63,
-    "flow.strategy": 65,
-    "flow.datamodel": 65,
+    "flow.run": 65,
     "flow": 70,
     # 80 -- reading a finished record. Computes nothing a run did not store.
     "report": 80,

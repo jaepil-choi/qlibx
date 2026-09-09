@@ -38,7 +38,7 @@ from vqapr.flow.engine.run_state import (
     LifecycleTrace,
     PreparedRunState,
 )
-from vqapr.flow.strategy.context import (
+from vqapr.flow.run.context import (
     _ACCOUNT_IDENTITY,
     CALLBACK_STAGE,
     DEFAULT_TABLE_PREFIX,

@@ -23,9 +23,9 @@ import dataclasses
 from types import SimpleNamespace
 
 from vqapr.analysis.execution import fill_summary
-from vqapr.flow.strategy.context import FRAMEWORK_TABLES
+from vqapr.flow.run.context import FRAMEWORK_TABLES
 from vqapr.flow.engine.run_state import AcceptedRunState
-from vqapr.flow.strategy.loop import SimulationResult
+from vqapr.flow.run.loop import SimulationResult
 
 
 def _result(*tables: tuple[str, tuple[dict[str, object], ...]]) -> SimpleNamespace:

@@ -26,7 +26,7 @@ from vqapr.flow.engine.artifacts import (
     SimulationStage,
     ValuationEvidence,
 )
-from vqapr.flow.strategy.context import (
+from vqapr.flow.run.context import (
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     MONITORING_STAGE,

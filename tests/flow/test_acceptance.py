@@ -26,7 +26,7 @@ def _accept_no_decision(
     *,
     recorder: InvocationRecorder | None = None,
 ) -> AcceptedRunState:
-    """The composition the callback loop makes itself (`flow/strategy/callback.py`): prepare, publish."""
+    """The composition the callback loop makes itself (`flow/run/callback.py`): prepare, publish."""
     return repository.publish(
         repository.prepare_callback(
             memory,
@@ -151,7 +151,7 @@ def test_prepare_and_before_swap_failures_leave_authority_and_live_memory_unchan
     before = repository.root
     model = type("Model", (), {"memory": {"count": 1}})()
     # The callback loop snapshots live memory with `normalize_memory` before invoking the strategy
-    # and restores from that snapshot when publication fails (`flow/strategy/callback.py`).
+    # and restores from that snapshot when publication fails (`flow/run/callback.py`).
     baseline = normalize_memory(model.memory)
 
     with pytest.raises(TypeError):

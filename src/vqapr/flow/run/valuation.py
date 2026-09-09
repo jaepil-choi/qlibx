@@ -22,7 +22,7 @@ from vqapr.flow.engine.artifacts import (
     ValuationEvidence,
 )
 from vqapr.flow.engine.run_state import AcceptedRunState, PreparedRunState
-from vqapr.flow.strategy.context import (
+from vqapr.flow.run.context import (
     _ACCOUNT_IDENTITY,
     DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,

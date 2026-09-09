@@ -16,7 +16,7 @@ Two independent passes, on purpose:
   miss part of the vocabulary. This pass constant-folds those f-strings and follows parameter
   forwarding across call sites instead of guessing, for `code` and `status` alike -- across the
   whole package, because a refusal helper and its callers need not share a file
-  (`flow/datamodel/compute.py` raises through `flow/datamodel/output.py`'s `refusal`), and an
+  (`flow/run/compute.py` raises through `flow/run/output.py`'s `refusal`), and an
   index that stopped at the file boundary silently dropped a code whenever a module was split.
   A `status` that is a `Status` member (the case at almost every site) buckets the code
   under that member's number; a `status` computed from an exception (`status_of(error)`, a
@@ -138,8 +138,8 @@ class _SourceIndex:
 
     Those two are merged across modules on purpose. A per-file index only ever resolved a code
     forwarded through a helper defined in the same file, so splitting a module dropped codes from
-    the inventory without any refusal changing: `flow/datamodel/compute.py` raises through the
-    `refusal` helper `flow/datamodel/output.py` defines, and `datamodel.compute_failed` vanished
+    the inventory without any refusal changing: `flow/run/compute.py` raises through the
+    `refusal` helper `flow/run/output.py` defines, and `datamodel.compute_failed` vanished
     from the static pass the moment the two stopped sharing a file. A refusal helper is not
     required to live beside its callers, so neither is this index.
 
@@ -1243,7 +1243,7 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     from decimal import Decimal
 
     from vqapr.domain.errors import VqaprError
-    from vqapr.flow.datamodel.output import RunOutput
+    from vqapr.flow.run.output import RunOutput
 
     codes: list[str] = []
     output = RunOutput(

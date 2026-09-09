@@ -64,7 +64,7 @@ write and the parts' removal cannot double-count.
 
 COMPACT_FILENAME = "all.parquet"
 """The one file a finished table or dataset is: written when the run ends, after which any spill
-part beside it is stale input. Shared with `vqapr.flow.datamodel.output`, which writes an output
+part beside it is stale input. Shared with `vqapr.flow.run.output`, which writes an output
 dataset the same way (`docs/issues/archive/087`).
 
 Here rather than beside that writer -- where both lived until campaign M6 Step 3 -- because a

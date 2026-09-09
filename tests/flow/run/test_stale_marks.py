@@ -22,7 +22,7 @@ from vqapr.account.marking import SelectedMark
 from vqapr.domain.account_state import AccountMark
 from vqapr.domain.values import Mark, MarkBatch
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.flow.strategy.loop import _marks_from_execution_snapshot
+from vqapr.flow.run.valuation import _marks_from_execution_snapshot
 
 QUOTED = datetime(2024, 1, 4, 6, 30, tzinfo=UTC)
 """The last instant the venue published a price for the halted name."""

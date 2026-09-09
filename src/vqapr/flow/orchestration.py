@@ -45,8 +45,6 @@ from vqapr.extension.loading import (
     load_exchange,
     load_strategy_model,
 )
-from vqapr.flow.datamodel.loop import DataModelEventLoop, DataModelResult
-from vqapr.flow.datamodel.output import RunOutput
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.judgments import require_judged
 from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
@@ -63,8 +61,14 @@ from vqapr.flow.roster import (
     registered_roster,
     roster_report,
 )
-from vqapr.flow.strategy.context import DEFAULT_TABLE_PREFIX
-from vqapr.flow.strategy.loop import SimulationResult, StrategyEventLoop
+from vqapr.flow.run.context import DEFAULT_TABLE_PREFIX
+from vqapr.flow.run.loop import (
+    DataModelEventLoop,
+    DataModelResult,
+    SimulationResult,
+    StrategyEventLoop,
+)
+from vqapr.flow.run.output import RunOutput
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
 from vqapr.record import (

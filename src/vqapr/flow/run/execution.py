@@ -28,7 +28,7 @@ from vqapr.flow.engine.artifacts import (
     SimulationStage,
 )
 from vqapr.flow.engine.run_state import AcceptedRunState, PreparedRunState
-from vqapr.flow.strategy.context import (
+from vqapr.flow.run.context import (
     CALLBACK_STAGE,
     AcceptedIntent,
     DueExecutionResult,

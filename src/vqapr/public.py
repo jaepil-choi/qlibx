@@ -91,7 +91,6 @@ from vqapr.exchange.venues.krx import (
 )
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.conformance import conformance
-from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure
 
@@ -104,7 +103,7 @@ from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
 from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.strategy.loop import SimulationResult, callback_evidence
+from vqapr.flow.run.loop import DataModelResult, SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,

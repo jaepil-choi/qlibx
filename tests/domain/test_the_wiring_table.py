@@ -25,7 +25,7 @@ from vqapr.domain.wiring import (
 )
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind
-from vqapr.flow.strategy.loop import StrategyEventLoop
+from vqapr.flow.run.loop import StrategyEventLoop
 
 
 def test_every_role_has_exactly_one_row_and_no_row_is_without_a_role() -> None:

@@ -29,7 +29,7 @@ the one that could never be closed by deleting anything.
 **Record `125` closed the seventh, and not by deleting it either.** The bridge imported
 `EconomicPortfolioIntent`, `PortfolioTarget`, `IntentSourceRef` and `NoDecision` from the facade in
 order to STAMP an intent -- minting the UUID, rebuilding provenance, copying the account version.
-Moving that stamping into `flow/strategy/loop.py`, where the Flow already derived every one of those
+Moving that stamping into `flow/run/loop.py`, where the Flow already derived every one of those
 values to check the bridge's copy of them, left the bridge with nothing to import. The file is
 still there and still translates one call surface into the other; it simply no longer reaches up.
 

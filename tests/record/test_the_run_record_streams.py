@@ -42,7 +42,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.strategy.loop import StrategyEventLoop
+from vqapr.flow.run.loop import StrategyEventLoop
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 
 ROWS_PER_OCCURRENCE = 200

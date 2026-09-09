@@ -22,7 +22,7 @@ from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _wo
 from tests.cli.test_commands import _cli
 from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
 from vqapr.flow.engine.run_state import LifecycleKind
-from vqapr.flow.strategy.loop import DueExecutionTrace, OccurrenceTrace, StrategyEventLoop
+from vqapr.flow.run.loop import DueExecutionTrace, OccurrenceTrace, StrategyEventLoop
 from vqapr.public import Workspace, preflight_run, run
 
 _ZONE = ZoneInfo("Asia/Seoul")

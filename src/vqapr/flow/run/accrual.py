@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from vqapr.flow.engine.artifacts import SimulationStage
-from vqapr.flow.strategy.context import FlowContext
+from vqapr.flow.run.context import FlowContext
 
 
 class AccrualHandler:

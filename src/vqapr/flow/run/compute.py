@@ -18,13 +18,13 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.shapes import Row
-from vqapr.flow.datamodel.output import (
+from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
+from vqapr.flow.run.output import (
     RunOutput,
     derived_available_at,
     refusal,
     validated_output,
 )
-from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from vqapr.flow.datamodel.output import LookAheadDetected, derived_available_at
+from vqapr.flow.run.output import LookAheadDetected, derived_available_at
 
 AT = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
 

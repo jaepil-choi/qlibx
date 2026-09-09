@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.datamodel.output import RunOutput
+from vqapr.flow.run.output import RunOutput
 
 
 def _output(root: Path) -> RunOutput:

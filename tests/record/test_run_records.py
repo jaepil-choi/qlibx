@@ -305,7 +305,7 @@ def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> No
     fires once per occurrence, so a run that records no rows still proves it is alive.
     """
     from vqapr.flow.engine.loop import EventLoop
-    from vqapr.flow.strategy.loop import StrategyEventLoop
+    from vqapr.flow.run.loop import StrategyEventLoop
 
     signature = inspect.signature(StrategyEventLoop.__init__)
     assert "on_progress" in signature.parameters, (

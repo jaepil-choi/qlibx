@@ -22,11 +22,11 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.strategy.loop import StrategyEventLoop
+from vqapr.flow.run.loop import StrategyEventLoop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
+from vqapr.project.run import ComplianceSet, StrategyConfig
 
 _BUDGET = Budget(
     PortfolioDirection.LONG_ONLY, Decimal("0"), Decimal("1"), Decimal("0"), Decimal("1")

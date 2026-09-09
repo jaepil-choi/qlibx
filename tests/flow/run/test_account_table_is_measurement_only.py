@@ -14,7 +14,7 @@ replays is the only record of the book's value there is. That case lives in
 
 from __future__ import annotations
 
-from vqapr.flow.strategy.loop import DEFAULT_TABLE_PREFIX, DEFAULT_TABLES
+from vqapr.flow.run.loop import DEFAULT_TABLE_PREFIX, DEFAULT_TABLES
 
 ACCOUNT = f"{DEFAULT_TABLE_PREFIX}account"
 MONITORING = f"{DEFAULT_TABLE_PREFIX}monitoring"

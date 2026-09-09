@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.strategy.context import FRAMEWORK_TABLES
+from vqapr.flow.run.context import FRAMEWORK_TABLES
 from vqapr.record import (
     read_run_record,
     read_strategy_record,

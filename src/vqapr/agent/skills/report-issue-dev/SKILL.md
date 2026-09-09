@@ -1,6 +1,6 @@
 ---
 name: report-issue-dev
-description: Files a defect or friction report about vqapr itself into the upstream repository's issue directory, as a dated Markdown file naming the exact vqapr version, the scenario, the commands run, and the refusal envelope verbatim. Use when work on vqapr hits a package defect (status 500 or 502), a refusal whose `fix` does not resolve it, a documented command or option that does not exist or behaves differently than documented, a result that looks wrong, or friction that cost real time — and this project is a testbed or evaluation whose findings go back to the vqapr maintainers.
+description: Files a defect or friction report about vqapr itself into the upstream repository's issue directory, as a dated Markdown file naming the exact vqapr version, the scenario, the commands run, and the refusal envelope verbatim. Use when work on vqapr hits a package defect (status 500), a refusal whose `fix` does not resolve it, a documented command or option that does not exist or behaves differently than documented, a result that looks wrong, or friction that cost real time — and this project is a testbed or evaluation whose findings go back to the vqapr maintainers.
 ---
 
 # Report a vqapr defect upstream
@@ -16,7 +16,8 @@ failure carries `status`, `stage`, `cause`, `fix`, `requirement`, `observed` and
 
 | what you saw | file a report? |
 |---|---|
-| `status` **500** or **502** | **Yes, always.** These mean a vqapr defect by definition. Do not work around it silently |
+| `status` **500** | **Yes, always.** A 500 is a vqapr defect by definition. Do not work around it silently |
+| `status` **502** | **No** — your own component raised. `cause.origin` is `"user"` and `cause.where` names your file and line; fix it. Report only if `cause.origin` is not `"user"`, or the raise came from a package helper you called correctly |
 | `status` **423** or **503** | **No.** Retry the same command unchanged. Report only if it never clears |
 | `status` **400/404/409/422** and `fix` resolved it | No. That is the envelope working |
 | `status` **400/404/409/422** and `fix` did **not** resolve it, or named something that does not exist | **Yes.** A `fix` that does not fix is a defect in the message |

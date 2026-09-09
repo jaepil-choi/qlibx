@@ -148,6 +148,11 @@ vqapr list datasets
 vqapr show dataset <id> --limit 20
 ```
 
+`show dataset` returns the **declared projection** — the fields you named, holding the values a
+model will receive (`items_are: "projection"`) — so for an aggregated registration this is where
+you see whether the expressions did what you meant. On a large file that evaluates the whole
+grouping once; `--source` shows the file's own rows instead.
+
 Then **write down, for the user, the facts that change what the result means and that vqapr cannot
 verify**: which instant `available_at` was taken to be, whether a fill price is observable at the
 time it is used, and what a derived tradability rule does not cover. These belong in the result's
@@ -169,5 +174,7 @@ unconfirmed `available_at` has not finished this skill.
 ---
 
 A refusal carries its own status, stage and cause, plus `fix`, `requirement`, `observed` and
-`source` — read it rather than looking for it here. Status **500 or 502 is a vqapr defect**: do not
-work around it, report it with the envelope.
+`source` — read it rather than looking for it here. Status **500 is a vqapr defect**: do not work
+around it, report it with the envelope. **502 is your own code raising** — `cause.origin` is
+`"user"` and `cause.where` is your file and line; fix the component. **503 is the machine** — retry
+unchanged.

@@ -124,5 +124,7 @@ they agreed to install.
 ---
 
 A refusal carries its own status, stage and cause, plus `fix`, `requirement`, `observed` and
-`source` — read it rather than looking for it here. Status **500 or 502 is a vqapr defect**: do not
-work around it, report it with the envelope.
+`source` — read it rather than looking for it here. Status **500 is a vqapr defect**: do not work
+around it, report it with the envelope. **502 is your own code raising** — `cause.origin` is
+`"user"` and `cause.where` is your file and line; fix the component. **503 is the machine** — retry
+unchanged.

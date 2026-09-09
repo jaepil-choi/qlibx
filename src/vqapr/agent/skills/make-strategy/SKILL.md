@@ -148,5 +148,6 @@ agreed which of "a tuning" and "a new strategy" this file is.
 
 A refusal carries its own status, stage and cause, plus `fix`, `requirement`, `observed` and
 `source` — read it rather than looking for it here. A raise from your own file gives `source` the
-file and the line. Status **500 or 502 is a vqapr defect**: do not work around it, report it with
-the envelope.
+file and the line, `cause.origin: "user"` and **status 502** — that is your code to fix, not a
+defect to report. Status **500 is a vqapr defect**: do not work around it, report it with the
+envelope. **503 is the machine** — retry unchanged.

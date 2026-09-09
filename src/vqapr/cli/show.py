@@ -99,7 +99,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="limit",
         type=int,
         default=100,
-        help="rows to return when --table is given; 0 returns every row",
+        help="rows to return when --table is given, or for `show dataset`; 0 returns every row",
+    )
+    parser.add_argument(
+        "--source",
+        dest="source_rows",
+        action="store_true",
+        help=(
+            "with `show dataset`: return rows of the underlying source file, with the file's own "
+            "columns, instead of the dataset's declared projection. By default `items` holds the "
+            "declared fields with the values a model receives -- for an aggregated registration "
+            "that means evaluating the whole grouping, a full pass over a large file"
+        ),
     )
     parser.add_argument(
         "--instrument",
@@ -214,8 +225,19 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     }
 
 
-def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
-    """What a registered dataset actually holds, not merely that it exists."""
+def _dataset(
+    dataset_id: str, project_root: Path, limit: int, *, source_rows: bool = False
+) -> dict[str, Any]:
+    """What a registered dataset actually holds, not merely that it exists.
+
+    `items` is the declared PROJECTION -- the fields the registration names, holding what a model
+    reading it receives -- read through the same `projection_relation` the read path uses. It was
+    the source file's head, which for the one registration whose fields are aggregate expressions
+    showed nine columns the dataset does not expose and none of the nine it does, on rows the
+    projection filters out, while `fields`, `field_types` and `aggregated` in the same response
+    described the projection (`docs/issues/093`). `--source` asks for the file's rows instead, and
+    `items_are` says which was answered so a reader never has to infer it.
+    """
     from vqapr.data import scan
 
     space = Workspace.open(project_root)
@@ -230,11 +252,26 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
         )
 
     source = space.source(str(item.source))
-    rows = scan.head(source, limit=limit)
+    relation = (
+        None
+        if source_rows or item.aggregated is None
+        else scan.projection_relation(
+            source,
+            instrument_field=item.instrument_field,
+            available_at_field=item.available_at,
+            fields=item.fields,
+            aggregated=item.aggregated,
+        )
+    )
+    rows = scan.head(source, limit=limit, relation=relation)
     return {
         "dataset_id": dataset_id,
         "source_id": str(source.source_id),
         "path": str(source.path),
+        # Which rows `items` holds: the declared projection, or the source file's own. A
+        # registration that was never measured (`aggregated` unknown) has no projection shape to
+        # read through and answers with source rows, saying so.
+        "items_are": "source" if relation is None else "projection",
         "fields": dict(item.fields),
         "field_types": (
             None
@@ -248,7 +285,9 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
         "span": [str(value) for value in (item.span or ())] or None,
         "produced_by": item.produced_by,
         "produced_by_record": item.produced_by_record,
-        "rows_total": scan.row_count(source),
+        # `rows_total` counts what `items` pages over; `source_rows_total` is always the file's.
+        "rows_total": scan.row_count(source, relation=relation),
+        "source_rows_total": scan.row_count(source),
         "returned": len(rows),
         "items": rows,
     }
@@ -364,7 +403,15 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return success("model.show", **_model(args.identifier, project_root))
     if args.kind == "dataset":
         limit = max(int(getattr(args, "limit", 100) or 0), 0)
-        return success("dataset.show", **_dataset(args.identifier, project_root, limit))
+        return success(
+            "dataset.show",
+            **_dataset(
+                args.identifier,
+                project_root,
+                limit,
+                source_rows=bool(getattr(args, "source_rows", False)),
+            ),
+        )
     root = args.store_root or project_root / WORKSPACE_DIRECTORY
     if args.kind == "strategy":
         run_id, strategy_ref = resolve_strategy(root, args.identifier)

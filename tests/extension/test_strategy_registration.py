@@ -47,6 +47,23 @@ def test_a_syntax_error_is_refused_at_registration(tmp_path: Path) -> None:
     assert "SyntaxError" in (raised.value.failures[0].observed or "")
 
 
+def test_a_source_path_that_is_not_there_is_a_404_not_a_503(tmp_path: Path) -> None:
+    """A path that resolved wrongly never clears by retrying (`docs/issues/094`).
+
+    The skills tell an agent that 503 means "retry the same command unchanged"; this refusal used
+    to be a 503 whose own `retry_precondition` named an edit. It is `Status.MISSING` now -- "the
+    path it names is not there" -- and the fix says how a relative `path` resolves, which is the
+    mistake that produced the report.
+    """
+    with pytest.raises(VqaprError) as raised:
+        register_strategy_model(tmp_path, "gone", tmp_path / "declarations" / "gone.py", "S")
+    (failure,) = raised.value.failures
+    assert failure.code == "component.source_missing"
+    assert int(failure.status) == 404
+    assert "declaration file's own directory" in failure.fix
+    assert raised.value.retry_precondition == "correct the component's `path`, then retry"
+
+
 def test_an_object_outside_the_contract_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "plain.py"
     path.write_text("class S:\n    pass\n", encoding="utf-8")

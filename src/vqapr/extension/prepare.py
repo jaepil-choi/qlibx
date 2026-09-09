@@ -34,6 +34,35 @@ from vqapr.extension.fingerprint import fingerprint_component
 
 
 def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError:
+    """The source could not be read: MISSING (404) when it is not there, UNAVAILABLE (503) else.
+
+    One OSError became one 503, and 503 is the class the skills tell an agent to retry unchanged
+    -- while a path that resolved wrongly never clears by retrying, and the refusal's own
+    `retry_precondition` said so (`docs/issues/094`). A path that is not there is the submission's
+    to fix (`Status.MISSING`: "the path it names is not there"); a permission or disk fault is the
+    machine's, and stays 503.
+    """
+    if isinstance(error, FileNotFoundError | NotADirectoryError | IsADirectoryError):
+        return VqaprError(
+            stage=Stage.REGISTER,
+            failures=[
+                Failure.bounded(
+                    "component.source_missing",
+                    f"{kind_label} source must be a Python file that exists",
+                    status=Status.MISSING,
+                    observed=f"nothing at {path}",
+                    fix=(
+                        f"point `path` at the {kind_label} source file. A relative `path` "
+                        "resolves against the declaration file's own directory, not the project "
+                        "root or the working directory"
+                    ),
+                    cause=error,
+                    source=FailureSource(file=str(path)),
+                )
+            ],
+            mutation=False,
+            retry_precondition="correct the component's `path`, then retry",
+        )
     return VqaprError(
         stage=Stage.REGISTER,
         failures=[
@@ -41,17 +70,18 @@ def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError
                 "component.source_unreadable",
                 f"{kind_label} source must be a readable Python file",
                 # UNAVAILABLE (503), not CONTRACT: fingerprinting failed on an OSError while
-                # reading the file at `path` -- the declared path and kind are already fine, only
-                # the filesystem read failed, which is what the machine's status describes.
+                # reading a file that exists at `path` -- the declared path and kind are already
+                # fine, only the filesystem read failed, which is what the machine's status
+                # describes.
                 status=Status.UNAVAILABLE,
                 observed=str(error),
-                fix=f"create or fix permissions on the {kind_label} source file at {path}",
+                fix=f"fix permissions on the {kind_label} source file at {path}",
                 cause=error,
                 source=FailureSource(file=str(path)),
             )
         ],
         mutation=False,
-        retry_precondition="create or repair the component source, then retry",
+        retry_precondition="repair the component source, then retry",
     )
 
 

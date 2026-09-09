@@ -20,6 +20,8 @@ canonical_documents:
   # 이것은 "경계가 옳은가"를 묻는다. 설계 근거는 아래 wiring_design, 착수 순서는 이 파일.
   # 2026-09-10: 두 시계 캠페인 완료(records 201-214). 설계 §8은 PRD·architecture에 흡수됐다 —
   # 현행 계약은 그 두 문서가 authority이고 wiring_design은 결정의 근거 기록이다. 현행 캠페인 없음.
+  # 2026-09-10: 0.9.0.dev1 testbed 보고 7건(docs/issues/089-095) 처리, records 215-220. develop은
+  # 0.11.0.dev0 (record 215가 run identity를 바꿈; docs/releases/0.11.0.md).
   active_campaign: docs/refactoring/2026-09-09-the-two-clocks-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.

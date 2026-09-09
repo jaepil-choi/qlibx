@@ -478,6 +478,67 @@ def test_show_dataset_reads_back_what_a_dataset_holds(
     assert "prices" in refused["failures"][0]["observed"], "the refusal names what is registered"
 
 
+def test_show_dataset_shows_the_declared_projection_not_the_source_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`items` holds the declared fields with the values a model receives (`docs/issues/093`).
+
+    The one registration whose fields are aggregate expressions is the one carrying the whole
+    reduction rule, and it is exactly there that a source-file head confirms nothing: nine columns
+    the dataset does not expose, none of the nine it does, on rows the projection filters out. The
+    response's own `fields`, `field_types` and `aggregated` describe the projection, so `items` must
+    too -- and `--source` is the explicit way to ask for the file's rows, with `items_are` saying
+    which was answered either way.
+    """
+    _workspace_for_run(tmp_path, capsys)
+    observation = tmp_path / "observation.parquet"
+    grouped = tmp_path / "grouped.yaml"
+    grouped.write_text(
+        f"""
+datasets:
+  prices-high:
+    source_id: price-source-grouped
+    path: {observation.as_posix()}
+    instrument_field: instrument
+    available_at: available_at
+    grain: instrument_instant
+    key_fields: [available_at, instrument]
+    fields: {{high: "max(close)"}}
+    field_types: {{high: DOUBLE}}
+""",
+        encoding="utf-8",
+    )
+    code, registered = _cli(capsys, "--project-root", str(tmp_path), "register", str(grouped))
+    assert code == 0, registered
+
+    code, shown = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "dataset", "prices-high", "--limit", "2"
+    )
+    assert code == 0, shown
+    assert shown["aggregated"] is True and shown["items_are"] == "projection"
+    assert set(shown["items"][0]) == {"available_at", "instrument", "high"}, (
+        "the declared fields and the identity columns, nothing the file happens to hold"
+    )
+    assert "session_date" not in shown["items"][0] and "close" not in shown["items"][0]
+    assert shown["returned"] == 2 and shown["rows_total"] == 3 == shown["source_rows_total"]
+    assert {row["high"] for row in shown["items"]} <= {100.0, 101.0, 104.0}
+
+    code, raw = _cli(
+        capsys, "--project-root", str(tmp_path), "show", "dataset", "prices-high",
+        "--limit", "2", "--source",
+    )
+    assert code == 0, raw
+    assert raw["items_are"] == "source"
+    assert {"session_date", "close"} <= set(raw["items"][0]), "the file's own columns"
+    assert "high" not in raw["items"][0]
+    assert raw["rows_total"] == raw["source_rows_total"] == 3
+
+    # An identity projection reads the same either way, so nothing that worked before changes.
+    code, identity = _cli(capsys, "--project-root", str(tmp_path), "show", "dataset", "prices")
+    assert identity["items_are"] == "projection"
+    assert set(identity["items"][0]) == {"available_at", "instrument", "close"}
+
+
 def test_show_model_describes_a_datamodel_and_not_only_a_strategy(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

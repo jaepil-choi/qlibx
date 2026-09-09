@@ -1,7 +1,8 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-09.** 88개 중 **86개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
-이 디렉터리에 평평하게 남는 것은 아직 열린 둘 — `023`(절반)과 `035`(판정만 남음) — 뿐이다.
+**작성 2026-09-02 · 갱신 2026-09-10.** 95개 중 **93개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
+이 디렉터리에 평평하게 남는 것은 아직 열린 둘 — `023`(절반)과 `035`(판정만 남음) — 과, 2026-09-10에
+닫혔지만 그 record들이 인용하는 동안 한 릴리스만 여기 두는 `089`–`094`다(0.11.0 릴리스 때 archive로).
 
 **옮기면서 인용을 같이 고쳤다.** `src/`·`docs/`·`tests/`·`scripts/`의 481개 파일이 이 번호들을
 **결정의 근거**로 인용하고 있었고, 그 1,036곳을 `docs/issues/NNN` → `docs/issues/archive/NNN`으로
@@ -33,6 +34,24 @@
 | ~~`027`~~ | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **닫힘 2026-09-05 — record `160`.** `register`가 `spoken`으로 PIT 개념마다 한 문장을 말한다(dataset의 `available_at`, execution input의 `trade_at`과 fill 규약, run의 `at`·`timezone`); 없으면 아무 말도 안 한다 | 닫힘 |
 | ~~`088`~~ | `DOUBLE`로 등록된 field가 모델에 `Decimal`로 도착한다 — 아무도 그것이 무엇인지 선언하지 않았다 | **닫힘 2026-09-08 — record `173`.** 오너 판정: user가 `field_types`를 선언하고 등록이 `DESCRIBE`와 1회 대조해 불일치를 이름으로 거부한다(`049`의 "author는 타입을 쓰지 않는다"와 `079`의 A안 기각을 번복). `DECIMAL`은 잴 수는 있어도 선언할 수 없어 등록에서 `field_decimal`, DataModel 출력은 첫 세션에서 `field_type`으로 거부. 샘플 panel은 float64. 열린 것: DataModel `value_fields`의 선언 타입 | 닫힘 |
 | ~~`087`~~ | 끝난 run이 occurrence마다 parquet 파일 하나를 남긴다 — 표 하나가 8 KB짜리 607개 | **닫힘 2026-09-07 — record `164`.** writer가 행을 Arrow로 메모리에 들고 run이 끝날 때(정상·예외·인터럽트) 표당 `all.parquet` 하나를 쓴다; 256 MB spill 밸브; hard kill은 spill분만 남는다(오너가 record 135의 약속 축소를 수용). 매 loop 물리 IO 0. 샘플 journey 7.8→5.4 s, 파일 1,465→3 | 닫힘 |
+
+### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
+
+`report-issue-dev` skill이 쓴 첫 보고 묶음이다. `report-2026-09-09-<slug>.md`로 도착해 소유자가
+2026-09-10에 분류하며 `089`–`095`를 붙였다. 하나(`095`)는 도착 시 이미 0.10.0의 record `203`이 닫아
+바로 `archive/`로; 여섯은 records `215`–`220`이 하나씩 닫았다. 릴리스 노트는
+`docs/releases/0.11.0.md`. 여섯 중 셋(`089`·`090`·`091`)이 한 워크플로우 — ~190개 alpha DataModel의
+상수 sweep — 에서 났고, `091`은 결과가 **그럴듯해 보이는 채로 틀린** 종류다.
+
+| # | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| ~~`089`~~ | 첫 callback에서 `self.memory`가 `None`이라 문서의 예제가 죽는다 | **닫힘 — record `215`.** opening memory는 모든 층에서 `{}`; `null` 선언도 `{}`. **run identity 전부 바뀜** (0.11 migration 1번) | 코드 + 문서 |
+| ~~`090`~~ | 문서의 datamodel 재시도 절차가 바뀌지 않은 파일을 거절되게 두고, 거절이 "strategy"라 부른다 | **닫힘 — record `216`.** `record.exists` 409 · kind를 댐 · traceback 없음; "Retrying"은 `--force` | 코드 + 문서 |
+| ~~`091`~~ | materialized dataset이 자기를 만든 fingerprint를 기록하지 않는다 | **닫힘 — record `217`.** `produced_by_record`; `check`의 `run.output_stale` 412 | 코드 |
+| ~~`092`~~ | `optimize`가 shipped 박스의 bound를 거절한다 | **닫힘 — record `218`.** kit이 안쪽으로 quantize; 거절이 방향을 댐 | 코드 |
+| ~~`093`~~ | `show dataset`이 projection 대신 원천 행을 보여준다 | **닫힘 — record `219`.** 기본이 projection, `items_are`, `--source`, `source_rows_total` | 코드 |
+| ~~`094`~~ | 두 거절의 status가 결정표의 class 밖이다 | **닫힘 — record `220`.** 없는 경로는 404; 502는 "당신 코드"라고 문서 열 곳이 말함 | 코드 + 문서 |
+| ~~`095`~~ | `check`가 roster 없는 run을 통과시킨다 | **도착 시 닫힘 — record `203` (0.10.0).** 보고 wheel에 없던 commit. 후속: `rm instruments` 없음 | archive |
 
 ### 실환경 세션이 낸 아홉 (2026-09-04, `0.4.1` wheel) — 전부 열려 있다
 

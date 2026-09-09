@@ -612,26 +612,39 @@ def describe_projection(
     return ProjectionSchema({}, False, errors=tuple(errors))
 
 
-def row_count(spec: SourceSpec) -> int:
-    """How many rows the source holds, without reading them."""
+def row_count(spec: SourceSpec, *, relation: str | None = None) -> int:
+    """How many rows the source holds -- or, given a `projection_relation`, how many it yields.
+
+    A grouped projection collapses the source's rows to one per (instant, instrument), so the two
+    counts differ, and reporting the source's as the dataset's told a reader a 39-million-row
+    panel was what their model would receive (`docs/issues/093`). Counting a grouped projection
+    is a full pass over the file; the caller says which count it wants.
+    """
     con = _open(spec)
     try:
-        return int(_one_row(con.execute(f"SELECT count(*) FROM {_relation(spec)}"))[0])
+        target = _relation(spec) if relation is None else relation
+        return int(_one_row(con.execute(f"SELECT count(*) FROM {target}"))[0])
     finally:
         con.close()
 
 
-def head(spec: SourceSpec, *, limit: int = 100) -> list[dict[str, object]]:
-    """The first rows of a source, as plain dicts. `limit=0` reads every row.
+def head(
+    spec: SourceSpec, *, limit: int = 100, relation: str | None = None
+) -> list[dict[str, object]]:
+    """The first rows of a source -- or of a `projection_relation` over it -- as plain dicts.
+    `limit=0` reads every row.
 
-    A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback,
-    no dataset semantics. `show dataset` is the caller, and what it answers is "what is in this
-    file" rather than "what would a model have seen" -- conflating the two would make an inspection
-    command quietly disagree with the windows a run actually reads.
+    A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback.
+    `show dataset` is the caller. With `relation` it answers "what does this dataset yield" --
+    the declared fields, holding the values a model would receive, which is the only thing that
+    confirms an aggregated registration did what its author meant (`docs/issues/093`); without
+    it, "what is in this file". Neither applies a cutoff or a lookback, so neither can quietly
+    disagree with the windows a run actually reads. `LIMIT` over a grouped projection still
+    evaluates the whole grouping, so on a large source the projected head costs a full pass.
     """
     con = _open(spec)
     try:
-        sql = f"SELECT * FROM {_relation(spec)}"
+        sql = f"SELECT * FROM {_relation(spec) if relation is None else relation}"
         if limit:
             sql += f" LIMIT {int(limit)}"
         cursor = con.execute(sql)

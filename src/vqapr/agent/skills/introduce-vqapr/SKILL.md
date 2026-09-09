@@ -132,10 +132,11 @@ the answer you can no longer see what was missing. The framework improves from h
 not from workarounds.
 
 **report-issue-dev** owns where that goes and what it must carry. Reach for it for friction and
-for defects alike; a status 500 or 502 is a vqapr defect and always belongs in a report.
+for defects alike; a status 500 is a vqapr defect and always belongs in a report.
 
 ---
 
 A refusal carries its own status, stage and cause. Status **423 or 503 means wait and retry the
-same command unchanged**; **500 or 502 is a vqapr defect**: do not work around it silently — file
-it with **report-issue-dev**, envelope and all, and then carry on.
+same command unchanged**; **502 is your own component's code raising** (`cause.origin: "user"`,
+`cause.where` names your line) — fix it; **500 is a vqapr defect**: do not work around it silently
+— file it with **report-issue-dev**, envelope and all, and then carry on.

@@ -80,15 +80,7 @@ def _load(
             config=ref.config,
         )
     except OSError as error:
-        raise _failure(
-            "component.source_unreadable",
-            f"component source must remain readable at {path}",
-            str(error),
-            fix=f"restore or fix permissions on the component source at {path}",
-            status=Status.UNAVAILABLE,
-            source=FailureSource(file=str(path)),
-            cause=error,
-        ) from error
+        raise _source_lost(path, error) from error
     # The drift refusal that stood here is gone. It refused a run whose source had been edited
     # since registration and named "re-register the component" as the repair -- which
     # `register_component` then refused, demanding a new identity instead. A reader following
@@ -161,15 +153,38 @@ def as_loaded_fingerprint(
             config=ref.config,
         )
     except OSError as error:
-        raise _failure(
-            "component.source_unreadable",
-            f"component source must remain readable at {path}",
-            str(error),
-            fix=f"restore or fix permissions on the component source at {path}",
-            status=Status.UNAVAILABLE,
+        raise _source_lost(path, error) from error
+
+
+def _source_lost(path: Path, error: OSError) -> VqaprError:
+    """A registered component's source could not be read at load time.
+
+    404 when the file is gone -- a name was registered and nothing is at the path it recorded,
+    which is the submission's to repair -- and 503 only when a file that exists could not be read
+    (`docs/issues/094`; the same split `extension/prepare.py` makes at registration).
+    """
+    if isinstance(error, FileNotFoundError | NotADirectoryError | IsADirectoryError):
+        return _failure(
+            "component.source_missing",
+            f"component source must still exist at {path}",
+            f"nothing at {path}",
+            fix=(
+                f"restore the component source at {path}, or register the component again from "
+                "where it lives now"
+            ),
+            status=Status.MISSING,
             source=FailureSource(file=str(path)),
             cause=error,
-        ) from error
+        )
+    return _failure(
+        "component.source_unreadable",
+        f"component source must remain readable at {path}",
+        str(error),
+        fix=f"fix permissions on the component source at {path}",
+        status=Status.UNAVAILABLE,
+        source=FailureSource(file=str(path)),
+        cause=error,
+    )
 
 
 def positional_arity(target: object) -> tuple[int, int] | None:

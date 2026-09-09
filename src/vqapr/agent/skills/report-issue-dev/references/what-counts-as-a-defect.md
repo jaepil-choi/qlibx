@@ -14,8 +14,8 @@ The envelope carries the triage decision most of the time. Read `status` first, 
 | **422** declaration rejected | you — the declaration is unsound | Only if `fix` does not resolve it, or `run` accepts what `check` refused (or the reverse) |
 | **423** locked | nobody — another process holds it | **No.** Retry unchanged. File only if it never clears and no other process is running |
 | **500** unhandled | **vqapr** | **Always.** A 500 is by definition a defect: an exception nobody turned into a judgment |
-| **502** upstream failure | **vqapr** | **Always.** vqapr failed to handle something a dependency did |
-| **503** unavailable | nobody — transient | **No.** Retry unchanged. File only if it never clears |
+| **502** your code raised | **you** — `cause.origin` is `"user"`, `cause.where` is your file and line | **No.** Fix the component and re-run. File only if `origin` is not `"user"`, or a package helper you called correctly raised inside your callback |
+| **503** unavailable | nobody — the machine: a file that exists could not be read, a disk was full | **No.** Retry unchanged. File only if it never clears. (A path that is not there is a **404**, not a 503) |
 
 A 500 that you can work around is still a 500. Work around it *and* file it — the workaround is
 evidence of impact, not a reason to stay quiet.

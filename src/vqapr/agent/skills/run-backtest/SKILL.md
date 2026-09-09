@@ -135,5 +135,6 @@ some strategies completed — say which ones did and which did not.
 
 A refusal carries its own status, stage and cause, plus `fix`, `requirement`, `observed` and
 `source` — read it rather than looking for it here. Status **423 or 503 means wait and retry the
-same command unchanged**; **500 or 502 is a vqapr defect**: do not work around it, report it with
-the envelope.
+same command unchanged**; **502 is a strategy's own code raising** (`cause.origin: "user"`,
+`cause.where` names the line) — fix the component; **500 is a vqapr defect**: do not work around
+it, report it with the envelope.

@@ -350,7 +350,7 @@ def _judge_execution_ordering(
     fill_at = definition.execution.fill.at
     found: list[Failure] = []
     occurrences = agenda().occurrences  # type: ignore[attr-defined]
-    for entry in definition.strategies:
+    for entry in ((definition.strategy,) if definition.strategy is not None else ()):
         late = [
             occurrence.occurrence_id
             for occurrence in occurrences
@@ -382,8 +382,14 @@ def _judge_execution_ordering(
 def _members(definition: RunDefinition) -> list[tuple[str, Any, Any]]:
     """Every component the run names: the section it was declared under, the entry, its loader."""
     return [
-        *(("strategies", entry, load_strategy_model) for entry in definition.strategies),
-        *(("datamodels", entry, load_data_model) for entry in definition.datamodels),
+        *(
+            ("strategies", entry, load_strategy_model)
+            for entry in ((definition.strategy,) if definition.strategy is not None else ())
+        ),
+        *(
+            ("datamodels", entry, load_data_model)
+            for entry in ((definition.datamodel,) if definition.datamodel is not None else ())
+        ),
     ]
 
 
@@ -521,7 +527,7 @@ def _judge_outputs(
     `check` cannot certify a run that `run` then refuses.
     """
     found: list[Failure] = []
-    for entry in definition.datamodels:
+    for entry in ((definition.datamodel,) if definition.datamodel is not None else ()):
         if entry.dataset_id not in registered:
             continue
         found.append(

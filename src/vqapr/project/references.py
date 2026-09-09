@@ -33,10 +33,9 @@ def _references_in(state: _State, kind: str, identity: str) -> tuple[str, ...]:
     blockers: list[str] = []
     if kind == "component":
         for run_id, definition in runs.items():
-            named = {definition.exchange}
-            named.update(entry.component_id for entry in definition.strategies)
-            named.update(name for entry in definition.strategies for name in entry.constraints)
-            named.update(entry.component_id for entry in definition.datamodels)
+            named = {definition.exchange, definition.member.component_id}
+            if definition.strategy is not None:
+                named.update(definition.strategy.constraints)
             if identity in named:
                 blockers.append(f"run {run_id!r}")
     elif kind == "dataset":

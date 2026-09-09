@@ -126,7 +126,7 @@ def _setup(
     )
     return workspace, RunDefinition(
         run_id="preflight",
-        strategies=(StrategyEntry("strategy", ("limit",), {"cadence": [1]}),),
+        strategy=StrategyEntry("strategy", ("limit",), {"cadence": [1]}),
         sessions=(SESSION,),
         timezone="Asia/Seoul",
         at=at,
@@ -241,7 +241,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
 
     frozen = preflight_run(workspace, definition)
 
-    (layer,) = frozen.strategies
+    layer = frozen.strategy
     assert layer.config.agenda_id == definition.agenda_id == "preflight.sessions"
     assert layer.agenda.agenda_id == definition.agenda_id
     assert layer.agenda.timezone == "Asia/Seoul"
@@ -496,16 +496,16 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # a frozen run detached from the workspace without copying on every read (record `145`).
     with pytest.raises(TypeError):
         workspace.component("strategy").config["changed"] = 1  # type: ignore[index]
-    assert frozen.strategies[0].config.component == workspace.component("strategy")
-    assert frozen.strategies[0].config.component.config == {}
+    assert frozen.strategy.config.component == workspace.component("strategy")
+    assert frozen.strategy.config.component.config == {}
 
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
-    definition = definition.replace(strategies=(StrategyEntry('strategy', ('limit',), memory),))
+    definition = definition.replace(strategy=StrategyEntry('strategy', ('limit',), memory))
     frozen = preflight_run(workspace, definition)
     memory["nested"].append(2)
-    assert definition.strategies[0].initial_model_memory == {"nested": [1]}
-    assert frozen.strategies[0].initial_model_memory == {"nested": [1]}
+    assert definition.strategy.initial_model_memory == {"nested": [1]}
+    assert frozen.strategy.initial_model_memory == {"nested": [1]}
     workspace, definition = _setup(tmp_path / "drift", model_price_parquet)
     (tmp_path / "drift" / "strategy.py").write_text(
         "class Strategy:\n    changed = True\n", encoding="utf-8"
@@ -855,7 +855,7 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     calls.clear()
     frozen = preflight_run(tmp_path, two_days)
     assert calls == ["prices"], f"preflight derived the agenda {len(calls)} times"
-    assert len(frozen.strategy("strategy").agenda.occurrences) == 1
+    assert len(frozen.strategy.agenda.occurrences) == 1
 
 
 def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(

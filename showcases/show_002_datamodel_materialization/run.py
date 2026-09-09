@@ -237,9 +237,8 @@ def _datamodel_run(
     """Register one datamodel run, freeze it, execute it; the result and its record."""
     definition = RunDefinition(
         run_id=run_id,
-        strategies=(),
         instruments=INSTRUMENTS,
-        datamodels=(DataModelEntry(component_id, dataset_id, value_fields),),
+        datamodel=DataModelEntry(component_id, dataset_id, value_fields),
         timezone="Asia/Seoul",
         at=time(16, 0),
         sessions=sessions,

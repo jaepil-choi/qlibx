@@ -249,7 +249,7 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
         return success("workspace.removed", kind="run", identifier=run_id, cascade=True,
                        removed=removed, kept=kept)
     removed["run_definition"] = bool(workspace.remove("run", run_id))
-    outputs = [str(entry.dataset_id) for entry in definition.datamodels]
+    outputs = [] if definition.datamodel is None else [str(definition.datamodel.dataset_id)]
     for dataset_id in outputs:
         blockers = workspace.references_to("dataset", dataset_id)
         if blockers:
@@ -262,11 +262,9 @@ def _cascade(project_root: Path, root: Path, run_id: str) -> dict[str, Any]:
             removed["datasets"].append(dataset_id)
             if materialized is not None:
                 shutil.rmtree(materialized, ignore_errors=True)
-    named: list[str] = []
-    for entry in definition.strategies:
-        named.append(entry.component_id)
-        named.extend(entry.constraints)
-    named.extend(entry.component_id for entry in definition.datamodels)
+    named: list[str] = [definition.member.component_id]
+    if definition.strategy is not None:
+        named.extend(definition.strategy.constraints)
     if definition.exchange is not None:
         named.append(definition.exchange)
     for component_id in dict.fromkeys(named):

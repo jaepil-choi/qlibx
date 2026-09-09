@@ -116,16 +116,13 @@ class StrategyEventLoop(
         registry: InstrumentRoster | None = None,
         record_account_positions: bool = True,
     ) -> None:
-        # One flow runs ONE strategy of the run (record `139`): the run layer is shared, the
-        # strategy layer is this flow's own. A run with one strategy needs no `layer`.
+        # A run runs ONE strategy (2026-09-09,
+        # `docs/design/two-clocks-and-the-wiring-table.md` §2.3), so `layer` is a courtesy the
+        # caller may pass and never a choice: the run holds the answer.
         if layer is None:
-            if len(frozen_run.strategies) != 1:
-                raise ValueError(
-                    "a run with several strategies must say which one this flow runs (layer=)"
-                )
-            layer = frozen_run.strategies[0]
-        if layer not in frozen_run.strategies:
-            raise ValueError("layer must be one of the frozen run's strategies")
+            layer = frozen_run.strategy
+        if layer is None or layer is not frozen_run.strategy:
+            raise ValueError("layer must be the frozen run's strategy")
         if not callable(strategy_window_for_occurrence):
             raise TypeError("strategy_window_for_occurrence must be callable")
         if not callable(constraint_window_for_occurrence):

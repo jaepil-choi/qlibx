@@ -154,4 +154,4 @@ def test_the_registered_run_is_what_the_sample_executes(tmp_path: Path) -> None:
     registered = Workspace.open(project).run_definition(journey.RUN_ID)
 
     assert registered == journey.definition(panel)
-    assert [entry.component_id for entry in registered.strategies] == [journey.STRATEGY_ID]
+    assert registered.strategy.component_id == journey.STRATEGY_ID

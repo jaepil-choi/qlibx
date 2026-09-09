@@ -95,7 +95,7 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
         ],
         strategies=[
             {"component_id": layer.component_id, "record": layer.record_ref}
-            for layer in frozen.strategies
+            for layer in ((frozen.strategy,) if frozen.strategy is not None else ())
         ],
         # A run holds one kind (record `148`); the other list is empty, and stays in the record
         # so a reader never has to know which kind it is holding to ask.
@@ -105,7 +105,7 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
                 "record": layer.record_ref,
                 "dataset_id": layer.dataset_id,
             }
-            for layer in frozen.datamodels
+            for layer in ((frozen.datamodel,) if frozen.datamodel is not None else ())
         ],
     )
     return write_run_record(root, frozen.run_id, record)

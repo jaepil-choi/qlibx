@@ -855,7 +855,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     alpha_definition = RunDefinition(
         run_id="show005-alpha",
-        strategies=(StrategyEntry("show005-alpha"),),
+        strategy=StrategyEntry("show005-alpha"),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=time(8, 30),
@@ -895,7 +895,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     index_definition = RunDefinition(
         run_id="show005-index",
-        strategies=(StrategyEntry("show005-index", ("no-short", "single-name-cap")),),
+        strategy=StrategyEntry("show005-index", ("no-short", "single-name-cap")),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=time(9, 0),

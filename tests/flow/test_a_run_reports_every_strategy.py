@@ -1,13 +1,18 @@
-"""A run reports every strategy it was asked to run, and a worker's refusal comes back.
+"""One run's refusal is that run's outcome, and a worker's refusal comes back.
 
-`docs/issues/archive/073`: under `--jobs` a strategy's `SimulationFailure` could not be pickled back to
-the parent (its keyword-only constructor and the `Rebalance` it kept on itself), so the run ended
-`stage: unhandled` with `failures: []` and named none of the seven strategies that had finished.
-In a single process the loop stopped at the first exception and the strategies after it never
-ran. `docs/issues/archive/071`: the failure named no strategy and its `source` was three nulls.
+`docs/issues/archive/073`: under `--jobs` a strategy's `SimulationFailure` could not be pickled
+back to the parent (its keyword-only constructor and the `Rebalance` it kept on itself), so the
+batch ended `stage: unhandled` with `failures: []` and named none of the strategies that had
+finished. `docs/issues/archive/071`: the failure named no strategy and its `source` was three
+nulls.
 
-The run here is the shipped sample journey with the sample strategy registered twice and a
-strategy that raises from its own file between them.
+**The unit moved on 2026-09-09** (`docs/design/two-clocks-and-the-wiring-table.md` §2.3). A run
+holds one model, so what used to be three strategies in one run is three runs, and the guarantee
+this file pins moved with them: one refusal is reported as that RUN's outcome and the others
+still run. The pickling rule is unchanged -- it is why the worker returns a `StrategyOutcome`.
+
+Three runs of the shipped sample journey: the sample strategy twice, and a strategy that raises
+from its own file between them.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ import pytest
 
 import tests.sample.journey as journey
 from vqapr.flow.engine.artifacts import SimulationFailure
+from vqapr.flow.orchestration import in_workers, run_registered_strategy
 from vqapr.record import strategy_refs
 from vqapr.public import (
     StrategyEntry,
@@ -68,10 +74,11 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     register_strategy_model(project, "ou-first", journey.STRATEGY_SOURCE, "SampleReversal5d")
     register_strategy_model(project, "never-ready", raising, "NeverReady")
     register_strategy_model(project, "ou-last", journey.STRATEGY_SOURCE, "SampleReversal5d")
-    definition = journey.definition(panel, run_id='mixed').replace(
-                     strategies=tuple(StrategyEntry(name) for name in STRATEGIES),
-                 )
-    register_run(project, definition)
+    for name in STRATEGIES:
+        register_run(
+            project,
+            journey.definition(panel, run_id=name).replace(strategy=StrategyEntry(name)),
+        )
     return project, tmp_path / "store"
 
 
@@ -95,58 +102,63 @@ def _assert_failure_names_its_strategy(failure: dict) -> None:
     )
 
 
-def test_one_strategys_refusal_is_its_outcome_and_the_others_still_run(tmp_path: Path) -> None:
+def test_one_runs_refusal_is_its_outcome_and_the_other_runs_still_run(tmp_path: Path) -> None:
     project, store = _project(tmp_path)
-    frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
+    statuses: dict[str, str] = {}
+    for name in STRATEGIES:
+        frozen = preflight_run(project, Workspace.open(project).run_definition(name))
+        outcome = execute_run(project, frozen, store_root=store)
+        statuses[name] = "completed" if outcome.ok else "failed"
 
-    outcome = execute_run(project, frozen, store_root=store)
+    assert statuses == {
+        "ou-first": "completed",
+        "never-ready": "failed",
+        "ou-last": "completed",
+    }, "the run after the refused one ran; nothing about the refusal reached it"
+    assert len(strategy_refs(store, "ou-first")) == 1
+    assert len(strategy_refs(store, "ou-last")) == 1
+    assert strategy_refs(store, "never-ready") == (), "the refused run left no record"
 
-    assert [(name, o.status) for name, o in outcome.outcomes.items()] == [
-        ("ou-first", "completed"),
-        ("never-ready", "failed"),
-        ("ou-last", "completed"),
-    ], "the strategy after the failed one ran; it used to never start"
-    assert not outcome.ok and outcome.failed == ("never-ready",)
-    assert set(outcome.results) == {"ou-first", "ou-last"}
-    assert sorted(ref.rsplit("@", 1)[0] for ref in strategy_refs(store, "mixed")) == [
-        "ou-first",
-        "ou-last",
-    ], "two records stand; the failed strategy left none"
-
-    failed = outcome.errors["never-ready"]
+    frozen = preflight_run(project, Workspace.open(project).run_definition("never-ready"))
+    refused = execute_run(project, frozen, store_root=store)
+    failed = refused.errors["never-ready"]
     assert isinstance(failed, SimulationFailure)
     assert failed.component_id == "never-ready"
     assert "[never-ready]" in str(failed), "the human form names the strategy too"
     _assert_failure_names_its_strategy(failed.as_dict())
-    assert outcome.outcomes["never-ready"].failure == failed.as_dict()
+    assert refused.outcomes["never-ready"].failure == failed.as_dict()
 
-    # A Python caller asking for the failed strategy's result meets the real exception.
+    # A Python caller asking for the refused run's result meets the real exception.
     with pytest.raises(SimulationFailure):
-        outcome.result("never-ready")
-    assert outcome.result("ou-first").final_state.version > 0
+        refused.result("never-ready")
 
 
 @pytest.mark.slow
 def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(tmp_path: Path) -> None:
-    """The finding itself: `--jobs`, one refusal, the parent used to see `cannot pickle`."""
+    """The finding itself: `--jobs`, one refusal, the parent used to see `cannot pickle`.
+
+    The pool spreads RUNS now, so this is three runs in three processes rather than three
+    strategies of one -- the pickling rule it pins is the same.
+    """
     project, store = _project(tmp_path)
-    frozen = preflight_run(project, Workspace.open(project).run_definition("mixed"))
 
-    outcome = execute_run(project, frozen, store_root=store, jobs=3)
-
-    assert outcome.results == {} and outcome.errors == {}, (
-        "nothing in-process crosses the boundary; the outcome does"
+    outcomes: dict[str, StrategyOutcome] = in_workers(
+        list(STRATEGIES),
+        run_registered_strategy,
+        (False, True),
+        jobs=3,
+        store=store,
+        root_path=project,
     )
-    assert {name: o.status for name, o in outcome.outcomes.items()} == {
+
+    assert {name: o.status for name, o in outcomes.items()} == {
         "ou-first": "completed",
         "never-ready": "failed",
         "ou-last": "completed",
     }
-    assert set(outcome.records) == {"ou-first", "ou-last"}
-    assert len(strategy_refs(store, "mixed")) == 2
-    failed: StrategyOutcome = outcome.outcomes["never-ready"]
+    failed = outcomes["never-ready"]
     assert failed.record is None and failed.error is not None
     assert "SimulationFailure" in failed.error and "cannot pickle" not in failed.error
     _assert_failure_names_its_strategy(dict(failed.failure))
-    with pytest.raises(ValueError, match="worker process"):
-        outcome.result("never-ready")
+    assert len(strategy_refs(store, "ou-first")) == 1
+    assert strategy_refs(store, "never-ready") == ()

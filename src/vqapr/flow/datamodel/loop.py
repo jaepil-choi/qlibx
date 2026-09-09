@@ -56,8 +56,8 @@ class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelRes
         output: DataModelOutput,
         on_progress: Callable[[], None] | None = None,
     ) -> None:
-        if layer not in frozen_run.datamodels:
-            raise ValueError("layer must be one of the frozen run's datamodels")
+        if layer is not frozen_run.datamodel:
+            raise ValueError("layer must be the frozen run's datamodel")
         if not callable(window_for_occurrence):
             raise TypeError("window_for_occurrence must be callable")
         cutoff = frozen_run.start or frozen_run.end

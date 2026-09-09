@@ -64,7 +64,7 @@ def _strategy(name: str, root: Path) -> ComponentRef:
 def _run(run_id: str, strategy: str) -> RunDefinition:
     return RunDefinition(
         run_id=run_id,
-        strategies=(StrategyEntry(strategy),),
+        strategy=StrategyEntry(strategy),
         instruments=("A",),
         timezone="Asia/Seoul",
         at=time(15, 29),

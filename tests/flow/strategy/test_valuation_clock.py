@@ -177,7 +177,7 @@ RUNNER = textwrap.dedent(
     # every session, decided at 08:00, filled and valued at the 15:30 print.
     definition = RunDefinition(
         run_id="clock",
-        strategies=(StrategyEntry("clock-strategy"),),
+        strategy=StrategyEntry("clock-strategy"),
         instruments=("A005930",),
         sessions=sessions,
         timezone="Asia/Seoul",
@@ -455,8 +455,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     )
     frozen = FrozenRun(
         run_id="fallback",
-        strategies=(
-            FrozenStrategy(
+        strategy=FrozenStrategy(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
@@ -464,7 +463,6 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
                 constraints=ConstraintSet(()),
                 agenda=FrozenAgenda("strategy", (occurrence,)),
             ),
-        ),
         start=occurrence.evaluation_time,
         end=occurrence.evaluation_time,
         initial_account_snapshot=snapshot,

@@ -735,7 +735,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
-    if definition.datamodels:
+    if definition.datamodel is not None:
         return _preflight_datamodel_run(workspace, definition)
     _require_execution_authority(definition)
     if definition.start is None or definition.end is None:
@@ -760,11 +760,17 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
     )
 
-    strategies = tuple(
+    if definition.strategy is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a strategy run declares no strategy")
+    strategies = (
         _freeze_strategy(
-            workspace, entry, decide=decide, execution_table=execution_table, start=start, end=end
-        )
-        for entry in definition.strategies
+            workspace,
+            definition.strategy,
+            decide=decide,
+            execution_table=execution_table,
+            start=start,
+            end=end,
+        ),
     )
     # Valuation subscribes to nothing: it reads the prices the venue already published to fill
     # against, so it contributes no DataRequirement. The union is what the strategies and their
@@ -783,7 +789,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
 
     return FrozenRun(
         run_id=definition.run_id,
-        strategies=strategies,
+        strategy=strategies[0],
         exchange=exchange,
         execution=execution_table,
         start=start,
@@ -811,9 +817,10 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
     decide = derived_agenda(workspace, definition)
-    datamodels = tuple(
-        _freeze_datamodel(workspace, entry, decide=decide, start=start, end=end)
-        for entry in definition.datamodels
+    if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a datamodel run declares no datamodel")
+    datamodels = (
+        _freeze_datamodel(workspace, definition.datamodel, decide=decide, start=start, end=end),
     )
     requirements: list[DataRequirement] = []
     for layer in datamodels:
@@ -828,8 +835,7 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
     return FrozenRun(
         run_id=definition.run_id,
-        strategies=(),
-        datamodels=datamodels,
+        datamodel=datamodels[0],
         start=start,
         end=end,
         instruments=definition.instruments,

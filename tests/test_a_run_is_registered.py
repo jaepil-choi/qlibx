@@ -56,7 +56,7 @@ def _component(name: str, kind: ComponentKind, root: Path) -> ComponentRef:
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "krx-2024",
-        "strategies": (StrategyEntry("ou-k0", ("no-short",)), StrategyEntry("ou-ff5")),
+        "strategy": StrategyEntry("ou-k0", ("no-short",)),
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
         "at": time(15, 29),
@@ -124,7 +124,7 @@ def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> N
     assert [run.run_id for run in reopened.run_definitions] == ["krx-2024"]
     document = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))
     written = document["runs"]["krx-2024"]
-    assert set(written["strategies"]) == {"ou-k0", "ou-ff5"}
+    assert set(written["strategies"]) == {"ou-k0"}
     assert written["strategies"]["ou-k0"] == {"constraints": ["no-short"]}
     # The sessions and the one wall time are the run's own keys, in the shape an author writes.
     assert written["timezone"] == "Asia/Seoul"
@@ -183,9 +183,9 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
 @pytest.mark.parametrize(
     ("override", "names"),
     [
-        ({"strategies": (StrategyEntry("absent"),)}, "strategy 'absent'"),
-        ({"strategies": (StrategyEntry("venue"),)}, "strategy 'venue'"),
-        ({"strategies": (StrategyEntry("ou-k0", ("ou-ff5",)),)}, "constraint 'ou-ff5'"),
+        ({"strategy": StrategyEntry("absent")}, "strategy 'absent'"),
+        ({"strategy": StrategyEntry("venue")}, "strategy 'venue'"),
+        ({"strategy": StrategyEntry("ou-k0", ("ou-ff5",))}, "constraint 'ou-ff5'"),
         ({"exchange": "ou-k0"}, "exchange 'ou-k0'"),
         (
             {
@@ -219,7 +219,6 @@ def test_a_run_holds_what_it_names_so_removal_is_refused_by_name(workspace: Work
     with Workspace.transaction(workspace) as t:
         t.register_run(_definition())
 
-    assert workspace.references_to("component", "ou-ff5") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "no-short") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "venue") == ("run 'krx-2024'",)
     assert workspace.references_to("run", "krx-2024") == (), "nothing names a run"
@@ -254,7 +253,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                     },
                 },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
-                "strategies": {"ou-k0": {"constraints": ["no-short"]}, "ou-ff5": None},
+                "strategies": {"ou-k0": {"constraints": ["no-short"]}},
             }
         }
     }
@@ -271,7 +270,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
         # A key-set fault names the keys the run lacks: the model is refused before any rule
         # about the values can run, so the clock keys are what a 0.3.0-shaped run hears first.
         ({"instruments": ["A"], "strategies": {}}, "timezone: Field required"),
-        ({**_RUN_READY, "strategies": {}}, "must name at least one model"),
+        ({**_RUN_READY, "strategies": {}}, "exactly one of"),
         (
             {
                 **_RUN_READY,

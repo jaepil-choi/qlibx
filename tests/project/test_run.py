@@ -35,7 +35,7 @@ def _component(kind: ComponentKind, name: str) -> ComponentRef:
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "r",
-        "strategies": (StrategyEntry("strategy", ("no-short",)),),
+        "strategy": StrategyEntry("strategy", ("no-short",)),
         "instruments": ("ABC",),
         "timezone": "Asia/Seoul",
         "at": time(15, 29),
@@ -60,26 +60,27 @@ def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
         )
 
 
-def test_a_run_names_its_strategies_and_each_strategy_its_constraints() -> None:
-    """Record `139`: the run layer is shared; constraints belong to the strategy under them."""
-    run = _definition(
-        strategies=(StrategyEntry("a", ("no-short",)), StrategyEntry("b")),
-    )
+def test_a_run_names_one_strategy_and_that_strategy_its_constraints() -> None:
+    """A run runs one model; constraints belong to the strategy under it."""
+    run = _definition(strategy=StrategyEntry("a", ("no-short",)))
 
-    assert [entry.component_id for entry in run.strategies] == ["a", "b"]
-    assert run.strategy("a").constraints == ("no-short",)
-    assert run.strategy("b").constraints == ()
+    assert run.strategy is not None
+    assert run.strategy.component_id == "a"
+    assert run.strategy.constraints == ("no-short",)
+    assert run.member is run.strategy
     assert "constraints" not in set(RunDefinition.model_fields)
-    assert "strategy" not in set(RunDefinition.model_fields)
-    with pytest.raises(KeyError, match="does not name strategy 'c'"):
-        run.strategy("c")
+    assert "strategies" not in set(RunDefinition.model_fields)
 
 
-def test_a_run_names_each_strategy_at_most_once_and_at_least_one() -> None:
-    with pytest.raises(ValueError, match="at most once"):
-        _definition(strategies=(StrategyEntry("a"), StrategyEntry("a")))
-    with pytest.raises(ValueError, match="at least one strategy"):
-        _definition(strategies=())
+def test_a_run_names_exactly_one_model() -> None:
+    """Two members are refused by name rather than half-run, and none is refused too.
+
+    The stored block is still `strategies: {id: {...}}`; what changed is that it holds one.
+    """
+    with pytest.raises(ValueError, match="names exactly one model"):
+        _definition(strategies={"a": {}, "b": {}})
+    with pytest.raises(ValueError, match="exactly one of"):
+        _definition(strategy=None)
 
 
 def test_a_strategy_entry_is_ids_and_memory_only() -> None:
@@ -160,9 +161,9 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
     """Record `148` pins the surface: valued where it fills, judged after each commit."""
     assert set(RunDefinition.model_fields) == {
         "run_id",
-        "strategies",
+        "strategy",
         "instruments",
-        "datamodels",
+        "datamodel",
         "timezone",
         "at",
         "sessions_from",

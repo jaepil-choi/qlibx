@@ -127,7 +127,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         t.register_run(
             RunDefinition(
                 run_id="probe",
-                strategies=(StrategyEntry("my-strat"),),
+                strategy=StrategyEntry("my-strat"),
                 timezone="Asia/Seoul",
                 at=time(15, 30),
                 sessions=(date(2024, 1, 2),),

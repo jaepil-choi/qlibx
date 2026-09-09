@@ -423,7 +423,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    definition = _definition().replace(strategies=(StrategyEntry('wide'),))
+    definition = _definition().replace(strategy=StrategyEntry('wide'))
     (member,) = _members(definition)
     failures = _judge_member_datasets(
         definition,

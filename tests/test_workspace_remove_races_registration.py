@@ -71,7 +71,7 @@ def _seed(tmp_path: Path) -> Workspace:
 def _run_naming_alpha() -> RunDefinition:
     return RunDefinition(
         run_id="cadence",
-        strategies=(StrategyEntry("alpha"),),
+        strategy=StrategyEntry("alpha"),
         instruments=("A",),
         timezone=ZONE,
         at=time(9, 0),

@@ -93,7 +93,7 @@ def _summarize(item: object) -> dict[str, Any]:
         # value gave a reader `data_model`, which they cannot type at any verb.
         summary[field] = cli_kind(value) if field == "kind" else str(value)
     if isinstance(item, RunDefinition):
-        summary["strategies"] = [entry.component_id for entry in item.strategies]
+        summary["model"] = item.member.component_id
         summary["start"] = None if item.start is None else item.start.isoformat()
         summary["end"] = None if item.end is None else item.end.isoformat()
         summary["exchange"] = item.exchange

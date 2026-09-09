@@ -134,8 +134,7 @@ def _flow(
     requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
-        strategies=(
-            FrozenStrategy(
+        strategy=FrozenStrategy(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
@@ -143,7 +142,6 @@ def _flow(
                 constraints=ConstraintSet((_component("constraint", ComponentKind.CONSTRAINT),)),
                 agenda=FrozenAgenda("strategy", occurrences),
             ),
-        ),
         start=occurrences[0].evaluation_time,
         end=occurrences[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),

@@ -30,7 +30,12 @@ from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 from vqapr.flow.datamodel.loop import DataModelResult
 from vqapr.flow.datamodel.output import output_directory, output_source_id
 from vqapr.flow.declaration.judgments import judgments
-from vqapr.flow.orchestration import RunResult, run
+from vqapr.flow.orchestration import (
+    RunResult,
+    in_workers,
+    run,
+    run_registered_datamodel,
+)
 from vqapr.flow.declaration.preflight import preflight_run
 from vqapr.record import (
     DATAMODEL_KIND,
@@ -187,15 +192,14 @@ def _models(project: Path) -> Path:
 
 def _definition(
     run_id: str,
-    *entries: DataModelEntry,
+    entry: DataModelEntry,
     instruments: tuple[str, ...] = ("A", "B"),
     sessions_from: str = "price_daily",
     at: time = time(16, 0),
 ) -> RunDefinition:
     return RunDefinition(
         run_id=run_id,
-        strategies=(),
-        datamodels=entries,
+        datamodel=entry,
         instruments=instruments,
         timezone="Asia/Seoul",
         at=at,
@@ -209,10 +213,10 @@ def _store(project: Path) -> Path:
     return project / WORKSPACE_DIRECTORY
 
 
-def _run(project: Path, definition: RunDefinition, *, jobs: int = 1) -> RunResult:
+def _run(project: Path, definition: RunDefinition) -> RunResult:
     """Preflight and run one definition against the project, recording under the store."""
     frozen = preflight_run(project, definition)
-    return run(project, frozen, store_root=_store(project), jobs=jobs)
+    return run(project, frozen, store_root=_store(project))
 
 
 def _dataset_ids(project: Path) -> set[str]:
@@ -440,7 +444,7 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
     """
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
     definition = _definition("factors", DataModelEntry("reversal", "reversal_2d", ("score",)))
-    ref = preflight_run(tmp_path, definition).datamodel("reversal").record_ref
+    ref = preflight_run(tmp_path, definition).datamodel.record_ref
 
     outcome = _run(tmp_path, definition)
 
@@ -504,33 +508,44 @@ def test_a_second_run_is_refused_before_it_computes(
 def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Two datamodels, two workers, two datasets; the results come back as records.
+    """Two datamodel RUNS, two workers, two datasets; each worker returns what it wrote.
 
-    A worker freezes the REGISTERED run again, so the definition is registered first; the
-    in-process `results` are empty and `records` carries what each worker wrote.
+    The pool spreads runs since 2026-09-09 (`docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3), so what used to be two members of one run is two runs. A worker freezes the
+    REGISTERED run again, which is why both are registered first.
     """
     _prepared(
         tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("momentum", "MomentumModel")
     )
-    definition = _definition(
-        "factors",
-        DataModelEntry("reversal", "reversal_2d", ("score",)),
-        DataModelEntry("momentum", "momentum_2d", ("score",)),
+    for run_id, component_id, dataset_id in (
+        ("factors-reversal", "reversal", "reversal_2d"),
+        ("factors-momentum", "momentum", "momentum_2d"),
+    ):
+        assert (
+            register_run(
+                tmp_path, _definition(run_id, DataModelEntry(component_id, dataset_id, ("score",)))
+            )
+            is True
+        )
+
+    records = in_workers(
+        ["factors-reversal", "factors-momentum"],
+        run_registered_datamodel,
+        (False,),
+        jobs=2,
+        store=_store(tmp_path),
+        root_path=tmp_path,
     )
-    assert register_run(tmp_path, definition) is True
 
-    outcome = _run(tmp_path, definition, jobs=2)
-
-    assert dict(outcome.results) == {}
-    assert set(outcome.records) == {"reversal", "momentum"}
+    assert set(records) == {"factors-reversal", "factors-momentum"}
     assert {"reversal_2d", "momentum_2d"} <= _dataset_ids(tmp_path)
-    assert set(datamodel_refs(_store(tmp_path), "factors")) == {
-        outcome.records["reversal"]["datamodel_ref"],
-        outcome.records["momentum"]["datamodel_ref"],
-    }
-    for component_id, dataset_id in (("reversal", "reversal_2d"), ("momentum", "momentum_2d")):
-        assert outcome.records[component_id]["dataset_id"] == dataset_id
-        assert outcome.records[component_id]["rows"] == 4
+    for run_id, dataset_id in (
+        ("factors-reversal", "reversal_2d"),
+        ("factors-momentum", "momentum_2d"),
+    ):
+        assert datamodel_refs(_store(tmp_path), run_id) == (records[run_id]["datamodel_ref"],)
+        assert records[run_id]["dataset_id"] == dataset_id
+        assert records[run_id]["rows"] == 4
         assert [path.name for path in _chunks(tmp_path, dataset_id)] == ["all.parquet"]
     opposite = _query(
         f"SELECT max(abs(r.score + m.score)) FROM {_parquet(tmp_path, 'reversal_2d')} r "
@@ -544,23 +559,35 @@ def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raise
 ) -> None:
     """A datamodel refused in a `--jobs` worker is refused by its own code in the parent.
 
-    The strategy pool learned this in `docs/issues/archive/073` by returning an outcome; the datamodel
-    pool was a copy that never did, so a `VqaprError` raised in a worker failed to unpickle
-    (keyword-only constructor) and the run died as `stage: unhandled` with no failures. One pool
-    driver for both kinds and a picklable `VqaprError` close it (record `170`).
+    The strategy pool learned this in `docs/issues/archive/073` by returning an outcome; the
+    datamodel pool was a copy that never did, so a `VqaprError` raised in a worker failed to
+    unpickle (keyword-only constructor) and the run died as `stage: unhandled` with no failures.
+    One pool driver for both kinds and a picklable `VqaprError` close it (record `170`). The pool
+    spreads runs now; the rule it pins is the same.
     """
     _prepared(
         tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("stray", "StrayNameModel")
     )
-    definition = _definition(
-        "factors",
-        DataModelEntry("reversal", "reversal_2d", ("score",)),
-        DataModelEntry("stray", "stray_2d", ("score",)),
-    )
-    assert register_run(tmp_path, definition) is True
+    for run_id, component_id, dataset_id in (
+        ("factors-reversal", "reversal", "reversal_2d"),
+        ("factors-stray", "stray", "stray_2d"),
+    ):
+        assert (
+            register_run(
+                tmp_path, _definition(run_id, DataModelEntry(component_id, dataset_id, ("score",)))
+            )
+            is True
+        )
 
     with pytest.raises(VqaprError) as caught:
-        _run(tmp_path, definition, jobs=2)
+        in_workers(
+            ["factors-reversal", "factors-stray"],
+            run_registered_datamodel,
+            (False,),
+            jobs=2,
+            store=_store(tmp_path),
+            root_path=tmp_path,
+        )
 
     assert caught.value.stage is Stage.RUN
     (failure,) = caught.value.failures

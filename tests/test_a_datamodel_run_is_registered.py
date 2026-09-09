@@ -49,8 +49,7 @@ _DATAMODELS = {"reversal": {"dataset_id": "reversal_2d", "value_fields": ["score
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "factors",
-        "strategies": (),
-        "datamodels": (ENTRY,),
+        "datamodel": ENTRY,
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
         "at": time(16, 0),
@@ -80,19 +79,15 @@ def workspace(tmp_path: Path) -> Workspace:
 def test_a_run_holds_one_kind_of_model() -> None:
     """Strategies or datamodels: the two share sessions but nothing else a run declares."""
     with pytest.raises(ValueError, match="not both"):
-        _definition(strategies=(StrategyEntry("ou-k0"),))
-    with pytest.raises(ValueError, match="at least one strategy or at least one datamodel"):
-        _definition(datamodels=())
+        _definition(strategy=StrategyEntry("ou-k0"))
+    with pytest.raises(ValueError, match="not both and not neither"):
+        _definition(datamodel=None)
 
     definition = _definition()
     assert definition.kind == "datamodel"
-    assert definition.members == (ENTRY,)
-    assert definition.member("reversal") is ENTRY
-    assert definition.datamodel("reversal") is ENTRY
-    with pytest.raises(KeyError, match="does not name datamodel 'absent'"):
-        definition.datamodel("absent")
-    with pytest.raises(KeyError, match="does not name strategy 'reversal'"):
-        definition.strategy("reversal")
+    assert definition.member is ENTRY
+    assert definition.datamodel is ENTRY
+    assert definition.strategy is None
 
 
 @pytest.mark.parametrize(
@@ -122,11 +117,15 @@ def test_a_datamodel_run_may_not_declare_what_it_cannot_use(override: dict[str, 
         _definition(**override)
 
 
-def test_a_run_writes_each_output_dataset_once() -> None:
-    with pytest.raises(ValueError, match="each output dataset at most once"):
-        _definition(datamodels=(ENTRY, DataModelEntry("momentum", "reversal_2d", ("score",))))
-    with pytest.raises(ValueError, match="each model at most once"):
-        _definition(datamodels=(ENTRY, DataModelEntry("reversal", "other", ("score",))))
+def test_a_run_writes_one_output_dataset() -> None:
+    """A run is one arrow of the graph, so it writes one thing and two members are refused."""
+    with pytest.raises(ValueError, match="names exactly one model"):
+        _definition(
+            datamodels={
+                "reversal": {"dataset_id": "reversal_2d", "value_fields": ["score"]},
+                "momentum": {"dataset_id": "momentum_2d", "value_fields": ["score"]},
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -158,9 +157,7 @@ def test_the_entry_normalizes_its_opening_memory() -> None:
 def test_a_datamodel_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> None:
     """Written in the shape an author writes, and read back as the same value."""
     definition = _definition(
-        datamodels=(
-            DataModelEntry("reversal", "reversal_2d", ("score",), initial_model_memory={"k": 1}),
-        )
+        datamodel=DataModelEntry("reversal", "reversal_2d", ("score",), initial_model_memory={"k": 1})
     )
 
     with Workspace.transaction(workspace) as t:
@@ -207,7 +204,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
     cannot freeze, so registration refuses it first."""
     with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
         t.register_run(
-            _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
+            _definition(datamodel=DataModelEntry(component_id, "out", ("score",)))
         )
     failure = refused.value.as_dict()["failures"][0]
     assert failure["code"] == "run.reference_invalid"

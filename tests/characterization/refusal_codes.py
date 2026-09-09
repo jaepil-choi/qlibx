@@ -1176,7 +1176,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
             t.register_run(
                 RunDefinition(
                     run_id="unsourced",
-                    strategies=(StrategyEntry("strategy"),),
+                    strategy=StrategyEntry("strategy"),
                     instruments=("A",),
                     timezone="Asia/Seoul",
                     at=time(15, 30),

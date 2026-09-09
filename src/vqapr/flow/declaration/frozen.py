@@ -2,11 +2,10 @@
 
 Split out of `flow/declaration/run.py` (one-shape campaign Step 6, record 161): `run.py` is the
 declaration -- what a document registers -- and this is what preflight makes of it. A `FrozenRun`
-shares the
-run layer's identity across every strategy; each `FrozenStrategy`/`FrozenDataModel` carries its
-own. Nothing here is declared or on disk as itself: identities are hashed from explicit payloads
-and records pick fields by name, which is why these stay dataclasses rather than becoming
-pydantic (ExecPlan M6, 6a).
+carries the run layer's identity and its one `FrozenStrategy`/`FrozenDataModel` carries its own.
+Nothing here is declared or on disk as itself: identities are hashed from explicit payloads and
+records pick fields by name, which is why these stay dataclasses rather than becoming pydantic
+(ExecPlan M6, 6a).
 """
 
 from __future__ import annotations
@@ -223,15 +222,15 @@ class FrozenDataModel:
 class FrozenRun:
     """Frozen owner declarations retained by a future preflight result.
 
-    The run layer -- what every strategy shares -- plus the frozen strategies. `identity` is the
+    The run layer -- period, venue, data -- plus the one frozen model. `identity` is the
     run layer's alone, so adding a strategy to a run does not rename the rows the others wrote;
     `requirements`, `datasets` and `sources` are the union every strategy and constraint reads,
     which is the panel set (design §4.1).
     """
 
     run_id: str
-    strategies: tuple[FrozenStrategy, ...]
-    datamodels: tuple[FrozenDataModel, ...] = field(default=(), kw_only=True)
+    strategy: FrozenStrategy | None = None
+    datamodel: FrozenDataModel | None = field(default=None, kw_only=True)
     exchange: ComponentRef | None = None
     execution: ExecutionTable | None = None
     start: datetime | None = None
@@ -253,12 +252,9 @@ class FrozenRun:
 
     def __post_init__(self) -> None:
         _require_id(self.run_id, "run_id")
-        if bool(self.strategies) == bool(self.datamodels):
-            raise ValueError("a frozen run holds strategies or datamodels, at least one, not both")
-        ids = [layer.component_id for layer in (*self.strategies, *self.datamodels)]
-        if len(set(ids)) != len(ids):
-            raise ValueError("a frozen run holds each model at most once")
-        if self.datamodels and (
+        if (self.strategy is None) == (self.datamodel is None):
+            raise ValueError("a frozen run holds one strategy or one datamodel, not both")
+        if self.datamodel is not None and (
             self.exchange is not None
             or self.execution is not None
             or self.initial_account_snapshot is not None
@@ -317,32 +313,15 @@ class FrozenRun:
 
     @property
     def kind(self) -> str:
-        return "datamodel" if self.datamodels else "strategy"
+        return "datamodel" if self.datamodel is not None else "strategy"
 
     @property
-    def members(self) -> tuple[FrozenStrategy | FrozenDataModel, ...]:
-        return (*self.strategies, *self.datamodels)
-
-    def strategy(self, component_id: str) -> FrozenStrategy:
-        for layer in self.strategies:
-            if layer.component_id == component_id:
-                return layer
-        raise KeyError(
-            f"run {self.run_id!r} froze no strategy {component_id!r}; it holds "
-            f"{', '.join(layer.component_id for layer in self.members)}"
-        )
-
-    def datamodel(self, component_id: str) -> FrozenDataModel:
-        for layer in self.datamodels:
-            if layer.component_id == component_id:
-                return layer
-        raise KeyError(
-            f"run {self.run_id!r} froze no datamodel {component_id!r}; it holds "
-            f"{', '.join(layer.component_id for layer in self.members)}"
-        )
-
-    def member(self, component_id: str) -> FrozenStrategy | FrozenDataModel:
-        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
+    def member(self) -> FrozenStrategy | FrozenDataModel:
+        """The one model this run froze, whichever kind it holds."""
+        one = self.strategy if self.strategy is not None else self.datamodel
+        if one is None:  # pragma: no cover -- `__post_init__` refuses this
+            raise ValueError(f"run {self.run_id!r} froze no model")
+        return one
 
     def dispatch_order(
         self, layer: FrozenStrategy | FrozenDataModel

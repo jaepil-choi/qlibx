@@ -361,7 +361,7 @@ def _linked(raw: object) -> tuple[dict, ...]:
     runs = {}
     for raw_id, entry in document.runs.items():
         definition = _decoded("run", raw_id, RunDefinition, {"run_id": raw_id, **entry})
-        for strategy in definition.strategies:
+        if (strategy := definition.strategy) is not None:
             component = components.get(component_id(strategy.component_id))
             if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered strategy")
@@ -369,7 +369,7 @@ def _linked(raw: object) -> tuple[dict, ...]:
                 constraint = components.get(component_id(name))
                 if constraint is None or constraint.kind is not ComponentKind.CONSTRAINT:
                     raise ValueError(f"run {raw_id!r} names an unregistered constraint")
-        for datamodel in definition.datamodels:
+        if (datamodel := definition.datamodel) is not None:
             component = components.get(component_id(datamodel.component_id))
             if component is None or component.kind is not ComponentKind.DATA_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered datamodel")

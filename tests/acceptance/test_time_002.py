@@ -225,7 +225,7 @@ def _frozen(
     )
     return FrozenRun(
         run_id="test",
-        strategies=(layer,),
+        strategy=layer,
         exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
         execution=execution,
         initial_account_snapshot=account,
@@ -256,7 +256,7 @@ def _flow(
                 evaluation_time=occurrence.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
-                allowed_requirements=frozen.strategies[0].requirements,
+                allowed_requirements=frozen.strategy.requirements,
                 consumer_id="test-consumer",
             )
         ),
@@ -643,11 +643,11 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     # The source actually read, at the digest it actually carried.
     assert stamped.source_refs == (IntentSourceRef("source", digest),)
     # The frozen component, not a string the callback chose.
-    assert stamped.strategy_id == str(frozen.strategies[0].config.component.component_id)
+    assert stamped.strategy_id == str(frozen.strategy.config.component.component_id)
     # The account the callback was handed.
     assert stamped.account_version_seen == _ACCOUNT.version
     # Deterministic, so a replayed run mints the same identity for the same occurrence.
-    first_occurrence = frozen.dispatch_order(frozen.strategies[0])[0]
+    first_occurrence = frozen.dispatch_order(frozen.strategy)[0]
     assert stamped.intent_id == uuid5(
         NAMESPACE_URL, f"{stamped.strategy_id}/{first_occurrence.occurrence_id}"
     )
@@ -748,7 +748,7 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_WINDOW
-    assert failure.failed_requirement == frozen.strategies[0].requirements
+    assert failure.failed_requirement == frozen.strategy.requirements
     assert failure.mutation is False
     assert state.current.lifecycle_trace == ()
 
@@ -930,7 +930,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow._callback.dispatch(frozen.strategies[0].agenda.occurrences[0])
+        flow._callback.dispatch(frozen.strategy.agenda.occurrences[0])
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_INTENT
@@ -1028,7 +1028,7 @@ def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> Non
     second = _frozen((nine, ten))
 
     assert first.identity == second.identity
-    order = first.dispatch_order(first.strategies[0])
+    order = first.dispatch_order(first.strategy)
     assert [item.occurrence_id for item in order] == ["strategy-0", "strategy-1"]
 
 
@@ -1061,7 +1061,7 @@ def test_shared_constraint_identity_is_the_only_constraint_authority() -> None:
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
     assert "'risk'" in caught.value.failures[0].observed
-    assert frozen.strategies[0].constraints.constraints == (
+    assert frozen.strategy.constraints.constraints == (
         _component("risk", ComponentKind.CONSTRAINT),
     )
     assert ConstraintSet((constraint,)).constraints == (constraint,)
@@ -1129,9 +1129,9 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert due_evidence.mark == mark_evidence
     assert due_evidence.feedback == feedback_evidence
     assert callback_evidence.run_identity == frozen.identity
-    assert callback_evidence.agenda == frozen.strategies[0].agenda
+    assert callback_evidence.agenda == frozen.strategy.agenda
     assert callback_evidence.occurrence.occurrence_id == "strategy-0"
-    assert callback_evidence.current_model_state_ref == frozen.strategies[0].initial_model_state_ref
+    assert callback_evidence.current_model_state_ref == frozen.strategy.initial_model_state_ref
     assert callback_evidence.committed_model_state_ref != callback_evidence.current_model_state_ref
     assert commit_evidence.execution_snapshot.missing_target_instruments == ()
     assert commit_evidence.execution_snapshot.duplicate_instruments == ()
@@ -1257,7 +1257,7 @@ def test_callback_payload_fault_does_not_publish_recorder_or_state() -> None:
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_STATE
-    assert failure.failed_requirement is frozen.strategies[0].config
+    assert failure.failed_requirement is frozen.strategy.config
     assert failure.kind is SimulationFailureKind.PRE_COMMIT
     assert failure.mutation is False
     assert state.current.account == AccountState(_ACCOUNT)
@@ -1446,7 +1446,7 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     elif boundary == "valuation":
         # Valuation has no configuration of its own since record `148`; the owner the failure
         # names is the strategy agenda whose fill instant the book was being valued at.
-        assert failure.failed_requirement is frozen.strategies[0].agenda
+        assert failure.failed_requirement is frozen.strategy.agenda
     else:
         assert isinstance(failure.failed_requirement, FeedbackEvidence)
 

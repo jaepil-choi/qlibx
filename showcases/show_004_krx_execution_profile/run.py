@@ -131,7 +131,7 @@ def _definition(
     """
     return RunDefinition(
         run_id=exchange.component_id,
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=time(8, 30),
@@ -384,9 +384,8 @@ def main() -> None:
     register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
     score_definition = RunDefinition(
         run_id="momentum-score",
-        strategies=(),
         instruments=universe,
-        datamodels=(DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),),
+        datamodel=DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),
         timezone=VENUE,
         at=time(16, 0),
         sessions=tuple(score_days),

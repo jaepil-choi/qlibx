@@ -167,7 +167,7 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         t.register_run(
             RunDefinition(
                 run_id="probe",
-                strategies=(StrategyEntry("evil"),),
+                strategy=StrategyEntry("evil"),
                 timezone="Asia/Seoul",
                 at=time(9, 0),
                 sessions=(date(2024, 1, 2),),

@@ -1137,21 +1137,17 @@ def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
         capsys, "--project-root", str(tmp_path), "register", scaffold["declaration"]
     )
     assert code == 0, registered
-    code, payload = _register_run(
-        tmp_path, capsys, "mixed", strategies={"my-alpha": {}, "never-ready": {}}
-    )
+    code, payload = _register_run(tmp_path, capsys, "good", strategies={"my-alpha": {}})
+    assert code == 0, payload
+    code, payload = _register_run(tmp_path, capsys, "bad", strategies={"never-ready": {}})
     assert code == 0, payload
 
-    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "mixed")
+    code, ran = _cli(capsys, "--project-root", str(tmp_path), "run", "bad")
 
     assert code == 1 and ran["ok"] is False
     assert ran["stage"] == "run.strategy_failed"
     assert "family" not in ran, "record 171: stage and status replaced family"
-    assert ran["run_id"] == "mixed" and ran["store_root"]
-    assert ran["strategies"]["my-alpha"]["status"] == "completed"
-    assert ran["strategies"]["my-alpha"]["record"].startswith("my-alpha@"), (
-        "the strategy that completed is named beside the one that did not"
-    )
+    assert ran["run_id"] == "bad" and ran["store_root"]
     failed = ran["strategies"]["never-ready"]
     assert failed["status"] == "failed"
     assert failed["stage"] == "simulation.callback.intent"
@@ -1166,14 +1162,30 @@ def test_a_run_names_every_strategy_it_ran_when_one_of_them_fails(
     assert entry["observed"] == "the signal is not ready"
     assert entry["source"]["key_path"] == "strategies.never-ready"
     assert entry["source"]["file"].endswith(".py") and isinstance(entry["source"]["line"], int)
-    assert "1 of 2 strategies failed: never-ready" in ran["error"]
     assert "read `observed`" in entry["fix"]
-    # The record store agrees: one finished record, and the run's own record stands.
+
+    # A run holds one model since 2026-09-09, so "named beside the one that did not" is now a
+    # property of naming several RUNS: one refusal is that run's entry and the other still runs.
+    code, both = _cli(capsys, "--project-root", str(tmp_path), "run", "good", "bad")
+
+    assert code == 1 and both["ok"] is False
+    assert set(both["runs"]) == {"good", "bad"}
+    assert both["runs"]["good"]["ok"] is True
+    assert both["runs"]["good"]["strategies"]["my-alpha"]["record"].startswith("my-alpha@")
+    assert both["runs"]["bad"]["ok"] is False
+
+    # The record store agrees: the good run left a record, the refused one left none.
     code, listed = _cli(
-        capsys, "--project-root", str(tmp_path), "list", "strategies", "--run", "mixed"
+        capsys, "--project-root", str(tmp_path), "list", "strategies", "--run", "good"
     )
     assert code == 0
-    by_status = {row["strategy_id"]: row["status"] for row in listed["items"]}
-    assert by_status == {"my-alpha": "completed", "never-ready": "unfinished"}, (
-        "the failed strategy's directory is listed too (074): rows, no record, lock released"
+    assert {row["strategy_id"]: row["status"] for row in listed["items"]} == {
+        "my-alpha": "completed"
+    }
+    code, refused = _cli(
+        capsys, "--project-root", str(tmp_path), "list", "strategies", "--run", "bad"
     )
+    assert code == 0
+    assert {row["strategy_id"]: row["status"] for row in refused["items"]} == {
+        "never-ready": "unfinished"
+    }, "the failed strategy's directory is listed too (074): rows, no record, lock released"

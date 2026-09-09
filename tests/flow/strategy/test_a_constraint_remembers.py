@@ -183,8 +183,7 @@ def _flow(
     occurrences = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="remembered",
-        strategies=(
-            FrozenStrategy(
+        strategy=FrozenStrategy(
                 config=StrategyConfig(
                     _component("strategy", ComponentKind.STRATEGY_MODEL),
                     "strategy",
@@ -194,7 +193,6 @@ def _flow(
                     "strategy", occurrences, timezone="Asia/Seoul"
                 ),
             ),
-        ),
         exchange=_component("exchange", ComponentKind.EXCHANGE),
         execution=_execution_input(root, sessions),
         start=occurrences[0].evaluation_time,

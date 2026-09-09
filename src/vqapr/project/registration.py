@@ -952,8 +952,8 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
     """
     produced: dict[str, str] = {}
     for run_id, definition in definitions:
-        for entry in definition.datamodels:
-            produced.setdefault(str(entry.dataset_id), run_id)
+        if definition.datamodel is not None:
+            produced.setdefault(str(definition.datamodel.dataset_id), run_id)
     found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
         wanted = definition.sessions_from

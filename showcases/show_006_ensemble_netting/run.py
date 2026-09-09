@@ -680,7 +680,7 @@ def _member_run(
 ) -> Any:
     definition = RunDefinition(
         run_id=str(strategy_ref.component_id),
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=at,
@@ -926,7 +926,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_start = datetime.fromisoformat(f"{ensemble_days[0].isoformat()}T00:00:00{OFFSET}")
     ensemble_definition = RunDefinition(
         run_id="show006-ensemble",
-        strategies=(StrategyEntry("show006-ensemble", ("no-short", "single-name-cap")),),
+        strategy=StrategyEntry("show006-ensemble", ("no-short", "single-name-cap")),
         sessions=tuple(ensemble_days),
         timezone=VENUE,
         at=time(9, 0),

@@ -409,9 +409,8 @@ def main() -> None:
     # strategy run below, no venue and no account, one registered dataset at the end.
     score_definition = RunDefinition(
         run_id="showcase-score",
-        strategies=(),
         instruments=tuple(universe),
-        datamodels=(DataModelEntry("showcase-model", "reversal_score", ("score",)),),
+        datamodel=DataModelEntry("showcase-model", "reversal_score", ("score",)),
         timezone=VENUE,
         at=time(16, 0),
         sessions=tuple(score_days),
@@ -429,7 +428,7 @@ def main() -> None:
 
     definition = RunDefinition(
         run_id="show003",
-        strategies=(StrategyEntry("showcase-strategy", ("showcase-constraint",)),),
+        strategy=StrategyEntry("showcase-strategy", ("showcase-constraint",)),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=time(8, 30),

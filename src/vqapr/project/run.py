@@ -2,20 +2,23 @@
 
 **A run is configuration; a strategy is what it tries** (record `139`, design
 `docs/design/the-panel-the-surface-and-the-run.md` §4). A `RunDefinition` names its universe,
-period, venue, execution dataset and fill, initial account and the strategies it runs -- by
-id, because it is a registered document, and the workspace is what resolves an id. Preflight
-freezes the run layer once into a `FrozenRun` and each strategy into a `FrozenStrategy`; the
-run layer's identity is shared by every strategy and each strategy's identity is its own.
+period, venue, execution dataset and fill, initial account and the one model it runs -- by id,
+because it is a registered document, and the workspace is what resolves an id. Preflight freezes
+the run layer into a `FrozenRun` and its model into a `FrozenStrategy`; the run layer's identity
+and the model's identity are separate.
 
-Before `139` both types held one `strategy` field, so a run was one strategy at the level of a
-dataclass field and a comparison across factor models was n runs with n copies of one period.
+**One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3). Record
+`139` had made it several so that a comparison across factor models would share one frozen layer.
+Determinism already gives that -- two runs declaring the same inputs freeze identically -- so the
+sharing bought an optimisation and cost two things: parallelism lived inside a run rather than
+across independent runs, and strategies run on different days could not be compared at all.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
@@ -363,13 +366,62 @@ def _naive_wall_time(value: object) -> time:
     return value
 
 
+def _the_one_member[Entry](
+    declared: object,
+    *,
+    build: Callable[[str, dict[str, Any]], Entry],
+    plural: str,
+) -> Entry | None:
+    """The single member a run names, from any of the spellings a document may carry it in.
+
+    A run is one arrow of the project's dataset graph and so runs one model
+    (`docs/design/two-clocks-and-the-wiring-table.md` §2.3). The stored block is still the
+    `plural: {component_id: {...}}` mapping it has always been, holding exactly one entry, so a
+    workspace written before this rule reads back unchanged unless it actually declared two --
+    and then it is refused by name rather than half-run.
+    """
+    if declared is None:
+        return None
+    if isinstance(declared, Mapping):
+        items = list(declared.items())
+    elif isinstance(declared, (tuple, list)):
+        items = [(getattr(entry, "component_id", ""), entry) for entry in declared]
+    else:
+        return declared  # type: ignore[return-value]
+    if not items:
+        return None
+    if len(items) > 1:
+        named = ", ".join(sorted(str(name) for name, _ in items))
+        raise ValueError(
+            f"a run names exactly one model; `{plural}:` named {len(items)} ({named}). "
+            "Register one run per model -- they share nothing a run has to hold them together "
+            "for, and independent runs parallelise where a run's members could not"
+        )
+    name, entry = items[0]
+    if isinstance(entry, (StrategyEntry, DataModelEntry)):
+        return entry  # type: ignore[return-value]
+    if entry is None:
+        return build(str(name), {})
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"`{plural}.{name}` must be a block of fields")
+    return build(str(name), dict(entry))
+
+
 class RunDefinition(BaseModel):
     """A registered run: what every model in it shares, and which models it runs.
 
-    A run holds one kind of model (record `148`): `strategies`, each with its own account and
-    venue, or `datamodels`, each writing one dataset and touching no account. Everything here is
-    an id or a value; the workspace resolves ids at preflight. Pairing rules are enforced here so
-    a document cannot half-declare a venue or a period.
+    A run runs ONE model of one kind (record `148`; `docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3): a `strategy`, with its own account and venue, or a `datamodel`, writing one dataset and
+    touching no account. Everything here is an id or a value; the workspace resolves ids at
+    preflight. Pairing rules are enforced here so a document cannot half-declare a venue or a
+    period.
+
+    **One model, because a run is one arrow of the project's dataset graph.** It held several
+    until 2026-09-09. The reason given was that members must share a frozen layer to be
+    comparable -- but determinism already guarantees that two runs declaring the same inputs
+    freeze identically, so sharing was an optimisation and not a meaning. What it cost was real:
+    parallelism lived inside a run instead of across independent runs, and two strategies run on
+    different days could not be compared at all.
 
     This is also the `runs.<run_id>` entry of `workspace.yaml` and of a declaration, read and
     written through `model_validate` / `model_dump(mode="json")`. The stored spelling differs
@@ -385,10 +437,11 @@ class RunDefinition(BaseModel):
     )
 
     run_id: Annotated[str, Field(min_length=1)]
-    strategies: tuple[StrategyEntry, ...] = ()
+    strategy: StrategyEntry | None = None
+    """The one strategy this run executes, when it is a strategy run. Never beside `datamodel`."""
     instruments: tuple[Annotated[str, Field(min_length=1)], ...]
-    datamodels: tuple[DataModelEntry, ...] = ()
-    """The datamodels a run computes, when it is a datamodel run. Never beside `strategies`."""
+    datamodel: DataModelEntry | None = None
+    """The one dataset this run computes, when it is a datamodel run. Never beside `strategy`."""
     timezone: str
     """The venue zone every wall time below is expressed in. Required: a run without one is not
     run-ready, and the dataclass's `""` default only deferred that refusal to the zone check."""
@@ -418,20 +471,16 @@ class RunDefinition(BaseModel):
         if not isinstance(raw, Mapping):
             return raw
         body = dict(raw)
-        strategies = body.get("strategies")
-        if isinstance(strategies, Mapping):
-            body["strategies"] = tuple(
-                StrategyEntry(component_id=name, **(entry or {}))
-                if isinstance(entry, Mapping) or entry is None
-                else entry
-                for name, entry in strategies.items()
-            )
-        datamodels = body.get("datamodels")
-        if isinstance(datamodels, Mapping):
-            body["datamodels"] = tuple(
-                DataModelEntry(component_id=name, **entry) if isinstance(entry, Mapping) else entry
-                for name, entry in datamodels.items()
-            )
+        body["strategy"] = _the_one_member(
+            body.pop("strategies", None) if "strategies" in body else body.get("strategy"),
+            build=lambda name, fields: StrategyEntry(component_id=name, **fields),
+            plural="strategies",
+        )
+        body["datamodel"] = _the_one_member(
+            body.pop("datamodels", None) if "datamodels" in body else body.get("datamodel"),
+            build=lambda name, fields: DataModelEntry(component_id=name, **fields),
+            plural="datamodels",
+        )
         if "execution_table" in body or "execution_input_id" in body:
             raise ValueError(
                 "execution_table is retired (record 185): register the venue table as a dataset "
@@ -449,7 +498,7 @@ class RunDefinition(BaseModel):
                     version=declared.version, cash=declared.cash, positions=declared.positions
                 )
                 body["initial_account_mode"] = declared.mode
-        for name in ("strategies", "datamodels", "sessions", "instruments"):
+        for name in ("sessions", "instruments"):
             if name in body and body[name] is None:
                 body[name] = ()
         return body
@@ -478,17 +527,17 @@ class RunDefinition(BaseModel):
                 positions=dict(self.initial_account_snapshot.positions),
                 version=self.initial_account_snapshot.version,
             ).model_dump(mode="json")
-        if self.strategies:
+        if self.strategy is not None:
             ordered["strategies"] = {
-                entry.component_id: _entry_body(entry, ("constraints", "initial_model_memory"))
-                for entry in self.strategies
-            }
-        if self.datamodels:
-            ordered["datamodels"] = {
-                entry.component_id: _entry_body(
-                    entry, ("dataset_id", "value_fields", "initial_model_memory")
+                self.strategy.component_id: _entry_body(
+                    self.strategy, ("constraints", "initial_model_memory")
                 )
-                for entry in self.datamodels
+            }
+        if self.datamodel is not None:
+            ordered["datamodels"] = {
+                self.datamodel.component_id: _entry_body(
+                    self.datamodel, ("dataset_id", "value_fields", "initial_model_memory")
+                )
             }
         if self.sessions_from is not None:
             ordered["sessions_from"] = self.sessions_from
@@ -534,19 +583,13 @@ class RunDefinition(BaseModel):
 
     @model_validator(mode="after")
     def _whole_declaration(self) -> RunDefinition:
-        if bool(self.strategies) == bool(self.datamodels):
+        if (self.strategy is None) == (self.datamodel is None):
             raise ValueError(
-                "must name at least one model under exactly one of `strategies:` or "
-                "`datamodels:` -- a run names at least one strategy or at least one datamodel, "
-                "not both (record 148: a run holds one kind)"
+                "must name one model under exactly one of `strategies:` or `datamodels:` -- a "
+                "run runs one strategy or one datamodel, not both and not neither "
+                "(record 148: a run holds one kind; a run is one arrow of the graph)"
             )
-        ids = [entry.component_id for entry in (*self.strategies, *self.datamodels)]
-        if len(set(ids)) != len(ids):
-            raise ValueError("a run names each model at most once")
-        outputs = [entry.dataset_id for entry in self.datamodels]
-        if len(set(outputs)) != len(outputs):
-            raise ValueError("a run writes each output dataset at most once")
-        if self.datamodels:
+        if self.datamodel is not None:
             declared = [
                 key
                 for key, value in (
@@ -620,34 +663,15 @@ class RunDefinition(BaseModel):
     @property
     def kind(self) -> str:
         """`"strategy"` or `"datamodel"`: which kind of model this run holds."""
-        return "datamodel" if self.datamodels else "strategy"
+        return "datamodel" if self.datamodel is not None else "strategy"
 
     @property
-    def members(self) -> tuple[StrategyEntry | DataModelEntry, ...]:
-        """The models the run names, whichever kind it holds."""
-        return (*self.strategies, *self.datamodels)
-
-    def strategy(self, component_id: str) -> StrategyEntry:
-        for entry in self.strategies:
-            if entry.component_id == component_id:
-                return entry
-        raise KeyError(
-            f"run {self.run_id!r} does not name strategy {component_id!r}; it names "
-            f"{', '.join(entry.component_id for entry in self.members)}"
-        )
-
-    def datamodel(self, component_id: str) -> DataModelEntry:
-        for entry in self.datamodels:
-            if entry.component_id == component_id:
-                return entry
-        raise KeyError(
-            f"run {self.run_id!r} does not name datamodel {component_id!r}; it names "
-            f"{', '.join(entry.component_id for entry in self.members)}"
-        )
-
-    def member(self, component_id: str) -> StrategyEntry | DataModelEntry:
-        """The named model of whichever kind the run holds."""
-        return self.datamodel(component_id) if self.datamodels else self.strategy(component_id)
+    def member(self) -> StrategyEntry | DataModelEntry:
+        """The one model the run names, whichever kind it holds."""
+        one = self.strategy if self.strategy is not None else self.datamodel
+        if one is None:  # pragma: no cover -- `_whole_declaration` refuses this
+            raise ValueError(f"run {self.run_id!r} names no model")
+        return one
 
 
 def _entry_body(entry: object, names: Sequence[str]) -> dict[str, Any]:

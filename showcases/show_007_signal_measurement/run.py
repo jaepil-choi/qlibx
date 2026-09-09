@@ -572,7 +572,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     definition = RunDefinition(
         run_id="show007",
-        strategies=(StrategyEntry("show007-signal"),),
+        strategy=StrategyEntry("show007-signal"),
         sessions=tuple(callback_days),
         timezone=VENUE,
         at=time(8, 0),

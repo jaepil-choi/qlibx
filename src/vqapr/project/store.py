@@ -453,12 +453,12 @@ class Workspace:
                     ),
                 )
 
-        for entry in definition.strategies:
-            component(entry.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
-            for name in entry.constraints:
+        if definition.strategy is not None:
+            component(definition.strategy.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
+            for name in definition.strategy.constraints:
                 component(name, ComponentKind.CONSTRAINT, "constraint")
-        for entry in definition.datamodels:
-            component(entry.component_id, ComponentKind.DATA_MODEL, "datamodel")
+        if definition.datamodel is not None:
+            component(definition.datamodel.component_id, ComponentKind.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
             component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
         if definition.execution is not None:

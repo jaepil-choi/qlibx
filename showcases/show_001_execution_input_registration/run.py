@@ -261,7 +261,7 @@ def main() -> None:
         # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so the
         # strategy entry names no constraints rather than an inert one authored to keep a field
         # non-empty. See README.
-        strategies=(StrategyEntry("showcase-strategy"),),
+        strategy=StrategyEntry("showcase-strategy"),
         sessions=tuple(SESSIONS),
         timezone=KST,
         at=time(4, 0),

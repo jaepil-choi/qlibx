@@ -55,7 +55,7 @@ def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
         t.register_run(
             RunDefinition(
                 run_id="daily",
-                strategies=(StrategyEntry(str(ref.component_id)),),
+                strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
                 at=time(9, 0),
@@ -197,7 +197,7 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
         t.register_run(
             RunDefinition(
                 run_id="daily",
-                strategies=(StrategyEntry(str(ref.component_id)),),
+                strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
                 at=time(9, 0),

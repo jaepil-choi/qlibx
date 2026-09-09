@@ -20,14 +20,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from vqapr.account.account import Account
-from vqapr.account.marking import ValuationService
+from vqapr.account.account import Account, PreparedAccountFill
+from vqapr.account.marking import SelectedMark, ValuationService
 from vqapr.authoring import AccountHistoryInput, Component, Constraint, Hold, StrategyModel
 from vqapr.authoring.records import TableSpec
 from vqapr.constraints.evaluation import ConstraintReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account_state import AccountMark, AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.instruments import InstrumentRoster
@@ -37,9 +37,11 @@ from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
+    AccountCommitEvidence,
     CallbackEvidence,
     DueExecutionEvidence,
     FailureObservation,
+    MarkEvidence,
     MonitoringEvidence,
     RetryPrecondition,
     SimulationFailure,
@@ -79,6 +81,37 @@ class AcceptedIntent:
     @property
     def pending_id(self) -> str:
         return str(self.intent.intent_id)
+
+
+@dataclass(frozen=True, slots=True)
+class Filled:
+    """What EXECUTE leaves for the stages after it at one market instant (record `207`).
+
+    The committed account and everything VALUATION and the fill's epilogue read: the snapshot
+    the fill was priced from, the fills, the prepared fill (the Account's own transition), the
+    mark that stood before it (a halted name carries its price forward), and the commit
+    evidence and root. Handler-to-handler only; nothing here reaches a record on its own.
+    """
+
+    pending: AcceptedIntent
+    snapshot: object
+    fills: object
+    prepared_fill: PreparedAccountFill
+    previous_mark: AccountMark | None
+    commit_evidence: AccountCommitEvidence
+    committed_root: AcceptedRunState
+
+
+@dataclass(frozen=True, slots=True)
+class Marked:
+    """What VALUATION leaves at one market instant: the root it published, the mark batch it
+    committed, the evidence (a fill's `MarkEvidence`, a held book's `ValuationEvidence`) and
+    the marks it selected."""
+
+    root: AcceptedRunState
+    mark: MarkBatch
+    evidence: MarkEvidence | ValuationEvidence
+    selected: tuple[SelectedMark, ...]
 
 
 @dataclass(frozen=True, slots=True)

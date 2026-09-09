@@ -22,6 +22,7 @@ from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import MarkBatch
 from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.engine.artifacts import (
+    MarkEvidence,
     MonitoringEvidence,
     SimulationFailureKind,
     SimulationStage,
@@ -34,8 +35,9 @@ from vqapr.flow.strategy.context import (
     DEFAULT_TABLES,
     MONITORING_STAGE,
     VALUATION_STAGE,
+    Filled,
     FlowContext,
-    HeldResult,
+    Marked,
     MonitoringResult,
     ValuationResult,
 )
@@ -92,15 +94,115 @@ def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
 
 
 class ValuationHandler:
-    """Values the book at every market-clock instant from the venue snapshot, commits the mark
-    with the NAV it measured, and judges the committed account right after (design §3.1:
-    VALUATION and COMPLIANCE are stages of the market clock, with no clock of their own)."""
+    """VALUATION and COMPLIANCE: values the book at every market-clock instant from the venue
+    snapshot -- the fill's own (`mark_fill`) or a fresh one for a held book (`mark_held`) --
+    commits the mark with the NAV it measured, and judges the committed account right after
+    (design §3.1: two stages of the market clock, with no clock of their own)."""
 
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
-    def value_at(self, instant: datetime) -> HeldResult:
-        """Value the held book at a market-clock instant no fill was due at.
+    def mark_fill(self, filled: Filled) -> Marked:
+        """VALUATION after EXECUTE: value the just-committed book from the snapshot the fill was
+        priced from, and publish the mark on the same root (record `148`: the marked account and
+        the account-table row stating its NAV are one commit)."""
+        pending = filled.pending
+        at = pending.target.target_at
+        prepared_fill = filled.prepared_fill
+        committed_root = filled.committed_root
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_VALUATION_SELECTION,
+            cutoff=at,
+            owner=self._context.layer.agenda,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            selected_marks = _marks_from_execution_snapshot(
+                filled.snapshot,
+                at,
+                previous=filled.previous_mark,
+                held=prepared_fill.next_snapshot.positions,
+            )
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_VALUATION_MARK,
+            cutoff=at,
+            owner=self._context.layer.agenda,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            mark = self._context.valuation_service.mark(prepared_fill.next_snapshot, selected_marks)
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=at,
+            owner=committed_root.account,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            prepared_account = self._context.account.prepare_mark(
+                prepared_fill,
+                mark,
+                marked_at=at,
+                observed_at={
+                    selected.instrument_id: selected.observed_at for selected in selected_marks
+                },
+                provenance=ValuationEvidence(
+                    run_identity=self._context.frozen_run.identity,
+                    agenda=self._context.layer.agenda,
+                    occurrence=pending.occurrence,
+                    root_version=committed_root.version,
+                    cutoff=at,
+                    account=prepared_fill.next_snapshot,
+                    marks=mark,
+                    account_version=prepared_fill.next_snapshot.version,
+                ),
+            )
+        mark_evidence = MarkEvidence(
+            run_identity=self._context.frozen_run.identity,
+            agenda=self._context.layer.agenda,
+            occurrence=pending.occurrence,
+            cutoff=at,
+            selected_marks=selected_marks,
+            marks=mark,
+            limitations=(),
+            account=prepared_account.next_state.snapshot,
+            root_version=committed_root.version,
+            account_version=prepared_account.next_state.snapshot.version,
+        )
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=at,
+            owner=committed_root.account,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            committed_mark = prepared_account.next_state.latest_mark
+            if committed_mark is None:
+                raise RuntimeError("a prepared Account mark must carry the mark it appends")
+            prepared_marked = self._context.state.prepare_marked(
+                account=prepared_account,
+                mark=mark,
+                evidence=mark_evidence,
+                recorder=self.measurement_recorder(
+                    cutoff=at,
+                    account=prepared_account.next_state.snapshot,
+                    mark=committed_mark,
+                    selected=selected_marks,
+                ),
+            )
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=at,
+            owner=committed_root.account,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            self._context.account.commit_mark(prepared_account)
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=at,
+            owner=committed_root.account,
+            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
+        ):
+            marked_root = self.publish_marked(prepared_marked)
+        return Marked(marked_root, mark, mark_evidence, selected_marks)
+
+    def mark_held(self, instant: datetime) -> Marked:
+        """VALUATION at a market-clock instant no fill was due at: value the held book.
 
         Same instant, same snapshot, same prices an order would have been filled at -- only
         without an order. The Account is not changed, so no version is consumed, and a pending
@@ -207,8 +309,8 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            self._context.state.publish_valuation_only(prepared_root)
-        return HeldResult(evidence, self.monitor_at(instant, occurrence=None))
+            root = self._context.state.publish_valuation_only(prepared_root)
+        return Marked(root, mark, evidence, selected_marks)
 
     def measurement_recorder(
         self,

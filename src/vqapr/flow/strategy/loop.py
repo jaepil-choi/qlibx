@@ -34,6 +34,7 @@ from vqapr.flow.engine.run_state import (
     RunFinalization,
     RunStateRepository,
 )
+from vqapr.flow.strategy.accrual import AccrualHandler
 from vqapr.flow.strategy.callback import CallbackHandler
 from vqapr.flow.strategy.context import (
     DEFAULT_TABLE_PREFIX,
@@ -191,9 +192,10 @@ class StrategyEventLoop(
             record_account_positions=record_account_positions,
             account_history_declaration=declared_history,
         )
+        self._accrual = AccrualHandler(self._context)
         self._valuation = ValuationHandler(self._context)
         self._callback = CallbackHandler(self._context)
-        self._execution = ExecutionHandler(self._context, self._valuation)
+        self._execution = ExecutionHandler(self._context)
         account.bind(initial)
 
     def run(self) -> SimulationResult:
@@ -244,32 +246,48 @@ class StrategyEventLoop(
             return self._callback.dispatch(event.occurrence)
 
     def _handle_market(self, event: MarketEvent) -> DueExecutionTrace:
-        """One instant of the market clock, in the order design §3.1 fixes.
+        """One instant of the market clock, in the order design §3.1 fixes -- written once, here.
 
-        EXECUTE when the pending intent's target is this instant, which values and judges the
-        book as part of the fill; otherwise VALUATION of the held book and COMPLIANCE on it. A
-        pending intent whose target has already passed is a broken invariant, not a late fill:
+            1. ACCRUE      what the holding period up to now earned         (a place, for now)
+            2. EXECUTE     the pending intent whose target is this instant  (when there is one)
+            3. VALUATION   the committed book, from the fill's snapshot or a fresh one
+            4. COMPLIANCE  the declared constraints on the committed, marked book
+            (5. DECIDE     a decision at this same instant is a separate event, sorted after)
+
+        A pending intent whose target has already passed is a broken invariant, not a late fill:
         targets are selected from this same clock, so the instant was walked.
         """
+        instant = event.instant
         with (
             self._context.timed("due"),
             self._context.guard(
-                SimulationStage.DUE_SNAPSHOT,
-                event.instant,
-                owner=self._context.frozen_run.execution,
+                SimulationStage.DUE_SNAPSHOT, instant, owner=self._context.frozen_run.execution
             ),
         ):
             pending = self._context.state.current.pending_accepted_intent
             if pending is not None and not isinstance(pending, AcceptedIntent):
                 raise TypeError("run state pending must be an AcceptedIntent")
-            if pending is not None and pending.target.target_at == event.instant:
-                result: DueExecutionResult | HeldResult = self._execution.execute_due(pending)
-                if self._context.state.current.pending_accepted_intent is not None:
-                    raise RuntimeError("due execution failed to consume its pending identity")
-            else:
-                if pending is not None and pending.target.target_at < event.instant:
-                    raise RuntimeError("a pending intent's target instant was never walked")
-                result = self._valuation.value_at(event.instant)
+            if pending is not None and pending.target.target_at < instant:
+                raise RuntimeError("a pending intent's target instant was never walked")
+            due = pending if pending is not None and pending.target.target_at == instant else None
+
+            self._accrual.accrue(instant)
+            filled = None if due is None else self._execution.fill(due)
+            if filled is not None and self._context.state.current.pending_accepted_intent:
+                raise RuntimeError("due execution failed to consume its pending identity")
+            marked = (
+                self._valuation.mark_held(instant)
+                if filled is None
+                else self._valuation.mark_fill(filled)
+            )
+            monitoring = self._valuation.monitor_at(
+                instant, occurrence=None if filled is None else filled.pending.occurrence
+            )
+            result: DueExecutionResult | HeldResult = (
+                HeldResult(marked.evidence, monitoring)  # type: ignore[arg-type]
+                if filled is None
+                else self._execution.close(filled, marked, monitoring)
+            )
             return DueExecutionTrace(event, result, self._context.state.current)
 
     def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:

@@ -1,9 +1,13 @@
-"""The execution phase: an accepted intent becomes orders, fills and a committed account.
+"""The EXECUTE stage of a market-clock instant: an accepted intent becomes orders, fills and a
+committed account -- and, after VALUATION and COMPLIANCE have run on that account, the
+evidence that closes the fill.
 
-Record `147`. What was `StrategyEventLoop._execute_due`, moved verbatim: the snapshot the venue
-published at the target instant, `plan_orders`, the venue's `execute`, `Account.prepare_fill` and
-the commit -- the spine, called from here and not changed -- then the mark at the same instant
-through the valuation phase."""
+Record `147` moved the spine here verbatim from `StrategyEventLoop._execute_due`; record `207`
+split it in two around the stages design §3.1 puts between them. `fill` is EXECUTE: the snapshot
+the venue published at the instant, the instrument gate, `plan_orders`, the venue's `execute`,
+`Account.prepare_fill` and the commit. `close` is the fill's epilogue, run once the book has
+been valued (`ValuationHandler.mark_fill`) and judged (`monitor_at`): the feedback evidence and
+its publication. The loop's `_handle_market` is the one place the order is written down."""
 
 from __future__ import annotations
 
@@ -21,26 +25,27 @@ from vqapr.flow.engine.artifacts import (
     MarkEvidence,
     SimulationFailureKind,
     SimulationStage,
-    ValuationEvidence,
 )
 from vqapr.flow.engine.run_state import AcceptedRunState, PreparedRunState
 from vqapr.flow.strategy.context import (
     CALLBACK_STAGE,
     AcceptedIntent,
     DueExecutionResult,
+    Filled,
     FlowContext,
+    Marked,
+    MonitoringResult,
 )
-from vqapr.flow.strategy.valuation import ValuationHandler, _marks_from_execution_snapshot
 
 
 class ExecutionHandler:
-    """One due execution: intent -> orders -> fills -> committed account -> marked account."""
+    """EXECUTE: intent -> orders -> fills -> committed account; then `close` once it is marked."""
 
-    def __init__(self, context: FlowContext, valuation: ValuationHandler) -> None:
+    def __init__(self, context: FlowContext) -> None:
         self._context = context
-        self._valuation = valuation
 
-    def execute_due(self, pending: AcceptedIntent) -> DueExecutionResult:
+    def fill(self, pending: AcceptedIntent) -> Filled:
+        """Fill the pending intent at its target instant and commit the account (EXECUTE)."""
         execution_table = self._context.frozen_run.execution
         if execution_table is None:
             raise RuntimeError("due execution requires frozen execution dataset")
@@ -217,102 +222,30 @@ class ExecutionHandler:
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             committed_root = self._publish_account_commit(prepared_commit)
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_VALUATION_SELECTION,
-            cutoff=pending.target.target_at,
-            owner=self._context.layer.agenda,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            selected_marks = _marks_from_execution_snapshot(
-                snapshot,
-                pending.target.target_at,
-                previous=account_state.latest_mark,
-                held=prepared_fill.next_snapshot.positions,
-            )
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_VALUATION_MARK,
-            cutoff=pending.target.target_at,
-            owner=self._context.layer.agenda,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            mark = self._context.valuation_service.mark(prepared_fill.next_snapshot, selected_marks)
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
-            owner=committed_root.account,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            prepared_account = self._context.account.prepare_mark(
-                prepared_fill,
-                mark,
-                marked_at=pending.target.target_at,
-                observed_at={
-                    selected.instrument_id: selected.observed_at for selected in selected_marks
-                },
-                provenance=ValuationEvidence(
-                    run_identity=self._context.frozen_run.identity,
-                    agenda=self._context.layer.agenda,
-                    occurrence=pending.occurrence,
-                    root_version=committed_root.version,
-                    cutoff=pending.target.target_at,
-                    account=prepared_fill.next_snapshot,
-                    marks=mark,
-                    account_version=prepared_fill.next_snapshot.version,
-                ),
-            )
-        mark_evidence = MarkEvidence(
-            run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=pending.occurrence,
-            cutoff=pending.target.target_at,
-            selected_marks=selected_marks,
-            marks=mark,
-            limitations=(),
-            account=prepared_account.next_state.snapshot,
-            root_version=committed_root.version,
-            account_version=prepared_account.next_state.snapshot.version,
+        return Filled(
+            pending=pending,
+            snapshot=snapshot,
+            fills=fills,
+            prepared_fill=prepared_fill,
+            previous_mark=account_state.latest_mark,
+            commit_evidence=commit_evidence,
+            committed_root=committed_root,
         )
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
-            owner=committed_root.account,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            committed_mark = prepared_account.next_state.latest_mark
-            if committed_mark is None:
-                raise RuntimeError("a prepared Account mark must carry the mark it appends")
-            prepared_marked = self._context.state.prepare_marked(
-                account=prepared_account,
-                mark=mark,
-                evidence=mark_evidence,
-                recorder=self._valuation.measurement_recorder(
-                    cutoff=pending.target.target_at,
-                    account=prepared_account.next_state.snapshot,
-                    mark=committed_mark,
-                    selected=selected_marks,
-                ),
-            )
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
-            owner=committed_root.account,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            self._context.account.commit_mark(prepared_account)
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=pending.target.target_at,
-            owner=committed_root.account,
-            kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
-        ):
-            marked_root = self._valuation.publish_marked(prepared_marked)
+
+    def close(
+        self, filled: Filled, marked: Marked, monitoring: MonitoringResult | None
+    ) -> DueExecutionResult:
+        """The fill's epilogue, once VALUATION and COMPLIANCE have run: publish the feedback."""
+        pending = filled.pending
+        if not isinstance(marked.evidence, MarkEvidence):
+            raise RuntimeError("a fill is closed with the mark evidence its valuation produced")
         with self._context.due_boundary(
             stage=SimulationStage.DUE_FEEDBACK_CANDIDATE,
             cutoff=pending.target.target_at,
             owner=pending,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            marked_account = marked_root.account
+            marked_account = marked.root.account
             if marked_account is None:
                 raise RuntimeError("a marked root must carry the Account it marked")
             feedback_evidence = FeedbackEvidence(
@@ -321,16 +254,13 @@ class ExecutionHandler:
                 occurrence=pending.occurrence,
                 cutoff=pending.target.target_at,
                 pending=pending,
-                candidates=(fills, mark),
-                root_version=marked_root.version,
+                candidates=(filled.fills, marked.mark),
+                root_version=marked.root.version,
                 account_version=marked_account.snapshot.version,
             )
-        # Monitoring judges the committed, marked book right here (record `148`): there is no
-        # later occurrence for it, and nothing later could see more than the fill instant did.
-        monitoring = self._valuation.monitor_at(
-            pending.target.target_at, occurrence=pending.occurrence
+        due_evidence = DueExecutionEvidence(
+            filled.commit_evidence, marked.evidence, feedback_evidence
         )
-        due_evidence = DueExecutionEvidence(commit_evidence, mark_evidence, feedback_evidence)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_FEEDBACK_PUBLICATION,
             cutoff=pending.target.target_at,

@@ -68,7 +68,7 @@ project owns, which is the question behind most "can vqapr do X".
 
 ## Which skill to use
 
-This skill is orientation. The work happens in eight others:
+This skill is orientation. The work happens in nine others:
 
 | the user wants to | skill |
 |---|---|
@@ -80,6 +80,7 @@ This skill is orientation. The work happens in eight others:
 | declare, check and execute a run | **run-backtest** |
 | get returns, costs, tables and paper figures out | **analyze-result** |
 | see what is registered, what a run used, what to delete | **inspect-workspace** |
+| report a vqapr defect or friction back to its maintainers | **report-issue-dev** |
 
 Each is self-contained. Do not read this file for the details of any of them.
 
@@ -116,7 +117,7 @@ the order to branch on them.
 - guess missing semantics
 - confirm a binding before the evidence exists
 
-Those are the same three the other eight hold to. Where a choice changes the economic meaning of a
+Those are the same three the other nine hold to. Where a choice changes the economic meaning of a
 result, the user makes it.
 
 ## CLI reference
@@ -126,18 +127,15 @@ help is the authoritative usage reference** and these skills do not duplicate it
 
 ## Friction logging
 
-When something is harder than it should be, write it down **before** resolving it:
+When something is harder than it should be, write it down **before** resolving it — once you know
+the answer you can no longer see what was missing. The framework improves from honest friction,
+not from workarounds.
 
-- what you were doing
-- what you expected
-- what actually happened
-- how long it took, and how you resolved it
-- what would have prevented it
-
-This log is a deliverable. The framework improves from honest friction, not from workarounds.
+**report-issue-dev** owns where that goes and what it must carry. Reach for it for friction and
+for defects alike; a status 500 or 502 is a vqapr defect and always belongs in a report.
 
 ---
 
 A refusal carries its own status, stage and cause. Status **423 or 503 means wait and retry the
-same command unchanged**; **500 or 502 is a vqapr defect**: do not work around it, report it with
-the envelope.
+same command unchanged**; **500 or 502 is a vqapr defect**: do not work around it silently — file
+it with **report-issue-dev**, envelope and all, and then carry on.

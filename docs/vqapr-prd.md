@@ -663,7 +663,7 @@ logical dataset은 physical file과 구분되는 versioned reference다. 최초 
 5. **선택한 field 각각의 타입 선언** (`TIMESTAMP_TZ` · `DATE` · `INTEGER` · `DOUBLE` · `VARCHAR` · `BOOLEAN`)
 6. 선언된 physical source identity
 
-**타입은 user가 선언하고 package가 1회 대조한다** (2026-09-08 판정, `docs/issues/088`). parquet을
+**타입은 user가 선언하고 package가 1회 대조한다** (2026-09-08 판정, `docs/issues/archive/088`). parquet을
 만드는 쪽이 user이므로 그 컬럼이 무엇인지도 user가 말한다. 등록은 파일을 `DESCRIBE`해서 선언과 다르면
 거부하고, 같으면 그 선언이 dataset의 사실이 된다 -- consumer는 `DOUBLE` field를 `float`으로, `INTEGER`를
 `int`로 받으며 그 사이의 변환은 없다. `DECIMAL` 컬럼은 선언할 수 없고 거부된다: 데이터 평면의 숫자는
@@ -2154,6 +2154,16 @@ user가 데이터 위치만 알려준다. agent는 파일을 읽어 축, availab
 
 vqapr는 skill 하나가 아니라 **skill 집합**을 출하한다.
 
+**아홉은 user가 하려는 일로 나뉘고, 열 번째는 축이 다르다.** `report-issue-dev`는 vqapr로
+무엇을 하는 skill이 아니라 **vqapr가 틀렸을 때 그것을 upstream에 돌려보내는** skill이다. 별도
+skill인 이유는 discovery다 -- "결함을 보고한다"는 요청은 아홉 중 어느 description으로도 발견되지
+않는다. 이 skill은 파일 하나를 쓰는 것만 하고, 진단을 위해 upstream을 읽는 것은 금지한다:
+testbed 발견의 값어치는 공개 표면만 가진 사람이 냈다는 데 있고, 구현을 읽는 순간 그것이 사라진다.
+
+**보고는 번호를 받지 않는다.** `NNN-` 이름은 소유자가 분류한 이슈의 것이고 `src/`가 결정 근거로
+인용한다. 아직 판정되지 않은 보고에 그 번호를 주면 인용이 무엇을 뜻하는지 알 수 없게 되고,
+testbed 여럿이 동시에 번호를 고르면 충돌한다. 보고 파일은 `report-YYYY-MM-DD-<slug>.md`다.
+
 이유는 discovery에 있다. agent가 시작할 때 미리 읽는 것은 각 skill의 `name`과 `description`뿐이고, 본문은
 그 skill이 관련 있다고 판정된 **뒤에야** 읽힌다. 그러므로 description이 "언제 이것을 써야 하는가"를 말하지
 못하면 skill은 발견되지 않는다. 그런데 vqapr 전체를 하나로 표현하면 description은 프레임워크 소개문 말고는
@@ -2174,6 +2184,7 @@ vqapr는 skill 하나가 아니라 **skill 집합**을 출하한다.
 | `run-backtest` | run 선언, `check`, 실행 | §6.1·6.2·6.9, §3.6 |
 | `analyze-result` | 끝난 run의 기록을 답·표·그림으로 | §9.1·9.4, §2.8 |
 | `inspect-workspace` | workspace가 무엇을 들고 있는가, 재사용 판정, 삭제 | §9.6, §2.8 |
+| `report-issue-dev` | vqapr 자체의 결함·마찰을 upstream `docs/issues/`에 보고 | §11.2, §10.1 |
 
 각 skill의 `description`은 **무엇을 하는가와 언제 쓰는가를 모두** 담고, 3인칭으로 쓰며, user가 실제로 말할
 법한 단어를 앞쪽에 둔다. description 문구 자체는 각 `SKILL.md`가 소유한다 — 이 표에 복제하면 둘 중 하나는

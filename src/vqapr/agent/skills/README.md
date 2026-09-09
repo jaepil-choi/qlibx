@@ -20,18 +20,18 @@ adapter를 놓았고 이유는 "복사본이 두 개가 되는 순간 하나는 
 
 ## 현재 담고 있는 것
 
-| 경로 | 역할 | 상태 |
-|---|---|---|
-| `introduce-vqapr/SKILL.md` | required entrypoint. PRD §11.2가 정한 이름 | **분할 전 본문 전체를 임시로 들고 있다** |
-| `_shipped.json` | 출하 이력 표 | 아직 없음 — 릴리스가 만든다 |
+PRD §11.2가 정한 아홉은 전부 서 있다: `introduce-vqapr`, `register-dataset`, `make-datamodel`,
+`make-strategy`, `make-exchange`, `make-constraint`, `run-backtest`, `analyze-result`,
+`inspect-workspace`. `_shipped.json`은 릴리스마다 `scripts/record_shipped_skills.py`가 갱신한다.
 
-`introduce-vqapr/`가 1,019줄을 통째로 들고 있는 것은 과도기다. record `175`가 기계를 먼저
-세웠고, 내용을 아홉으로 흩는 것은 그 다음 마일스톤들의 일이다. **없는 것을 현재형으로 쓰지
-않는다** — 그것이 FRICTION F-001의 실제 원인이었다. 문서가 현재형으로 서술한 명령을 찾다가
-없다는 것을 알아내는 비용은 읽는 사람마다 똑같이 다시 든다.
+**열 번째는 축이 다르다.** `report-issue-dev`는 vqapr로 무엇을 하는 skill이 아니라 vqapr가
+틀렸을 때 그것을 upstream `docs/issues/`에 돌려보내는 skill이다. 아홉의 description 중 어느
+것으로도 "결함을 보고한다"는 요청이 발견되지 않기 때문에 별도 skill이다.
 
-PRD §11.2가 정한 아홉: `introduce-vqapr`, `register-dataset`, `make-datamodel`, `make-strategy`,
-`make-exchange`, `make-constraint`, `run-backtest`, `analyze-result`, `inspect-workspace`.
+그 skill은 upstream에 **파일 하나를 쓰는 것만** 한다. 진단하려고 upstream을 읽는 것은 금지한다 —
+testbed 발견의 값어치는 공개 표면만 가진 사람이 냈다는 데 있고, `src/`를 읽는 순간 그것이
+사라진다. 번호(`NNN-`)도 주지 않는다: 그 이름은 소유자가 분류한 이슈의 것이고 `src/`가 결정
+근거로 인용하므로, 판정되지 않은 보고가 그것을 가져가면 인용이 무엇을 뜻하는지 알 수 없게 된다.
 
 ## skill 하나를 어떻게 쓰는가
 

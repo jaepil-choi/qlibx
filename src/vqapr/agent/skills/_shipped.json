@@ -30,7 +30,8 @@
     "35d13c293882742075a4d72fbc9b338585bc29fe1f46b4030d7a3c7da6bd147a": "0.8.0"
   },
   "introduce-vqapr/SKILL.md": {
-    "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0"
+    "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0",
+    "fff93d3aee7e38d620daea8a865780607df0c4a5ac49324b3071bd6d78246ec3": "0.9.0.dev1"
   },
   "introduce-vqapr/references/install-and-environment.md": {
     "b1f5b73f00eb4a902e5f634b4f9651c480c1547196a54637376bc081dd98b3c5": "0.8.0"
@@ -130,6 +131,15 @@
   },
   "register-dataset/scripts/profile_source.py": {
     "6f0682395416906b33d373cb02d712c562bf5ff7018c87b210b0b06cfe5ff6ba": "0.8.0"
+  },
+  "report-issue-dev/SKILL.md": {
+    "a86edf6e66b7209e6cf5b7eb2473e9d0edd76e78b7c67b71b59766befbd482ca": "0.9.0.dev1"
+  },
+  "report-issue-dev/references/report-template.md": {
+    "93d16dd846bfc30ad4f7c1015d8de9e1163343eef73d20823f45a598f2010134": "0.9.0.dev1"
+  },
+  "report-issue-dev/references/what-counts-as-a-defect.md": {
+    "476d2613e1bfb81107a9e5970052fa25943c26603636e036e25d5a52422269c6": "0.9.0.dev1"
   },
   "run-backtest/SKILL.md": {
     "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0"

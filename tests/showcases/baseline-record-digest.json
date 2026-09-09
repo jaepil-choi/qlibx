@@ -28,7 +28,7 @@
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/run.json": {
-    "digest": "ed88c8313d21fe5e",
+    "digest": "d2f76f4fc3e8579f",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
@@ -45,7 +45,7 @@
       "signal",
       "stage"
     ],
-    "digest": "0badcb3bfd465901",
+    "digest": "f13ffec9f4945749",
     "kind": "table",
     "rows": 105
   },
@@ -64,7 +64,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "da89be01bee0d196",
+    "digest": "44c82620c5bd7942",
     "kind": "table",
     "rows": 126
   },
@@ -86,7 +86,7 @@
       "stage",
       "tax"
     ],
-    "digest": "27c400ca2e4f2249",
+    "digest": "1c3b78e07b8d2afa",
     "kind": "table",
     "rows": 105
   },
@@ -100,12 +100,12 @@
       "stage",
       "weight"
     ],
-    "digest": "d0fff2b41449e007",
+    "digest": "d2521155d97c3a74",
     "kind": "table",
     "rows": 105
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/run.json": {
-    "digest": "ed88c8313d21fe5e",
+    "digest": "d2f76f4fc3e8579f",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
@@ -122,7 +122,7 @@
       "signal",
       "stage"
     ],
-    "digest": "0badcb3bfd465901",
+    "digest": "f13ffec9f4945749",
     "kind": "table",
     "rows": 105
   },
@@ -141,7 +141,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "da89be01bee0d196",
+    "digest": "44c82620c5bd7942",
     "kind": "table",
     "rows": 126
   },
@@ -163,7 +163,7 @@
       "stage",
       "tax"
     ],
-    "digest": "27c400ca2e4f2249",
+    "digest": "1c3b78e07b8d2afa",
     "kind": "table",
     "rows": 105
   },
@@ -177,12 +177,12 @@
       "stage",
       "weight"
     ],
-    "digest": "d0fff2b41449e007",
+    "digest": "d2521155d97c3a74",
     "kind": "table",
     "rows": 105
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/run.json": {
-    "digest": "2b3489440937b5ba",
+    "digest": "3def4b5fdc662bc2",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
@@ -204,7 +204,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "e6067851c6e77b3a",
+    "digest": "f5edbc46d38d8bc7",
     "kind": "table",
     "rows": 65
   },
@@ -226,7 +226,7 @@
       "stage",
       "tax"
     ],
-    "digest": "b46e8dafec921ac9",
+    "digest": "25a853b3233705c9",
     "kind": "table",
     "rows": 44
   },
@@ -240,12 +240,12 @@
       "stage",
       "weight"
     ],
-    "digest": "76755836e16909fb",
+    "digest": "6a1f2da2b92a0364",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/run.json": {
-    "digest": "0589f013ae8ba11d",
+    "digest": "72a7c9c94a89a3b5",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
@@ -267,7 +267,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "0be91153d95e8220",
+    "digest": "5966637d374dae61",
     "kind": "table",
     "rows": 85
   },
@@ -289,7 +289,7 @@
       "stage",
       "tax"
     ],
-    "digest": "263f5642e36b6e83",
+    "digest": "461834cc7ee7e8c9",
     "kind": "table",
     "rows": 64
   },
@@ -303,12 +303,12 @@
       "stage",
       "weight"
     ],
-    "digest": "5fa308bf183f80a6",
+    "digest": "cd851b9c712cf0a4",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/run.json": {
-    "digest": "2b3489440937b5ba",
+    "digest": "3def4b5fdc662bc2",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
@@ -330,7 +330,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "e6067851c6e77b3a",
+    "digest": "f5edbc46d38d8bc7",
     "kind": "table",
     "rows": 65
   },
@@ -352,7 +352,7 @@
       "stage",
       "tax"
     ],
-    "digest": "b46e8dafec921ac9",
+    "digest": "25a853b3233705c9",
     "kind": "table",
     "rows": 44
   },
@@ -366,12 +366,12 @@
       "stage",
       "weight"
     ],
-    "digest": "76755836e16909fb",
+    "digest": "6a1f2da2b92a0364",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/run.json": {
-    "digest": "0589f013ae8ba11d",
+    "digest": "72a7c9c94a89a3b5",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
@@ -393,7 +393,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "0be91153d95e8220",
+    "digest": "5966637d374dae61",
     "kind": "table",
     "rows": 85
   },
@@ -415,7 +415,7 @@
       "stage",
       "tax"
     ],
-    "digest": "263f5642e36b6e83",
+    "digest": "461834cc7ee7e8c9",
     "kind": "table",
     "rows": 64
   },
@@ -429,12 +429,12 @@
       "stage",
       "weight"
     ],
-    "digest": "5fa308bf183f80a6",
+    "digest": "cd851b9c712cf0a4",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/run.json": {
-    "digest": "4bc1ba2937da06cb",
+    "digest": "f75d63998faeb1e4",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
@@ -452,7 +452,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "929a9d7698c0f144",
+    "digest": "47878c0fdeda815a",
     "kind": "table",
     "rows": 64
   },
@@ -471,7 +471,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "49e279e407b5d218",
+    "digest": "a86448558d018af2",
     "kind": "table",
     "rows": 85
   },
@@ -493,7 +493,7 @@
       "stage",
       "tax"
     ],
-    "digest": "e785459ea610822c",
+    "digest": "339b8af130704dd8",
     "kind": "table",
     "rows": 64
   },
@@ -507,12 +507,12 @@
       "stage",
       "weight"
     ],
-    "digest": "b7cba740c4793a10",
+    "digest": "6cb4488a0f55403f",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/run.json": {
-    "digest": "4bc1ba2937da06cb",
+    "digest": "f75d63998faeb1e4",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
@@ -530,7 +530,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "929a9d7698c0f144",
+    "digest": "47878c0fdeda815a",
     "kind": "table",
     "rows": 64
   },
@@ -549,7 +549,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "49e279e407b5d218",
+    "digest": "a86448558d018af2",
     "kind": "table",
     "rows": 85
   },
@@ -571,7 +571,7 @@
       "stage",
       "tax"
     ],
-    "digest": "e785459ea610822c",
+    "digest": "339b8af130704dd8",
     "kind": "table",
     "rows": 64
   },
@@ -585,12 +585,12 @@
       "stage",
       "weight"
     ],
-    "digest": "b7cba740c4793a10",
+    "digest": "6cb4488a0f55403f",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/run.json": {
-    "digest": "62bea53a2cb6a727",
+    "digest": "d1bf7df31eea86ea",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
@@ -612,7 +612,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "fe5f4218f2e9ccfc",
+    "digest": "ea61734ed0a96c4e",
     "kind": "table",
     "rows": 65
   },
@@ -634,7 +634,7 @@
       "stage",
       "tax"
     ],
-    "digest": "6756a79e59ec0b95",
+    "digest": "9dde5b9d82020c5d",
     "kind": "table",
     "rows": 44
   },
@@ -648,12 +648,12 @@
       "stage",
       "weight"
     ],
-    "digest": "ce2ff6932289eda2",
+    "digest": "34d9d4cfa9b0aad9",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/run.json": {
-    "digest": "f9ec11c2b22d993b",
+    "digest": "3749dff8d710a603",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
@@ -675,7 +675,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "fbcbdb1b0379c6fb",
+    "digest": "ada01559022b2964",
     "kind": "table",
     "rows": 65
   },
@@ -697,7 +697,7 @@
       "stage",
       "tax"
     ],
-    "digest": "98409422b3c4940c",
+    "digest": "0918e7babf95ce1a",
     "kind": "table",
     "rows": 44
   },
@@ -711,12 +711,12 @@
       "stage",
       "weight"
     ],
-    "digest": "313fe2fc65719300",
+    "digest": "9b7f15ca93af7e5e",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/run.json": {
-    "digest": "062ff1d18833e530",
+    "digest": "eefaa843777c3297",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
@@ -738,7 +738,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "5ae8f79fbd493453",
+    "digest": "958a70af3801458a",
     "kind": "table",
     "rows": 85
   },
@@ -760,7 +760,7 @@
       "stage",
       "tax"
     ],
-    "digest": "23d4f257761808a4",
+    "digest": "45702ce73b0f525d",
     "kind": "table",
     "rows": 64
   },
@@ -774,12 +774,12 @@
       "stage",
       "weight"
     ],
-    "digest": "6718832637b17ed3",
+    "digest": "4da157452eeda239",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/run.json": {
-    "digest": "62bea53a2cb6a727",
+    "digest": "d1bf7df31eea86ea",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
@@ -801,7 +801,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "fe5f4218f2e9ccfc",
+    "digest": "ea61734ed0a96c4e",
     "kind": "table",
     "rows": 65
   },
@@ -823,7 +823,7 @@
       "stage",
       "tax"
     ],
-    "digest": "6756a79e59ec0b95",
+    "digest": "9dde5b9d82020c5d",
     "kind": "table",
     "rows": 44
   },
@@ -837,12 +837,12 @@
       "stage",
       "weight"
     ],
-    "digest": "ce2ff6932289eda2",
+    "digest": "34d9d4cfa9b0aad9",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/run.json": {
-    "digest": "f9ec11c2b22d993b",
+    "digest": "3749dff8d710a603",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
@@ -864,7 +864,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "fbcbdb1b0379c6fb",
+    "digest": "ada01559022b2964",
     "kind": "table",
     "rows": 65
   },
@@ -886,7 +886,7 @@
       "stage",
       "tax"
     ],
-    "digest": "98409422b3c4940c",
+    "digest": "0918e7babf95ce1a",
     "kind": "table",
     "rows": 44
   },
@@ -900,12 +900,12 @@
       "stage",
       "weight"
     ],
-    "digest": "313fe2fc65719300",
+    "digest": "9b7f15ca93af7e5e",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/run.json": {
-    "digest": "062ff1d18833e530",
+    "digest": "eefaa843777c3297",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
@@ -927,7 +927,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "5ae8f79fbd493453",
+    "digest": "958a70af3801458a",
     "kind": "table",
     "rows": 85
   },
@@ -949,7 +949,7 @@
       "stage",
       "tax"
     ],
-    "digest": "23d4f257761808a4",
+    "digest": "45702ce73b0f525d",
     "kind": "table",
     "rows": 64
   },
@@ -963,7 +963,7 @@
       "stage",
       "weight"
     ],
-    "digest": "6718832637b17ed3",
+    "digest": "4da157452eeda239",
     "kind": "table",
     "rows": 64
   }

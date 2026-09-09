@@ -901,7 +901,7 @@ def _runtime_dataset_schema_and_key(tmp_path: Path) -> list[str]:
 
 def _runtime_execution_table(tmp_path: Path) -> list[str]:
     from vqapr.data.sources import SourceSpec
-    from vqapr.exchange.conventions import FillConvention, FillSelector
+    from vqapr.exchange.conventions import FillRule
     from vqapr.exchange.execution_table import (
         ExecutionTable,
         ExecutionTableSpec,
@@ -920,12 +920,7 @@ def _runtime_execution_table(tmp_path: Path) -> list[str]:
                 is_tradable_field="is_tradable",
                 price_fields={"open": "open", "close": "close"},
             ),
-            FillConvention(
-                selector=FillSelector.SAME_DAY,
-                local_time=__import__("datetime").time(15, 30),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
+            FillRule("close", "Asia/Seoul", at=__import__("datetime").time(15, 30)),
         )
 
     bad_types = _write_parquet(
@@ -1057,7 +1052,7 @@ def _runtime_declaration_read(tmp_path: Path) -> list[str]:
         "exchange": "venue",
         "execution": {
             "dataset": "fills",
-            "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+            "trade_price": "close", "fill": {"at": "15:30"},
         },
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
     }

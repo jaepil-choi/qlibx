@@ -177,7 +177,8 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
                 exchange="venue",
                 execution=RunExecution(
                     dataset='my-exec',
-                    fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+                    trade_price='close',
+                    fill=RunFill(at=time(15, 30)),
                 ),
                 start=datetime(2024, 1, 2, tzinfo=UTC),
                 end=datetime(2024, 1, 5, tzinfo=UTC),

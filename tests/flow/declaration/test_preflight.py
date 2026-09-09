@@ -14,7 +14,7 @@ from vqapr.data.datasets import DatasetRegistration, validate
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
@@ -79,7 +79,6 @@ def _setup(
     model_price_parquet: Path,
     *,
     with_execution: bool = True,
-    selector: FillSelector = FillSelector.SAME_DAY,
     at: time = time(9),
     days: tuple[date, ...] = (SESSION,),
 ) -> tuple[Workspace, RunDefinition]:
@@ -124,7 +123,6 @@ def _setup(
             workspace,
             root,
             identifier="setup-exchange",
-            selector=selector,
             days=days,
         )
         if with_execution
@@ -139,12 +137,8 @@ def _setup(
         execution=(
             RunExecution(
                 dataset="execution",
-                fill=RunFill(
-                    selector=selector.value.lower(),
-                    at=time(15, 30),
-                    timezone="Asia/Seoul",
-                    trade_price="close",
-                ),
+                trade_price="close",
+                fill=RunFill(at=time(15, 30)),
             )
             if with_execution
             else None
@@ -171,7 +165,6 @@ def _execution_exchange(
     minimum: str = "Decimal('1')",
     fractional: str = "False",
     register_input: bool = True,
-    selector: FillSelector = FillSelector.SAME_DAY,
     days: tuple[date, ...] = (SESSION,),
 ) -> ComponentRef:
     root.mkdir(parents=True, exist_ok=True)
@@ -294,7 +287,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
             "is_tradable",
             {"close": "close"},
         ),
-        FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+        FillRule("close", "Asia/Seoul", at=time(15, 30)),
     )
     frozen_execution = replace(frozen, exchange=exchange, execution=execution)
     changed_fill = replace(
@@ -302,7 +295,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
         execution=ExecutionTable(
             execution.dataset_id,
             execution.table,
-            FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), "Asia/Seoul", "close"),
+            FillRule("close", "Asia/Seoul", at=time(15, 30), within="1d"),
         ),
     )
     assert changed_account.identity != frozen.identity
@@ -323,12 +316,7 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     run-ready declaration and the simulation raised a bare `ValueError` only if the callback
     produced an intent.
     """
-    workspace, definition = _setup(
-        tmp_path,
-        model_price_parquet,
-        selector=FillSelector.NEXT_ELIGIBLE,
-        at=time(15, 30),
-    )
+    workspace, definition = _setup(tmp_path, model_price_parquet, at=time(15, 30))
 
     with pytest.raises(VqaprError) as caught:
         preflight_run(workspace, definition)
@@ -341,7 +329,7 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     assert failure.code == "execution.target_outside_horizon"
     assert failure.example_total == 1
     assert failure.examples == ("preflight.agenda-2024-03-05T1530: 2024-03-05T15:30:00+09:00",)
-    assert "selector=next_eligible" in (failure.observed or "")
+    assert "fill=the first execution instant after the decision" in (failure.observed or "")
     assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
     assert "extend end" in failure.requirement
 
@@ -355,12 +343,8 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
                      exchange='exchange',
                      execution=RunExecution(
                          dataset='execution',
-                         fill=RunFill(
-                             selector='same_day',
-                             at=time(15, 30),
-                             timezone='Asia/Seoul',
-                             trade_price='close',
-                         ),
+                         trade_price='close',
+                         fill=RunFill(at=time(15, 30)),
                      ),
                      initial_account_snapshot=AccountSnapshot(
                          0, Decimal('100'), {'ABC': Decimal('2')}
@@ -831,7 +815,7 @@ def test_the_execution_tables_instants_collapse_to_venue_local_days(
     ] == [date(2024, 3, day) for day in (4, 5, 6, 7)]
 
     absent = from_table.replace(
-        execution=RunExecution(dataset="absent", fill=from_table.execution.fill)  # type: ignore[union-attr]
+        execution=RunExecution(dataset="absent", trade_price="close")
     )
     with pytest.raises(VqaprError):
         derived_agenda(workspace, absent)

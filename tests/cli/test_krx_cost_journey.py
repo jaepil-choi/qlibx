@@ -236,12 +236,7 @@ components:
                         "exchange": "krx-venue",
                         "execution": {
                             "dataset": "venue-daily",
-                            "fill": {
-                                "selector": "next_eligible",
-                                "at": "15:30",
-                                "timezone": "Asia/Seoul",
-                                "trade_price": "close",
-                            },
+                            "trade_price": "close", "fill": {"at": "15:30"},
                         },
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
                         "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),

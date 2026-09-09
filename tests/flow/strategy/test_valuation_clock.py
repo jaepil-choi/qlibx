@@ -185,7 +185,8 @@ RUNNER = textwrap.dedent(
         exchange="clock-exchange",
         execution=RunExecution(
             dataset='krx-daily',
-            fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+            trade_price='close',
+            fill=RunFill(at=time(15, 30)),
         ),
         start=datetime.combine(sessions[0], time(0, 0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23, 0), tzinfo=KST),

@@ -35,7 +35,7 @@ from vqapr.domain.errors import (
 from vqapr.domain.identifiers import DatasetId, dataset_id
 from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import side_of
-from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillConvention
+from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillRule
 from vqapr.exchange.listings import ExchangeRulesView
 
 _RETRY = "fix the prepared execution parquet or binding, then retry"
@@ -86,21 +86,18 @@ class ExecutionTable:
 
     dataset_id: DatasetId
     table: ExecutionTableSpec
-    fill: FillConvention
+    fill: FillRule
 
     def spoken(self) -> list[str]:
         """The point-in-time meaning of this binding, in two sentences (`docs/issues/archive/027`).
 
-        One for the table's clock, one for the fill -- the fill's four fields (selector, wall
-        time, zone, price) mean nothing apart, so they are one sentence rather than four.
+        One for the table's clock, one for the fill rule and its price (design §3.5).
         """
         fill = self.fill
         return [
             f"execution dataset {self.dataset_id!r}: a row is a fact about the instant in "
             f"{self.table.trade_at_field!r}; a decision fills at a later row, never at its own",
-            f"execution dataset {self.dataset_id!r}: a decision fills on the "
-            f"{fill.selector.value.lower()} session at {fill.local_time.isoformat()} "
-            f"{fill.timezone}, "
+            f"execution dataset {self.dataset_id!r}: a decision fills at {fill.describe()}, "
             f"at that row's {fill.trade_price!r}",
         ]
 
@@ -140,8 +137,8 @@ class ExecutionTable:
     def __post_init__(self) -> None:
         if not isinstance(self.table, ExecutionTableSpec):
             raise TypeError("table must be an ExecutionTableSpec")
-        if not isinstance(self.fill, FillConvention):
-            raise TypeError("fill must be a FillConvention")
+        if not isinstance(self.fill, FillRule):
+            raise TypeError("fill must be a FillRule")
         if self.fill.trade_price not in self.table.price_fields:
             raise ValueError(
                 f"trade_price {self.fill.trade_price!r} must be one of the execution dataset's "
@@ -153,7 +150,7 @@ class ExecutionTable:
         cls,
         raw_dataset_id: str,
         table: ExecutionTableSpec,
-        fill: FillConvention,
+        fill: FillRule,
     ) -> ExecutionTable:
         return cls(dataset_id(raw_dataset_id), table, fill)
 

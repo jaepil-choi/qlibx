@@ -166,7 +166,7 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
     if registration.instrument_field is None:
         raise ValueError(f"execution dataset {binding.dataset!r} must declare an instrument_field")
     prices = execution_price_fields(registration)
-    fill = binding.convention
+    fill = binding.rule(definition.timezone)
     if fill.trade_price not in prices:
         raise VqaprError(
             stage=Stage.FREEZE,
@@ -544,9 +544,9 @@ def _validate_execution_targets(
     """Prove every strategy callback can bind an accepted intent before the run starts.
 
     A callback may return ``Hold``, but preflight cannot assume that it will. If an
-    occurrence has no exact target under the declared fill convention, an intent accepted there
-    would fail only after every earlier callback had already mutated account state. The horizon,
-    selector, and callback instants are all frozen facts, so that refusal belongs here.
+    occurrence has no exact target under the fill rule, an intent accepted there would fail only
+    after every earlier callback had already mutated account state. The horizon, the rule and
+    the callback instants are all frozen facts, so that refusal belongs here.
 
     The horizon is read once. Calling ``select_target`` without it would rescan the execution
     table once per occurrence -- both slower and vulnerable to observing different bytes while
@@ -569,36 +569,35 @@ def _validate_execution_targets(
     if not missing:
         return
 
-    selector = execution_table.fill.selector.value.lower()
+    rule = execution_table.fill.describe()
     raise VqaprError(
         stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
                 code="execution.target_outside_horizon",
                 requirement=(
-                    "every strategy occurrence must have an exact execution target strictly "
-                    "later than the occurrence and inside the run horizon; extend end through "
-                    "the required execution snapshot, or choose a fill selector whose target "
-                    "exists after that decision"
+                    "every strategy occurrence must have an execution instant after it that the "
+                    "fill rule admits, inside the run horizon; extend end through the required "
+                    "execution instant, or loosen `at`/`after`/`within`"
                 ),
-                observed=(f"selector={selector}, end={end.isoformat()}, unresolved={len(missing)}"),
+                observed=(f"fill={rule}, end={end.isoformat()}, unresolved={len(missing)}"),
                 examples=[
                     f"{occurrence.occurrence_id}: {occurrence.evaluation_time.isoformat()}"
                     for occurrence in missing
                 ],
                 example_total=len(missing),
                 fix=(
-                    f"widen the run end past {end.isoformat()} to cover the required "
-                    f"execution snapshot, or choose a fill selector other than {selector!r} "
-                    "whose target resolves inside the horizon"
+                    f"widen the run end past {end.isoformat()} to cover the required execution "
+                    "instant, move the decision earlier, or loosen the fill's `at`/`after`/"
+                    "`within` so an instant after every decision qualifies"
                 ),
                 status=Status.PRECONDITION,
             )
         ],
         mutation=False,
         retry_precondition=(
-            "extend the run end through the missing execution snapshot, correct the execution "
-            "table, or choose a fill selector that resolves inside the horizon, then retry"
+            "extend the run end through the missing execution instant, correct the execution "
+            "table, or loosen the fill rule, then retry"
         ),
     )
 

@@ -2,7 +2,7 @@
 it and a component list can be asked who reads a dataset (`082`).
 
 `027`, reopened by the owner: nothing made a convention be spoken aloud. `available_at`,
-`trade_at`, `at`, `timezone`, `selector` and `trade_price` are the fields whose whole content is
+`trade_at`, `at`, `timezone`, the fill handles and `trade_price` are the fields whose whole content is
 their meaning, and an author who typed them had never been told what they commit to. The rule
 settled there: **one sentence per PIT-bearing concept, or nothing** -- a restatement long enough
 to scroll past is the paragraph it was meant to replace.
@@ -173,11 +173,9 @@ runs:
     exchange: venue
     execution:
       dataset: krx-daily
+      trade_price: close
       fill:
-        selector: same_day
         at: "15:30"
-        timezone: Asia/Seoul
-        trade_price: close
     initial_account: {{cash: "1000", mode: long_only, positions: {{}}}}
     writes: beta-weights
     strategies: {{holds: {{}}}}
@@ -204,7 +202,7 @@ def test_register_says_what_each_pit_bearing_declaration_means_once(
     assert "never earlier" in dataset
     assert clock.startswith("dataset 'krx-daily':") and "'trade_at'" in clock
     assert fill.startswith("run 'beta' fills against dataset 'krx-daily':")
-    for word in ("same_day", "15:30:00", "Asia/Seoul", "'close'"):
+    for word in ("first execution instant", "15:30:00", "Asia/Seoul", "'close'"):
         assert word in fill, (word, fill)
     assert run.startswith("run 'alpha':") and "16:00:00 Asia/Seoul" in run
     assert "knowable before" in run

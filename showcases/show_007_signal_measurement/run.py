@@ -582,12 +582,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         exchange="show007-academic",
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=start,
         end=end,

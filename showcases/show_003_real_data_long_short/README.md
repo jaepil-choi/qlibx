@@ -28,7 +28,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
 
 - Observation and execution rows for a session share the venue close instant `15:30 KST`.
 - The strategy callback is `08:30 KST`, so it can only ever see strictly prior sessions.
-- `FillConvention(SAME_DAY, 15:30)` resolves one strictly-later execution target inside the run.
+- `FillRule("close", "Asia/Seoul", at=15:30)` resolves one strictly-later execution target inside the run.
 - Valuation `16:00` and monitoring `16:30` run on their own agendas.
 
 ## Honest limitations

@@ -66,7 +66,7 @@ from vqapr.domain.values import (
     Side,
     declare_local_instant,
 )
-from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
+from vqapr.exchange.conventions import ExactExecutionTarget, FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -195,9 +195,8 @@ __all__ = (
     "ExecutionTable",
     "ExecutionTableSpec",
     "FactorInstrument",
-    "FillConvention",
     "FillCost",
-    "FillSelector",
+    "FillRule",
     "FrozenAgenda",
     "FrozenDataModel",
     "FrozenRun",

@@ -83,9 +83,8 @@ def _strategy_run(run_id: str = "alpha") -> RunDefinition:
         exchange="venue",
         execution=RunExecution(
             dataset="fills",
-            fill=RunFill(
-                selector="same_day", at=time(15, 30), timezone="Asia/Seoul", trade_price="close"
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=datetime(2024, 3, 5, tzinfo=KST),
         end=datetime(2024, 3, 6, tzinfo=KST),

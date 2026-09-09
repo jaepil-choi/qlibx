@@ -24,7 +24,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -268,7 +268,7 @@ def test_real_execution_snapshot_selects_the_exact_close(
             is_tradable_field="is_tradable",
             price_fields={"close": "close"},
         ),
-        FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+        FillRule("close", VENUE, at=time(15, 30)),
     )
     sessions = _sessions(observation_path)
     decision_session = sessions[3]

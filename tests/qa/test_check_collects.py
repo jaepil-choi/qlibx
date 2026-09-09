@@ -150,7 +150,8 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
                 exchange="venue",
                 execution=RunExecution(
                     dataset='my-exec',
-                    fill=RunFill(selector='next_eligible', at=time(15, 30), timezone='Asia/Seoul', trade_price='close'),
+                    trade_price='close',
+                    fill=RunFill(at=time(15, 30)),
                 ),
                 start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
                 end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),

@@ -544,20 +544,19 @@ def test_a_rejected_enum_value_names_every_permitted_one(
 ) -> None:
     """A bad enum value must not arrive as an unhandled KeyError.
 
-    `fill.selector` was a raw `FillSelector[value.upper()]` lookup, so a wrong value crashed with
-    a traceback instead of a refusal. Measured: a reader spent six consecutive attempts on
-    price vocabulary (close, market, vwap, next_open) because the field name reads as "which
-    price" while the members are scheduling words. Guessing cannot converge on a vocabulary the
-    field name argues against, so the refusal has to carry the list.
+    The since-retired `fill.selector` was a raw `Enum[value.upper()]` lookup, so a wrong value
+    crashed with a traceback instead of a refusal, and a reader spent six consecutive guesses on
+    a vocabulary the field name argued against. The closed set that remains on a run is the
+    account mode; the refusal has to carry its list.
     """
     spec = tmp_path / "runs.yaml"
     spec.write_text(
         "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
         "    end: \"2024-03-06T23:00:00+09:00\"\n"
         "    timezone: Asia/Seoul\n    agenda: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
-        "    execution:\n      dataset: krx\n      fill:\n        selector: next_open\n"
-        "        at: \"15:30\"\n        timezone: Asia/Seoul\n        trade_price: close\n"
-        "    initial_account: {cash: \"1000\", mode: long_only}\n    strategies: {alpha: {}}\n",
+        "    execution:\n      dataset: krx\n      trade_price: close\n"
+        "      fill:\n        at: \"15:30\"\n"
+        "    initial_account: {cash: \"1000\", mode: long_short}\n    strategies: {alpha: {}}\n",
         encoding="utf-8",
     )
 
@@ -568,7 +567,7 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     assert payload["failures"], "a bad enum value produced no structured failure"
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.value_not_permitted"
-    for member in ("same_day", "next_eligible"):
+    for member in ("long_only", "signed"):
         assert member in failure["requirement"], f"{member} was not named"
     assert failure["examples"], "permitted values must ride as examples"
 

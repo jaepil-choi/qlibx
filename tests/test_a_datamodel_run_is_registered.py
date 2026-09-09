@@ -114,12 +114,8 @@ def test_a_run_holds_one_kind_of_model() -> None:
             "exchange": "venue",
             "execution": RunExecution(
                 dataset="venue-daily",
-                fill=RunFill(
-                    selector="same_day",
-                    at=time(15, 30),
-                    timezone="Asia/Seoul",
-                    trade_price="close",
-                ),
+                trade_price="close",
+                fill=RunFill(at=time(15, 30)),
             ),
         },
         {
@@ -242,7 +238,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
                 "strategies": {"ou-k0": None},
                 "execution": {
                     "dataset": "venue-daily",
-                    "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+                    "trade_price": "close", "fill": {"at": "15:30"},
                 },
             },
             "exchange and execution must be declared together",

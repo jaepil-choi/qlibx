@@ -173,12 +173,7 @@ def _run(root: Path, capsys: pytest.CaptureFixture[str], run_id: str, strategy: 
         "exchange": "venue",
         "execution": {
             "dataset": "venue-daily",
-            "fill": {
-                "selector": "next_eligible",
-                "at": "15:30",
-                "timezone": "Asia/Seoul",
-                "trade_price": "close",
-            },
+            "trade_price": "close", "fill": {"at": "15:30"},
         },
         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
         "end": datetime(2024, 3, 6, 23, tzinfo=_ZONE).isoformat(),

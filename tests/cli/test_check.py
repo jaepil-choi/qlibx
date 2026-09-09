@@ -161,12 +161,8 @@ def _venue_dataset(
 def _fill(fill_at: str = "15:30", dataset: str = "my-exec") -> RunExecution:
     return RunExecution(
         dataset=dataset,
-        fill=RunFill(
-            selector="next_eligible",
-            at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-            timezone="UTC",
-            trade_price="close",
-        ),
+        trade_price="close",
+        fill=RunFill(at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time()),
     )
 
 

@@ -186,12 +186,10 @@ def declaration(
                 "exchange": EXCHANGE_ID,
                 "execution": {
                     "dataset": EXECUTION_ID,
-                    "fill": {
-                        "selector": "same_day",
-                        "at": CLOSE,
-                        "timezone": VENUE,
-                        "trade_price": "close",
-                    },
+                    "trade_price": "close",
+                    # The first execution instant after the 08:00 decision is that day's close;
+                    # `at` says so explicitly (design §3.5).
+                    "fill": {"at": CLOSE},
                 },
                 "initial_account": {"cash": OPENING_CASH, "mode": "LONG_ONLY", "positions": {}},
                 "writes": f"{STRATEGY_ID}-weights",

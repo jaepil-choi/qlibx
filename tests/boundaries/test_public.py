@@ -44,8 +44,7 @@ from vqapr.public import (
     ExecutionTable,
     ExecutionTableSpec,
     FactorInstrument,
-    FillConvention,
-    FillSelector,
+    FillRule,
     FrozenAgenda,
     FrozenRun,
     Hold,
@@ -198,9 +197,8 @@ def test_public_exports_are_fixed() -> None:
         "ExecutionTable",
         "ExecutionTableSpec",
         "FactorInstrument",
-        "FillConvention",
         "FillCost",
-        "FillSelector",
+        "FillRule",
         "FrozenAgenda",
         "FrozenDataModel",
         "FrozenRun",
@@ -537,12 +535,7 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
             is_tradable_field="is_tradable",
             price_fields={"open": "open", "close": "close"},
         ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        FillRule("close", "Asia/Seoul", at=time(15, 30)),
     )
 
     # The bound table is what preflight checks (record `185`): the price the RUN chose must be

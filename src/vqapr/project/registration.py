@@ -41,7 +41,6 @@ from vqapr.domain.errors import (
 )
 from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.domain.instruments import export_roster
-from vqapr.exchange.conventions import FillSelector
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.prepare import prepare_component
 from vqapr.project.document import (
@@ -667,11 +666,9 @@ def _enum[E: Enum](kind: type[E], value: object, *, name: str) -> E:
     the member list then guesses, and guessing converges only when the field name happens to
     suggest the right vocabulary.
 
-    Measured: `fill.selector` was a raw lookup, and a reader spent six consecutive attempts on
-    `close, market, close_price, last, vwap, next_open` — every one a *price* word, because
-    "selector" alongside `trade_price` reads as "which price". The members are `SAME_DAY` and
-    `NEXT_ELIGIBLE`, which are *scheduling* words. No number of guesses reaches a vocabulary the
-    field name argues against, so the refusal has to carry the list.
+    Measured (on the since-retired `fill.selector`): a raw lookup sent a reader through six
+    consecutive guesses at a vocabulary the field name argued against. No number of guesses
+    reaches a closed set the reader cannot see, so the refusal has to carry the list.
     """
     try:
         return kind[str(value).upper()]
@@ -914,16 +911,6 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
             # judged here so the refusal names every member and the nearest spelling
             # (`docs/issues/archive/017`), rather than surfacing from the model as one line of many.
             _enum(AccountMode, account["mode"], name=f"{name}.initial_account.mode")
-        execution = declared_run.get("execution")
-        if isinstance(execution, dict) and isinstance(execution.get("fill"), dict):
-            fill = execution["fill"]
-            if "selector" in fill:
-                # The same closed-set treatment as the account mode: `selector` reads as
-                # "which price" while its members are scheduling words (`docs/issues/archive/017`),
-                # so the refusal has to carry the list rather than a one-line pydantic error.
-                _enum(
-                    FillSelector, fill["selector"], name=f"{name}.execution.fill.selector"
-                )
         try:
             definition = RunDefinition.model_validate({"run_id": str(run_id), **declared_run})
         except (ValidationError, TypeError, ValueError) as invalid:
@@ -945,7 +932,8 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     cause=invalid,
                     requirement=(
                         "a run declares writes, and one strategy (with exchange, execution "
-                        "and initial_account) or one datamodel (with agenda.days_from), plus "
+                        "{dataset, trade_price, fill?} and initial_account) or one datamodel "
+                        "(with agenda.days_from), plus "
                         "instruments, start, end, timezone and agenda (every, at or from/to), "
                         "each in the shape `vqapr new run` emits"
                     ),

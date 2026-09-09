@@ -164,14 +164,13 @@ runs:
     exchange: my-venue               # component_id of a registered Exchange
     execution:                       # the registered venue table, and THIS run's fill on it
       dataset: my-venue-daily        # a dataset registered with `execution: {{is_tradable: ...}}`
-      fill:
-        selector: same_day           # SCHEDULING rule, not a price choice. One of:
-        #   same_day       fill at the instant selected within the same session
-        #   next_eligible  fill at the next session where the name is tradable
-        at: "15:30"                  # execution must be STRICTLY LATER than `at` above
-        timezone: Asia/Seoul         # venue timezone that this `at` is expressed in
-        trade_price: close           # which numeric field of the dataset this run fills at;
+      trade_price: close             # which numeric field of the dataset this run fills at;
                                      #   another run may fill the same table at `open`
+      fill:                          # optional. Without it a decision fills at the FIRST
+        at: "15:30"                  #   execution instant after it; `at` keeps only instants at
+        # after: "10m"               #   this wall time (run timezone) -- STRICTLY LATER than the
+        # within: "1d"               #   decision. `after`: minimum gap. `within`: maximum gap,
+                                     #   else the run is refused before it starts
     initial_account:
       cash: "1000000"                # quoted to preserve precision (parsed as Decimal)
       # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a

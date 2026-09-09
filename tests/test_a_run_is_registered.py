@@ -64,9 +64,8 @@ def _definition(**overrides: object) -> RunDefinition:
         "exchange": "venue",
         "execution": RunExecution(
             dataset="venue-daily",
-            fill=RunFill(
-                selector="same_day", at=time(15, 30), timezone="Asia/Seoul", trade_price="close"
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         "start": datetime(2024, 3, 5, tzinfo=KST),
         "end": datetime(2024, 3, 8, 15, 30, tzinfo=KST),
@@ -168,12 +167,8 @@ def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
             {
                 "execution": RunExecution(
                     dataset="nope",
-                    fill=RunFill(
-                        selector="same_day",
-                        at=time(15, 30),
-                        timezone="Asia/Seoul",
-                        trade_price="close",
-                    ),
+                    trade_price="close",
+                    fill=RunFill(at=time(15, 30)),
                 )
             },
             "dataset 'nope'",
@@ -220,12 +215,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                 "exchange": "venue",
                 "execution": {
                     "dataset": "venue-daily",
-                    "fill": {
-                        "selector": "same_day",
-                        "at": "15:30",
-                        "timezone": "Asia/Seoul",
-                        "trade_price": "close",
-                    },
+                    "trade_price": "close", "fill": {"at": "15:30"},
                 },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
                 "writes": "krx-2024-weights",

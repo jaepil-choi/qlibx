@@ -28,11 +28,12 @@ from vqapr.domain.errors import VqaprError
 from vqapr.project.store import Workspace
 
 
-class _Selector(StrEnum):
-    """A second closed set, so the helper is proven general rather than fitted to one field."""
+class _Unit(StrEnum):
+    """A closed set beside `AccountMode`, so the refusal's shape is proven on two keys."""
 
-    SAME_DAY = "same_day"
-    NEXT_ELIGIBLE = "next_eligible"
+    D = "d"
+    H = "h"
+    M = "m"
 
 
 def _failure(error: VqaprError) -> dict:
@@ -52,7 +53,7 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                 "exchange": "venue",
                 "execution": {
                     "dataset": "venue-daily",
-                    "fill": {"at": "15:30", "timezone": "Asia/Seoul", "trade_price": "close"},
+                    "trade_price": "close", "fill": {"at": "15:30"},
                 },
                 "initial_account": {"cash": "1000", "mode": mode, "positions": {}},
                 "writes": "r-weights",
@@ -98,7 +99,7 @@ def test_the_suggestion_names_the_nearest_member(tmp_path: Path) -> None:
     ("enum", "written", "key_path", "expected"),
     [
         (AccountMode, "LONG_SHORT", "initial_account.mode", "long_only, signed"),
-        (_Selector, "CLOSE", "fill.selector", "same_day, next_eligible"),
+        (_Unit, "week", "agenda.unit", "d, h, m"),
     ],
 )
 def test_the_refusal_is_the_same_shape_on_two_different_keys(
@@ -106,8 +107,8 @@ def test_the_refusal_is_the_same_shape_on_two_different_keys(
 ) -> None:
     """Verified on two keys, because a fix fitted to one field is not a fix to the class.
 
-    The second case is the `fill.selector` vocabulary trap by name: `CLOSE` is a price word, and
-    the members are scheduling words, so no number of guesses gets there without the list.
+    The second case stands in for the vocabulary trap the retired `fill.selector` was: a value
+    from a neighbouring vocabulary, refused with the list rather than a bare `KeyError`.
     """
     with pytest.raises(VqaprError) as raised:
         _enum(enum, written, name=key_path)

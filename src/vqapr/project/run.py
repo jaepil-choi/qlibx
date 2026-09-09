@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from decimal import Decimal
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -43,7 +43,7 @@ from vqapr.domain.agendas import AgendaRule
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.extension.component import ComponentKind, ComponentRef
 
 FINGERPRINT_PREFIX = 8
@@ -305,46 +305,49 @@ class _InitialAccount(BaseModel):
 
 
 class RunFill(BaseModel):
-    """`runs.<id>.execution.fill`: on which session instant, at which price, a decision fills.
+    """`runs.<id>.execution.fill`: the optional handles on when a decision fills (design §3.5).
 
-    The run's own fill convention (record `185`): `at` is the venue-local wall time of the fill,
-    `selector` the scheduling rule, `trade_price` one of the execution dataset's numeric fields.
-    `fold`/`offset` are the DST proof a stored declaration may carry; a declaration without them
-    resolves the wall time from the zone and refuses an ambiguous one.
+    Absent, a decision fills at the first market-clock instant after it. `at` keeps only the
+    instants whose venue-local wall time (the run's zone) is this one; `after` is a minimum
+    elapsed time; `within` a maximum gap -- a decision with no candidate inside it has no target,
+    which preflight refuses. Durations share `agenda.every`'s grammar: `10m`, `2h`, `1d`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
 
-    selector: Literal["same_day", "next_eligible"] = "same_day"
-    at: time
-    timezone: str
-    trade_price: str
-    fold: int | None = None
-    offset: str | None = None
+    at: time | None = None
+    after: str | None = None
+    within: str | None = None
 
-    @field_validator("selector", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _lowered(cls, value: object) -> object:
-        return value.lower() if isinstance(value, str) else value
+    def _the_retired_shape(cls, raw: object) -> object:
+        if isinstance(raw, Mapping):
+            retired = [key for key in ("selector", "timezone", "trade_price") if key in raw]
+            if retired:
+                raise ValueError(
+                    f"{', '.join(retired)} left `fill:` (design §3.5): a decision fills at the "
+                    "first execution instant after it, narrowed by `at`, `after`, `within`; "
+                    "`trade_price` sits on `execution:` beside `dataset`, and the run's "
+                    "`timezone` reads `at`"
+                )
+        return raw
 
     @field_validator("at")
     @classmethod
-    def _wall_time(cls, value: time) -> time:
-        return _naive_wall_time(value)
+    def _wall_time(cls, value: time | None) -> time | None:
+        return None if value is None else _naive_wall_time(value)
 
-    @field_serializer("at")
-    def _at_as_text(self, value: time) -> str:
-        return value.isoformat()
-
-    def to_convention(self) -> FillConvention:
-        return FillConvention(
-            FillSelector[self.selector.upper()],
-            self.at,
-            self.timezone,
-            self.trade_price,
-            self.fold,
-            self.offset,
-        )
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if self.at is not None:
+            body["at"] = self.at.isoformat()
+        if self.after is not None:
+            body["after"] = self.after
+        if self.within is not None:
+            body["within"] = self.within
+        return body
 
 
 class RunAgenda(BaseModel):
@@ -415,16 +418,34 @@ class RunAgenda(BaseModel):
 
 
 class RunExecution(BaseModel):
-    """`runs.<id>.execution`: the registered execution dataset and this run's fill on it."""
+    """`runs.<id>.execution`: the registered execution dataset, the price this run fills at, and
+    the optional fill handles."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
 
     dataset: Annotated[str, Field(min_length=1)]
-    fill: RunFill
+    trade_price: Annotated[str, Field(min_length=1)]
+    fill: RunFill | None = None
 
-    @property
-    def convention(self) -> FillConvention:
-        return self.fill.to_convention()
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"dataset": self.dataset, "trade_price": self.trade_price}
+        if self.fill is not None:
+            stored = self.fill.model_dump(mode="json")
+            if stored:
+                body["fill"] = stored
+        return body
+
+    def rule(self, timezone: str) -> FillRule:
+        """The domain rule, read in the run's zone; refuses an inconsistent `after`/`within`."""
+        fill = self.fill or RunFill()
+        return FillRule(
+            trade_price=self.trade_price,
+            timezone=timezone,
+            at=fill.at,
+            after=fill.after,
+            within=fill.within,
+        )
 
 
 def _naive_wall_time(value: object) -> time:
@@ -690,6 +711,8 @@ class RunDefinition(BaseModel):
                 "a datamodel run declares agenda.days_from: it has no execution table, so it "
                 "names the dataset whose days are its trading days (design §3.3)"
             )
+        if self.execution is not None:
+            self.execution.rule(self.timezone)  # refuses an after/within pair no instant satisfies
         if self.execution is not None and self.writes == self.execution.dataset:
             raise ValueError(
                 f"writes {self.writes!r} is also the execution dataset: a run cannot fill "
@@ -731,11 +754,10 @@ class RunDefinition(BaseModel):
         when = f" {self.agenda.rule.describe()} {self.timezone}"
         sentences: list[str] = []
         if self.execution is not None:
-            fill = self.execution.fill
+            rule = self.execution.rule(self.timezone)
             sentences.append(
                 f"run {self.run_id!r} fills against dataset {self.execution.dataset!r}: "
-                f"{fill.selector} at {fill.at.isoformat()} {fill.timezone}, at its "
-                f"{fill.trade_price!r} price"
+                f"{rule.describe()}, at its {rule.trade_price!r} price"
             )
         days = (
             "the days its execution table has rows for"

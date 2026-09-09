@@ -141,7 +141,8 @@ def _fill(dataset_id: str) -> RunExecution:
     """This run's fill on the venue table: the next eligible 15:30 close after a decision."""
     return RunExecution(
         dataset=dataset_id,
-        fill=RunFill(selector="next_eligible", at=time(15, 30), timezone=KST, trade_price="close"),
+        trade_price="close",
+        fill=RunFill(at=time(15, 30)),
     )
 
 

@@ -47,7 +47,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
@@ -170,7 +170,7 @@ def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionTable:
             "is_tradable",
             {"close": "close"},
         ),
-        FillConvention(FillSelector.SAME_DAY, FILL, "Asia/Seoul", "close"),
+        FillRule("close", "Asia/Seoul", at=FILL),
     )
 
 

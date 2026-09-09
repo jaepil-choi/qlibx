@@ -66,8 +66,9 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
                 "trade_at_field": execution.table.trade_at_field,
                 "price_fields": dict(execution.table.price_fields),
                 "fill": {
-                    "selector": execution.fill.selector.value,
-                    "local_time": execution.fill.local_time.isoformat(),
+                    "at": None if execution.fill.at is None else execution.fill.at.isoformat(),
+                    "after": execution.fill.after,
+                    "within": execution.fill.within,
                     "timezone": execution.fill.timezone,
                     "trade_price": execution.fill.trade_price,
                     "declaration_identity": execution.fill.declaration_identity,

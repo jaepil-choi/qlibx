@@ -1,4 +1,21 @@
-"""Exchange가 고정하는 체결 시각과 가격 선택."""
+"""When a decision fills: the first market-clock instant after it, and three optional handles.
+
+Design §3.5. The market clock is every instant the execution table has (§3); a decision made at
+`D` fills at the first of them strictly later than `D`. That default already expresses a
+minute-by-minute strategy on a minute table -- the next point is the next minute -- and a daily
+strategy on a daily table. Three handles narrow it:
+
+    at       keep only the instants whose venue-local wall time is this one   ("fill at the close")
+    after    a minimum elapsed time since the decision                         (delayed fill)
+    within   a maximum gap; a decision with no candidate inside it has no target, which
+             preflight refuses                                     ("fill today or not at all")
+
+What retired with this module's previous shape: the `SAME_DAY` / `NEXT_ELIGIBLE` selector (the
+difference -- "may it roll to the next day" -- is `within`), the fill's own `timezone` (the run's
+zone reads `at`), and the fold/offset proof (`at` FILTERS real instants by their clock reading
+rather than constructing a wall time, so an instant that happens twice is two candidates and the
+first later one wins; a wall time that never happens simply matches nothing).
+"""
 
 from __future__ import annotations
 
@@ -6,8 +23,7 @@ import re
 from bisect import bisect_right
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
-from enum import StrEnum
+from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -16,14 +32,16 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
-_OFFSET = re.compile(r"[+-](?:0\d|1[0-4]):[0-5]\d\Z")
+_DURATION = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
+_UNIT = {"m": timedelta(minutes=1), "h": timedelta(hours=1), "d": timedelta(days=1)}
 
 
-class FillSelector(StrEnum):
-    """The venue-local rule used to select an execution snapshot."""
-
-    SAME_DAY = "SAME_DAY"
-    NEXT_ELIGIBLE = "NEXT_ELIGIBLE"
+def parse_duration(text: str, *, name: str) -> timedelta:
+    """`10m`, `2h`, `1d` -- a count and one of three units, the grammar `agenda.every` shares."""
+    match = _DURATION.match(text) if isinstance(text, str) else None
+    if match is None:
+        raise ValueError(f"{name} must be a count and a unit such as 10m, 2h or 1d; got {text!r}")
+    return int(match.group("count")) * _UNIT[match.group("unit")]
 
 
 def _instants(candidates: Iterable[object]) -> tuple[datetime, ...]:
@@ -48,27 +66,21 @@ class ExactExecutionTarget:
     identity: UUID
     dataset_id: DatasetId
     target_at: datetime
-    selector: FillSelector
     trade_price: str
 
 
 class ExecutionHorizon:
-    """한 run 동안 불변인 체결 후보 시각 집합과, 해석이 끝난 venue-local target.
+    """The run's candidate instants, read once and bisected per decision.
 
-    `select_target`은 콜백마다 (1) 남은 horizon 전체의 instant를 다시 스캔하고
-    (2) 남은 달력 전체를 순회하며 `_local_target`을 부르고 결과를 버렸다. 둘 다 **frozen run
-    동안 변하지 않는 사실**이다. execution table은 run 내내 불변이므로 instant 집합도 불변이고,
-    달력 해석은 순수 함수다.
-
-    소유자는 run 수명 객체여야 한다. `FillConvention`은 값 객체라 상태를 들 수 없다.
+    The execution table is frozen for the run, so this set cannot change between callbacks;
+    rescanning it per callback was the cost record `162` removed. The owner is a run-lifetime
+    object because `FillRule` is a value and holds no state.
     """
 
-    __slots__ = ("_instants", "_local_targets", "_validated_through")
+    __slots__ = ("_instants",)
 
     def __init__(self, instants: tuple[datetime, ...]) -> None:
         self._instants = instants
-        self._local_targets: dict[date, datetime] = {}
-        self._validated_through: date | None = None
 
     @property
     def instants(self) -> tuple[datetime, ...]:
@@ -78,113 +90,60 @@ class ExecutionHorizon:
         """Candidates strictly later than the decision, without rescanning the source."""
         return self._instants[bisect_right(self._instants, decision_time.astimezone(UTC)) :]
 
-    def local_target(self, convention: FillConvention, day: date) -> datetime:
-        cached = self._local_targets.get(day)
-        if cached is None:
-            cached = self._local_targets[day] = convention.resolve_local_target(day)
-        return cached
-
-    def validate_calendar(
-        self, convention: FillConvention, *, first_date: date, last_date: date
-    ) -> None:
-        """Prove every venue-local target in the span resolves, once per run.
-
-        The original loop re-proved the same days on every callback and discarded the result.
-        The proof is a run-invariant fact, so it is kept instead of repeated.
-        """
-        start = first_date
-        if self._validated_through is not None:
-            if self._validated_through >= last_date:
-                return
-            start = max(start, self._validated_through + timedelta(days=1))
-        day = start
-        while day <= last_date:
-            self.local_target(convention, day)
-            day += timedelta(days=1)
-        previous = self._validated_through
-        self._validated_through = last_date if previous is None else max(previous, last_date)
-
 
 @dataclass(frozen=True, slots=True)
-class FillConvention:
-    """한 decision을 어느 session 시각의 어느 execution field로 체결할지 선언한다."""
+class FillRule:
+    """Which market-clock instant a decision fills at, and at which price (design §3.5)."""
 
-    selector: FillSelector
-    local_time: time
-    timezone: str
     trade_price: str
-    fold: int | None = None
-    offset: str | None = None
+    timezone: str
+    at: time | None = None
+    after: str | None = None
+    within: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.selector, FillSelector):
-            raise TypeError("selector must be a FillSelector")
-        if not isinstance(self.local_time, time):
-            raise TypeError("local_time must be a datetime.time")
-        if self.local_time.tzinfo is not None:
-            raise ValueError("local_time must be a timezone-naive wall time")
+        if not isinstance(self.trade_price, str) or not self.trade_price.strip():
+            raise ValueError("trade_price must be a non-empty semantic price field")
         if not isinstance(self.timezone, str) or not self.timezone.strip():
             raise ValueError("timezone must be a non-empty IANA timezone name")
         try:
             ZoneInfo(self.timezone)
         except (ZoneInfoNotFoundError, ValueError) as error:
             raise ValueError(f"unknown IANA timezone: {self.timezone!r}") from error
-        if not isinstance(self.trade_price, str) or not self.trade_price.strip():
-            raise ValueError("trade_price must be a non-empty semantic price field")
-        if (self.fold is None) != (self.offset is None):
-            raise ValueError("fold and offset must be declared together")
-        if self.fold is not None and (
-            not isinstance(self.fold, int) or isinstance(self.fold, bool) or self.fold not in (0, 1)
-        ):
-            raise ValueError("fold must be 0 or 1")
-        if self.offset is not None:
-            if not isinstance(self.offset, str) or _OFFSET.fullmatch(self.offset) is None:
-                raise ValueError("offset must use ISO UTC offset format ±HH:MM")
-            if self.offset[1:3] == "14" and self.offset[4:] != "00":
-                raise ValueError("offset must be within ±14:00")
+        if self.at is not None:
+            if not isinstance(self.at, time):
+                raise TypeError("at must be a datetime.time")
+            if self.at.tzinfo is not None:
+                raise ValueError("at must be a timezone-naive wall time; the run declares the zone")
+        if self.after is not None:
+            parse_duration(self.after, name="after")
+        if self.within is not None:
+            parse_duration(self.within, name="within")
+        if self.after is not None and self.within is not None:
+            minimum = parse_duration(self.after, name="after")
+            if minimum > parse_duration(self.within, name="within"):
+                raise ValueError("after must not exceed within: no instant could satisfy both")
 
     @property
-    def declaration_identity(self) -> tuple[str, str, str, str, int | None, str | None]:
-        """Workspace-facing immutable selector declaration, including DST proof."""
+    def declaration_identity(self) -> tuple[str, str, str, str, str]:
+        """Workspace-facing immutable declaration of the rule."""
         return (
-            self.selector.value,
-            self.local_time.isoformat(),
-            self.timezone,
             self.trade_price,
-            self.fold,
-            self.offset,
+            self.timezone,
+            "" if self.at is None else self.at.isoformat(),
+            self.after or "",
+            self.within or "",
         )
 
-    def resolve_local_target(self, day: date) -> datetime:
-        """Resolve one venue-local candidate day without implicit DST policy."""
-        zone = ZoneInfo(self.timezone)
-        candidates: list[datetime] = []
-        naive = datetime.combine(day, self.local_time)
-        for fold in (0, 1):
-            candidate = naive.replace(tzinfo=zone, fold=fold)
-            round_trip = candidate.astimezone(UTC).astimezone(zone)
-            if round_trip.replace(tzinfo=None) == naive and round_trip.fold == fold:
-                candidates.append(candidate)
-        if not candidates:
-            raise ValueError(
-                f"local target time {naive.isoformat()} does not exist in {self.timezone}"
-            )
-        if len(candidates) == 1:
-            return candidates[0]
-        if self.fold is None or self.offset is None:
-            raise ValueError(
-                f"local target time {naive.isoformat()} is ambiguous in {self.timezone}; "
-                "declare fold and offset"
-            )
-        for candidate in candidates:
-            offset = candidate.strftime("%z")
-            formatted_offset = f"{offset[:3]}:{offset[3:]}"
-            if candidate.fold == self.fold and formatted_offset == self.offset:
-                return candidate
-        raise ValueError(
-            f"declared fold/offset does not resolve local target time {naive.isoformat()} "
-            f"in {self.timezone}"
-        )
+    def describe(self) -> str:
+        parts = ["the first execution instant after the decision"]
+        if self.at is not None:
+            parts.append(f"at {self.at.isoformat()} {self.timezone}")
+        if self.after is not None:
+            parts.append(f"at least {self.after} later")
+        if self.within is not None:
+            parts.append(f"within {self.within}")
+        return ", ".join(parts)
 
     def build_horizon(
         self,
@@ -197,14 +156,10 @@ class FillConvention:
     ) -> ExecutionHorizon:
         """Read the run's candidate instants once from an execution table's source.
 
-        A convention reads a source and the field that stamps a fill; it does not know the
-        registration that pairs it with a table. `ExecutionTable.build_horizon`
-        passes its own table's binding here (one-shape Step 7, record 162: this was the
-        `conventions <-> execution_table` import cycle).
-
-        The execution table is frozen for the run, so this set cannot change between callbacks.
-        `start_time` must not be later than the earliest decision the run will make, or the
-        horizon would omit instants a callback is entitled to select.
+        A rule reads a source and the field that stamps a fill; it does not know the
+        registration that pairs it with a table. `ExecutionTable.build_horizon` passes its own
+        table's binding here (record `162`). `start_time` must not be later than the earliest
+        decision the run will make, or the horizon would omit instants a callback is entitled to.
         """
         candidates = scan.candidate_instants(
             source,
@@ -225,16 +180,18 @@ class FillConvention:
         end_time: datetime,
         horizon: ExecutionHorizon | None = None,
     ) -> ExactExecutionTarget | None:
-        """Select the first strictly-later eligible execution instant in the run horizon.
+        """The first market-clock instant after the decision that the rule admits, or `None`.
 
-        `source`/`trade_at_field` are the execution table's binding and `dataset_id` the
-        dataset the target is stamped with; the bound table passes its own through
-        `ExecutionTable.select_target`.
+        `None` is a fact about the table and the rule -- no instant after this decision passes
+        `at`/`after` inside `within` and the run's end -- and preflight proves it never happens
+        for a frozen agenda (`_validate_execution_targets`). `source`/`trade_at_field` are the
+        execution table's binding and `dataset_id` the dataset the target is stamped with.
         """
-
         if decision_time.tzinfo is None or end_time.tzinfo is None:
             raise ValueError("decision_time and end_time must be timezone-aware")
-        if decision_time.astimezone(UTC) > end_time.astimezone(UTC):
+        decision_utc = decision_time.astimezone(UTC)
+        end_utc = end_time.astimezone(UTC)
+        if decision_utc > end_utc:
             raise ValueError("decision_time must not be after end_time")
 
         if horizon is None:
@@ -246,56 +203,31 @@ class FillConvention:
                     end_time=end_time,
                 )
             )
-            resolve = self.resolve_local_target
         else:
-            # The horizon was read once for the whole run; bisect to this decision instead of
-            # rescanning, and drop anything past this call's own end_time.
-            end_utc = end_time.astimezone(UTC)
-            candidates = tuple(
-                candidate for candidate in horizon.after(decision_time) if candidate <= end_utc
-            )
-
-            def resolve(day: date) -> datetime:
-                return horizon.local_target(self, day)
-
+            candidates = horizon.after(decision_time)
+        earliest = decision_utc if self.after is None else (
+            decision_utc + parse_duration(self.after, name="after")
+        )
+        latest = end_utc if self.within is None else min(
+            end_utc, decision_utc + parse_duration(self.within, name="within")
+        )
         zone = ZoneInfo(self.timezone)
-        decision_date = decision_time.astimezone(zone).date()
-        final_date = end_time.astimezone(zone).date()
-        first_date = decision_date
-        last_date = decision_date if self.selector is FillSelector.SAME_DAY else final_date
-        if horizon is None:
-            day = first_date
-            while day <= last_date:
-                self.resolve_local_target(day)
-                day += timedelta(days=1)
-        else:
-            horizon.validate_calendar(self, first_date=first_date, last_date=last_date)
         for candidate in candidates:
             target_at = candidate.astimezone(UTC)
-            local_candidate = target_at.astimezone(zone)
-            resolved_local = resolve(local_candidate.date())
-            if local_candidate.astimezone(UTC) != resolved_local.astimezone(UTC):
+            if target_at <= decision_utc or target_at < earliest:
                 continue
-            if self.selector is FillSelector.SAME_DAY and local_candidate.date() != decision_date:
+            if target_at > latest:
+                return None
+            if self.at is not None and target_at.astimezone(zone).time() != self.at:
                 continue
             identity = uuid5(
                 _IDENTITY_NAMESPACE,
-                "|".join(
-                    (
-                        str(dataset_id),
-                        *(
-                            "" if value is None else str(value)
-                            for value in self.declaration_identity
-                        ),
-                        target_at.isoformat(),
-                    )
-                ),
+                "|".join((str(dataset_id), *self.declaration_identity, target_at.isoformat())),
             )
             return ExactExecutionTarget(
                 identity=identity,
                 dataset_id=dataset_id,
                 target_at=target_at,
-                selector=self.selector,
                 trade_price=self.trade_price,
             )
         return None

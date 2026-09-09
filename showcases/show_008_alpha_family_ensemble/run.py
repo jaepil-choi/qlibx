@@ -990,12 +990,8 @@ def _member_run(
         exchange=academic_ref.component_id,
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=start,
         end=end,
@@ -1182,12 +1178,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         exchange="show008-krx",
         execution=RunExecution(
             dataset="krx-daily",
-            fill=RunFill(
-                selector="same_day",
-                at=time(15, 30),
-                timezone=VENUE,
-                trade_price="close",
-            ),
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
         ),
         start=ensemble_start,
         end=end,

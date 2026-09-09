@@ -99,12 +99,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
                         "exchange": journey.EXCHANGE_ID,
                         "execution": {
                             "dataset": journey.EXECUTION_ID,
-                            "fill": {
-                                "selector": "same_day",
-                                "at": "15:30",
-                                "timezone": journey.VENUE,
-                                "trade_price": "close",
-                            },
+                            "trade_price": "close", "fill": {"at": "15:30"},
                         },
                         "initial_account": {
                             "mode": "LONG_ONLY",

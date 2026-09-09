@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 
 from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
+from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -33,12 +33,7 @@ def _registration(path: Path, *, local_time: time = time(15, 30)) -> ExecutionTa
             is_tradable_field="is_tradable",
             price_fields={"open": "open", "close": "close"},
         ),
-        FillConvention(
-            selector=FillSelector.SAME_DAY,
-            local_time=local_time,
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        FillRule("close", "Asia/Seoul", at=local_time),
     )
 
 
@@ -133,7 +128,6 @@ def test_fill_selects_one_exact_same_day_target_with_stable_identity(tmp_path: P
 
     assert selected is not None
     assert selected.target_at == datetime.fromisoformat("2024-03-05T06:30:00+00:00")
-    assert selected.selector is FillSelector.SAME_DAY
     assert selected.trade_price == "close"
     assert selected == registration.select_target(
         decision_time=decision_time, end_time=end_time

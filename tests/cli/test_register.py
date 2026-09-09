@@ -510,8 +510,7 @@ def _run_document(**overrides: str) -> str:
         "agenda": '{every: 1d, at: "04:00"}',
         "exchange": "venue",
         "execution": (
-            "{dataset: venue-daily, fill: {selector: next_eligible, at: \"15:30\", "
-            "timezone: Asia/Seoul, trade_price: close}}"
+            "{dataset: venue-daily, trade_price: close, fill: {}}"
         ),
         "initial_account": '{cash: "1000", mode: long_only}',
         "writes": "r-weights",

@@ -42,7 +42,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
-from vqapr.flow.declaration.preflight import derived_agenda
+from vqapr.flow.declaration.preflight import bound_execution_table, derived_agenda
 from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import RunDefinition
 
@@ -354,48 +354,54 @@ def _judge_execution_ordering(
     at: FailureSource,
     agenda: Callable[[], object],
 ) -> list[Failure]:
-    """AC-C5: a decision cannot fill at an instant that has already passed.
+    """AC-C5: every decision must have an execution instant after it that the fill rule admits.
 
     Caught here, before the run, rather than at the first callback. The old failure mode was a
     bare `ValueError: no exact execution target exists within the run horizon` raised only once
-    the simulation was already underway and earlier callbacks had mutated account state.
+    the simulation was already underway and earlier callbacks had mutated account state. Since
+    design §3.5 the question is asked of the table itself -- the market clock -- rather than of a
+    wall time: a decision AT the last instant of the day, with `at` set to that instant, has no
+    fill until the next day, and `within: 1d` may forbid that.
 
-    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise out
-    of here on purpose. This is the judgment `docs/issues/archive/015` exists for, and reporting it
-    as answered when it was not is the defect `docs/issues/archive/077` filed.
+    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise
+    out of here on purpose (`docs/issues/archive/077`).
     """
-    if definition.execution is None:
+    if definition.execution is None or definition.start is None or definition.end is None:
         return []
-    fill_at = definition.execution.fill.at
-    found: list[Failure] = []
+    # The agenda first: an execution table that cannot be read blocks this judge and the
+    # dataset judge for the SAME reason (`docs/issues/archive/077`), rather than this one
+    # naming the horizon scan and the other the agenda derivation.
     occurrences = agenda().occurrences  # type: ignore[attr-defined]
-    for entry in ((definition.strategy,) if definition.strategy is not None else ()):
-        late = [
-            occurrence.occurrence_id
-            for occurrence in occurrences
-            if occurrence.local_instant.local_time >= fill_at
-        ]
-        if not late:
-            continue
-        found.append(
-            Failure.bounded(
-                EXECUTION_NOT_AFTER_DECISION,
-                "every decision must be strictly earlier than the instant it fills at",
-                observed=(
-                    f"strategy {entry.component_id!r} fills at {fill_at.isoformat()}; "
-                    f"{len(late)} occurrence(s) at or after it"
-                ),
-                examples=late,
-                example_total=len(late),
-                fix=(
-                    f"move the strategy cadence earlier than {fill_at.isoformat()}, or declare a "
-                    "fill convention whose instant is later than every decision"
-                ),
-                status=Status.PRECONDITION,
-                source=_key(at, "strategies", entry.component_id),
-            )
+    table = bound_execution_table(workspace, definition)
+    horizon = table.build_horizon(start_time=definition.start, end_time=definition.end)
+    late = [
+        occurrence.occurrence_id
+        for occurrence in occurrences
+        if table.select_target(
+            decision_time=occurrence.evaluation_time, end_time=definition.end, horizon=horizon
         )
-    return found
+        is None
+    ]
+    if not late or definition.strategy is None:
+        return []
+    return [
+        Failure.bounded(
+            EXECUTION_NOT_AFTER_DECISION,
+            "every decision must have an execution instant after it that the fill rule admits",
+            observed=(
+                f"strategy {definition.strategy.component_id!r} fills at "
+                f"{table.fill.describe()}; {len(late)} occurrence(s) with no such instant"
+            ),
+            examples=late,
+            example_total=len(late),
+            fix=(
+                "move the decision earlier than the instant it should fill at, extend the run "
+                "end, or loosen the fill's `at`/`after`/`within`"
+            ),
+            status=Status.PRECONDITION,
+            source=_key(at, "strategies", definition.strategy.component_id),
+        )
+    ]
 
 
 def _members(definition: RunDefinition) -> list[tuple[str, Any, Any]]:

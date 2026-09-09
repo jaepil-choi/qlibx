@@ -34,7 +34,7 @@ from vqapr.domain.errors import VqaprError
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.instruments import instruments as _instruments
 from vqapr.domain.values import LocalInstantDeclaration
-from vqapr.exchange.conventions import ExactExecutionTarget, FillConvention, FillSelector
+from vqapr.exchange.conventions import ExactExecutionTarget, FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -290,9 +290,7 @@ def _parquet(path: Path, rows: str) -> Path:
     return path
 
 
-def _execution(
-    path: Path, selector: FillSelector = FillSelector.SAME_DAY
-) -> ExecutionTable:
+def _execution(path: Path) -> ExecutionTable:
     return ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
@@ -302,7 +300,7 @@ def _execution(
             "is_tradable",
             {"close": "close"},
         ),
-        FillConvention(selector, time(15, 30), "Asia/Seoul", "close"),
+        FillRule("close", "Asia/Seoul", at=time(15, 30)),
     )
 
 
@@ -539,7 +537,6 @@ def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurr
         UUID(int=2),
         "execution",
         datetime(2024, 3, 5, 15, 30, tzinfo=KST),
-        FillSelector.SAME_DAY,
         "close",
     )
     assert validate_economic_intent(payload) is payload
@@ -1141,12 +1138,11 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert commit_evidence.execution_snapshot.missing_target_instruments == ()
     assert commit_evidence.execution_snapshot.duplicate_instruments == ()
     assert commit_evidence.fill_convention.declaration_identity == (
-        "SAME_DAY",
-        "15:30:00",
-        "Asia/Seoul",
         "close",
-        None,
-        None,
+        "Asia/Seoul",
+        "15:30:00",
+        "",
+        "",
     )
     assert commit_evidence.target.identity == commit_evidence.pending.target.identity
     assert mark_evidence.run_identity == feedback_evidence.run_identity == frozen.identity

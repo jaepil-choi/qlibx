@@ -137,6 +137,7 @@ from vqapr.project.registration import register_dataset as register_dataset
 from vqapr.project.run import (
     ConstraintSet,
     DataModelEntry,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -231,6 +232,7 @@ __all__ = (
     "PortfolioTarget",
     "Rebalance",
     "RowsLookback",
+    "RunAgenda",
     "RunDefinition",
     "RunExecution",
     "RunFill",

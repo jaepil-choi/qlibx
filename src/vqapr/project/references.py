@@ -39,16 +39,16 @@ def _references_in(state: _State, kind: str, identity: str) -> tuple[str, ...]:
             if identity in named:
                 blockers.append(f"run {run_id!r}")
     elif kind == "dataset":
-        # What the DOCUMENT knows names a dataset: a registered run whose sessions come from
-        # it. A component's reads are declared in its code, not here, so a strategy that
-        # reads a withdrawn dataset is refused by `check` and `run` at its next preflight
-        # (`check.dataset.unregistered`), which is the same place it would be refused had
-        # the dataset never been registered. A datamodel run that WRITES this dataset is
-        # not a blocker: withdrawing the output is how that run is run again
-        # (`docs/issues/archive/060`).
+        # What the DOCUMENT knows names a dataset: a registered datamodel run whose
+        # trading days come from it (`agenda.days_from`). A component's reads are declared in
+        # its code, not here, so a strategy that reads a withdrawn dataset is refused by
+        # `check` and `run` at its next preflight (`check.dataset.unregistered`), which is the
+        # same place it would be refused had the dataset never been registered. A datamodel
+        # run that WRITES this dataset is not a blocker: withdrawing the output is how that
+        # run is run again (`docs/issues/archive/060`).
         for run_id, definition in runs.items():
-            if definition.sessions_from == identity:
-                blockers.append(f"run {run_id!r} (sessions_from)")
+            if definition.agenda.days_from == identity:
+                blockers.append(f"run {run_id!r} (agenda.days_from)")
             # The venue table is a dataset too (record 185): a run that fills against
             # it holds it by name in the document.
             if definition.execution is not None and definition.execution.dataset == identity:

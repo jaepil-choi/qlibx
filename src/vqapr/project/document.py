@@ -387,10 +387,10 @@ def _linked(raw: object) -> tuple[dict, ...]:
                     "which declares no execution role"
                 )
         if (
-            definition.sessions_from is not None
-            and dataset_id(definition.sessions_from) not in datasets
+            definition.agenda.days_from is not None
+            and dataset_id(definition.agenda.days_from) not in datasets
         ):
-            raise ValueError(f"run {raw_id!r} takes its sessions from an unregistered dataset")
+            raise ValueError(f"run {raw_id!r} takes its trading days from an unregistered dataset")
         runs[raw_id] = definition
 
     return (datasets, sources, components, runs)

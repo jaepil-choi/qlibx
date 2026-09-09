@@ -36,6 +36,7 @@ from vqapr.public import (
     AccountSnapshot,
     DataModelEntry,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -413,8 +414,7 @@ def main() -> None:
         instruments=tuple(universe),
         datamodel=DataModelEntry("showcase-model", ("score",)),
         timezone=VENUE,
-        at=time(16, 0),
-        sessions=tuple(score_days),
+        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
         writes="reversal_score",
@@ -434,9 +434,8 @@ def main() -> None:
     definition = RunDefinition(
         run_id="show003",
         strategy=StrategyEntry("showcase-strategy", ("showcase-constraint",)),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=time(8, 30),
+        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
         exchange="showcase-exchange",
         execution=RunExecution(
             dataset="krx-daily",

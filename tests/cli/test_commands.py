@@ -10,7 +10,7 @@ the command that closed that gap. This file previously reached past the CLI into
 all of them, under a docstring admitting the CLI could not register them; the workspace below is
 now reachable by typing `vqapr` commands only, which is the property that matters.
 
-Since record 148 a run declares its own sessions and wall time (`sessions_from`, `timezone`,
+Since the two-clocks campaign a run declares its own strategy clock (`agenda`, `timezone`,
 `at`): there is no agenda to register and no binding to write, so the fixture is one file
 shorter than it was.
 """
@@ -205,9 +205,8 @@ def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Pa
         # A run declares what it writes (design §2); a test that cares overrides it.
         "writes": f"{run_id}-weights",
         "strategies": {"my-alpha": {} if constraints is None else {"constraints": constraints}},
-        "sessions_from": "prices",
         "timezone": "Asia/Seoul",
-        "at": "04:00",
+        "agenda": {"every": "1d", "at": "04:00"},
         "exchange": "venue",
         "execution": {
             "dataset": "venue-daily",

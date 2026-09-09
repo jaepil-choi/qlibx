@@ -26,6 +26,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -265,9 +266,8 @@ def main() -> None:
         # strategy entry names no constraints rather than an inert one authored to keep a field
         # non-empty. See README.
         strategy=StrategyEntry("showcase-strategy"),
-        sessions=tuple(SESSIONS),
         timezone=KST,
-        at=time(4, 0),
+        agenda=RunAgenda(every="1d", at=(time(4, 0),)),
         exchange="showcase-exchange",
         execution=_fill("krx-daily"),
         start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),

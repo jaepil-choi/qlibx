@@ -48,6 +48,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -856,9 +857,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     alpha_definition = RunDefinition(
         run_id="show005-alpha",
         strategy=StrategyEntry("show005-alpha"),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=time(8, 30),
+        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
         exchange="show005-academic",
         execution=RunExecution(
             dataset="krx-daily",
@@ -897,9 +897,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     index_definition = RunDefinition(
         run_id="show005-index",
         strategy=StrategyEntry("show005-index", ("no-short", "single-name-cap")),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=time(9, 0),
+        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="show005-krx",
         execution=RunExecution(
             dataset="krx-daily",

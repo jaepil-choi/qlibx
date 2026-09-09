@@ -18,6 +18,8 @@ import pytest
 import yaml
 
 from vqapr.account.account import AccountMode
+from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.sources import SourceSpec
 from vqapr.project.registration import apply
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import VqaprError
@@ -39,8 +41,7 @@ _RUN_READY: dict[str, object] = {
     "start": "2024-03-06T00:00:00+09:00",
     "end": "2024-03-08T00:00:00+09:00",
     "timezone": "Asia/Seoul",
-    "at": "16:00",
-    "sessions": ["2024-03-06", "2024-03-07"],
+    "agenda": {"every": "1d", "at": "16:00", "days_from": "prices"},
     "writes": "reversal_2d",
 }
 """A `runs.<id>` body with everything but its models, for each test to add one kind to."""
@@ -54,8 +55,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "datamodel": ENTRY,
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
-        "at": time(16, 0),
-        "sessions": SESSIONS,
+        "agenda": {"every": "1d", "at": time(16, 0), "days_from": "prices"},
         "start": datetime(2024, 3, 6, tzinfo=KST),
         "end": datetime(2024, 3, 8, tzinfo=KST),
     }
@@ -65,8 +65,23 @@ def _definition(**overrides: object) -> RunDefinition:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
-    """One datamodel and one strategy registered: the right kind and the wrong kind to name."""
+    """One datamodel and one strategy registered: the right kind and the wrong kind to name --
+    and the dataset a datamodel run takes its trading days from (design §3.3)."""
     space = Workspace.create(tmp_path)
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("available_at", "instrument"),
+                fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
+            ).with_span(datetime(2024, 3, 1, tzinfo=KST), datetime(2024, 3, 31, tzinfo=KST)),
+            SourceSpec.of("prices-source", tmp_path / "prices"),
+        )
     for name, kind in (
         ("reversal", ComponentKind.DATA_MODEL),
         ("ou-k0", ComponentKind.STRATEGY_MODEL),
@@ -223,6 +238,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
         (
             {
                 **_RUN_READY,
+                "agenda": {"every": "1d", "at": "16:00"},
                 "strategies": {"ou-k0": None},
                 "execution": {
                     "dataset": "venue-daily",

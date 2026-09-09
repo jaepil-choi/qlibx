@@ -56,14 +56,13 @@ def _dataset(source_id: str, parquet: Path) -> dict[str, object]:
     }
 
 
-def _run(sessions_from: str, *, strategy: str = "alpha", at: str = "04:00") -> dict:
+def _run(*, strategy: str = "alpha", at: str = "04:00") -> dict:
     return {
         "instruments": ["A"],
         "start": None,
         "end": None,
         "timezone": "Asia/Seoul",
-        "at": at,
-        "sessions_from": sessions_from,
+        "agenda": {"every": "1d", "at": at},
         "exchange": None,
         "execution": None,
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
@@ -102,7 +101,7 @@ def test_a_document_refused_at_its_kth_item_leaves_the_workspace_byte_identical(
     # Item 1 (a second dataset) is valid; item 2 (a run) names a strategy nobody registered.
     refused = {
         "datasets": {"price_b": _dataset("src-b", model_price_parquet)},
-        "runs": {"daily": _run("price_b", strategy="nonexistent")},
+        "runs": {"daily": _run(strategy="nonexistent")},
     }
     with pytest.raises(VqaprError):
         apply(refused, tmp_path, base=tmp_path)
@@ -115,7 +114,7 @@ def test_a_document_refused_at_its_kth_item_leaves_the_workspace_byte_identical(
 def test_a_valid_document_is_one_write(
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two datasets, and a run taking its sessions from a dataset declared in the same document."""
+    """Two datasets and a run, declared in one document and landed in one write."""
     _register_a_strategy(tmp_path)
     writes: list[Path] = []
     original = workspace_module.atomic.write_atomically
@@ -131,7 +130,7 @@ def test_a_valid_document_is_one_write(
             "price_a": _dataset("src-a", model_price_parquet),
             "price_b": _dataset("src-b", model_price_parquet),
         },
-        "runs": {"daily": _run("price_b")},
+        "runs": {"daily": _run()},
     }
     registered = apply(document, tmp_path, base=tmp_path)
 
@@ -140,7 +139,7 @@ def test_a_valid_document_is_one_write(
     assert len(writes) == 1, [str(path) for path in writes]
     reopened = Workspace.open(tmp_path)
     assert {str(item.dataset_id) for item in reopened.datasets} == {"price_a", "price_b"}
-    assert reopened.run_definition("daily").sessions_from == "price_b"
+    assert reopened.run_definition("daily").agenda.every == "1d"
 
 
 def test_an_idempotent_document_writes_nothing(
@@ -150,7 +149,7 @@ def test_an_idempotent_document_writes_nothing(
     _register_a_strategy(tmp_path)
     document = {
         "datasets": {"price_a": _dataset("src-a", model_price_parquet)},
-        "runs": {"daily": _run("price_a")},
+        "runs": {"daily": _run()},
     }
     apply(document, tmp_path, base=tmp_path)
     before = _fingerprint(tmp_path)

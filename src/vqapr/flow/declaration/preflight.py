@@ -45,21 +45,24 @@ from vqapr.project.store import Workspace
 
 
 def derived_agenda(workspace: Workspace, definition: RunDefinition) -> OperationAgenda:
-    """The run's one agenda -- every session, at `at` -- built from what the run declares.
+    """The run's one agenda: its `agenda:` rule expanded over its trading days (design §3.4).
 
-    Record `148`: an agenda is no longer a registered declaration. A run says which sessions
-    (`sessions_from`, a dataset's own days, or `sessions` listed) and at what venue-local wall
-    time every model is called, and this builds the `OperationAgenda` the flow already runs on,
-    id `<run_id>.sessions`. `OperationAgenda.daily` owns the occurrence ids, fold and offset, so
-    a DST session is refused rather than guessed. The book is valued at the instant the venue
-    fills and monitored right after each commit, so there is no second agenda to build.
+    The DAYS come from data and the INSTANTS from the rule (§3.3): a strategy run's trading days
+    are the days its execution table has rows for -- a denser table adds instants to the market
+    clock and not one day to the strategy clock, which is `UC-TIME-002`'s guarantee -- and a
+    datamodel run, having no venue, names the dataset whose days count with `days_from`.
+    `OperationAgenda.expand` owns the occurrence ids, fold and offset, so a DST wall time is
+    refused rather than guessed. The book is valued at the instant the venue fills and monitored
+    right after each commit, so there is no second agenda to build.
     """
-    sessions: Iterable[datetime | date] = (
-        workspace.evaluation_times(definition.sessions_from)
-        if definition.sessions_from is not None
-        else definition.sessions
+    source = (
+        definition.execution.dataset
+        if definition.execution is not None
+        else definition.agenda.days_from
     )
-    assert definition.at is not None
+    if source is None:  # pragma: no cover -- `RunDefinition` refuses both shapes
+        raise ValueError("a run's trading days come from its execution table or agenda.days_from")
+    sessions: Iterable[datetime | date] = workspace.evaluation_times(source)
     if definition.start is not None and definition.end is not None:
         # Cut on DATES before an occurrence is built, not on occurrences after
         # (`docs/issues/archive/069`: a run of 15 sessions built 735 occurrences, with their fold
@@ -80,10 +83,10 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
         sessions = tuple(
             session for session in sessions if first <= _local_date(session) <= last
         )
-    return OperationAgenda.daily(
+    return OperationAgenda.expand(
         agenda_id=agenda_id(definition.agenda_id),
-        sessions=sessions,
-        at=definition.at,
+        days=sessions,
+        rule=definition.agenda.rule,
         timezone=definition.timezone,
     )
 

@@ -52,6 +52,7 @@ from vqapr.public import (
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -132,9 +133,8 @@ def _definition(
     return RunDefinition(
         run_id=exchange.component_id,
         strategy=StrategyEntry(str(strategy_ref.component_id)),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=time(8, 30),
+        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
         exchange=exchange.component_id,
         execution=RunExecution(
             dataset="krx-daily",
@@ -388,8 +388,7 @@ def main() -> None:
         instruments=universe,
         datamodel=DataModelEntry("momentum-model", ("score", "eligible")),
         timezone=VENUE,
-        at=time(16, 0),
-        sessions=tuple(score_days),
+        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
         writes="momentum_score",

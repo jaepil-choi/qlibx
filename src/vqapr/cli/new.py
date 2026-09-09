@@ -139,14 +139,13 @@ again: adding or renaming a member updates the template in the same edit.
 _RUN_TEMPLATE = f"""\
 # Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# A run is configuration (record 139): the universe, the period, the sessions it fires on and
-# the wall time it fires at, the venue, the execution dataset, the initial account, and the
-# strategies it tries. Every strategy is called on EVERY session at `at` and decides for itself
-# whether to act -- a monthly rebalance is a rule inside the strategy, read from
-# `call.evaluation_time` and kept in `self.memory` (record 148). The book is valued at the
-# instant the venue fills and the declared constraints judge it right after each commit; there
-# is no separate valuation or monitoring time to declare. Each strategy runs with its OWN
-# account from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/.
+# A run is configuration (record 139): the universe, the period, the strategy clock it decides
+# on (`agenda`), the venue, the execution dataset, the initial account, and the one strategy it
+# runs. The clock is expanded over the trading days the execution dataset has rows for -- a
+# denser table adds fill instants, never decision days -- and the strategy is called at every
+# instant of it, deciding for itself whether to act. The book is valued at the instant the venue
+# fills and the declared constraints judge it right after each commit; there is no separate
+# valuation or monitoring time to declare. The run's record lives under .vqapr/runs/RUN_ID/.
 # Ids below name registered declarations; nothing here registers them.
 
 runs:
@@ -156,11 +155,12 @@ runs:
       - INSTRUMENT_B
     start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
     end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
-    sessions_from: DATASET_ID        # every session this registered dataset has a row for...
-    # sessions:                      # ...or list the days literally. Exactly ONE of the two.
-    #   - "2024-01-02"
-    timezone: Asia/Seoul             # the zone `at` is expressed in
-    at: "15:29"                      # when strategies decide; strictly before the execution `at`
+    timezone: Asia/Seoul             # the zone every wall time below is expressed in
+    agenda:                          # the strategy clock: a day filter and a within-day rule
+      every: 1d                      # 1d | 2d | 1w | 1M select trading days and pair with `at`;
+      at: "15:29"                    #   1m | 5m | 1h select instants and pair with `from`/`to`
+      # from: "09:00"                # the trading days are the days the execution dataset
+      # to: "15:20"                  #   below has rows for -- nothing to declare here
     exchange: my-venue               # component_id of a registered Exchange
     execution:                       # the registered venue table, and THIS run's fill on it
       dataset: my-venue-daily        # a dataset registered with `execution: {{is_tradable: ...}}`
@@ -235,9 +235,10 @@ def _declaration(
                 "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-12-31T23:00:00+09:00",
-                "sessions_from": dataset_id,
                 "timezone": "Asia/Seoul",
-                "at": "16:00",
+                # A datamodel run has no execution table, so it names the dataset whose days
+                # are its trading days (design §3.3).
+                "agenda": {"every": "1d", "at": "16:00", "days_from": dataset_id},
                 "writes": f"{component_id}-values",
                 "datamodel": {
                     "component": component_id,

@@ -14,7 +14,7 @@ tries to write inside `.vqapr/` itself?
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +28,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.domain.inputs import InputError
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.public import register_instruments
@@ -172,8 +172,7 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
                 run_id="probe",
                 strategy=StrategyEntry("evil"),
                 timezone="Asia/Seoul",
-                at=time(9, 0),
-                sessions=(date(2024, 1, 2),),
+                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
                 instruments=("A",),
                 exchange="venue",
                 execution=RunExecution(

@@ -47,9 +47,8 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                 "instruments": ["A"],
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-01-03T00:00:00+09:00",
-                "sessions_from": "prices",
                 "timezone": "Asia/Seoul",
-                "at": "15:29",
+                "agenda": {"every": "1d", "at": "15:29"},
                 "exchange": "venue",
                 "execution": {
                     "dataset": "venue-daily",

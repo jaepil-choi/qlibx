@@ -45,7 +45,7 @@ from vqapr.record import (
     strategy_refs,
 )
 from vqapr.record.schema import _DATAMODEL_FIELDS
-from vqapr.project.run import DataModelEntry, RunDefinition
+from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition
 from vqapr.public import register_data_model, register_dataset, register_run
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
@@ -204,8 +204,7 @@ def _definition(
         datamodel=entry,
         instruments=instruments,
         timezone="Asia/Seoul",
-        at=at,
-        sessions_from=sessions_from,
+        agenda=RunAgenda(every="1d", at=(at,), days_from=sessions_from),
         start=START,
         end=END,
     )

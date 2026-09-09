@@ -309,9 +309,8 @@ _RUN_KEYS = (
     "instruments",
     "start",
     "end",
-    "sessions_from",
     "timezone",
-    "at",
+    "agenda",
     "exchange",
     "execution",
     "initial_account",
@@ -320,9 +319,9 @@ _RUN_KEYS = (
 
 `RunDefinition` tolerates an absent period, venue, execution dataset and account because other
 callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
-The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
-`sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
-days are the common case. Pinned as a literal rather than imported: the template is judged
+The strategy clock is the run's own `agenda:` block since the two-clocks campaign (`every`
+with `at`, or with `from`/`to`), expanded over the execution dataset's trading days -- there is
+no day list to declare. Pinned as a literal rather than imported: the template is judged
 against what the reader needs to type, and a constant that moved with the code would make this
 test pass for any template.
 """
@@ -554,8 +553,8 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     spec = tmp_path / "runs.yaml"
     spec.write_text(
         "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
-        "    end: \"2024-03-06T23:00:00+09:00\"\n    sessions: [2024-03-05]\n"
-        "    timezone: Asia/Seoul\n    at: \"04:00\"\n    exchange: venue\n"
+        "    end: \"2024-03-06T23:00:00+09:00\"\n"
+        "    timezone: Asia/Seoul\n    agenda: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
         "    execution:\n      dataset: krx\n      fill:\n        selector: next_open\n"
         "        at: \"15:30\"\n        timezone: Asia/Seoul\n        trade_price: close\n"
         "    initial_account: {cash: \"1000\", mode: long_only}\n    strategies: {alpha: {}}\n",
@@ -615,13 +614,11 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
 
     text = target.read_text(encoding="utf-8")
 
-    assert "sessions_from" in text and "sessions:" in text, "both ways to say the sessions"
-    assert "EVERY session" in text, "the template does not say every strategy is called"
-    assert "call.evaluation_time" in text and "self.memory" in text, (
-        "the template does not say where a strategy's own cadence lives"
-    )
+    assert "agenda:" in text and "every:" in text, "the strategy clock is the agenda block"
+    assert "trading days" in text, "the template does not say where the days come from"
+    assert "from" in text and "to" in text, "the template does not show the intraday form"
     assert "nothing here registers them" in text
-    for retired in ("agenda", "strategy_configs"):
+    for retired in ("agendas:", "strategy_configs", "sessions_from", "sessions:"):
         assert retired not in text, f"the template still points at {retired!r}, which is gone"
 
 
@@ -635,7 +632,7 @@ def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
 
     (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
-    decide_at = time.fromisoformat(run["at"])
+    decide_at = time.fromisoformat(run["agenda"]["at"])
     fill_at = time.fromisoformat(run["execution"]["fill"]["at"])
 
     assert decide_at < fill_at

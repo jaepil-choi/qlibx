@@ -42,7 +42,9 @@ def _lookahead_run(
     `execution.not_after_decision` refuses -- and `register` accepts, since every id the
     run names is registered and a wall time is not a reference it can check.
     """
-    code, payload = _register_run(root, capsys, run_id, at="15:30", **overrides)
+    code, payload = _register_run(
+        root, capsys, run_id, agenda={"every": "1d", "at": "15:30"}, **overrides
+    )
     assert code == 0, payload
 
 

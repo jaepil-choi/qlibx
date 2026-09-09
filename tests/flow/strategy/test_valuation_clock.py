@@ -126,7 +126,7 @@ RUNNER = textwrap.dedent(
 
     from vqapr.public import (
         AccountMode, AccountSnapshot, DatasetRegistration,
-        RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
+        RunAgenda, RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
         register_dataset, register_exchange, register_instruments, register_strategy_model, run,
     )
 
@@ -180,9 +180,8 @@ RUNNER = textwrap.dedent(
         run_id="clock",
         strategy=StrategyEntry("clock-strategy"),
         instruments=("A005930",),
-        sessions=sessions,
         timezone="Asia/Seoul",
-        at=time(8, 0),
+        agenda=RunAgenda(every="1d", at=(time(8, 0),)),
         exchange="clock-exchange",
         execution=RunExecution(
             dataset='krx-daily',

@@ -21,7 +21,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
-from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.domain.model_state import prepare_model_state
 from vqapr.public import register_dataset, register_instruments
 from vqapr.project.store import Workspace
@@ -81,6 +81,7 @@ def _setup(
     with_execution: bool = True,
     selector: FillSelector = FillSelector.SAME_DAY,
     at: time = time(9),
+    days: tuple[date, ...] = (SESSION,),
 ) -> tuple[Workspace, RunDefinition]:
     """A registered workspace and a declaration for it.
 
@@ -88,7 +89,8 @@ def _setup(
     declaration without one, so a definition lacking it is not a run a caller could ever have.
     Tests that assert the refusal itself pass False.
 
-    The run declares its sessions and wall time directly (record `148`): one session, at `at`.
+    The run's trading days are the execution table's (design §3.3): `days`, one by default, and
+    the strategy clock is `every: 1d` at `at`.
     """
     workspace = Workspace.create(root)
     strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
@@ -123,6 +125,7 @@ def _setup(
             root,
             identifier="setup-exchange",
             selector=selector,
+            days=days,
         )
         if with_execution
         else None
@@ -130,9 +133,8 @@ def _setup(
     return workspace, RunDefinition(
         run_id="preflight",
         strategy=StrategyEntry("strategy", ("limit",), {"cadence": [1]}),
-        sessions=(SESSION,),
         timezone="Asia/Seoul",
-        at=at,
+        agenda=RunAgenda(every="1d", at=(at,)),
         exchange=None if exchange_component is None else str(exchange_component.component_id),
         execution=(
             RunExecution(
@@ -170,6 +172,7 @@ def _execution_exchange(
     fractional: str = "False",
     register_input: bool = True,
     selector: FillSelector = FillSelector.SAME_DAY,
+    days: tuple[date, ...] = (SESSION,),
 ) -> ComponentRef:
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{identifier}.py"
@@ -198,11 +201,17 @@ def _execution_exchange(
     if register_input:
         connection = duckdb.connect()
         try:
+            # Two prints per trading day, 09:30 and 15:30 KST: the days are what the run's
+            # agenda is expanded over (design §3.3), the instants what it fills against.
+            rows = ",\n".join(
+                f"(TIMESTAMPTZ '{day.isoformat()} 09:30:00+09', 'ABC', true, 9.0::DOUBLE),\n"
+                f"(TIMESTAMPTZ '{day.isoformat()} 15:30:00+09', 'ABC', true, 10.0::DOUBLE)"
+                for day in sorted(set(days))
+            )
             connection.execute(
                 f"""COPY (
                     SELECT * FROM (VALUES
-                        (TIMESTAMPTZ '2024-03-05 09:30:00+09', 'ABC', true, 9.0::DOUBLE),
-                        (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'ABC', true, 10.0::DOUBLE)
+{rows}
                     ) AS t(trade_at, instrument, is_tradable, close)
                 ) TO '{execution_path.as_posix()}' (FORMAT PARQUET)"""
             )
@@ -246,11 +255,11 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     frozen = preflight_run(workspace, definition)
 
     layer = frozen.strategy
-    assert layer.config.agenda_id == definition.agenda_id == "preflight.sessions"
+    assert layer.config.agenda_id == definition.agenda_id == "preflight.agenda"
     assert layer.agenda.agenda_id == definition.agenda_id
     assert layer.agenda.timezone == "Asia/Seoul"
     assert [item.occurrence_id for item in layer.agenda.occurrences] == [
-        "preflight.sessions-2024-03-05"
+        "preflight.agenda-2024-03-05T0900"
     ]
     (occurrence,) = layer.agenda.occurrences
     assert occurrence.evaluation_time == datetime(2024, 3, 5, 9, tzinfo=_ZONE)
@@ -331,7 +340,7 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     failure = error.failures[0]
     assert failure.code == "execution.target_outside_horizon"
     assert failure.example_total == 1
-    assert failure.examples == ("preflight.sessions-2024-03-05: 2024-03-05T15:30:00+09:00",)
+    assert failure.examples == ("preflight.agenda-2024-03-05T1530: 2024-03-05T15:30:00+09:00",)
     assert "selector=next_eligible" in (failure.observed or "")
     assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
     assert "extend end" in failure.requirement
@@ -756,71 +765,76 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         StrategyEntry("strategy", (), ("not-json",))  # type: ignore[arg-type]
 
 
-def test_the_derived_agenda_fires_once_per_session_at_the_declared_wall_time(
+def test_the_derived_agenda_fires_once_per_trading_day_at_the_declared_wall_time(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Record `148`: the agenda is built from what the run declares, not registered beside it.
+    """Design §3.3-3.4: the DAYS come from the execution table, the INSTANTS from `agenda`.
 
-    One occurrence per session, in the run's zone, at `at`; a day listed twice is a day, not two
-    occurrences; the ids and the fold/offset proof are `OperationAgenda.daily`'s, so two runs over
-    the same sessions name the same occurrences.
+    Three trading days, written out of order and one of them twice; one occurrence per day, in
+    the run's zone, at `at`; the ids and the fold/offset proof are `OperationAgenda.expand`'s, so
+    two runs over the same days name the same occurrences.
     """
-    workspace, definition = _setup(tmp_path, model_price_parquet)
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
+    )
     listed = definition.replace(
-                 sessions=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
-                 at=time(8, 30),
-                 end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
-             )
+        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
+        end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
+    )
 
     agenda = derived_agenda(workspace, listed)
 
-    assert agenda.agenda_id == listed.agenda_id == "preflight.sessions"
+    assert agenda.agenda_id == listed.agenda_id == "preflight.agenda"
     assert agenda.timezone == "Asia/Seoul"
     assert [occurrence.occurrence_id for occurrence in agenda.occurrences] == [
-        "preflight.sessions-2024-03-05",
-        "preflight.sessions-2024-03-06",
-        "preflight.sessions-2024-03-07",
+        "preflight.agenda-2024-03-05T0830",
+        "preflight.agenda-2024-03-06T0830",
+        "preflight.agenda-2024-03-07T0830",
     ]
     assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
         datetime(2024, 3, day, 8, 30, tzinfo=_ZONE) for day in (5, 6, 7)
     ]
-    assert all(
-        occurrence.local_instant.offset == "+09:00" and occurrence.local_instant.fold == 0
-        for occurrence in agenda.occurrences
-    ), "the offset proof is derived from the zone, never typed"
 
 
-def test_sessions_from_collapses_a_dataset_s_instants_to_venue_local_days(
+def test_the_execution_tables_instants_collapse_to_venue_local_days(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """A dataset's `available_at` says when a row became visible; the run's `at` says when it asks.
+    """`UC-TIME-002`, kept by date derivation (design §3.3): a denser table adds fill instants
+    and never a decision day.
 
-    `workspace.evaluation_times` returns the dataset's distinct instants -- 15:30 KST on four
-    days here -- and the agenda takes only their DATE in the run's zone, at `at`. The zone is the
-    run's, not the dataset's: the same 15:30 KST instants are the evening BEFORE in Honolulu, so
-    a run declared there fires on those days.
+    The execution fixture prints twice a day, 09:30 and 15:30 KST; the agenda takes only their
+    DATE in the run's zone, at `at`. The zone is the run's, not the table's: the same instants
+    are the evening BEFORE in Honolulu, so a run declared there fires on those days. A table the
+    run cannot find is a refusal, not a guess.
     """
-    workspace, definition = _setup(tmp_path, model_price_parquet)
-    from_dataset = definition.replace(
-                       sessions=(),
-                       sessions_from='prices',
-                       end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE),
-                   )
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7), date(2024, 3, 8)),
+    )
+    from_table = definition.replace(end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE))
 
-    agenda = derived_agenda(workspace, from_dataset)
+    agenda = derived_agenda(workspace, from_table)
 
     assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
         datetime(2024, 3, day, 9, tzinfo=_ZONE) for day in (5, 6, 7, 8)
-    ], "the dataset's 15:30 instants became 09:00 decisions on the same venue days"
+    ], "eight prints became four 09:00 decisions on the four venue days"
 
-    honolulu = from_dataset.replace(timezone='Pacific/Honolulu', at=time(7))
+    honolulu = from_table.replace(
+        timezone="Pacific/Honolulu", agenda=RunAgenda(every="1d", at=(time(7),))
+    )
     assert [
         occurrence.local_instant.local_date
         for occurrence in derived_agenda(workspace, honolulu).occurrences
     ] == [date(2024, 3, day) for day in (4, 5, 6, 7)]
 
+    absent = from_table.replace(
+        execution=RunExecution(dataset="absent", fill=from_table.execution.fill)  # type: ignore[union-attr]
+    )
     with pytest.raises(VqaprError):
-        derived_agenda(workspace, from_dataset.replace(sessions_from='absent'))
+        derived_agenda(workspace, absent)
 
 
 def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
@@ -834,15 +848,19 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     """
     from vqapr.flow.declaration.judgments import judgments
 
-    workspace, definition = _setup(tmp_path, model_price_parquet)
-    # The dataset has four sessions (3/5 .. 3/8); the run's period (`_setup`: 3/5 09:00 to
-    # 15:30, the one day the execution fixture can fill) admits one.
-    two_days = definition.replace(sessions=(), sessions_from='prices')
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7), date(2024, 3, 8)),
+    )
+    # The execution table has four trading days (3/5 .. 3/8); the run's period (`_setup`: 3/5
+    # 09:00 to 15:30) admits one.
+    two_days = definition
 
     agenda = derived_agenda(workspace, two_days)
     assert [occurrence.local_instant.local_date for occurrence in agenda.occurrences] == [
         date(2024, 3, 5)
-    ], "the agenda is the run's sessions, not the dataset's"
+    ], "the agenda is the run's period, not the table's whole span"
 
     calls: list[str] = []
     original = Workspace.evaluation_times
@@ -854,11 +872,11 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     monkeypatch.setattr(Workspace, "evaluation_times", counted)
     failures, blocked = judgments(two_days, workspace)
     assert blocked == [] and failures == [], (failures, blocked)
-    assert calls == ["prices"], f"check derived the agenda {len(calls)} times"
+    assert calls == ["execution"], f"check derived the agenda {len(calls)} times"
 
     calls.clear()
     frozen = preflight_run(tmp_path, two_days)
-    assert calls == ["prices"], f"preflight derived the agenda {len(calls)} times"
+    assert calls == ["execution"], f"preflight derived the agenda {len(calls)} times"
     assert len(frozen.strategy.agenda.occurrences) == 1
 
 
@@ -866,14 +884,13 @@ def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     """02:30 on 2024-03-10 does not exist in New York; the run is refused, not moved an hour."""
-    workspace, definition = _setup(tmp_path, model_price_parquet)
+    workspace, definition = _setup(tmp_path, model_price_parquet, days=(date(2024, 3, 10),))
     skipped = definition.replace(
-                  timezone='America/New_York',
-                  at=time(2, 30),
-                  sessions=(date(2024, 3, 10),),
-                  start=datetime(2024, 3, 9, tzinfo=_ZONE),
-                  end=datetime(2024, 3, 11, tzinfo=_ZONE),
-              )
+        timezone="America/New_York",
+        agenda=RunAgenda(every="1d", at=(time(2, 30),)),
+        start=datetime(2024, 3, 9, tzinfo=_ZONE),
+        end=datetime(2024, 3, 11, tzinfo=_ZONE),
+    )
 
     with pytest.raises(ValueError, match="does not exist"):
         derived_agenda(workspace, skipped)

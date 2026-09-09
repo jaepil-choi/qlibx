@@ -945,9 +945,9 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     cause=invalid,
                     requirement=(
                         "a run declares writes, and one strategy (with exchange, execution "
-                        "and initial_account) or one datamodel, plus instruments, start, end, "
-                        "sessions_from or sessions, timezone and at, each in the shape "
-                        "`vqapr new run` emits"
+                        "and initial_account) or one datamodel (with agenda.days_from), plus "
+                        "instruments, start, end, timezone and agenda (every, at or from/to), "
+                        "each in the shape `vqapr new run` emits"
                     ),
                     observed=observed,
                     examples=["2024-01-02T00:00:00+09:00"],
@@ -970,9 +970,9 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
 
 
 def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinition]]) -> None:
-    """A run whose sessions come from a dataset another run in this document will write.
+    """A run whose trading days come from a dataset another run in this document will write.
 
-    `inputs()` and `sessions_from` are resolved at registration, so a document holding two runs
+    `inputs()` and `agenda.days_from` are resolved at registration, so a document holding two runs
     where the second takes its sessions from the first's output cannot be registered at all: the
     dataset does not exist until the first has run, and the first cannot run until the document is
     registered. The workspace refusal says only that the dataset is unregistered, and `vqapr new run
@@ -986,7 +986,7 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
         produced.setdefault(str(definition.writes), run_id)
     found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
-        wanted = definition.sessions_from
+        wanted = definition.agenda.days_from
         producer = None if wanted is None else produced.get(str(wanted))
         if producer is None or producer == run_id:
             continue
@@ -995,14 +995,14 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
                 "declaration.run_fed_by_sibling",
                 status=Status.INVALID,
                 requirement=(
-                    "a run that takes its sessions from a dataset must be registered after "
+                    "a run that takes its trading days from a dataset must be registered after "
                     "that dataset exists"
                 ),
                 observed=(
-                    f"run {run_id!r} takes sessions from {wanted!r}, which run {producer!r} in "
-                    "this same document will write when it runs"
+                    f"run {run_id!r} takes its trading days from {wanted!r}, which run "
+                    f"{producer!r} in this same document will write when it runs"
                 ),
-                source=_at(f"runs.{run_id}.sessions_from"),
+                source=_at(f"runs.{run_id}.agenda.days_from"),
                 fix=(
                     f"split the document: register and run {producer!r} first, then register "
                     f"{run_id!r} from its own file once {wanted!r} exists"

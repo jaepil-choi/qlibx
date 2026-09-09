@@ -23,10 +23,11 @@ speculation it started as.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
@@ -37,7 +38,7 @@ from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration import judgments as judgments_module
-from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
 from vqapr.public import register_instruments
 
@@ -83,9 +84,20 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     the unregistered-dataset defect. The run decides at 15:30 against a fill at 15:30, which is
     the look-ahead defect every run here carries.
     """
+    # A REAL venue table: the run's trading days are the days it has rows for (design §3.3).
+    # One day inside the run's period, printed at 15:30 KST -- the fill instant the 15:30
+    # decision collides with.
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
-    (exec_dir / "placeholder").write_text("x", encoding="utf-8")
+    con = duckdb.connect()
+    try:
+        con.execute(
+            "COPY (SELECT * FROM (VALUES (TIMESTAMPTZ '2024-01-05 15:30:00+09', 'A', true, "
+            "100.0::DOUBLE)) AS t(trade_at, instrument, is_tradable, close)) TO "
+            f"'{(exec_dir / 'e.parquet').as_posix()}' (FORMAT PARQUET)"
+        )
+    finally:
+        con.close()
     with Workspace.transaction(root) as t:
         t.register_dataset(
             DatasetRegistration.of(
@@ -133,8 +145,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
                 run_id="probe",
                 strategy=StrategyEntry("my-strat"),
                 timezone="Asia/Seoul",
-                at=time(15, 30),
-                sessions=(date(2024, 1, 2),),
+                agenda=RunAgenda(every="1d", at=(time(15, 30),)),
                 instruments=("A",),
                 exchange="venue",
                 execution=RunExecution(

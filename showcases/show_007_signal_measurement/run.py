@@ -58,6 +58,7 @@ from vqapr.public import (
     DatasetRegistration,
     Mark,
     MarkBatch,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -576,9 +577,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     definition = RunDefinition(
         run_id="show007",
         strategy=StrategyEntry("show007-signal"),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=time(8, 0),
+        agenda=RunAgenda(every="1d", at=(time(8, 0),)),
         exchange="show007-academic",
         execution=RunExecution(
             dataset="krx-daily",

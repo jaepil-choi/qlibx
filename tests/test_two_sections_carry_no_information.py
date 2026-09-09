@@ -18,7 +18,7 @@ sections, one rule, asserted here:
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,7 +27,7 @@ import yaml
 
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry, register_run
+from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry, register_run
 from vqapr.project.store import Workspace
 
 RETIRED_SECTIONS = """valuation_configs:
@@ -67,8 +67,7 @@ def _run(run_id: str, strategy: str) -> RunDefinition:
         strategy=StrategyEntry(strategy),
         instruments=("A",),
         timezone="Asia/Seoul",
-        at=time(15, 29),
-        sessions=(date(2024, 1, 2),),
+        agenda=RunAgenda(every="1d", at=(time(15, 29),)),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         writes=f"{run_id}-weights",

@@ -54,6 +54,6 @@ running it, and let them say yes.
 Running one again is refused while its output dataset is registered
 (`datamodel.output_registered`, 409). `vqapr rm dataset <id>` withdraws the registration and
 deletes the materialized files, which is the way to retry — and it refuses while a registered run
-takes its sessions from that dataset (`sessions_from`), naming the run.
+takes its trading days from that dataset (`agenda.days_from`), naming the run.
 
 A dataset registered from the user's own path is withdrawn **without touching their file**.

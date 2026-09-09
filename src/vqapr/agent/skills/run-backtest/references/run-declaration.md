@@ -4,21 +4,29 @@ The template from `vqapr new run --out runs.yaml` carries every required key wit
 it is generated from the contract the package enforces. **Fill the template rather than
 hand-writing the YAML** — this file explains the choices, not the key list.
 
-## Sessions and the wall time
+## The strategy clock: `agenda`
 
-A run declares **when it fires**, in two parts:
+A run declares **when it fires** as one block, a trading-day filter plus a within-day rule:
 
-- `sessions_from: <dataset-id>` — every session that registered dataset has. Or an explicit
-  `sessions:` list.
-- `timezone` and `at` — the venue-local wall time within each session.
+```yaml
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d          # 1d | 2d | 1w | 1M pick trading days and pair with `at`
+      at: "15:29"        #   one wall time or a list
+    # agenda:
+    #   every: 5m        # 1m | 5m | 1h pick instants inside each day and pair with from/to
+    #   from: "09:00"
+    #   to: "15:20"
+```
 
-There is no separate agenda to declare and no cadence key. Every strategy is called on **every**
-session at `at`, and decides for itself whether to act.
+**The days are not declared.** They come from data: a strategy run's trading days are the days its
+execution dataset has rows for, so a denser table adds fill instants and never a decision day. A
+datamodel run has no venue and names the dataset whose days count with `agenda.days_from`. There
+is no `sessions:` list to type and no calendar to register.
 
-**A monthly rebalance is a rule inside the strategy**, not a declaration here: read
-`call.evaluation_time`, keep what you need in `self.memory`, and return no decision on the sessions
-you skip. Expressing it as a declaration would put a piece of the strategy's logic somewhere the
-strategy's file does not show.
+`1w` fires on the first trading day of each ISO week, `1M` on the first trading day of each calendar
+month; `2d` on every second trading day. A strategy called on a day it does not want to act still
+decides for itself (`Hold`).
 
 ## No valuation or monitoring time
 

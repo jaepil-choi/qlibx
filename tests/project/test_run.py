@@ -1,7 +1,7 @@
 """A run is configuration: its universe, its period, its venue, and when it asks its strategies.
 
-Record `148`: an agenda is no longer a user declaration. A run says which sessions it fires on
-(`sessions`, listed, or `sessions_from`, a dataset's own days) and at what venue-local wall time
+Record `148`: an agenda is no longer a user declaration. A run says when it fires with its
+`agenda:` block (design §3.4) and in which venue-local zone; the days come from data
 (`at`, in `timezone`); every strategy is called on every session and decides for itself. The
 book is valued at the instant the venue fills and monitored right after each commit, so `at` is
 the one wall time a run declares, and the valuation and monitoring declarations are gone.
@@ -9,7 +9,7 @@ the one wall time a run declares, and the valuation and monitoring declarations 
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -17,7 +17,7 @@ import pytest
 from pydantic import ValidationError
 
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.project.run import ConstraintSet, RunDefinition, StrategyConfig, StrategyEntry
+from vqapr.project.run import ConstraintSet, RunAgenda, RunDefinition, StrategyConfig, StrategyEntry
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -39,8 +39,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "strategy": StrategyEntry("strategy", ("no-short",)),
         "instruments": ("ABC",),
         "timezone": "Asia/Seoul",
-        "at": time(15, 29),
-        "sessions": (date(2024, 1, 2), date(2024, 1, 3)),
+        "agenda": {"every": "1d", "at": time(15, 29)},
     }
     declared.update(overrides)
     return RunDefinition(**declared)  # type: ignore[arg-type]
@@ -50,14 +49,14 @@ def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
     """Preflight's product, not a user declaration; it carries no role (record `182`)."""
     strategy = _component(ComponentKind.STRATEGY_MODEL, "strategy")
 
-    config = StrategyConfig(strategy, "r.sessions")
+    config = StrategyConfig(strategy, "r.agenda")
 
-    assert config.agenda_id == "r.sessions"
+    assert config.agenda_id == "r.agenda"
     assert not hasattr(config, "agenda_role")
     with pytest.raises(ValueError, match="STRATEGY_MODEL"):
         StrategyConfig(
             _component(ComponentKind.CONSTRAINT, "limit"),
-            "r.sessions",
+            "r.agenda",
         )
 
 
@@ -106,54 +105,55 @@ def test_the_run_layer_pairs_its_declarations() -> None:
         _definition(instruments=("A", "A"))
 
 
-def test_a_run_declares_its_zone_and_one_naive_wall_time() -> None:
-    """`at` is a wall time on the venue's clock; the zone is declared once, beside it.
+def test_a_run_declares_its_zone_and_naive_wall_times() -> None:
+    """`at` is a wall time on the venue's clock; the zone is declared once, beside the agenda.
 
     A tz-aware `time` would carry a second zone that could disagree with `timezone`, and a
     string would let "15:29" and "3:29 PM" name the same instant under two spellings.
     """
-    assert _definition().at == time(15, 29)
+    assert _definition().agenda.rule.at == (time(15, 29),)
     assert _definition().timezone == "Asia/Seoul"
     with pytest.raises(ValueError, match="timezone must be a non-empty IANA timezone name"):
         _definition(timezone="")
     with pytest.raises(ValueError, match="unknown IANA timezone"):
         _definition(timezone="Mars/Olympus_Mons")
-    with pytest.raises(ValueError, match="at must be declared"):
-        _definition(at=None)
+    with pytest.raises(ValidationError, match="agenda"):
+        _definition(agenda=None)
     # A string is coerced by pydantic ("15:29" is a valid time); a non-time is a shape error.
-    assert _definition(at="15:29").at == time(15, 29)  # type: ignore[arg-type]
+    assert _definition(agenda={"every": "1d", "at": "15:29"}).agenda.at == (time(15, 29),)
     with pytest.raises(ValidationError, match="at"):
-        _definition(at=object())  # type: ignore[arg-type]
+        _definition(agenda={"every": "1d", "at": object()})
     with pytest.raises(ValueError, match="timezone-naive wall time"):
-        _definition(at=time(15, 29, tzinfo=KST))
+        _definition(agenda={"every": "1d", "at": time(15, 29, tzinfo=KST)})
 
 
-def test_a_run_declares_exactly_one_source_of_sessions() -> None:
-    """Listed dates, or a dataset's own days -- never both, never neither.
+def test_an_agenda_is_a_day_filter_and_a_within_day_rule() -> None:
+    """Design §3.4: `every` picks days (`1d`, `1w`, `1M`) with `at`, or instants (`5m`, `1h`)
+    with `from`/`to`; the two halves must agree, and a strategy run names no day source -- its
+    trading days are its execution table's."""
+    agenda = RunAgenda(every="5m", **{"from": time(9, 0)}, to=time(9, 10))
+    assert agenda.rule.times() == (time(9, 0), time(9, 5), time(9, 10))
+    assert agenda.model_dump(mode="json") == {"every": "5m", "from": "09:00:00", "to": "09:10:00"}
+    assert RunAgenda(every="1d", at=(time(9),)).model_dump(mode="json") == {
+        "every": "1d",
+        "at": ["09:00:00"],
+    }
 
-    A `datetime` is refused as a session on purpose: a session is a venue-local day and the
-    time of day comes from `at`. Letting a datetime through would smuggle a second wall time in.
-    """
-    from_dataset = _definition(sessions=(), sessions_from="prices")
-    assert from_dataset.sessions_from == "prices" and from_dataset.sessions == ()
-
-    with pytest.raises(ValueError, match="declare exactly one of sessions_from or sessions"):
-        _definition(sessions=())
-    with pytest.raises(ValueError, match="declare exactly one of sessions_from or sessions"):
-        _definition(sessions_from="prices")
-    with pytest.raises(ValueError, match="sessions_from must be a non-empty identifier"):
-        _definition(sessions=(), sessions_from="")
-    # pydantic owns the shape: a datetime is not a date, and a list of dates becomes a tuple of
-    # dates rather than being refused for its container type (a declaration writes a list).
-    with pytest.raises(ValidationError, match="sessions"):
-        _definition(sessions=(datetime(2024, 1, 2, 9, 30, tzinfo=KST),))
-    assert _definition(sessions=[date(2024, 1, 2)]).sessions == (date(2024, 1, 2),)
-    assert _definition(sessions=("2024-01-02",)).sessions == (date(2024, 1, 2),)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="needs at"):
+        RunAgenda(every="1d")
+    with pytest.raises(ValueError, match="declare from/to, not at"):
+        RunAgenda(every="5m", at=(time(9),))
+    with pytest.raises(ValueError, match="declare at, not from/to"):
+        RunAgenda(every="1w", at=(time(9),), to=time(10))
+    with pytest.raises(ValueError, match="count and a unit"):
+        RunAgenda(every="daily", at=(time(9),))
+    with pytest.raises(ValueError, match="declares no agenda.days_from"):
+        _definition(agenda={"every": "1d", "at": "15:29", "days_from": "prices"})
 
 
 def test_the_agenda_a_run_derives_is_named_after_the_run_and_is_not_a_field() -> None:
     """The one agenda is preflight's to build; the definition only knows what it will be called."""
-    assert _definition(run_id="alpha").agenda_id == "alpha.sessions"
+    assert _definition(run_id="alpha").agenda_id == "alpha.agenda"
     assert "agenda_id" not in set(RunDefinition.model_fields)
     assert "agenda_role" not in set(RunDefinition.model_fields)
 
@@ -167,9 +167,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
         "instruments",
         "datamodel",
         "timezone",
-        "at",
-        "sessions_from",
-        "sessions",
+        "agenda",
         "exchange",
         "execution",
         "start",

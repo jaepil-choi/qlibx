@@ -506,9 +506,8 @@ def _run_document(**overrides: str) -> str:
         "instruments": "[A]",
         "start": '"2024-03-05T00:00:00+09:00"',
         "end": '"2024-03-06T23:00:00+09:00"',
-        "sessions_from": "prices",
         "timezone": "Asia/Seoul",
-        "at": '"04:00"',
+        "agenda": '{every: 1d, at: "04:00"}',
         "exchange": "venue",
         "execution": (
             "{dataset: venue-daily, fill: {selector: next_eligible, at: \"15:30\", "
@@ -523,7 +522,7 @@ def _run_document(**overrides: str) -> str:
     return f"runs:\n  r:\n{body}\n"
 
 
-def test_a_run_must_declare_exactly_one_source_of_sessions(
+def test_an_agenda_rule_must_be_consistent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Both, or neither, is a question the command must not answer by guessing.
@@ -533,7 +532,7 @@ def test_a_run_must_declare_exactly_one_source_of_sessions(
     empty `failures[]`, and a traceback file, so the only machine-readable thing about it was
     the exit code. The run carries the sessions since record 148, and the same rule holds.
     """
-    document = _write(tmp_path, "w.yaml", _run_document(sessions='["2024-03-05"]'))
+    document = _write(tmp_path, "w.yaml", _run_document(agenda="{every: 1d}"))
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
@@ -542,14 +541,14 @@ def test_a_run_must_declare_exactly_one_source_of_sessions(
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.run_invalid"
     assert failure["status"] == 400
-    assert "exactly one of sessions_from" in failure["observed"]
+    assert "needs at" in failure["observed"]
     assert failure["source"]["key_path"] == "runs.r"
 
-    neither = _write(tmp_path, "neither.yaml", _run_document(sessions_from="null"))
+    neither = _write(tmp_path, "neither.yaml", _run_document(agenda='{every: 5m, at: "04:00"}'))
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", neither)
 
     assert code == 1
-    assert "exactly one of sessions_from" in payload["failures"][0]["observed"]
+    assert "not at" in payload["failures"][0]["observed"]
 
 
 def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
@@ -587,12 +586,12 @@ def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
     assert set(failure["examples"]) == {"datamodel", "strategy", "constraint", "exchange"}
 
 
-def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
+def test_an_agenda_wall_time_that_is_not_a_time_is_refused_with_a_stage(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One date, written without brackets, is the easiest version of this mistake to make."""
     document = _write(
-        tmp_path, "w.yaml", _run_document(sessions_from="null", sessions='"2024-03-05"')
+        tmp_path, "w.yaml", _run_document(agenda="{every: 1d, at: nope}")
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -601,7 +600,7 @@ def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
     assert payload["stage"] == "register"
     failure = payload["failures"][0]
     assert failure["code"] == "declaration.run_invalid"
-    assert "sessions" in failure["observed"], "the key that was mistyped is named"
+    assert "at" in failure["observed"], "the key that was mistyped is named"
     assert failure["source"]["key_path"] == "runs.r"
 
 

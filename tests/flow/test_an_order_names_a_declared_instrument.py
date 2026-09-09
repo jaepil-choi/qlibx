@@ -12,7 +12,7 @@ asks; `tests/cli/test_the_three_instrument_sets_are_independent.py` drives them 
 
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import datetime, time
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -31,7 +31,7 @@ from vqapr.domain.instruments import (
 )
 from vqapr.flow.declaration import judgments
 from vqapr.flow.declaration.roster import ROSTER_ABSENT, require_declared_roster
-from vqapr.project.run import DataModelEntry, RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
 from vqapr.public import register_instruments
 
@@ -78,9 +78,8 @@ def _strategy_run(run_id: str = "alpha") -> RunDefinition:
         writes=f"{run_id}-weights",
         strategy=StrategyEntry("model"),
         instruments=("A005930",),
-        sessions=(date(2024, 3, 5),),
         timezone="Asia/Seoul",
-        at=time(9, 0),
+        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="venue",
         execution=RunExecution(
             dataset="fills",
@@ -101,9 +100,8 @@ def _datamodel_run() -> RunDefinition:
         writes="scores_1d",
         datamodel=DataModelEntry("model", ("score",)),
         instruments=("A005930",),
-        sessions=(date(2024, 3, 5),),
         timezone="Asia/Seoul",
-        at=time(16, 0),
+        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="prices"),
         start=datetime(2024, 3, 5, tzinfo=KST),
         end=datetime(2024, 3, 6, tzinfo=KST),
     )

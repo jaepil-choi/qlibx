@@ -1150,7 +1150,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
 
     from vqapr.extension.component import ComponentKind, ComponentRef
     from vqapr.extension.fingerprint import fingerprint_component
-    from vqapr.project.run import RunDefinition, StrategyEntry
+    from vqapr.project.run import RunAgenda, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(
@@ -1180,8 +1180,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
                     strategy=StrategyEntry("strategy"),
                     instruments=("A",),
                     timezone="Asia/Seoul",
-                    at=time(15, 30),
-                    sessions_from="does-not-exist",
+                    agenda=RunAgenda(every="1d", at=(time(15, 30),)),
                     writes="unsourced-weights",
                 )
             )
@@ -1252,7 +1251,6 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     """
     from datetime import UTC, datetime
     from decimal import Decimal
-    from types import SimpleNamespace
 
     from vqapr.domain.errors import VqaprError
     from vqapr.flow.datamodel.output import RunOutput

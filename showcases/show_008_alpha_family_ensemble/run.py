@@ -65,6 +65,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
+    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -984,9 +985,8 @@ def _member_run(
     definition = RunDefinition(
         run_id=str(strategy_ref.component_id),
         strategy=StrategyEntry(str(strategy_ref.component_id)),
-        sessions=tuple(callback_days),
         timezone=VENUE,
-        at=at,
+        agenda=RunAgenda(every="1d", at=(at,)),
         exchange=academic_ref.component_id,
         execution=RunExecution(
             dataset="krx-daily",
@@ -1177,9 +1177,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ensemble_definition = RunDefinition(
         run_id="show008-ensemble",
         strategy=StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),
-        sessions=tuple(ensemble_days),
         timezone=VENUE,
-        at=time(9, 0),
+        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
         exchange="show008-krx",
         execution=RunExecution(
             dataset="krx-daily",

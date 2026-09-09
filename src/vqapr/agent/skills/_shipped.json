@@ -25,6 +25,7 @@
     "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0"
   },
   "inspect-workspace/references/deleting.md": {
+    "4bac2bc8f832771aaa0efbd1165d3fabd9d7033a22d1883a66a80cc3ea4201e8": "0.9.0.dev1",
     "6f5657a4bbe40b65e208b167d8cc1162bd469e39cf8fbf486085e616e4db1982": "0.8.0"
   },
   "inspect-workspace/references/reuse-judgement.md": {
@@ -73,6 +74,7 @@
     "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0"
   },
   "make-datamodel/references/running-a-datamodel.md": {
+    "06969cb4db1eb3a92e8bac607e983572d3a079b5b97864b3fb94cd76442ab39b": "0.9.0.dev1",
     "63fe7350c19a458029af7598290d6e528c86b2f86b034ddb54c9dd7ae7a9b4cb": "0.9.0.dev1",
     "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
   },
@@ -114,6 +116,7 @@
     "3744c4b026b14ecc260646504695fa3efbf25959fe84cb37e0069ea717335968": "0.8.0"
   },
   "register-dataset/references/correcting-a-registration.md": {
+    "1e32723c859f23da65d8bc023d7ad5d2c06fc35cb953579367f46b4f08d064d2": "0.9.0.dev1",
     "96a7a2791e4a15d69e77b54bcc7466e80eede39e8edda9e55196ff59fc4caaf8": "0.8.0"
   },
   "register-dataset/references/discouraged-preparation.md": {
@@ -147,7 +150,8 @@
     "476d2613e1bfb81107a9e5970052fa25943c26603636e036e25d5a52422269c6": "0.9.0.dev1"
   },
   "run-backtest/SKILL.md": {
-    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0"
+    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0",
+    "fe164f9dbb2c7f8a17a2dac8dbd5f78f1bf465fc3bcc6435f2582ed710d264e4": "0.9.0.dev1"
   },
   "run-backtest/references/check-before-run.md": {
     "bedc547dce75939d1545936bb80ed01598df051bd79a951f8bfa335970562a1d": "0.8.0"
@@ -156,10 +160,12 @@
     "9585bb08e676c3ce773fad13e736b09ac7d2b47709c93f788b79fd6e88d83332": "0.8.0"
   },
   "run-backtest/references/records-and-tweaks.md": {
-    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0"
+    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0",
+    "c4e1cada9f524313c571047347996b834dbd3dcbd0e5ff64e5927ff3ee4e4076": "0.9.0.dev1"
   },
   "run-backtest/references/run-declaration.md": {
     "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "61e1900d6812ff71d3c953cebf542f5254c74fe92bc71832397dbc780b6dabae": "0.9.0.dev1",
     "77061b8a63ff07034ffe44c8d55a7604fd2da4909ccf42ee4ec984bf6477dae8": "0.9.0.dev1",
     "930a7e3e6ca4b0ec150470bba4dd06a9b36e410b7b0472f78c9a05ab3bb1b1cc": "0.9.0.dev1"
   },

@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+import re
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.identifiers import AgendaId, OccurrenceId, occurrence_id
@@ -66,6 +67,118 @@ def _require_identifier(value: str, *, name: str) -> str:
     if not value or value != value.strip() or any(character.isspace() for character in value):
         raise ValueError(f"{name} must be a non-empty identifier without whitespace")
     return value
+
+
+_EVERY = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhdwM])$")
+DAY_UNITS = frozenset({"d", "w", "M"})
+INTRADAY_UNITS = frozenset({"m", "h"})
+
+
+@dataclass(frozen=True, slots=True)
+class AgendaRule:
+    """The strategy clock as a person writes it: a trading-day filter and a within-day rule.
+
+    Design §3.4. `every` is a count and a unit -- `1d`, `2d`, `1w`, `1M` select trading DAYS
+    (every Nth trading day; the first trading day of every Nth ISO week; of every Nth calendar
+    month) and pair with `at`, one or more wall times on each selected day. `1m`, `5m`, `1h`
+    select INSTANTS inside every trading day, from `from_time` to `to_time` inclusive, and refuse
+    `at`. Which days are trading days is not this value's to know: it is handed them, resolved
+    from data (§3.3), and does only arithmetic on top -- so nothing here is a guess about a
+    market.
+    """
+
+    every: str
+    at: tuple[time, ...] = ()
+    from_time: time | None = None
+    to_time: time | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.every, str) or not _EVERY.match(self.every):
+            raise ValueError(
+                f"every must be a count and a unit such as 1d, 1w, 1M, 5m or 1h; got {self.every!r}"
+            )
+        at = tuple(self.at)
+        for value in (*at, self.from_time, self.to_time):
+            if value is not None and (not isinstance(value, time) or value.tzinfo is not None):
+                raise ValueError("agenda wall times must be timezone-naive datetime.time values")
+        if self.intraday:
+            if at:
+                raise ValueError(
+                    f"every {self.every} selects instants inside the day; declare from/to, not at"
+                )
+            if self.from_time is None or self.to_time is None:
+                raise ValueError(
+                    f"every {self.every} needs from and to, the window inside each trading day"
+                )
+            if self.from_time > self.to_time:
+                raise ValueError("from must not be later than to")
+        else:
+            if self.from_time is not None or self.to_time is not None:
+                raise ValueError(f"every {self.every} selects days; declare at, not from/to")
+            if not at:
+                raise ValueError(
+                    f"every {self.every} needs at: the wall time(s) on each selected day"
+                )
+            if len(set(at)) != len(at):
+                raise ValueError("at must not repeat a wall time")
+        object.__setattr__(self, "at", tuple(sorted(at)))
+
+    @property
+    def count(self) -> int:
+        match = _EVERY.match(self.every)
+        assert match is not None
+        return int(match.group("count"))
+
+    @property
+    def unit(self) -> str:
+        return self.every[-1]
+
+    @property
+    def intraday(self) -> bool:
+        return self.unit in INTRADAY_UNITS
+
+    def select_days(self, days: Sequence[date]) -> tuple[date, ...]:
+        """The trading days this rule fires on, out of the sorted trading days it is handed."""
+        if self.unit in ("d", "m", "h"):
+            return tuple(days[:: self.count]) if self.unit == "d" else tuple(days)
+        key = (
+            (lambda day: day.isocalendar()[:2])
+            if self.unit == "w"
+            else (lambda day: (day.year, day.month))
+        )
+        firsts: list[date] = []
+        seen: set[object] = set()
+        for day in days:
+            group = key(day)
+            if group not in seen:
+                seen.add(group)
+                firsts.append(day)
+        return tuple(firsts[:: self.count])
+
+    def times(self) -> tuple[time, ...]:
+        """The wall times on one selected day, in order."""
+        if not self.intraday:
+            return self.at
+        assert self.from_time is not None and self.to_time is not None
+        step = timedelta(minutes=self.count) if self.unit == "m" else timedelta(hours=self.count)
+        anchor = datetime(2000, 1, 1)
+        cursor = datetime.combine(anchor.date(), self.from_time)
+        last = datetime.combine(anchor.date(), self.to_time)
+        out: list[time] = []
+        while cursor <= last:
+            out.append(cursor.time())
+            cursor += step
+        return tuple(out)
+
+    def describe(self) -> str:
+        if self.intraday:
+            assert self.from_time is not None and self.to_time is not None
+            return (
+                f"every {self.every} from {self.from_time.isoformat()} to "
+                f"{self.to_time.isoformat()} on each trading day"
+            )
+        when = ", ".join(value.isoformat() for value in self.at)
+        return f"every {self.every} at {when}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +279,54 @@ class OperationAgenda:
         )
 
     @classmethod
+    def expand(
+        cls,
+        *,
+        agenda_id: AgendaId,
+        days: Iterable[datetime | date],
+        rule: AgendaRule,
+        timezone: str,
+    ) -> OperationAgenda:
+        """Resolve a rule over the trading days it is handed into a finite, ordered agenda.
+
+        Design §3.4: the declaration is a trading-day filter plus a within-day rule, preflight
+        expands it over the days the execution table has rows for, and the result is what the
+        run consumes from then on. `days` accepts the instants `Workspace.evaluation_times`
+        returns; only their venue-local date is used, each day once. The occurrence id is
+        `{agenda_id}-{date}T{HHMM}` -- one scheme for one and for many instants a day. A wall
+        time that does not exist, or happens twice, on any selected day is refused rather than
+        resolved by guess (`declare_local_instant`).
+        """
+        zone = ZoneInfo(timezone)
+        seen: set[date] = set()
+        ordered: list[date] = []
+        for session in days:
+            if isinstance(session, datetime):
+                day = (
+                    session.astimezone(zone).date()
+                    if session.tzinfo is not None
+                    else session.date()
+                )
+            elif isinstance(session, date):
+                day = session
+            else:
+                raise TypeError("days must contain datetime or date values")
+            if day not in seen:
+                seen.add(day)
+                ordered.append(day)
+        ordered.sort()
+        times = rule.times()
+        occurrences = tuple(
+            OperationOccurrence(
+                occurrence_id(f"{agenda_id}-{day.isoformat()}T{at.strftime('%H%M')}"),
+                declare_local_instant(day, at, timezone),
+            )
+            for day in rule.select_days(ordered)
+            for at in times
+        )
+        return cls(agenda_id=agenda_id, timezone=timezone, occurrences=occurrences)
+
+    @classmethod
     def daily(
         cls,
         *,
@@ -174,7 +335,7 @@ class OperationAgenda:
         at: time,
         timezone: str,
     ) -> OperationAgenda:
-        """One occurrence per session, at the same venue-local wall time.
+        """One occurrence per session, at the same venue-local wall time: `expand` with `1d`.
 
         The constructor takes occurrences that are already known. The common case is not a list --
         it is "every session this registered dataset has, at 08:00 local", and turning one into
@@ -201,28 +362,6 @@ class OperationAgenda:
         every session, so a venue whose clock skips or repeats that wall time on some day needs a
         different `at`, or sessions that avoid the day.
         """
-        zone = ZoneInfo(timezone)
-        days: list[date] = []
-        seen: set[date] = set()
-        for session in sessions:
-            if isinstance(session, datetime):
-                day = (
-                    session.astimezone(zone).date()
-                    if session.tzinfo is not None
-                    else session.date()
-                )
-            elif isinstance(session, date):
-                day = session
-            else:
-                raise TypeError("sessions must contain datetime or date values")
-            if day not in seen:
-                seen.add(day)
-                days.append(day)
-        occurrences = tuple(
-            OperationOccurrence(
-                occurrence_id(f"{agenda_id}-{day.isoformat()}"),
-                declare_local_instant(day, at, timezone),
-            )
-            for day in sorted(days)
+        return cls.expand(
+            agenda_id=agenda_id, days=sessions, rule=AgendaRule("1d", (at,)), timezone=timezone
         )
-        return cls(agenda_id=agenda_id, timezone=timezone, occurrences=occurrences)

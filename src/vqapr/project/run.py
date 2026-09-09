@@ -20,7 +20,7 @@ import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -39,6 +39,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from vqapr.account.account import AccountMode
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.agendas import AgendaRule
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
@@ -346,6 +347,73 @@ class RunFill(BaseModel):
         )
 
 
+class RunAgenda(BaseModel):
+    """`runs.<id>.agenda`: the strategy clock, as a trading-day filter and a within-day rule.
+
+    Design §3.4: `every` (`1d`, `2d`, `1w`, `1M` select days and pair with `at`; `1m`, `5m`,
+    `1h` select instants inside each day between `from` and `to`). Which days are trading days
+    comes from data (§3.3): for a strategy run, the days its execution table has rows for --
+    nothing to declare; for a datamodel run, which has no venue, the dataset named by
+    `days_from`. The rule is validated by the domain's `AgendaRule`, which is also what
+    preflight expands.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False, populate_by_name=True)
+
+    every: Annotated[str, Field(min_length=2)]
+    at: tuple[time, ...] = ()
+    from_: time | None = Field(default=None, alias="from")
+    to: time | None = None
+    days_from: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_or_many(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "at" in raw and not isinstance(raw["at"], (list, tuple)):
+            body = dict(raw)
+            body["at"] = () if body["at"] is None else (body["at"],)
+            return body
+        return raw
+
+    @field_validator("at", "from_", "to")
+    @classmethod
+    def _wall_times(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            return tuple(_naive_wall_time(item) for item in value)
+        return _naive_wall_time(value)
+
+    @field_validator("days_from")
+    @classmethod
+    def _dataset_name(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("days_from must be a non-empty dataset id")
+        return value
+
+    @model_validator(mode="after")
+    def _a_rule(self) -> RunAgenda:
+        self.rule  # noqa: B018 -- the domain refuses an inconsistent every/at/from/to here
+        return self
+
+    @property
+    def rule(self) -> AgendaRule:
+        return AgendaRule(self.every, self.at, self.from_, self.to)
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"every": self.every}
+        if self.at:
+            body["at"] = [value.isoformat() for value in self.at]
+        if self.from_ is not None:
+            body["from"] = self.from_.isoformat()
+        if self.to is not None:
+            body["to"] = self.to.isoformat()
+        if self.days_from is not None:
+            body["days_from"] = self.days_from
+        return body
+
+
 class RunExecution(BaseModel):
     """`runs.<id>.execution`: the registered execution dataset and this run's fill on it."""
 
@@ -470,14 +538,11 @@ class RunDefinition(BaseModel):
     timezone: str
     """The venue zone every wall time below is expressed in. Required: a run without one is not
     run-ready, and the dataclass's `""` default only deferred that refusal to the zone check."""
-    at: time | None = None
-    """When, on each session, every model is called. A strategy decides for itself whether to
-    act; the book is valued at the instant the venue fills, and monitored right after each
-    commit, so this is the one wall time a run declares (record `148`)."""
-    sessions_from: str | None = None
-    """The dataset whose distinct `available_at` days are the run's sessions."""
-    sessions: tuple[date, ...] = ()
-    """Or the sessions listed literally. Exactly one of the two is declared."""
+    agenda: RunAgenda
+    """When the model is called: the strategy clock (design §3.4). The trading days it is
+    expanded over come from the execution table for a strategy run and from `days_from` for a
+    datamodel run; the book is valued at the instant the venue fills and monitored right after
+    each commit, so this is the one clock a run declares."""
     exchange: str | None = None
     execution: RunExecution | None = None
     """Which registered execution dataset the run fills against, and how: the session instant
@@ -496,6 +561,13 @@ class RunDefinition(BaseModel):
         if not isinstance(raw, Mapping):
             return raw
         body = dict(raw)
+        retired = [key for key in ("at", "sessions", "sessions_from") if key in body]
+        if retired:
+            raise ValueError(
+                f"{', '.join(retired)} moved into `agenda:` (design §3.4): declare "
+                "`agenda: {every: 1d, at: HH:MM}`; a strategy run takes its trading days from "
+                "its execution table, a datamodel run names them with `agenda.days_from`"
+            )
         strategy = _singular_block(body, "strategy", "strategies")
         datamodel = _singular_block(body, "datamodel", "datamodels")
         # A datamodel block written before `writes` moved to the run carried `dataset_id`
@@ -543,9 +615,8 @@ class RunDefinition(BaseModel):
                     version=declared.version, cash=declared.cash, positions=declared.positions
                 )
                 body["initial_account_mode"] = declared.mode
-        for name in ("sessions", "instruments"):
-            if name in body and body[name] is None:
-                body[name] = ()
+        if "instruments" in body and body["instruments"] is None:
+            body["instruments"] = ()
         return body
 
     @model_serializer(mode="plain")
@@ -561,7 +632,7 @@ class RunDefinition(BaseModel):
             "start": None if self.start is None else self.start.isoformat(),
             "end": None if self.end is None else self.end.isoformat(),
             "timezone": self.timezone,
-            "at": None if self.at is None else self.at.isoformat(),
+            "agenda": self.agenda.model_dump(mode="json"),
             "writes": self.writes,
             "exchange": self.exchange,
             "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
@@ -583,38 +654,9 @@ class RunDefinition(BaseModel):
                 "component": self.datamodel.component_id,
                 **_entry_body(self.datamodel, ("value_fields", "initial_model_memory")),
             }
-        if self.sessions_from is not None:
-            ordered["sessions_from"] = self.sessions_from
-        if self.sessions:
-            ordered["sessions"] = [day.isoformat() for day in self.sessions]
         return ordered
 
     # ---- this package's rules ----------------------------------------------------------------
-
-    @field_validator("at")
-    @classmethod
-    def _wall_time(cls, value: time | None) -> time | None:
-        return None if value is None else _naive_wall_time(value)
-
-    @field_validator("sessions", mode="before")
-    @classmethod
-    def _declared_sessions(cls, value: object) -> object:
-        # `None` on disk is "not declared", and so is the domain's `()` default. An explicit
-        # empty LIST is a declaration of nothing -- a declaration writes lists -- which the
-        # document refused by name and this keeps refusing by name.
-        if value is None:
-            return ()
-        if isinstance(value, list) and not value:
-            raise ValueError("sessions must list at least one date")
-        return value
-
-    @field_validator("sessions")
-    @classmethod
-    def _dates_only(cls, value: tuple[date, ...]) -> tuple[date, ...]:
-        for day in value:
-            if isinstance(day, datetime) or not isinstance(day, date):
-                raise ValueError("sessions must be a tuple of dates")
-        return value
 
     @field_validator("start", "end")
     @classmethod
@@ -633,10 +675,20 @@ class RunDefinition(BaseModel):
                 "run runs one strategy or one datamodel, not both and not neither "
                 "(record 148: a run holds one kind; a run is one arrow of the graph)"
             )
-        if self.sessions_from is not None and self.writes == self.sessions_from:
+        if self.agenda.days_from is not None and self.writes == self.agenda.days_from:
             raise ValueError(
-                f"writes {self.writes!r} is also sessions_from: a run cannot take its sessions "
-                "from the dataset it is about to write"
+                f"writes {self.writes!r} is also agenda.days_from: a run cannot take its trading "
+                "days from the dataset it is about to write"
+            )
+        if self.strategy is not None and self.agenda.days_from is not None:
+            raise ValueError(
+                "a strategy run declares no agenda.days_from: its trading days are the days its "
+                "execution table has rows for (design §3.3)"
+            )
+        if self.datamodel is not None and self.agenda.days_from is None:
+            raise ValueError(
+                "a datamodel run declares agenda.days_from: it has no execution table, so it "
+                "names the dataset whose days are its trading days (design §3.3)"
             )
         if self.execution is not None and self.writes == self.execution.dataset:
             raise ValueError(
@@ -661,12 +713,6 @@ class RunDefinition(BaseModel):
                     "because a datamodel sees no account and passes through no venue"
                 )
         _require_timezone(self.timezone)
-        if self.at is None:
-            raise ValueError("at must be declared")
-        if (self.sessions_from is None) == (not self.sessions):
-            raise ValueError("declare exactly one of sessions_from or sessions")
-        if self.sessions_from is not None and not self.sessions_from:
-            raise ValueError("sessions_from must be a non-empty identifier")
         if self.exchange is not None and not self.exchange:
             raise ValueError("exchange must be a non-empty identifier")
         if (self.exchange is None) != (self.execution is None):
@@ -682,7 +728,7 @@ class RunDefinition(BaseModel):
         """The point-in-time meaning of this declaration, in one sentence
         (`docs/issues/archive/027`).
         """
-        when = "" if self.at is None else f" at {self.at.isoformat()} {self.timezone}"
+        when = f" {self.agenda.rule.describe()} {self.timezone}"
         sentences: list[str] = []
         if self.execution is not None:
             fill = self.execution.fill
@@ -691,10 +737,15 @@ class RunDefinition(BaseModel):
                 f"{fill.selector} at {fill.at.isoformat()} {fill.timezone}, at its "
                 f"{fill.trade_price!r} price"
             )
+        days = (
+            "the days its execution table has rows for"
+            if self.agenda.days_from is None
+            else f"the days dataset {self.agenda.days_from!r} has rows for"
+        )
         sentences.append(
-            f"run {self.run_id!r}: every model is called{when} on each session and sees only "
-            "rows knowable before that instant; the book fills later, at the execution dataset's "
-            "own instant"
+            f"run {self.run_id!r}: the model is called{when}, over {days}, and sees only rows "
+            "knowable before each instant; the book fills later, at the execution dataset's own "
+            "instant"
         )
         return sentences
 
@@ -711,8 +762,8 @@ class RunDefinition(BaseModel):
 
     @property
     def agenda_id(self) -> str:
-        """The id of the one agenda preflight derives: every session, at `at`."""
-        return f"{self.run_id}.sessions"
+        """The id of the one agenda preflight derives from `agenda:` (design §3.4)."""
+        return f"{self.run_id}.agenda"
 
     @property
     def kind(self) -> str:

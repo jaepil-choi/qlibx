@@ -495,13 +495,13 @@ class Workspace:
                     ),
                 )
         if (
-            definition.sessions_from is not None
-            and dataset_id(definition.sessions_from) not in state.datasets
+            definition.agenda.days_from is not None
+            and dataset_id(definition.agenda.days_from) not in state.datasets
         ):
             raise reference_error(
-                f"run {definition.run_id!r} takes its sessions from dataset "
-                f"{definition.sessions_from!r}, which must be registered",
-                fix=f"register dataset {definition.sessions_from!r} first, or list `sessions`",
+                f"run {definition.run_id!r} takes its trading days from dataset "
+                f"{definition.agenda.days_from!r}, which must be registered",
+                fix=f"register dataset {definition.agenda.days_from!r} first",
             )
 
 

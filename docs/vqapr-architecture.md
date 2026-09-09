@@ -293,6 +293,10 @@ Flow는 recurrence, weekday, observation coverage와 execution rows에서 occurr
 
 ### 3.2 Deterministic finite agenda와 동일 timestamp 순서
 
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** 우선순위가 ACCRUE → EXECUTE → VALUATION → COMPLIANCE → DECIDE 다섯으로 다시 그어진다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
+
 Flow는 frozen component occurrences와 accepted intent에서 파생된 due execution을 다음 key로 merge한다.
 
 ```text
@@ -1808,6 +1812,10 @@ for 루프를 돈다.**
 
 ### 6.2 Exchange
 
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** 체결 테이블이 **시장 시계**로 격상된다 — 체결 시각을 넘어 EXECUTE·VALUATION·COMPLIANCE의 시각표를 공급한다. Exchange 계약은 좁아지고 내부 단계는 venue가 소유한다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
+
 ```python
 class Exchange(Protocol):
     exchange_id: str
@@ -2880,6 +2888,10 @@ UC 추적은 디렉터리가 아니라 `@pytest.mark.uc("UC-…")` 마커로 한
 성질이다 — 체결은 창 조회가 아니라 점 조회이므로 애초에 필요한 타입이 다르다(§6.2).
 
 ### 10.2 확장점은 넷이고 내장도 같은 문으로 들어온다
+
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** 확장점이 DataModel · StrategyModel · Exchange · Compliance이고, `Accrual`의 자리가 하나 더 예약된다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
 
 **결정.** 사용자가 저작할 수 있는 컴포넌트는 넷이다. 넷 다 `ComponentRef`로 지목되고, 같은 conformance
 suite를 통과해야 등록되며, `vqapr new`가 템플릿을 깐다.

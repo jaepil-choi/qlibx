@@ -431,6 +431,10 @@ look-ahead가 조용히 들어오고, 그 판단의 근거는 데이터가 아�
 
 ### 3.1 Operation occurrence와 세 timestamp authority를 분리한다
 
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** Valuation과 MonitoringPolicy는 각자 agenda를 참조하지 않는다 — 둘 다 시장 시계 위의 단계가 되고, 선언되는 시계는 전략 시계 하나뿐이다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
+
 | 사실 | 의미 | 소유자 |
 |---|---|---|
 | **operation occurrence** | `(role, stable occurrence ID, evaluation_time)` entity | 해당 component configuration이 참조하는 frozen `OperationAgenda` |
@@ -534,6 +538,10 @@ execution-time price와 tradability로 가는 접근 경로가 없다. Flow는 a
 finite agenda를 준비하는 과정은 package runtime 밖이며, package는 frozen resolved occurrences만 소비한다.
 
 #### UC-CALENDAR-001 — retired current requirement
+
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** ExecutionTable에서 **날짜**(거래일)를 유도하는 것은 허용된다. 밀도를 바꿔도 거래일 집합이 같기 때문이다. **시각** 유도는 계속 금지다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
 
 이 ID는 재사용하지 않는다. daily 가격 coverage나 ExecutionTable에서 venue calendar 또는 callback schedule을
 유도하는 capability는 current product contract에서 제거되었다. `OperationAgenda`는 open/close 의미나 미래 venue
@@ -1671,6 +1679,10 @@ state와 최종 Model state를 결과로 제공하며, 그 결과만으로 이�
 
 ## 7. Constraints
 
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** constraint는 user 확장점이 아니다 — built-in 순수 함수가 되고, 사후 관찰만 `Compliance` 확장점으로 남는다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
+
 constraint는 모든 research workflow의 선행 조건이 아니다. constraint adjustment와 actual-account monitoring을
 **선택한 경우에만** 해당 operation이 metric, bound, evaluation scope, 필요한 data를 요구한다.
 
@@ -1717,6 +1729,10 @@ override policy는 future work다. user가 위 계약(요구 data 선언 → bou
 constraint를 직접 작성하는 것은 막지 않으며, 그 계약으로 표현되지 않는 것은 지금 범위 밖이다.
 
 ### 7.1 두 가지 서로 다른 결과
+
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** "구성"의 증거 보존이 프레임워크 보장에서 전략이 직접 기록하는 것으로 내려간다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
 
 | 결과 | **언제** | 무엇 |
 |---|---|---|
@@ -2360,6 +2376,10 @@ config-driven workflow는 reproducibility를 위한 수단이다. 비슷한 fiel
 
 ### 12.3 Local extension
 
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** 확장점 목록이 바뀐다 — `Constraint`가 빠지고 `Compliance`가 들어온다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
+
 #### user가 작성할 수 있는 것은 넷이다
 
 | 확장점 | 무엇을 정하는가 | package built-in |
@@ -2411,6 +2431,10 @@ data가 없으면 결과를 만들기 전에 실패한다. local Exchange는 자
 authority, valuation, run lifecycle을 재정의할 수 없다.**
 
 ### 12.4 누가 무엇을 소유하는가
+
+> **2026-09-09 — 두 시계 캠페인이 이 절을 뒤집는다.** constraint metric의 소유는 그대로 user이나, 그것을 표현하는 수단이 확장점에서 순수 함수로 바뀐다.
+> 확정된 계약은 [`docs/design/two-clocks-and-the-wiring-table.md`](design/two-clocks-and-the-wiring-table.md) §8의 표에 있다.
+> 캠페인이 끝나면 이 문서가 그것을 흡수한다. 그전까지 아래 본문은 **현행 구현**의 설명이다.
 
 **vqapr가 소유:** project initialization과 frozen invocation, logical dataset registration과 capability binding,
 field semantics·unit·currency·timezone·universe·tradability 구분, point-in-time materialization과 bounded access,

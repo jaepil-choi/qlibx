@@ -1,15 +1,29 @@
-"""Versioned Account authority for closed Academic execution results."""
+"""The Account: the authority that appends to the ledger, and nothing else.
+
+Design §5.1: *"`Account` = 권한. '이 항목을 이 원장 뒤에 붙일 수 있는가'만 판단하고 붙인다."* Two
+things may be appended -- ledger entries, which change the book, and marks, which value it -- and
+for each the Account asks the same three questions: is this the state I hold (version order), is
+what results a valid account (cash not negative; no short in a long-only book; a mark that values
+what is held), and is it being appended once. Everything an origin knows about its own entry --
+that a fill's cash is its price times its quantity less its cost -- was checked by the producer
+that made it (§5.2: *the ledger checks what the ledger knows*).
+
+Record `211`: this is what `prepare_fill` / `prepare_mark` / `prepare_valuation` and their three
+`Prepared*` types collapsed into. Those carried three hand-written statements of "what must not
+change" and a `_appends_one_mark` that compared tails to allow for retention; the invariant is now
+one, stated once, and retention is the Account's own window rather than a property the ledger has
+to be forgiven for.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 from enum import StrEnum
 
-from vqapr.domain.account_state import AccountMark, AccountSnapshot, AccountState
-from vqapr.domain.fills import Fill, FillBatch
+from vqapr.domain.account_state import AccountMark, AccountSnapshot, AccountState, fold
+from vqapr.domain.ledger import LedgerEntry
 from vqapr.domain.values import MarkBatch
 
 
@@ -21,86 +35,66 @@ class AccountMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class JournalEntry:
-    """Append-only record of one fill included in an account transition."""
+class PreparedAppend:
+    """Ledger entries the Account has agreed to append, and the state they fold to.
 
-    version: int
-    fill: Fill
+    Not yet an Account mutation: the run state publishes `next_state` as its root, and only then
+    does `commit_append` install it. `next_state` carries the entries it was made by and the mark
+    window it inherited; the record's fill table is written from those entries.
+    """
 
-
-@dataclass(frozen=True, slots=True)
-class PreparedAccountFill:
-    """A validated fill candidate that is not an Account mutation."""
-
-    expected_version: int
     source: AccountState
-    fill_batch: FillBatch
-    next_snapshot: AccountSnapshot
-    journal_entries: tuple[JournalEntry, ...]
-
-    def __post_init__(self) -> None:
-        if isinstance(self.expected_version, bool) or not isinstance(self.expected_version, int):
-            raise TypeError("expected_version must be an integer")
-        if self.expected_version < 0:
-            raise ValueError("expected_version must be non-negative")
-        if not isinstance(self.source, AccountState):
-            raise TypeError("source must be an AccountState")
-        if self.source.snapshot.version != self.expected_version:
-            raise ValueError("source version must match expected_version")
-        if not isinstance(self.fill_batch, FillBatch):
-            raise TypeError("fill_batch must be a FillBatch")
-        if self.fill_batch.account_version_seen != self.expected_version:
-            raise ValueError("fill_batch version must match expected_version")
-        if not isinstance(self.next_snapshot, AccountSnapshot):
-            raise TypeError("next_snapshot must be an AccountSnapshot")
-        if self.next_snapshot.version != self.expected_version + 1:
-            raise ValueError("next_snapshot version must advance expected_version by one")
-        if not isinstance(self.journal_entries, tuple) or any(
-            not isinstance(entry, JournalEntry) for entry in self.journal_entries
-        ):
-            raise TypeError("journal_entries must be a tuple of JournalEntry")
-        if any(entry.version != self.next_snapshot.version for entry in self.journal_entries):
-            raise ValueError("journal entries must have the committed version")
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedAccountTransition:
-    """A complete fill-and-mark candidate suitable for one root publication."""
-
-    fill: PreparedAccountFill
+    entries: tuple[LedgerEntry, ...]
     next_state: AccountState
 
     def __post_init__(self) -> None:
-        if not isinstance(self.fill, PreparedAccountFill):
-            raise TypeError("fill must be a PreparedAccountFill")
+        if not isinstance(self.source, AccountState):
+            raise TypeError("source must be an AccountState")
+        if not isinstance(self.entries, tuple) or any(
+            not isinstance(entry, LedgerEntry) for entry in self.entries
+        ):
+            raise TypeError("entries must be a tuple of LedgerEntry")
         if not isinstance(self.next_state, AccountState):
             raise TypeError("next_state must be an AccountState")
-        if self.next_state.snapshot != self.fill.next_snapshot:
-            raise ValueError("next_state must publish the prepared fill snapshot")
-        # The journal is published to vqapr.fill and then dropped, so a committed state carries
-        # the entries this commit produced rather than every entry the run ever made. What must
-        # hold is that it carries exactly those and nothing invented.
-        if tuple(self.next_state.fill_history) != tuple(self.fill.journal_entries):
-            raise ValueError("next_state must contain exactly the prepared fill history")
-        if not _appends_one_mark(self.fill.source.mark_history, self.next_state.mark_history):
-            raise ValueError("next_state must preserve the published mark history")
-        latest_mark = self.next_state.latest_mark
-        if latest_mark is None or latest_mark.account_version != self.fill.next_snapshot.version:
-            raise ValueError("next_state must append a mark for the prepared snapshot")
+        if self.next_state.snapshot.version != self.source.snapshot.version + 1:
+            raise ValueError("an append advances the account version by exactly one")
+        if self.next_state.ledger != self.entries:
+            raise ValueError("next_state must carry exactly the appended entries")
+        if self.next_state.marks != self.source.marks:
+            raise ValueError("an append changes no mark")
+
+    @property
+    def expected_version(self) -> int:
+        return self.source.snapshot.version
+
+    @property
+    def next_snapshot(self) -> AccountSnapshot:
+        return self.next_state.snapshot
 
 
-def _appends_one_mark(source: tuple[object, ...], nxt: tuple[object, ...]) -> bool:
-    """Did `nxt` extend `source` by exactly one mark, allowing for retention?
+@dataclass(frozen=True, slots=True)
+class PreparedMark:
+    """A mark the Account has agreed to append to the state it values."""
 
-    A run keeps only as many marks as some consumer declared it would read, so the new history is
-    the tail of `source + (mark,)` rather than all of it. Comparing against that tail keeps the
-    'exactly one appended' guarantee intact while letting the oldest marks fall off the front:
-    what must never happen is a mark being altered, reordered or silently dropped from the middle.
-    """
-    if not nxt:
-        return False
-    kept = len(nxt) - 1
-    return nxt[:-1] == source[len(source) - kept :] if kept else True
+    source: AccountState
+    mark: AccountMark
+    next_state: AccountState
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, AccountState):
+            raise TypeError("source must be an AccountState")
+        if not isinstance(self.mark, AccountMark):
+            raise TypeError("mark must be an AccountMark")
+        if not isinstance(self.next_state, AccountState):
+            raise TypeError("next_state must be an AccountState")
+        if self.next_state.snapshot != self.source.snapshot:
+            raise ValueError("a mark changes no account snapshot")
+        if self.next_state.ledger != self.source.ledger:
+            raise ValueError("a mark changes no ledger entry")
+        if self.next_state.latest_mark is not self.mark:
+            raise ValueError("next_state must end with the appended mark")
+        if self.mark.account_version != self.source.snapshot.version:
+            raise ValueError("a mark values the current account snapshot")
 
 
 def _require_marks_within(marks: MarkBatch, snapshot: AccountSnapshot) -> None:
@@ -126,42 +120,8 @@ def _require_marks_within(marks: MarkBatch, snapshot: AccountSnapshot) -> None:
         raise ValueError(f"marks must value the held quantity for {mismatched}")
 
 
-@dataclass(frozen=True, slots=True)
-class PreparedAccountValuation:
-    """A mark-only candidate: the book is valued and nothing about it changes.
-
-    An occurrence that requests no orders still values the book. There is no fill, so there is no
-    journal entry and no reason to advance the account version -- `account_version` means "the
-    account changed", and the optimistic-concurrency checks in the venue, the Flow and monitoring
-    all rely on that meaning.
-    """
-
-    expected_version: int
-    source: AccountState
-    next_state: AccountState
-
-    def __post_init__(self) -> None:
-        if isinstance(self.expected_version, bool) or not isinstance(self.expected_version, int):
-            raise TypeError("expected_version must be an integer")
-        if not isinstance(self.source, AccountState):
-            raise TypeError("source must be an AccountState")
-        if not isinstance(self.next_state, AccountState):
-            raise TypeError("next_state must be an AccountState")
-        if self.source.snapshot.version != self.expected_version:
-            raise ValueError("source version must match expected_version")
-        if self.next_state.snapshot != self.source.snapshot:
-            raise ValueError("a mark-only transition must not change the Account snapshot")
-        if self.next_state.fill_history != self.source.fill_history:
-            raise ValueError("a mark-only transition must not change the fill history")
-        if not _appends_one_mark(self.source.mark_history, self.next_state.mark_history):
-            raise ValueError("next_state must append exactly one mark")
-        latest_mark = self.next_state.latest_mark
-        if latest_mark is None or latest_mark.account_version != self.source.snapshot.version:
-            raise ValueError("next_state must append a mark for the current snapshot")
-
-
 class Account:
-    """Owns Account transition validation; AcceptedRunState owns publication."""
+    """Owns append permission; `AcceptedRunState` owns publication."""
 
     def __init__(self, *, mode: AccountMode, retained_marks: int = 1) -> None:
         if not isinstance(mode, AccountMode):
@@ -171,8 +131,9 @@ class Account:
         if retained_marks < 1:
             raise ValueError("an Account must retain at least its current mark")
         self._mode = mode
-        # How many marks stay resident. One unless a consumer declared it reads more: a run does
-        # not pay to carry a history nobody asked for. The full record goes to the recorder.
+        # The mark WINDOW: how many marks stay resident, a property of this run's memory and not
+        # of the ledger (design §5.1). One unless a consumer declared it reads more; the full
+        # series goes to the recorder.
         self._retained_marks = retained_marks
         self._state: AccountState | None = None
 
@@ -195,112 +156,61 @@ class Account:
             raise RuntimeError("Account is already bound")
         self._state = state
 
-    def prepare_fill(
-        self, state: AccountState, fill_batch: FillBatch, *, expected_version: int
-    ) -> PreparedAccountFill:
-        """Validate a complete fill candidate without retaining mutable Account state."""
+    def append(
+        self, state: AccountState, entries: tuple[LedgerEntry, ...], *, expected_version: int
+    ) -> PreparedAppend:
+        """May these entries go after this state? Version order and a valid result, nothing else.
+
+        The producer proved each entry's own arithmetic. What is proved here is what only the
+        ledger can: that `state` is the version the caller thinks it is, and that the folded book
+        is an account -- cash not negative, and no short position in a long-only account.
+        """
         if not isinstance(state, AccountState):
             raise TypeError("state must be an AccountState")
-        if not isinstance(fill_batch, FillBatch):
-            raise TypeError("fill_batch must be a FillBatch")
+        if not isinstance(entries, tuple) or any(
+            not isinstance(entry, LedgerEntry) for entry in entries
+        ):
+            raise TypeError("entries must be a tuple of LedgerEntry")
         if isinstance(expected_version, bool) or not isinstance(expected_version, int):
             raise TypeError("expected_version must be an integer")
-        current = state.snapshot
-        if expected_version != current.version:
+        if expected_version != state.snapshot.version:
             raise ValueError("expected_version does not match the current account version")
-        if fill_batch.account_version_seen != expected_version:
-            raise ValueError("fill_batch account_version_seen does not match expected_version")
-
-        next_cash = current.cash
-        next_positions = dict(current.positions)
-        for fill in fill_batch.fills:
-            # Fill validates finite values and requires a price for every dealt quantity.
-            if fill.dealt_quantity == 0:
-                continue
-            assert fill.price is not None
-            next_cash += fill.cash_delta
-            quantity = next_positions.get(fill.instrument_id, Decimal(0)) + fill.dealt_quantity
-            if quantity == 0:
-                next_positions.pop(fill.instrument_id, None)
-            else:
-                next_positions[fill.instrument_id] = quantity
-
-        if next_cash < 0:
+        folded = fold(state.snapshot, entries)
+        if folded.cash < 0:
             raise ValueError("fill batch would make cash negative")
         if self._mode is AccountMode.LONG_ONLY and any(
-            quantity < 0 for quantity in next_positions.values()
+            quantity < 0 for quantity in folded.positions.values()
         ):
             raise ValueError("fill batch would create a short position in a long-only account")
-
-        # Trusted: every value was derived just above from the committed snapshot's validated
-        # fields and from fills the batch already validated, and this runs once per commit.
-        next_snapshot = AccountSnapshot.trusted(
-            version=current.version + 1,
-            cash=next_cash,
-            positions=next_positions,
-        )
-        return PreparedAccountFill(
-            expected_version=expected_version,
+        return PreparedAppend(
             source=state,
-            fill_batch=fill_batch,
-            next_snapshot=next_snapshot,
-            journal_entries=tuple(
-                JournalEntry(version=next_snapshot.version, fill=fill) for fill in fill_batch.fills
-            ),
+            entries=entries,
+            # Published, not retained: the entries this append made go to the record's fill
+            # table, and the state keeps only them, so the resident ledger stops growing for the
+            # life of the run while every entry still reaches parquet.
+            next_state=AccountState(snapshot=folded, marks=state.marks, ledger=entries),
         )
 
-    def prepare_mark(
-        self,
-        fill: PreparedAccountFill,
-        marks: MarkBatch,
-        *,
-        provenance: object,
-        marked_at: datetime | None = None,
-        observed_at: Mapping[str, datetime] | None = None,
-    ) -> PreparedAccountTransition:
-        """Validate the required post-fill valuation before any root is published."""
-        if not isinstance(fill, PreparedAccountFill):
-            raise TypeError("fill must be a PreparedAccountFill")
-        if not isinstance(marks, MarkBatch):
-            raise TypeError("marks must be a MarkBatch")
-        _require_marks_within(marks, fill.next_snapshot)
-        mark = AccountMark(
-            account_version=fill.next_snapshot.version,
-            marks=marks,
-            nav=fill.next_snapshot.cash + marks.total_value,
-            provenance=provenance,
-            marked_at=marked_at,
-            observed_at_by_instrument=observed_at,
-        )
-        return PreparedAccountTransition(
-            fill=fill,
-            next_state=AccountState(
-                snapshot=fill.next_snapshot,
-                mark_history=(*fill.source.mark_history, mark)[-self._retained_marks :],
-                fill_history=tuple(fill.journal_entries),
-            ),
-        )
-
-    def prepare_valuation(
+    def mark(
         self,
         state: AccountState,
         marks: MarkBatch,
         *,
-        expected_version: int,
         provenance: object,
         marked_at: datetime | None = None,
         observed_at: Mapping[str, datetime] | None = None,
-    ) -> PreparedAccountValuation:
-        """Validate a mark taken without any fill. The Account does not change."""
+    ) -> PreparedMark:
+        """May this valuation go after this state? It must value what the state holds.
+
+        One door for both market-clock cases (design §3.1): the mark after a fill and the mark of
+        a held book differ only in what the ledger did just before, which is not the mark's
+        concern. The account does not change; the window slides.
+        """
         if not isinstance(state, AccountState):
             raise TypeError("state must be an AccountState")
         if not isinstance(marks, MarkBatch):
             raise TypeError("marks must be a MarkBatch")
-        if isinstance(expected_version, bool) or not isinstance(expected_version, int):
-            raise TypeError("expected_version must be an integer")
         current = state.snapshot
-        if expected_version != current.version:
-            raise ValueError("expected_version does not match the current account version")
         _require_marks_within(marks, current)
         mark = AccountMark(
             account_version=current.version,
@@ -310,47 +220,33 @@ class Account:
             marked_at=marked_at,
             observed_at_by_instrument=observed_at,
         )
-        return PreparedAccountValuation(
-            expected_version=expected_version,
+        return PreparedMark(
             source=state,
+            mark=mark,
             next_state=AccountState(
                 snapshot=current,
-                mark_history=(*state.mark_history, mark)[-self._retained_marks :],
-                fill_history=state.fill_history,
+                marks=(*state.marks, mark)[-self._retained_marks :],
+                ledger=state.ledger,
             ),
         )
 
-    def commit_valuation(self, prepared: PreparedAccountValuation) -> AccountState:
-        """Infallibly install a previously validated mark-only transition."""
-        if not isinstance(prepared, PreparedAccountValuation):
-            raise TypeError("prepared must be a PreparedAccountValuation")
-        if self.state.snapshot != prepared.source.snapshot:
-            raise RuntimeError("Account optimistic conflict")
-        if self.state.fill_history != prepared.source.fill_history:
-            raise RuntimeError("Account optimistic conflict")
-        self._state = prepared.next_state
-        return self._state
-
-    def commit_fill(self, prepared: PreparedAccountFill) -> AccountState:
-        """Infallibly install a previously validated fill after optimistic checking."""
-        if not isinstance(prepared, PreparedAccountFill):
-            raise TypeError("prepared must be a PreparedAccountFill")
+    def commit_append(self, prepared: PreparedAppend) -> AccountState:
+        """Infallibly install a previously agreed append after optimistic checking."""
+        if not isinstance(prepared, PreparedAppend):
+            raise TypeError("prepared must be a PreparedAppend")
         if self.state != prepared.source:
             raise RuntimeError("Account optimistic conflict")
-        self._state = AccountState(
-            snapshot=prepared.next_snapshot,
-            mark_history=prepared.source.mark_history,
-            fill_history=tuple(prepared.journal_entries),
-        )
+        self._state = prepared.next_state
         return self._state
 
-    def commit_mark(self, prepared: PreparedAccountTransition) -> AccountState:
-        """Infallibly install a previously validated valuation after optimistic checking."""
-        if not isinstance(prepared, PreparedAccountTransition):
-            raise TypeError("prepared must be a PreparedAccountTransition")
-        if self.state.snapshot != prepared.fill.next_snapshot:
-            raise RuntimeError("Account optimistic conflict")
-        if self.state.fill_history != prepared.next_state.fill_history:
+    def commit_mark(self, prepared: PreparedMark) -> AccountState:
+        """Infallibly install a previously agreed mark after optimistic checking."""
+        if not isinstance(prepared, PreparedMark):
+            raise TypeError("prepared must be a PreparedMark")
+        if self.state != prepared.source:
             raise RuntimeError("Account optimistic conflict")
         self._state = prepared.next_state
         return self._state
+
+
+__all__ = ["Account", "AccountMode", "PreparedAppend", "PreparedMark"]

@@ -9,14 +9,13 @@ from itertools import chain
 from types import MappingProxyType
 
 from vqapr.account.account import (
-    JournalEntry,
-    PreparedAccountFill,
-    PreparedAccountTransition,
-    PreparedAccountValuation,
+    PreparedAppend,
+    PreparedMark,
 )
 from vqapr.authoring.records import InvocationRecorder, RecorderManifest
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
+from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
 from vqapr.domain.model_state import prepare_model_state
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 
@@ -219,9 +218,15 @@ fill journal can be published and then dropped from memory rather than carried f
 
 
 def _fill_rows(
-    entries: tuple[JournalEntry, ...], *, envelope: Mapping[str, object] | None = None
+    entries: tuple[LedgerEntry, ...],
+    version: int,
+    *,
+    envelope: Mapping[str, object] | None = None,
 ) -> tuple[Mapping[str, object], ...]:
-    """One row per committed fill, including zero-dealt ones.
+    """One row per committed fill entry, including zero-dealt ones.
+
+    Read off the ledger entries the append made (record `211`): a fill entry's `detail` is the
+    fill's own facts, and `version` is the account version the append produced.
 
     The five envelope fields are stamped here rather than by `InvocationRecorder`, because these
     rows are staged straight into the run-state chunks and never pass through a recorder. That is
@@ -252,21 +257,22 @@ def _fill_rows(
     rows = []
     stamp = dict(envelope or {})
     for sequence, entry in enumerate(entries):
-        fill = entry.fill
-        cost = fill.cost
+        if entry.origin != FILL_ORIGIN:
+            continue
+        detail = entry.detail
         rows.append(
             MappingProxyType(
                 {
-                    "instrument": str(fill.instrument_id),
-                    "kind": None if fill.kind is None else str(fill.kind),
-                    "account_version": int(entry.version),
-                    "requested_quantity": str(fill.requested_quantity),
-                    "dealt_quantity": str(fill.dealt_quantity),
-                    "price": None if fill.price is None else str(fill.price),
-                    "cash_delta": str(fill.cash_delta),
-                    "commission": None if cost is None else str(cost.commission),
-                    "tax": None if cost is None else str(cost.tax),
-                    "reason": None if fill.reason is None else str(fill.reason),
+                    "instrument": str(detail["instrument"]),
+                    "kind": detail.get("kind"),
+                    "account_version": int(version),
+                    "requested_quantity": str(detail["requested_quantity"]),
+                    "dealt_quantity": str(detail["dealt_quantity"]),
+                    "price": detail.get("price"),
+                    "cash_delta": str(entry.cash),
+                    "commission": detail.get("commission"),
+                    "tax": detail.get("tax"),
+                    "reason": detail.get("reason"),
                     **stamp,
                     **({"sequence": sequence} if stamp else {}),
                 }
@@ -450,13 +456,12 @@ class RunStateRepository:
         self,
         *,
         pending_id: str,
-        account: PreparedAccountFill,
-        fill: object,
+        account: PreparedAppend,
         evidence: object = None,
         envelope: Mapping[str, object] | None = None,
         component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Prepare the root which consumes pending and mirrors the fill commit.
+        """Prepare the root which consumes pending and mirrors the ledger append.
 
         `component_memory` is what the venue's `execute` -- and any other stateful component
         this due item called -- left in memory (record `184`), committed with the fills it
@@ -465,23 +470,23 @@ class RunStateRepository:
         root = self._root
         if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
             raise RuntimeError("due completion pending identity does not match current pending")
-        if root.account != account.source or fill != account.fill_batch:
-            raise RuntimeError("prepared Account fill does not match current root")
+        if root.account != account.source:
+            raise RuntimeError("prepared Account append does not match current root")
         states = dict(root._model_states)
         payloads = dict(root._payloads)
         component_refs, proved = _component_states(root, component_memory, states, payloads)
-        committed = AccountState(
-            snapshot=account.next_snapshot,
-            # Published, not retained. The journal entries this commit produced go into the
-            # vqapr.fill chunk below and the account keeps only them, so fill_history stops
-            # growing for the life of the run while every fill still reaches parquet.
-            mark_history=account.source.mark_history,
-            fill_history=tuple(account.journal_entries),
-        )
+        # The state the Account agreed to: the fold, the same mark window, and the entries this
+        # append made -- which go into the vqapr.fill chunk below and are then the only ledger
+        # the state keeps, so it never grows with the run while every entry reaches parquet.
+        committed = account.next_state
         chunks = dict(root._recorder_chunks)
-        rows = _fill_rows(account.journal_entries, envelope=envelope)
-        if rows:
-            chunks[FILL_TABLE] = (*chunks.get(FILL_TABLE, ()), rows)
+        rows = _fill_rows(account.entries, committed.snapshot.version, envelope=envelope)
+        # Staged like every other table's rows: onto the root without a sink, out to the sink
+        # at publish with one. Until record `211` the fill rows went into the root's chunks
+        # either way and reached disk only when the strategy record was frozen at the end -- so
+        # a run that died left its account table and no fill table, which is exactly the
+        # damaged-account outcome an append-only ledger exists to rule out (design §5.1).
+        new_rows = self._stage_rows(chunks, {FILL_TABLE: rows} if rows else {})
         return PreparedRunState(
             root.version,
             AcceptedRunState(
@@ -503,6 +508,7 @@ class RunStateRepository:
                 finalization=root.finalization,
                 model_state_commit_count=root.model_state_commit_count,
             ),
+            new_rows,
         )
 
     def publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
@@ -524,7 +530,7 @@ class RunStateRepository:
     def prepare_marked(
         self,
         *,
-        account: PreparedAccountTransition,
+        account: PreparedMark,
         mark: MarkBatch,
         evidence: object = None,
         recorder: InvocationRecorder | None = None,
@@ -536,9 +542,9 @@ class RunStateRepository:
         series from can never disagree with the marks the run holds.
         """
         root = self._root
-        if root.account is None or root.account.snapshot != account.fill.next_snapshot:
+        if root.account is None or root.account != account.source:
             raise RuntimeError("prepared Account mark does not match current root")
-        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
+        if mark != account.mark.marks:
             raise ValueError("mark must be the prepared Account mark batch")
         chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
@@ -571,7 +577,7 @@ class RunStateRepository:
     def prepare_valuation_only(
         self,
         *,
-        account: PreparedAccountValuation,
+        account: PreparedMark,
         mark: MarkBatch,
         evidence: object = None,
         recorder: InvocationRecorder | None = None,
@@ -585,7 +591,7 @@ class RunStateRepository:
         root = self._root
         if root.account is None or root.account != account.source:
             raise RuntimeError("prepared Account valuation does not match current root")
-        if mark != account.next_state.latest_mark.marks:  # type: ignore[union-attr]
+        if mark != account.mark.marks:
             raise ValueError("mark must be the prepared Account mark batch")
         chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(

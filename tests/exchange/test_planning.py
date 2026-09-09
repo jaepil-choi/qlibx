@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -9,6 +10,7 @@ from vqapr.account.marking import ValuationService
 from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.costs import SideCost
 from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
+from vqapr.domain.ledger import fill_entries
 from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.values import Side
 from vqapr.exchange.listings import (
@@ -19,6 +21,8 @@ from vqapr.exchange.listings import (
 )
 from vqapr.exchange.planning import plan_orders
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
+
+_AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 
 
 def decimal(value: str) -> Decimal:
@@ -203,16 +207,18 @@ def test_account_transition_validation_does_not_mutate_the_root() -> None:
     root = AccountState(snapshot(positions={"A": "1"}))
     short = FillBatch((Fill("A", decimal("-2"), decimal("-2"), decimal("10")),), 3)
     with pytest.raises(ValueError, match="short"):
-        account.prepare_fill(root, short, expected_version=3)
+        account.append(root, fill_entries(_AT, short), expected_version=3)
     unaffordable = FillBatch((Fill("B", decimal("11"), decimal("11"), decimal("10")),), 3)
     with pytest.raises(ValueError, match="cash"):
-        account.prepare_fill(root, unaffordable, expected_version=3)
+        account.append(root, fill_entries(_AT, unaffordable), expected_version=3)
     with pytest.raises(ValueError, match="expected_version"):
-        account.prepare_fill(root, short, expected_version=2)
+        account.append(root, fill_entries(_AT, short), expected_version=2)
     assert root == AccountState(snapshot(positions={"A": "1"}))
 
 
-def test_account_prepares_a_complete_fill_and_mark_transition() -> None:
+def test_account_appends_the_entries_and_then_the_mark() -> None:
+    """Two doors, one question each (design §5.1): may these entries follow this state, and may
+    this mark value it. The append carries its entries; the mark leaves them and the book alone."""
     root = AccountState(snapshot(cash="10"))
     account = Account(mode=AccountMode.SIGNED)
     fills = FillBatch(
@@ -223,16 +229,21 @@ def test_account_prepares_a_complete_fill_and_mark_transition() -> None:
         3,
     )
 
-    prepared_fill = account.prepare_fill(root, fills, expected_version=3)
-    transition = account.prepare_mark(
-        prepared_fill,
-        ValuationService().mark(prepared_fill.next_snapshot, {"A": decimal("4")}),
+    appended = account.append(root, fill_entries(_AT, fills), expected_version=3)
+    marked = account.mark(
+        appended.next_state,
+        ValuationService().mark(appended.next_snapshot, {"A": decimal("4")}),
         provenance="test",
+        marked_at=_AT,
     )
 
-    assert transition.next_state.snapshot == AccountSnapshot(4, decimal("6"), {"A": decimal("1")})
-    assert len(transition.next_state.fill_history) == 2
-    assert transition.next_state.latest_mark is not None
+    assert appended.next_state.snapshot == AccountSnapshot(4, decimal("6"), {"A": decimal("1")})
+    assert len(appended.next_state.ledger) == 2, "the refused fill is an entry too: a fact"
+    assert appended.next_state.ledger[1].positions == {} and appended.next_state.ledger[1].cash == 0
+    assert appended.next_state.marks == root.marks == ()
+    assert marked.next_state.snapshot == appended.next_state.snapshot
+    assert marked.next_state.ledger == appended.next_state.ledger
+    assert marked.next_state.latest_mark is marked.mark and marked.mark.account_version == 4
     assert root == AccountState(snapshot(cash="10"))
 
 
@@ -248,7 +259,7 @@ def test_zero_dealt_fills_prepare_an_unchanged_account_snapshot() -> None:
         before.version,
     )
 
-    prepared = account.prepare_fill(root, fills, expected_version=before.version)
+    prepared = account.append(root, fill_entries(_AT, fills), expected_version=before.version)
 
     assert prepared.next_snapshot.cash == before.cash
     assert prepared.next_snapshot.positions == before.positions
@@ -493,7 +504,7 @@ def test_a_halted_sale_does_not_fund_a_buy() -> None:
 
     The venue publishes a halted sell as typed ``NONTRADABLE`` zero-dealt evidence. If planning
     counted its proceeds, the buys it funded still fill and the account is overdrawn -- which
-    `Account.prepare_fill` catches only at the last moment, ending the run. A book with cash slack
+    `Account.append` catches only at the last moment, ending the run. A book with cash slack
     absorbs it silently; a fully-invested one dies on its first halted holding, and on the KOSPI
     200 panel every one of 2,485 sessions carries halted-but-priced rows.
 
@@ -551,7 +562,7 @@ def test_a_fully_invested_batch_is_payable_under_the_accounts_own_arithmetic() -
     real book already uses all 28 significant digits, so the same money summed in a different
     order can differ in the last one. A book that keeps cash absorbs that silently. One that
     declares ``cash_target = 0`` -- which is what an enhanced index holding its ETF sleeve as a
-    position declares -- lands within an ulp of zero, and ``prepare_fill`` refuses **any**
+    position declares -- lands within an ulp of zero, and ``Account.append`` refuses **any**
     negative, ending the run.
 
     The values below are the real rebalance that found it: session 8 of a KOSPI 200 enhanced
@@ -606,7 +617,7 @@ def test_a_fully_invested_batch_is_payable_under_the_accounts_own_arithmetic() -
         rules=rules,
     )
 
-    # Exactly what Account.prepare_fill accumulates, in the order it accumulates it.
+    # Exactly what the ledger fold accumulates, in the order it accumulates it.
     cash = account.cash
     for request in sorted(batch.requests, key=lambda item: item.instrument_id):
         if request.delta_quantity == 0:

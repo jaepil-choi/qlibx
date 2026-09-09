@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from vqapr.account.account import Account, PreparedAccountFill
+from vqapr.account.account import Account, PreparedAppend
 from vqapr.account.marking import SelectedMark, ValuationService
 from vqapr.authoring import AccountHistoryInput, Compliance, Component, Hold, StrategyModel
 from vqapr.authoring.records import TableSpec
@@ -97,7 +97,7 @@ class Filled:
     pending: AcceptedIntent
     snapshot: object
     fills: object
-    prepared_fill: PreparedAccountFill
+    prepared_fill: PreparedAppend
     previous_mark: AccountMark | None
     commit_evidence: AccountCommitEvidence
     committed_root: AcceptedRunState

@@ -445,7 +445,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     batch = ValuationService().mark(snapshot, {"A": Decimal("10")})
     arrived_marked = AccountState(
         snapshot,
-        mark_history=(
+        marks=(
             AccountMark(
                 0, batch, snapshot.cash + batch.total_value, provenance=None, marked_at=marked_at
             ),

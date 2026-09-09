@@ -30,6 +30,7 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
+from vqapr.domain.ledger import fill_entries
 from vqapr.domain.orders import OrderBatch, OrderRequest
 from vqapr.domain.values import LocalInstantDeclaration, Side
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
@@ -198,7 +199,7 @@ def test_the_exempt_band_reaches_the_account_through_a_real_fill(real_close) -> 
 
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
-    prepared = committed.prepare_fill(committed.state, fills, expected_version=3)
+    prepared = committed.append(committed.state, fill_entries(at, fills), expected_version=3)
     assert prepared.next_snapshot.cash == account.cash + notional - fill.cost.total
 
     # The same sale on the share category costs the tax, from the same account and price.
@@ -273,7 +274,7 @@ def test_the_exempt_sleeve_funds_more_of_the_buy_it_pays_for(real_close) -> None
     fills = venue.execute(execution_call(venue, batch, account, _snapshot(at, {etf: prices[etf], stock: prices[stock]})))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
-    prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
+    prepared = committed.append(committed.state, fill_entries(at, fills), expected_version=0)
     assert prepared.next_snapshot.cash >= 0, "planning must not reserve less than the fill charges"
     assert sum(fill.cost.tax for fill in fills.fills) == Decimal("0"), (
         "only the exempt sleeve was sold"

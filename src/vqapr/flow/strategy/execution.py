@@ -14,6 +14,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from vqapr.domain.instruments import InstrumentRoster, require_declared
+from vqapr.domain.ledger import fill_entries
 from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.planning import plan_orders
@@ -166,8 +167,13 @@ class ExecutionHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            prepared_fill = self._context.account.prepare_fill(
-                account_state, fills, expected_version=before.version
+            # The producer's entries, the ledger's permission (design §5.2, record `211`): the
+            # venue said what each fill did; the Account asks only whether they may go after
+            # this state and whether what results is an account.
+            prepared_fill = self._context.account.append(
+                account_state,
+                fill_entries(pending.target.target_at, fills),
+                expected_version=before.version,
             )
         commit_evidence = AccountCommitEvidence(
             run_identity=self._context.frozen_run.identity,
@@ -199,7 +205,6 @@ class ExecutionHandler:
             prepared_commit = self._context.state.prepare_account_commit(
                 pending_id=pending.pending_id,
                 account=prepared_fill,
-                fill=fills,
                 evidence=commit_evidence,
                 component_memory=component_memory,
                 envelope={
@@ -215,7 +220,7 @@ class ExecutionHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            self._context.account.commit_fill(prepared_fill)
+            self._context.account.commit_append(prepared_fill)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_COMMIT,
             cutoff=pending.target.target_at,

@@ -18,6 +18,7 @@ from tests.exchange.support import execution_call
 from vqapr.account.account import Account, AccountMode
 from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.costs import FillCost
+from vqapr.domain.ledger import fill_entries
 from vqapr.domain.fills import ZeroDealtReason
 from vqapr.domain.instruments import InstrumentRoster, instrument
 from vqapr.domain.values import LocalInstantDeclaration, Side
@@ -125,7 +126,7 @@ def test_real_prices_produce_whole_share_orders_that_fit_cash(real_close) -> Non
     fills = exchange.execute(execution_call(exchange, batch, account, _snapshot(at, prices)))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
-    prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
+    prepared = committed.append(committed.state, fill_entries(at, fills), expected_version=0)
 
     assert prepared.next_snapshot.cash >= 0, "whole-share planning must stay inside real cash"
     assert sum(fill.cost.tax for fill in fills.fills) == 0, "a pure buy programme pays no sale tax"
@@ -165,7 +166,7 @@ def test_sells_pay_commission_and_sale_tax_on_real_prices(real_close) -> None:
 
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
-    prepared = committed.prepare_fill(committed.state, fills, expected_version=3)
+    prepared = committed.append(committed.state, fill_entries(at, fills), expected_version=3)
     assert prepared.next_snapshot.cash == account.cash + notional - fill.cost.total
     assert prepared.next_snapshot.positions[instrument] == Decimal("40")
 
@@ -240,6 +241,6 @@ def test_rounding_residual_stays_visible_against_the_intended_position(real_clos
     fills = exchange.execute(execution_call(exchange, batch, account, _snapshot(at, {instrument: price})))
     committed = Account(mode=AccountMode.LONG_ONLY)
     committed.bind(AccountState(account))
-    prepared = committed.prepare_fill(committed.state, fills, expected_version=0)
+    prepared = committed.append(committed.state, fill_entries(at, fills), expected_version=0)
     residual_cash = account.cash - dealt * price - fills.fills[0].cost.total
     assert prepared.next_snapshot.cash == residual_cash

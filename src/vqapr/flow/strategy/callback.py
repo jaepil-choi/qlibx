@@ -650,5 +650,5 @@ class CallbackHandler:
         far. A Strategy that declared nothing gets an empty projection that refuses every read.
         """
         state = self._context.state.current.account
-        marks = () if state is None else state.mark_history
+        marks = () if state is None else state.marks
         return AccountHistory(marks, self._context.account_history_declaration)

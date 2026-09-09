@@ -1394,7 +1394,7 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     elif boundary == "exchange":
         monkeypatch.setattr(AcademicExchange, "execute", fail)
     elif boundary == "account":
-        monkeypatch.setattr(flow._context.account, "prepare_fill", fail)
+        monkeypatch.setattr(flow._context.account, "append", fail)
     elif boundary == "publication":
         monkeypatch.setattr(state, "prepare_feedback", fail)
     else:
@@ -1472,8 +1472,8 @@ def test_omitted_holding_is_liquidated_through_the_due_flow(tmp_path: Path) -> N
     assert result.final_state.account.snapshot == AccountSnapshot(
         1, Decimal("90"), {"B": Decimal("1")}
     )
-    assert [entry.fill.instrument_id for entry in result.final_state.account.fill_history] == [
+    assert [entry.detail["instrument"] for entry in result.final_state.account.ledger] == [
         "A",
         "B",
     ]
-    assert result.final_state.account.fill_history[0].fill.dealt_quantity == Decimal("-1")
+    assert result.final_state.account.ledger[0].positions["A"] == Decimal("-1")

@@ -1,8 +1,8 @@
-"""Detached immutable account state exposed to execution planning."""
+"""The account as values: a snapshot, a mark, and the state a run root holds."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from vqapr.domain.ledger import LedgerEntry
 from vqapr.domain.values import MarkBatch, require_tz_aware
 
 
@@ -131,34 +132,47 @@ class AccountMark:
 
 @dataclass(frozen=True, slots=True)
 class AccountState:
-    """Immutable Account authority embedded exclusively in an accepted run root."""
+    """The committed account as a run holds it: the fold, the mark window, the last append.
+
+    Design §5.1: *the real ledger is the record's parquet; this is the ledger's cached fold plus
+    the buffer awaiting publication.* `snapshot` is the fold of every entry ever appended;
+    `ledger` is the entries the LAST append made -- published to `vqapr.fill` and then dropped,
+    so the resident state never grows with the run; `marks` is the window of marks a consumer
+    declared it reads (`Account.retained_marks`), oldest first, which is a property of this run's
+    memory and not of the ledger.
+
+    What is checked here is what a window can be checked for in its own length: marks in version
+    and instant order, and the newest mark valuing this snapshot. Whether an entry may be appended
+    is the `Account`'s question (record `211`).
+    """
 
     snapshot: AccountSnapshot
-    mark_history: tuple[AccountMark, ...] = ()
-    fill_history: tuple[object, ...] = ()
+    marks: tuple[AccountMark, ...] = ()
+    ledger: tuple[LedgerEntry, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.snapshot, AccountSnapshot):
             raise TypeError("snapshot must be an AccountSnapshot")
-        if not isinstance(self.mark_history, tuple) or any(
-            not isinstance(mark, AccountMark) for mark in self.mark_history
+        if not isinstance(self.marks, tuple) or any(
+            not isinstance(mark, AccountMark) for mark in self.marks
         ):
-            raise TypeError("mark_history must be a tuple of AccountMark")
-        if not isinstance(self.fill_history, tuple):
-            raise TypeError("fill_history must be a tuple")
-        if self.mark_history:
-            versions = tuple(mark.account_version for mark in self.mark_history)
-            # Non-decreasing, not strictly increasing: an occurrence that trades nothing marks
-            # the book without advancing the account version, so one version can carry several
-            # marks. What must never happen is a mark for an earlier version arriving later.
+            raise TypeError("marks must be a tuple of AccountMark")
+        if not isinstance(self.ledger, tuple) or any(
+            not isinstance(entry, LedgerEntry) for entry in self.ledger
+        ):
+            raise TypeError("ledger must be a tuple of LedgerEntry")
+        if self.marks:
+            versions = tuple(mark.account_version for mark in self.marks)
+            # Non-decreasing, not strictly increasing: a market-clock instant that trades nothing
+            # marks the book without advancing the account version, so one version can carry
+            # several marks. What must never happen is a mark for an earlier version arriving
+            # later.
             if any(later < earlier for earlier, later in pairwise(versions)):
-                raise ValueError("mark history versions must not decrease")
-            instants = tuple(
-                mark.marked_at for mark in self.mark_history if mark.marked_at is not None
-            )
+                raise ValueError("mark versions must not decrease")
+            instants = tuple(mark.marked_at for mark in self.marks if mark.marked_at is not None)
             if any(later <= earlier for earlier, later in pairwise(instants)):
-                raise ValueError("mark history instants must be strictly increasing")
-            latest = self.mark_history[-1]
+                raise ValueError("mark instants must be strictly increasing")
+            latest = self.marks[-1]
             if latest.account_version > self.snapshot.version:
                 raise ValueError("latest mark cannot belong to a future Account snapshot")
             if (
@@ -169,4 +183,27 @@ class AccountState:
 
     @property
     def latest_mark(self) -> AccountMark | None:
-        return self.mark_history[-1] if self.mark_history else None
+        return self.marks[-1] if self.marks else None
+
+
+def fold(snapshot: AccountSnapshot, entries: Iterable[LedgerEntry]) -> AccountSnapshot:
+    """The book after appending `entries` to `snapshot`: one version later, deltas applied.
+
+    Arithmetic only (design §5.1: the ledger's incremental fold). A zero resulting quantity
+    leaves the book -- a position is a non-zero holding; whether the result is a *valid* account
+    -- cash not negative, no short in a long-only book -- is the `Account`'s question, asked once
+    on the folded result rather than on every delta.
+    """
+    cash = snapshot.cash
+    positions = dict(snapshot.positions)
+    for entry in entries:
+        if not isinstance(entry, LedgerEntry):
+            raise TypeError("entries must be LedgerEntry values")
+        cash += entry.cash
+        for instrument_id, delta in entry.positions.items():
+            quantity = positions.get(instrument_id, Decimal(0)) + delta
+            if quantity == 0:
+                positions.pop(instrument_id, None)
+            else:
+                positions[instrument_id] = quantity
+    return AccountSnapshot.trusted(version=snapshot.version + 1, cash=cash, positions=positions)

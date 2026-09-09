@@ -125,8 +125,11 @@ class ValuationHandler:
             owner=committed_root.account,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            prepared_account = self._context.account.prepare_mark(
-                prepared_fill,
+            committed_account = committed_root.account
+            if committed_account is None:
+                raise RuntimeError("a committed root must carry the Account it appended to")
+            prepared_account = self._context.account.mark(
+                committed_account,
                 mark,
                 marked_at=at,
                 observed_at={
@@ -161,9 +164,7 @@ class ValuationHandler:
             owner=committed_root.account,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            committed_mark = prepared_account.next_state.latest_mark
-            if committed_mark is None:
-                raise RuntimeError("a prepared Account mark must carry the mark it appends")
+            committed_mark = prepared_account.mark
             prepared_marked = self._context.state.prepare_marked(
                 account=prepared_account,
                 mark=mark,
@@ -256,10 +257,9 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            prepared_account = self._context.account.prepare_valuation(
+            prepared_account = self._context.account.mark(
                 account_state,
                 mark,
-                expected_version=before.version,
                 provenance=evidence,
                 marked_at=instant,
                 observed_at={
@@ -272,9 +272,7 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            committed_mark = prepared_account.next_state.latest_mark
-            if committed_mark is None:
-                raise RuntimeError("a prepared Account valuation must carry the mark it appends")
+            committed_mark = prepared_account.mark
             prepared_root = self._context.state.prepare_valuation_only(
                 account=prepared_account,
                 mark=mark,
@@ -292,7 +290,7 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            self._context.account.commit_valuation(prepared_account)
+            self._context.account.commit_mark(prepared_account)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=instant,

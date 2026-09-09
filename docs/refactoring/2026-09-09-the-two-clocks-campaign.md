@@ -4,7 +4,8 @@
 옳은지**를 묻는다. 무엇을 어떤 순서로 할 것인가.
 
 **설계 근거는 이 문서가 아니라 [`docs/design/two-clocks-and-the-wiring-table.md`](../design/two-clocks-and-the-wiring-table.md)에 있다.**
-왜 그렇게 정했는가는 거기, 무엇을 어떤 순서로 하는가는 여기.
+왜 그렇게 정했는가는 거기, 무엇을 어떤 순서로 하는가는 여기, 어디까지 갔는가는
+[`.agent/plans/active/two-clocks-campaign.md`](../../.agent/plans/active/two-clocks-campaign.md)에.
 
 ---
 
@@ -45,17 +46,22 @@ FillConvention    selector(SAME_DAY | NEXT_ELIGIBLE) + local_time + timezone
 
 ---
 
-## 2. Stage 0 — 확정과 측정 (코드 변경 없음)
+## 2. Stage 0 — 확정과 기준선 (코드 변경 없음)
 
 | | |
 |---|---|
 | 0a | 설계 문서 확정 — 완료 (`docs/design/two-clocks-and-the-wiring-table.md`) |
 | 0b | 캠페인 문서 확정 — 이 문서 |
 | 0c | 뒤집히는 PRD·아키텍처 절을 설계 문서 §8에 기록 — 완료 |
-| 0d | 각 Stage가 건드릴 파일과 줄 수를 측정. 특히 `flow/freeze.py`(364) · `flow/engine/run_state.py`(733) · `report/measure.py`(835)가 Stage 4에서 실제로 얼마나 줄어드는지 |
+| 0d | ExecPlan 작성 — 완료 (`.agent/plans/active/two-clocks-campaign.md`) |
+| 0e | showcase 8개의 record를 회귀 기준선으로 캡처 |
 
-**0d가 게이트다.** Stage 4(통장)의 근거는 "불변식이 세 벌에서 한 벌이 된다"인데, 그것이 실제로
-얼마나 줄이는지는 예측이지 측정이 아니다. 착수 전에 잰다.
+**착수 전 측정은 하지 않는다** (소유자 결정 2026-09-09). Stage 4의 근거는 *"불변식이 세 벌에서 한
+벌이 된다"*이고 그것은 구조적 사실이지 재서 정할 일이 아니다. 실제 감소량은 Stage 4가 끝난 뒤
+ExecPlan의 `Progress`에 기록한다.
+
+**0e는 측정이 아니라 검증 자산이다.** Stage 2와 4가 척추를 바꾸므로, 같은 선언이 같은 record를
+남기는지 대조할 기준이 필요하다.
 
 ---
 
@@ -92,7 +98,7 @@ FillConvention    selector(SAME_DAY | NEXT_ELIGIBLE) + local_time + timezone
 
 **위험.** 이 캠페인에서 가장 크다. 동일 시각 우선순위와 pending 의미가 바뀐다.
 
-**완료 판정.** `test_all` 통과 + showcase 9/9 + **기존 run의 record 회귀 비교** — 같은 선언으로 돌린
+**완료 판정.** `test_all` 통과 + showcase 8/8 + **기존 run의 record 회귀 비교** — 같은 선언으로 돌린
 run이 같은 record를 남기는지.
 
 ---
@@ -133,7 +139,8 @@ shipped skills · scaffold · showcase가 함께 움직인다.
 **Stage 2 뒤에 오는 이유.** 시계가 정리되기 전에 통장을 고치면 두 큰 변경이 겹친다. Stage 2가
 `PendingValuation`을 없애 놓으면 통장에 붙는 경로가 이미 단순해져 있다.
 
-**완료 판정.** Stage 0d의 측정치를 실제 감소량과 대조한다. 예측이 빗나갔으면 그 사실을 기록한다.
+**완료 판정.** 기준선 record 회귀 비교. 실제 감소량을 ExecPlan `Progress`에 기록한다 — 예측이
+빗나갔으면 그 사실도.
 
 ---
 
@@ -176,7 +183,7 @@ shipped skills · scaffold · showcase가 함께 움직인다.
            uv run ruff check src/
            uv run pyright
 Stage 2·4  기존 run 의 record 회귀 비교
-Stage 3    showcase 9/9 + shipped skills · scaffold 갱신
+Stage 3    showcase 8/8 + shipped skills · scaffold 갱신
 ```
 
 `tests/boundaries/test_the_layers_hold.py`의 `OPEN`은 비어 있고 그대로 비어 있어야 한다. 한 Step이
@@ -200,7 +207,7 @@ live                    아키텍처 §15-5 그대로
 
 | Stage | 상태 | 기록 |
 |---|---|---|
-| 0 | 문서 확정 완료. 0d 측정 미착수 | |
+| 0 | 문서 · ExecPlan 확정 완료. 0e 기준선 미착수 | |
 | 1 | 미착수 | |
 | 2 | 미착수 | |
 | 3 | 미착수 | |

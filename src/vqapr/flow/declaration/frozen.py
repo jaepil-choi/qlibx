@@ -21,7 +21,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
-from vqapr.domain.values import ModelMemory, normalize_memory
+from vqapr.domain.values import ModelMemory, opening_memory
 from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (
@@ -102,7 +102,7 @@ class FrozenStrategy:
     agenda: FrozenAgenda
     requirements: tuple[DataRequirement, ...] = ()
     compliance_requirements: tuple[DataRequirement, ...] = ()
-    initial_model_memory: ModelMemory = None
+    initial_model_memory: ModelMemory = field(default_factory=dict)
     initial_payload: bytes = b""
     initial_model_state_ref: ModelStateRef = field(init=False)
     _identity: str = field(default="", init=False, repr=False, compare=False)
@@ -112,7 +112,8 @@ class FrozenStrategy:
             raise ValueError("agenda must match the strategy config's agenda_id")
         _require_requirements("requirements", self.requirements)
         _require_requirements("compliance_requirements", self.compliance_requirements)
-        memory = normalize_memory(self.initial_model_memory)
+        # `{}` when nothing was declared (`docs/issues/089`): the first callback finds a mapping.
+        memory = opening_memory(self.initial_model_memory)
         object.__setattr__(self, "initial_model_memory", memory)
         object.__setattr__(
             self, "initial_model_state_ref", _model_state_ref(memory, self.initial_payload)
@@ -175,7 +176,7 @@ class FrozenDataModel:
     agenda: FrozenAgenda
     value_fields: tuple[str, ...]
     requirements: tuple[DataRequirement, ...] = ()
-    initial_model_memory: ModelMemory = None
+    initial_model_memory: ModelMemory = field(default_factory=dict)
     _identity: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -184,7 +185,7 @@ class FrozenDataModel:
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
         object.__setattr__(
-            self, "initial_model_memory", normalize_memory(self.initial_model_memory)
+            self, "initial_model_memory", opening_memory(self.initial_model_memory)
         )
 
     @property

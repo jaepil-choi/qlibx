@@ -42,7 +42,7 @@ from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.agendas import AgendaRule
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.model_state import prepare_model_state
-from vqapr.domain.values import ModelMemory, normalize_memory, require_tz_aware
+from vqapr.domain.values import ModelMemory, opening_memory, require_tz_aware
 from vqapr.exchange.conventions import FillRule
 from vqapr.extension.component import ComponentKind, ComponentRef
 
@@ -205,7 +205,12 @@ class StrategyEntry:
     """
 
     component_id: Annotated[str, Field(min_length=1)]
-    initial_model_memory: Any = None
+    initial_model_memory: Any = Field(default_factory=dict)
+    """The memory the model finds on its first callback. A mapping, `{}` unless declared: the
+    authoring reference promises `self.memory.setdefault(...)` works on session one, and it did
+    not while an undeclared opening memory was `None` (`docs/issues/089`). A declared `null` is
+    read as the same empty mapping, because "nothing declared" and "declared nothing" are one
+    opening state."""
 
     @model_validator(mode="before")
     @classmethod
@@ -222,7 +227,7 @@ class StrategyEntry:
     @field_validator("initial_model_memory")
     @classmethod
     def _memory(cls, value: object) -> ModelMemory:
-        return normalize_memory(value)
+        return opening_memory(value)
 
 
 _OUTPUT_OWNED_FIELDS = frozenset({"available_at", "instrument"})
@@ -258,7 +263,8 @@ class DataModelEntry:
 
     component_id: Annotated[str, Field(min_length=1)]
     value_fields: tuple[str, ...]
-    initial_model_memory: Any = None
+    initial_model_memory: Any = Field(default_factory=dict)
+    """`{}` unless declared, as for a strategy (`docs/issues/089`)."""
 
     @field_validator("value_fields")
     @classmethod
@@ -268,7 +274,7 @@ class DataModelEntry:
     @field_validator("initial_model_memory")
     @classmethod
     def _memory(cls, value: object) -> ModelMemory:
-        return normalize_memory(value)
+        return opening_memory(value)
 
 
 class _InitialAccount(BaseModel):
@@ -835,11 +841,12 @@ class RunDefinition(BaseModel):
 
 def _entry_body(entry: object, names: Sequence[str]) -> dict[str, Any]:
     """An entry's declared fields as its stored block: only what was declared, in the stored
-    order, `initial_model_memory` omitted when empty (as the document always wrote it)."""
+    order, `initial_model_memory` omitted when empty (as the document always wrote it: an
+    undeclared opening memory is `{}` and is not spelled)."""
     body: dict[str, Any] = {}
     for name in names:
         value = getattr(entry, name)
-        if name == "initial_model_memory" and value is None:
+        if name == "initial_model_memory" and value in (None, {}):
             continue
         body[name] = list(value) if isinstance(value, tuple) else value
     return body

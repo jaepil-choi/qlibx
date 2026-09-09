@@ -17,7 +17,7 @@ from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
 from vqapr.domain.model_state import prepare_model_state
-from vqapr.domain.values import ModelMemory, normalize_memory
+from vqapr.domain.values import ModelMemory, normalize_memory, opening_memory
 
 
 class LifecycleKind(StrEnum):
@@ -300,7 +300,10 @@ class RunStateRepository:
         leaves from there (record `181`)."""
         if row_sink is not None and not callable(row_sink):
             raise TypeError("row_sink must be callable")
-        prepared = prepare_model_state(initial_model_memory, initial_payload)
+        # `{}` when nothing was handed over (`docs/issues/089`): the same opening memory the
+        # frozen layers default to, so a repository seeded without one and a run frozen without
+        # one name the same first state.
+        prepared = prepare_model_state(opening_memory(initial_model_memory), initial_payload)
         states = {prepared.ref: prepared.memory}
         payloads = {prepared.ref: prepared.payload}
         current_ref = prepared.ref

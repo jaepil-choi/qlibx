@@ -18,7 +18,14 @@ import pytest
 from pydantic import ValidationError
 
 from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.project.run import ComplianceSet, RunAgenda, RunDefinition, StrategyConfig, StrategyEntry
+from vqapr.project.run import (
+    ComplianceSet,
+    DataModelEntry,
+    RunAgenda,
+    RunDefinition,
+    StrategyConfig,
+    StrategyEntry,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -103,6 +110,23 @@ def test_a_strategy_entry_is_an_id_and_memory_only() -> None:
     # is pydantic's own shape error, not a hand-written TypeError.
     with pytest.raises(ValidationError, match="valid string"):
         _definition(compliance=(_component(ComponentKind.COMPLIANCE, "x"),))
+
+
+def test_an_undeclared_opening_memory_is_an_empty_mapping() -> None:
+    """`{}` unless declared, and a declared `null` is the same `{}` (`docs/issues/089`).
+
+    `make-strategy`'s reference shows `self.memory.setdefault(...)` on the first callback; an
+    entry whose opening memory was `None` made that documented example raise. Any other
+    strict-JSON value a run declares is kept as declared.
+    """
+    assert StrategyEntry("a").initial_model_memory == {}
+    assert StrategyEntry("a", None).initial_model_memory == {}
+    assert StrategyEntry("a", {"cadence": [1]}).initial_model_memory == {"cadence": [1]}
+    assert DataModelEntry("d", ("x",)).initial_model_memory == {}
+    assert DataModelEntry("d", ("x",), None).initial_model_memory == {}
+    # Distinct entries do not share one mutable default.
+    first, second = StrategyEntry("a"), StrategyEntry("b")
+    assert first.initial_model_memory is not second.initial_model_memory
 
 
 def test_the_run_layer_pairs_its_declarations() -> None:

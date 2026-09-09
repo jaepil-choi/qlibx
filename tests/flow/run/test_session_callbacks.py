@@ -168,6 +168,38 @@ class TimingOverrideStrategy(EveryThreeOccurrences):
         )
 
 
+class DocumentedMemoryExample(StrategyModel):
+    """`memory-and-payload.md`'s example, verbatim: it assumes `self.memory` is a mapping."""
+
+    def decide(self, call: StrategyModelContext) -> Hold:
+        seen = self.memory.setdefault("sessions", 0)  # type: ignore[union-attr]
+        self.memory["sessions"] = seen + 1  # type: ignore[index]
+        return Hold(reason="counting sessions")
+
+
+def test_the_documented_memory_example_runs_on_the_first_callback() -> None:
+    """An undeclared opening memory is `{}`, not `None` (`docs/issues/089`).
+
+    The reference promises "restored before every `decide()`" and shows `setdefault` unguarded;
+    with `None` as the opening memory that example raised `AttributeError` on session one of
+    every run. The frozen layer's default is what the run state is seeded from, so the test seeds
+    it the way `orchestration` does.
+    """
+    layer = FrozenStrategy(
+        config=StrategyConfig(_component("strategy", ComponentKind.STRATEGY_MODEL), "strategy"),
+        compliance=ComplianceSet(()),
+        agenda=FrozenAgenda("strategy", (_occurrence(1),)),
+    )
+    assert layer.initial_model_memory == {}
+    state = _state(memory=layer.initial_model_memory)
+    strategy = DocumentedMemoryExample()
+
+    _flow(strategy, state, (_occurrence(1), _occurrence(2))).run()
+
+    assert strategy.memory == {"sessions": 2}
+    assert state.load_model_state(state.current.current_model_state_ref) == {"sessions": 2}
+
+
 def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
     state = _state()
     strategy = TimingOverrideStrategy()
@@ -177,7 +209,9 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
         _flow(strategy, state, (_occurrence(1),)).run()
 
     assert state.current.current_model_state_ref == before_ref
-    assert strategy.memory is None
+    # The opening memory, restored before the callback and nothing more: what the callback wrote
+    # did not survive the refusal. `{}` since `docs/issues/089`; it was `None`.
+    assert strategy.memory == {}
 
 
 class FailingStrategy(EveryThreeOccurrences):

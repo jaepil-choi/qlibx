@@ -296,6 +296,19 @@ def normalize_memory(value: object) -> ModelMemory:
     return visit(value)
 
 
+def opening_memory(value: object) -> ModelMemory:
+    """The memory a model finds on its first callback: `value` normalized, and `{}` for `None`.
+
+    The authoring reference promises `self.memory` is a mapping a callback can `setdefault` on
+    from session one. An undeclared opening memory was `None`, so the documented example raised
+    on the first callback of every run (`docs/issues/089`). "Nothing declared" and "declared
+    `null`" are one opening state, and it is the empty mapping; any other strict-JSON value a
+    run declares is kept as declared.
+    """
+    normalized = normalize_memory(value)
+    return {} if normalized is None else normalized
+
+
 # ------------------------------------------------------------------------------------------
 # enums.py, folded in (one-shape Step 7, record 162)
 #

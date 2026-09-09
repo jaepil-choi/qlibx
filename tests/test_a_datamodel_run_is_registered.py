@@ -161,7 +161,8 @@ def test_the_entry_refuses_a_value_field_the_output_cannot_carry(
 
 
 def test_the_entry_normalizes_its_opening_memory() -> None:
-    assert DataModelEntry("reversal", ("score",)).initial_model_memory is None
+    # `{}` unless declared (`docs/issues/089`, record `215`): the first callback finds a mapping.
+    assert DataModelEntry("reversal", ("score",)).initial_model_memory == {}
     assert DataModelEntry("reversal", ("score",), initial_model_memory={"calls": 10}).initial_model_memory == {"calls": 10}
 
 

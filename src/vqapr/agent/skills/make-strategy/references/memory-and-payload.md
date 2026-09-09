@@ -12,6 +12,10 @@ worse, keeps it in a way the record cannot reproduce.
 Restored before every `decide()`, snapshotted after. Read it, change it, leave it; there is
 nothing to save explicitly.
 
+**On the first callback it is `{}`** — an empty mapping, not `None` — unless the run declares an
+`initial_model_memory` under its strategy entry, in which case it is that value. So the example
+below runs on session one as written.
+
 "Strict JSON" is the constraint that bites: no `Decimal`, no `datetime`, no set, no tuple key.
 Store what will round-trip and rebuild the rest.
 
@@ -20,6 +24,9 @@ def decide(self, call):
     seen = self.memory.setdefault("sessions", 0)
     self.memory["sessions"] = seen + 1
 ```
+
+Outside a run — a fresh instance you construct yourself in a test — `self.memory` is `None` until
+the framework restores it; `inputs()` is called on such an instance and must not read it.
 
 ## Warm-up is a `Hold`, not a failure
 

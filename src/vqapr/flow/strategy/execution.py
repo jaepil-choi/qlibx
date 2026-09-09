@@ -202,9 +202,9 @@ class ExecutionHandler:
             owner=account_state,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            prepared_commit = self._context.state.prepare_account_commit(
+            prepared_commit = self._context.state.prepare_account(
+                prepared_fill,
                 pending_id=pending.pending_id,
-                account=prepared_fill,
                 evidence=commit_evidence,
                 component_memory=component_memory,
                 envelope={
@@ -273,7 +273,7 @@ class ExecutionHandler:
             owner=feedback_evidence,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            root = self._context.state.publish_feedback(
+            root = self._context.state.publish_infallible(
                 self._context.state.prepare_feedback((due_evidence,), evidence=feedback_evidence)
             )
         assert root.account is not None
@@ -282,7 +282,7 @@ class ExecutionHandler:
         )
 
     def _publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
-        root = self._context.state.publish_account_commit(prepared)
+        root = self._context.state.publish_infallible(prepared)
         if root.account != self._context.account.state:
             raise RuntimeError("Account commit root does not mirror Account authority")
         return root

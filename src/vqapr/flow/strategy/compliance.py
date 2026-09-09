@@ -142,7 +142,7 @@ class ComplianceHandler:
                     "account_version": report.account_version,
                 },
             )
-        self._context.state.publish_monitoring(
+        self._context.state.publish_infallible(
             self._context.state.prepare_monitoring(
                 recorder=recorder, component_memory=component_memory
             )

@@ -17,7 +17,7 @@ from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
 from vqapr.domain.model_state import prepare_model_state
-from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
+from vqapr.domain.values import ModelMemory, normalize_memory
 
 
 class LifecycleKind(StrEnum):
@@ -376,6 +376,57 @@ class RunStateRepository:
         for table_id, rows in prepared.new_rows:
             self._row_sink(table_id, rows)
 
+    def _advance(
+        self,
+        root: AcceptedRunState,
+        *,
+        lifecycle: LifecycleTrace | None = None,
+        states: Mapping[ModelStateRef, ModelMemory] | None = None,
+        payloads: Mapping[ModelStateRef, bytes] | None = None,
+        verified: frozenset[ModelStateRef] | None = None,
+        current_model_state_ref: object = _UNSET,
+        component_refs: Mapping[str, ModelStateRef] | None = None,
+        account: object = _UNSET,
+        pending: object = _UNSET,
+        chunks: Mapping[str, tuple[tuple[Mapping[str, object], ...], ...]] | None = None,
+        manifests: tuple[RecorderManifest, ...] | None = None,
+        feedback: tuple[object, ...] | None = None,
+        finalization: object = _UNSET,
+        commits: int = 0,
+    ) -> AcceptedRunState:
+        """The next root: `root` one version later, with only what a transition names changed.
+
+        Every transition used to spell all fourteen fields of the root it was making, so what a
+        transition CHANGED was buried in what it carried over (record `212`). Here a transition
+        names its changes and nothing else; the root is otherwise the one it extends.
+        """
+        return AcceptedRunState(
+            version=root.version + 1,
+            _model_states=root._model_states if states is None else states,
+            _payloads=root._payloads if payloads is None else payloads,
+            _verified=root._verified if verified is None else verified,
+            current_model_state_ref=(
+                root.current_model_state_ref
+                if current_model_state_ref is _UNSET
+                else current_model_state_ref  # type: ignore[arg-type]
+            ),
+            component_state_refs=(
+                root.component_state_refs if component_refs is None else component_refs
+            ),
+            account=root.account if account is _UNSET else account,  # type: ignore[arg-type]
+            pending_accepted_intent=root.pending_accepted_intent if pending is _UNSET else pending,
+            lifecycle_trace=(
+                root.lifecycle_trace if lifecycle is None else (*root.lifecycle_trace, lifecycle)
+            ),
+            recorder_manifests=root.recorder_manifests if manifests is None else manifests,
+            _recorder_chunks=root._recorder_chunks if chunks is None else chunks,
+            feedback=root.feedback if feedback is None else feedback,
+            finalization=(
+                root.finalization if finalization is _UNSET else finalization  # type: ignore[arg-type]
+            ),
+            model_state_commit_count=root.model_state_commit_count + commits,
+        )
+
     def prepare_callback(
         self,
         memory: object,
@@ -404,35 +455,26 @@ class RunStateRepository:
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
         component_refs, proved = _component_states(root, component_memory, states, payloads)
-        chunks = dict(root._recorder_chunks)
-        manifests = root.recorder_manifests
-        new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
-        if recorder is not None:
-            new_rows = self._stage_rows(chunks, recorder.staged_rows())
-            manifests = manifests + recorder.manifests()
-        next_root = AcceptedRunState(
-            version=root.version + 1,
-            _model_states=states,
-            _payloads=payloads,
-            # `candidate` came straight out of prepare_model_state, so its ref is proved by
-            # construction; the rest were proved by the root we are extending.
-            _verified=root._verified | {candidate.ref} | proved,
-            current_model_state_ref=candidate.ref,
-            component_state_refs=component_refs,
-            account=root.account,
-            pending_accepted_intent=(
-                root.pending_accepted_intent
-                if pending_accepted_intent is _UNSET
-                else pending_accepted_intent
+        chunks, manifests, new_rows = self._staged(recorder)
+        return PreparedRunState(
+            expected,
+            self._advance(
+                root,
+                lifecycle=lifecycle,
+                states=states,
+                payloads=payloads,
+                # `candidate` came straight out of prepare_model_state, so its ref is proved by
+                # construction; the rest were proved by the root we are extending.
+                verified=root._verified | {candidate.ref} | proved,
+                current_model_state_ref=candidate.ref,
+                component_refs=component_refs,
+                pending=pending_accepted_intent,
+                chunks=chunks,
+                manifests=manifests,
+                commits=1,
             ),
-            lifecycle_trace=(*root.lifecycle_trace, lifecycle),
-            recorder_manifests=manifests,
-            _recorder_chunks=chunks,
-            feedback=root.feedback,
-            finalization=root.finalization,
-            model_state_commit_count=root.model_state_commit_count + 1,
+            new_rows,
         )
-        return PreparedRunState(expected_version=expected, root=next_root, new_rows=new_rows)
 
     def publish(self, prepared: PreparedRunState) -> AcceptedRunState:
         """Perform the sole mutable action after all fallible work is complete."""
@@ -444,75 +486,17 @@ class RunStateRepository:
         self._root = prepared.root
         return self._root
 
-    def _publish_infallible(self, prepared: PreparedRunState) -> AcceptedRunState:
-        """Publish a prevalidated post-Account candidate without callback hooks."""
+    def publish_infallible(self, prepared: PreparedRunState) -> AcceptedRunState:
+        """Publish a prevalidated post-Account candidate without callback hooks.
+
+        One door for every transition after the callback's -- the append, the mark, the
+        findings, the feedback -- which until record `212` had a wrapper each that did this.
+        """
         if prepared.expected_version != self._root.version:
             raise RuntimeError("run state optimistic conflict")
         self._deliver(prepared)
         self._root = prepared.root
         return self._root
-
-    def prepare_account_commit(
-        self,
-        *,
-        pending_id: str,
-        account: PreparedAppend,
-        evidence: object = None,
-        envelope: Mapping[str, object] | None = None,
-        component_memory: Mapping[str, object] | None = None,
-    ) -> PreparedRunState:
-        """Prepare the root which consumes pending and mirrors the ledger append.
-
-        `component_memory` is what the venue's `execute` -- and any other stateful component
-        this due item called -- left in memory (record `184`), committed with the fills it
-        produced; `None` carries every ref over unchanged.
-        """
-        root = self._root
-        if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
-            raise RuntimeError("due completion pending identity does not match current pending")
-        if root.account != account.source:
-            raise RuntimeError("prepared Account append does not match current root")
-        states = dict(root._model_states)
-        payloads = dict(root._payloads)
-        component_refs, proved = _component_states(root, component_memory, states, payloads)
-        # The state the Account agreed to: the fold, the same mark window, and the entries this
-        # append made -- which go into the vqapr.fill chunk below and are then the only ledger
-        # the state keeps, so it never grows with the run while every entry reaches parquet.
-        committed = account.next_state
-        chunks = dict(root._recorder_chunks)
-        rows = _fill_rows(account.entries, committed.snapshot.version, envelope=envelope)
-        # Staged like every other table's rows: onto the root without a sink, out to the sink
-        # at publish with one. Until record `211` the fill rows went into the root's chunks
-        # either way and reached disk only when the strategy record was frozen at the end -- so
-        # a run that died left its account table and no fill table, which is exactly the
-        # damaged-account outcome an append-only ledger exists to rule out (design §5.1).
-        new_rows = self._stage_rows(chunks, {FILL_TABLE: rows} if rows else {})
-        return PreparedRunState(
-            root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=states,
-                _payloads=payloads,
-                _verified=root._verified | proved,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=component_refs,
-                account=committed,
-                pending_accepted_intent=None,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.ACCOUNT_COMMITTED, evidence),
-                ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=chunks,
-                feedback=root.feedback,
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
-            ),
-            new_rows,
-        )
-
-    def publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:
-        return self._publish_infallible(prepared)
 
     def _staged(
         self, recorder: InvocationRecorder | None
@@ -527,99 +511,64 @@ class RunStateRepository:
             manifests = manifests + recorder.manifests()
         return chunks, manifests, new_rows
 
-    def prepare_marked(
+    def prepare_account(
         self,
+        account: PreparedAppend | PreparedMark,
         *,
-        account: PreparedMark,
-        mark: MarkBatch,
         evidence: object = None,
+        pending_id: str | None = None,
+        envelope: Mapping[str, object] | None = None,
         recorder: InvocationRecorder | None = None,
+        component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Publish the mark a fill was valued at, and the NAV it measured.
+        """Mirror what the Account agreed to -- an append or a mark -- as the next root.
 
-        Valuation happens at the instant the venue fills (record 148): the marked account and
-        the account-table row stating its NAV are one commit, so the rows a run reads its NAV
-        series from can never disagree with the marks the run holds.
+        One door for the two things the ledger accepts (design §5.1; record `212` folded the
+        three branches this replaced). An append consumes the pending intent it filled
+        (`pending_id` names it), stages its fill rows, and commits what the venue's `execute`
+        left in memory. A mark changes no account and no pending slot; it stages the NAV row the
+        valuation measured (`recorder`). Both publish `account.next_state`, which the Account
+        itself built -- this asks only that it extends the root it is handed.
         """
         root = self._root
         if root.account is None or root.account != account.source:
-            raise RuntimeError("prepared Account mark does not match current root")
-        if mark != account.mark.marks:
-            raise ValueError("mark must be the prepared Account mark batch")
+            raise RuntimeError("prepared Account transition does not match current root")
+        states = dict(root._model_states)
+        payloads = dict(root._payloads)
+        component_refs, proved = _component_states(root, component_memory, states, payloads)
         chunks, manifests, new_rows = self._staged(recorder)
+        pending: object = _UNSET
+        if isinstance(account, PreparedAppend):
+            if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
+                raise RuntimeError("an append consumes the pending intent it filled; ids differ")
+            # Staged like every other table's rows: onto the root without a sink, out to the
+            # sink at publish with one (record `211`: until then fill rows reached disk only
+            # when the strategy record was frozen, so a run that died left no fill table).
+            rows = _fill_rows(
+                account.entries, account.next_state.snapshot.version, envelope=envelope
+            )
+            new_rows = (*new_rows, *self._stage_rows(chunks, {FILL_TABLE: rows} if rows else {}))
+            kind, pending = LifecycleKind.ACCOUNT_COMMITTED, None
+        else:
+            if pending_id is not None:
+                raise RuntimeError("a mark consumes no pending intent")
+            kind = LifecycleKind.MARKED
         return PreparedRunState(
             root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=root.component_state_refs,
+            self._advance(
+                root,
+                lifecycle=LifecycleTrace(kind, evidence),
+                states=states,
+                payloads=payloads,
+                verified=root._verified | proved,
+                component_refs=component_refs,
                 account=account.next_state,
-                pending_accepted_intent=None,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.MARKED, evidence),
-                ),
-                recorder_manifests=manifests,
-                _recorder_chunks=chunks,
-                feedback=root.feedback,
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
+                pending=pending,
+                chunks=chunks,
+                manifests=manifests,
             ),
             new_rows,
         )
-
-    def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
-        return self._publish_infallible(prepared)
-
-    def prepare_valuation_only(
-        self,
-        *,
-        account: PreparedMark,
-        mark: MarkBatch,
-        evidence: object = None,
-        recorder: InvocationRecorder | None = None,
-    ) -> PreparedRunState:
-        """Publish a mark taken at a market-clock instant no fill was due at (design §3.1).
-
-        The Account did not change, so this appends a mark without an ACCOUNT_COMMITTED step,
-        and it leaves the pending intent -- whose target is a LATER instant -- exactly where it
-        was. The NAV measured rides along as `recorder` rows, as it does on `prepare_marked`.
-        """
-        root = self._root
-        if root.account is None or root.account != account.source:
-            raise RuntimeError("prepared Account valuation does not match current root")
-        if mark != account.mark.marks:
-            raise ValueError("mark must be the prepared Account mark batch")
-        chunks, manifests, new_rows = self._staged(recorder)
-        return PreparedRunState(
-            root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=root.component_state_refs,
-                account=account.next_state,
-                pending_accepted_intent=root.pending_accepted_intent,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.MARKED, evidence),
-                ),
-                recorder_manifests=manifests,
-                _recorder_chunks=chunks,
-                feedback=root.feedback,
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
-            ),
-            new_rows,
-        )
-
-    def publish_valuation_only(self, prepared: PreparedRunState) -> AcceptedRunState:
-        return self._publish_infallible(prepared)
 
     def prepare_monitoring(
         self,
@@ -628,52 +577,31 @@ class RunStateRepository:
         evidence: object = None,
         component_memory: Mapping[str, object] | None = None,
     ) -> PreparedRunState:
-        """Publish the findings monitoring made over the account one commit left.
+        """Publish the findings the Compliance rules made over the book one mark valued.
 
-        Monitoring changes nothing it observes: no fill, no mark, no decision, and the pending
-        slot is left exactly as found -- it runs right after a commit (record `148`), and the
-        commit already settled that slot. What it adds is rows -- one per rule, saying what
-        was measured against which limit -- and until this path existed those rows had nowhere to
-        go. The report sat
-        on the occurrence trace, the record counted it (`contract`), and the values themselves
-        never reached disk: a run whose book breached a limit could say *that* it did, and not
-        *by how much*.
-
-        `component_memory` is what each rule's `observe` left (record `181`): a rule that
-        counts its breaches commits the count here, with the findings it counted.
+        Compliance changes nothing it observes: no fill, no mark, no decision, and the pending
+        slot is left exactly as found. What it adds is rows -- one per rule, saying what was
+        measured against which limit -- and the memory each rule left (record `181`).
         """
         root = self._root
-        chunks = dict(root._recorder_chunks)
-        new_rows = self._stage_rows(chunks, recorder.staged_rows())
         states = dict(root._model_states)
         payloads = dict(root._payloads)
         component_refs, proved = _component_states(root, component_memory, states, payloads)
+        chunks, manifests, new_rows = self._staged(recorder)
         return PreparedRunState(
             root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=states,
-                _payloads=payloads,
-                _verified=root._verified | proved,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=component_refs,
-                account=root.account,
-                pending_accepted_intent=root.pending_accepted_intent,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.MONITORED, evidence),
-                ),
-                recorder_manifests=root.recorder_manifests + recorder.manifests(),
-                _recorder_chunks=chunks,
-                feedback=root.feedback,
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
+            self._advance(
+                root,
+                lifecycle=LifecycleTrace(LifecycleKind.MONITORED, evidence),
+                states=states,
+                payloads=payloads,
+                verified=root._verified | proved,
+                component_refs=component_refs,
+                chunks=chunks,
+                manifests=manifests,
             ),
             new_rows,
         )
-
-    def publish_monitoring(self, prepared: PreparedRunState) -> AcceptedRunState:
-        return self._publish_infallible(prepared)
 
     def prepare_feedback(
         self, feedback: tuple[object, ...], *, evidence: object = None
@@ -681,30 +609,13 @@ class RunStateRepository:
         root = self._root
         return PreparedRunState(
             root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=root.component_state_refs,
-                account=root.account,
-                pending_accepted_intent=None,
-                lifecycle_trace=(
-                    *root.lifecycle_trace,
-                    LifecycleTrace(LifecycleKind.FEEDBACK_PUBLISHED, evidence),
-                ),
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
+            self._advance(
+                root,
+                lifecycle=LifecycleTrace(LifecycleKind.FEEDBACK_PUBLISHED, evidence),
+                pending=None,
                 feedback=(*root.feedback, *feedback),
-                finalization=root.finalization,
-                model_state_commit_count=root.model_state_commit_count,
             ),
         )
-
-    def publish_feedback(self, prepared: PreparedRunState) -> AcceptedRunState:
-        """Publish already-prepared feedback without running an external hook."""
-        return self._publish_infallible(prepared)
 
     def prepare_finalization(self, finalization: RunFinalization) -> PreparedRunState:
         """Prepare a typed terminal transition after all pending work is consumed."""
@@ -714,23 +625,7 @@ class RunStateRepository:
         if root.finalization is not None:
             raise RuntimeError("run is already finalized")
         return PreparedRunState(
-            root.version,
-            AcceptedRunState(
-                version=root.version + 1,
-                _model_states=root._model_states,
-                _payloads=root._payloads,
-                _verified=root._verified,
-                current_model_state_ref=root.current_model_state_ref,
-                component_state_refs=root.component_state_refs,
-                account=root.account,
-                pending_accepted_intent=None,
-                lifecycle_trace=root.lifecycle_trace,
-                recorder_manifests=root.recorder_manifests,
-                _recorder_chunks=root._recorder_chunks,
-                feedback=root.feedback,
-                finalization=finalization,
-                model_state_commit_count=root.model_state_commit_count,
-            ),
+            root.version, self._advance(root, pending=None, finalization=finalization)
         )
 
     def finalize(self, finalization: RunFinalization) -> AcceptedRunState:

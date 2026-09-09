@@ -165,9 +165,8 @@ class ValuationHandler:
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             committed_mark = prepared_account.mark
-            prepared_marked = self._context.state.prepare_marked(
-                account=prepared_account,
-                mark=mark,
+            prepared_marked = self._context.state.prepare_account(
+                prepared_account,
                 evidence=mark_evidence,
                 recorder=self.measurement_recorder(
                     cutoff=at,
@@ -273,9 +272,8 @@ class ValuationHandler:
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             committed_mark = prepared_account.mark
-            prepared_root = self._context.state.prepare_valuation_only(
-                account=prepared_account,
-                mark=mark,
+            prepared_root = self._context.state.prepare_account(
+                prepared_account,
                 evidence=evidence,
                 recorder=self.measurement_recorder(
                     cutoff=instant,
@@ -297,7 +295,7 @@ class ValuationHandler:
             owner=account_state,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            root = self._context.state.publish_valuation_only(prepared_root)
+            root = self._context.state.publish_infallible(prepared_root)
         return Marked(root, mark, evidence, selected_marks)
 
     def measurement_recorder(
@@ -363,7 +361,7 @@ class ValuationHandler:
         return recorder
 
     def publish_marked(self, prepared: PreparedRunState) -> AcceptedRunState:
-        root = self._context.state.publish_marked(prepared)
+        root = self._context.state.publish_infallible(prepared)
         if root.account != self._context.account.state:
             raise RuntimeError("Account mark root does not mirror Account authority")
         return root

@@ -103,6 +103,11 @@ exists.
 **`rows_total`, `matched` and `returned` are reported separately**, so a truncated page never reads
 as a short run. Quote the right one; `--limit 0` returns everything.
 
+A dataset a run wrote names its producer twice: `produced_by` is the run id, `produced_by_record`
+is the record `<id>@<fp8>` — the component **version** that wrote it. When that version is not the
+one registered now, `vqapr check <run-id>` reports `run.output_stale`; the parquet is not what the
+file on disk would compute.
+
 Everything here reads what was **frozen to disk**. Nothing is recomputed — re-running to answer a
 question about a run would be a different run.
 

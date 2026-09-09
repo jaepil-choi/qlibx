@@ -115,6 +115,13 @@ class DatasetRegistration:
     `DataModelOutput.register` from the run it serves; `None` for a dataset registered from the
     author's own file. A fact about provenance a reader could otherwise only reconstruct by
     opening every run record."""
+    produced_by_record: str | None = None
+    """The record that wrote it -- `<component_id>@<fp8>`, the ref `list datamodels` and
+    `rm datamodel` address -- when a run did (`docs/issues/091`). The run id says WHICH run; only
+    the record ref says which VERSION of the component, and in a tuning loop several versions
+    write the same dataset id in turn. Without it the parquet on disk could not be told apart
+    from the file on disk, and five of eight pooled alphas in the reporting testbed held a
+    version other than the one restored. `None` when `produced_by` is."""
     """첫 · 마지막 `available_at`. **선언이 아니라 측정값**이다.
 
     author가 쓰는 값이 아니다. `validate`가 등록 중에 재어 `with_span`으로 붙인다 -- author가
@@ -266,11 +273,19 @@ class DatasetRegistration:
         """
         return replace(self, aggregated=bool(aggregated))
 
-    def with_producer(self, run_id: str) -> DatasetRegistration:
-        """The same registration, naming the run that wrote it."""
+    def with_producer(self, run_id: str, record_ref: str | None = None) -> DatasetRegistration:
+        """The same registration, naming the run that wrote it and, when known, its record.
+
+        `record_ref` is `<component_id>@<fp8>` (`docs/issues/091`). Optional only for a document
+        written before the field existed: a producing run always knows its record ref.
+        """
         if not isinstance(run_id, str) or not run_id:
             raise ValueError("produced_by must be a non-empty run id")
-        return replace(self, produced_by=run_id)
+        if record_ref is not None and (
+            not isinstance(record_ref, str) or "@" not in record_ref or record_ref.startswith("@")
+        ):
+            raise ValueError("produced_by_record must be a record ref `<component_id>@<fp8>`")
+        return replace(self, produced_by=run_id, produced_by_record=record_ref)
 
     def spoken(self) -> list[str]:
         """The point-in-time meaning of this declaration, in one sentence (`docs/issues/027`).

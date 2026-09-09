@@ -69,7 +69,8 @@ class DatasetCodec(Document):
     of an entry written before a key existed -- things a registration cannot carry as rules.
 
     Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
-    `field_types`. Measured: `aggregated`, `span`; `produced_by` is stamped by a datamodel run.
+    `field_types`. Measured: `aggregated`, `span`; `produced_by` and `produced_by_record` are
+    stamped by the run that wrote it.
     `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a
     declaration since (`docs/issues/archive/088`); an entry written under the old shape carries the
     value duckdb measured, which is what the author would have declared, so it decodes as declared.
@@ -93,6 +94,7 @@ class DatasetCodec(Document):
     aggregated: bool | None = None
     span: tuple[datetime, datetime] | None = None
     produced_by: str | None = None
+    produced_by_record: str | None = None
     execution: ExecutionRoleCodec | None = None
 
     @model_validator(mode="after")
@@ -106,7 +108,15 @@ class DatasetCodec(Document):
         self, handler: SerializerFunctionWrapHandler
     ) -> dict[str, Any]:
         body = handler(self)
-        for measured in ("grain", "field_types", "aggregated", "span", "produced_by", "execution"):
+        for measured in (
+            "grain",
+            "field_types",
+            "aggregated",
+            "span",
+            "produced_by",
+            "produced_by_record",
+            "execution",
+        ):
             if body.get(measured) is None:
                 del body[measured]
         if "span" in body:
@@ -144,7 +154,7 @@ class DatasetCodec(Document):
         if self.span is not None:
             registration = registration.with_span(*self.span)
         if self.produced_by is not None:
-            registration = registration.with_producer(self.produced_by)
+            registration = registration.with_producer(self.produced_by, self.produced_by_record)
         return registration
 
     @classmethod
@@ -162,6 +172,7 @@ class DatasetCodec(Document):
             aggregated=registration.aggregated,
             span=registration.span,
             produced_by=registration.produced_by,
+            produced_by_record=registration.produced_by_record,
             execution=(
                 None
                 if registration.execution is None

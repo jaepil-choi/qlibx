@@ -248,6 +248,61 @@ def test_a_materialized_dataset_names_the_run_that_wrote_it(
     assert by_id["alpha_values"]["produced_by"] == "alpha"
     assert "produced_by" not in by_id["price_daily"]
 
+    # And the RECORD that wrote it (`docs/issues/091`): the run id says which run, only the
+    # `<id>@<fp8>` ref says which version of the component -- the ref `list datamodels` and
+    # `rm datamodel` address.
+    code, records = _cli(capsys, tmp_path, "list", "datamodels", "--run", "alpha")
+    assert code == 0, records
+    (record,) = records["items"]
+    assert shown["produced_by_record"] == record["datamodel_ref"]
+    assert by_id["alpha_values"]["produced_by_record"] == record["datamodel_ref"]
+    assert mine["produced_by_record"] is None
+    assert "produced_by_record" not in by_id["price_daily"]
+
+
+def test_check_reports_an_output_written_by_another_version_of_the_component(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`run.output_stale`: the parquet on disk was written by a component version that is not
+    the one registered now (`docs/issues/091`).
+
+    The reporting testbed swept a constant per alpha, restored each file to its best version and,
+    seeing the dataset directory present, did not re-run -- so five of eight pooled alphas held a
+    version other than the file on disk, each with a plausible number, and nothing in vqapr could
+    say so because the dataset did not claim a version. Now it does, and `check` compares.
+    """
+    declaration = _declaration(tmp_path)
+    code, _ = _cli(capsys, tmp_path, "register", str(declaration))
+    assert code == 0
+    code, ran = _cli(capsys, tmp_path, "run", "alpha")
+    assert code == 0, ran
+    code, clean = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 0 and clean["ok"] is True, clean
+    code, shown = _cli(capsys, tmp_path, "show", "dataset", "alpha_values")
+    written_by = shown["produced_by_record"]
+
+    # A new version of the component: the same file with one more line, re-registered in place.
+    models = tmp_path / "models.py"
+    models.write_text(models.read_text(encoding="utf-8") + "\nTUNED = 2\n", encoding="utf-8")
+    code, _ = _cli(capsys, tmp_path, "register", str(declaration))
+    assert code == 0
+
+    code, stale = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 1, stale
+    (failure,) = [f for f in stale["failures"] if f["code"] == "run.output_stale"]
+    assert failure["status"] == 412
+    assert written_by in failure["observed"]
+    assert written_by not in failure["observed"].split("registered component is")[1]
+    assert "vqapr run alpha --force" in failure["fix"]
+
+    # `--force` rewrites the dataset from the current version, and `check` is clean again.
+    code, rerun = _cli(capsys, tmp_path, "run", "alpha", "--force")
+    assert code == 0, rerun
+    code, fresh = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 0 and fresh["ok"] is True, fresh
+    code, shown_again = _cli(capsys, tmp_path, "show", "dataset", "alpha_values")
+    assert shown_again["produced_by_record"] != written_by
+
 
 def test_list_components_can_be_asked_who_reads_a_dataset_in_one_process(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]

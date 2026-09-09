@@ -455,6 +455,7 @@ def _run_datamodel(
             writes=frozen.writes,
             value_fields=layer.value_fields,
             run_id=frozen.run_id,
+            record_ref=layer.record_ref,
         )
         flow = DataModelEventLoop(
             frozen,
@@ -813,7 +814,11 @@ def _publish_allocation(
     if not rows:
         return None
     output = RunOutput(
-        root_path, writes=frozen.writes, value_fields=("weight",), run_id=frozen.run_id
+        root_path,
+        writes=frozen.writes,
+        value_fields=("weight",),
+        run_id=frozen.run_id,
+        record_ref=None if frozen.strategy is None else frozen.strategy.record_ref,
     )
     output.open()
     output.append(rows)

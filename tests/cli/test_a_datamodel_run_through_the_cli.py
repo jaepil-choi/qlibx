@@ -228,6 +228,25 @@ def test_a_datamodel_run_is_registered_checked_run_listed_and_shown(
     assert code == 0, replaced
     assert _scores(tmp_path, "reversal_2d") == reversal, "withdrawn and published afresh"
 
+    # `rm dataset` is not the retry (`docs/issues/090`): with the dataset gone and the component
+    # file unchanged, the record of the same fingerprint still stands, and the run is refused as
+    # a 409 at stage `record` that names the model's own kind and `--force` -- not a 400 that
+    # said "edit the strategy" to a datamodel run and carried a FileExistsError traceback.
+    code, dropped = _cli(capsys, *project, "rm", "dataset", "reversal_2d")
+    assert code == 0, dropped
+    code, standing = _cli(capsys, *project, "run", "factors-reversal")
+    assert code == 1, standing
+    assert standing["stage"] == "record"
+    (failure,) = standing["failures"]
+    assert failure["code"] == "record.exists" and failure["status"] == 409
+    assert failure["requirement"] == "a datamodel record is written once per run and fingerprint"
+    assert "strategy" not in failure["requirement"] + failure["fix"]
+    assert "vqapr run factors-reversal --force" in failure["fix"]
+    assert failure["cause"]["traceback"] is None, "a routine refusal carries no traceback"
+    code, again = _cli(capsys, *project, "run", "factors-reversal", "--force")
+    assert code == 0, again
+    assert _scores(tmp_path, "reversal_2d") == reversal
+
 def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

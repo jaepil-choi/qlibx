@@ -85,7 +85,14 @@ def _summarize(item: object) -> dict[str, Any]:
         value = getattr(item, field, None)
         if value is not None:
             summary[field] = str(value)
-    for field in ("kind", "fingerprint", "object_name", "timezone", "produced_by"):
+    for field in (
+        "kind",
+        "fingerprint",
+        "object_name",
+        "timezone",
+        "produced_by",
+        "produced_by_record",
+    ):
         value = getattr(item, field, None)
         if value is None:
             continue

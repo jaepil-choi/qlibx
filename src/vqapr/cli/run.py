@@ -66,9 +66,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--force",
         action="store_true",
         help=(
-            "replace a strategy record that already exists under this run and fingerprint "
-            "instead of refusing. Refusing is the default because a repeated run is far more "
-            "often a retry than an intended overwrite. A live record is never replaced"
+            "replace this run's record (its strategy's or its datamodel's) that already exists "
+            "under this run and fingerprint, and the dataset it published, instead of refusing. "
+            "Refusing is the default because a repeated run is far more often a retry than an "
+            "intended overwrite. A live record is never replaced"
         ),
     )
     parser.add_argument(
@@ -217,18 +218,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
     except RunRecordLive as running:
         raise _held_record(running) from running
     except RunRecordExists as existing:
-        # Running a strategy again under the same fingerprint is a retry or an overwrite, and
-        # the reader says which in one flag. Letting the bare FileExistsError escape renders it
-        # as `stage: "unhandled"`, which says the framework broke.
-        raise InputError(
-            VALUE_INVALID,
-            requirement="a strategy record is written once per run and fingerprint",
-            observed=f"{existing.run_id!r} already has a record at {existing.directory}",
-            retry=(
-                f"edit the strategy (a new fingerprint records beside the old one), or replace "
-                f"this record deliberately: vqapr run {target} --force"
-            ),
-        ) from existing
+        raise _standing_record(existing, frozen, target) from None
     except RunRecordConflict as changed:
         raise InputError(
             VALUE_INVALID,
@@ -454,6 +444,42 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
         # the snapshot is half of it" is read off the result rather than off a profiler.
         "timing": record.get("timing"),
     }
+
+
+def _standing_record(existing: RunRecordExists, frozen: object, target: str) -> VqaprError:
+    """The refusal for a record that already stands under this run and fingerprint.
+
+    Running the same model again under the same fingerprint is a retry or an overwrite, and the
+    reader says which in one flag (`--force`). Letting the bare `FileExistsError` escape rendered
+    it as `stage: "unhandled"`, which says the framework broke; rendering it as a 400 said the
+    ARGUMENT was wrong, and its `fix` said "edit the strategy" to a run that declared a datamodel
+    (`docs/issues/090`). It is a 409 at stage `record`, beside `record.live`: what the store
+    already holds disagrees with a write, and the model's kind is the run's own to say. No
+    `cause`: the OS-level `FileExistsError` is how the record was found standing, not something
+    a reader needs a traceback of.
+    """
+    kind = "datamodel" if getattr(frozen, "datamodel", None) is not None else "strategy"
+    return VqaprError(
+        stage=Stage.RECORD,
+        failures=[
+            Failure.bounded(
+                "record.exists",
+                f"a {kind} record is written once per run and fingerprint",
+                status=Status.CONFLICT,
+                observed=f"{existing.run_id!r} already has a record at {existing.directory}",
+                fix=(
+                    f"edit the {kind} (a new fingerprint records beside the old one), or replace "
+                    f"this record and the dataset it published deliberately: "
+                    f"vqapr run {target} --force"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            f"change the {kind} so its fingerprint differs, or pass --force to replace the "
+            "standing record, then retry"
+        ),
+    )
 
 
 def _held_record(running: RunRecordLive) -> VqaprError:

@@ -4040,7 +4040,7 @@ non-overridable하게 freeze하는 것이다.
 - strategy run: 체결 테이블이 선언되어 있고(`execution:`), 그 `trade_at` 집합이 run 안에서 결정적으로 조회 가능함
   — 이것이 시장 시계다
 - strategy run: roster가 하나 이상 선언됨(`roster.absent`, 412). 주문마다의 검사는 runtime이 한다(§6.2)
-- `writes`가 남의 dataset 이름이 아님(`run.output_registered`)
+- `writes`가 남의 dataset 이름이 아님(`run.output_registered`); 이 run 자신의 출력이면 지금 등록된 component 버전이 쓴 것임(`run.output_stale`, 412 — `check`만 묻고, `run --force`가 수리한다; record `217`)
 - intent direction ↔ Exchange permitted side · Exchange ↔ AccountMode
 - 모든 component requirement 충족 가능 — 전략의 `inputs()`, 각 compliance 규칙의 `inputs()`
 - 모든 (instrument 종류, 방향, 실행 시점)에 **정확히 하나의** `CostRule`이 매칭됨 (§6.2)
@@ -4049,7 +4049,8 @@ non-overridable하게 freeze하는 것이다.
 - 선언된 각 compliance 규칙의 `compliance_id`가 등록 id와 같음(`compliance.identity_mismatch`)
 - exchange `settings`가 portable(strict JSON)임(`component.execution_profile_invalid`)
 
-`initial_model_memory`가 없으면 fresh Model을 뜻한다. 이전 또는 latest state를 자동 탐색하지 않는다. 초기
+`initial_model_memory`가 없으면 fresh Model을 뜻하고, 첫 callback의 `memory`는 빈 mapping `{}`이다(record `215`,
+`docs/issues/089`; `null`로 선언한 것도 같은 `{}`다). 이전 또는 latest state를 자동 탐색하지 않는다. 초기
 belief나 hyperparameter는 mutable state가 아니라 frozen Model configuration으로 준다. datamodel run도 같은
 initial-state 규칙을 사용한다.
 

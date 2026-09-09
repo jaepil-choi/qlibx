@@ -56,4 +56,6 @@ much later in the run.
 
 Once the run completes, the output registers as an ordinary dataset. `vqapr show dataset <id>`
 reads it, and any component may declare it as an input — **which is the point**: one model's
-output is the next model's input, with no publishing step between them.
+output is the next model's input, with no publishing step between them. The registration names
+the run (`produced_by`) and the record (`produced_by_record`, `<id>@<fp8>`) that wrote it, so a
+reader can tell which version of the component the rows came from.

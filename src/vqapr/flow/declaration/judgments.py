@@ -44,7 +44,7 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
 from vqapr.flow.declaration.preflight import bound_execution_table, derived_agenda
 from vqapr.flow.declaration.roster import absent_roster_failure
-from vqapr.project.run import RunDefinition
+from vqapr.project.run import FINGERPRINT_PREFIX, RunDefinition
 
 # `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
 # ABOVE this layer; a module under `flow/` importing it reaches back up through the thing it is
@@ -81,6 +81,7 @@ DATASET_UNREGISTERED = "dataset.unregistered"
 WEIGHTS_MODE_CONFLICT = "weights.mode_conflict"
 WEIGHTS_VENUE_CONFLICT = "weights.venue_conflict"
 RUN_OUTPUT_REGISTERED = "run.output_registered"
+RUN_OUTPUT_STALE = "run.output_stale"
 
 JUDGMENT_CODES = (
     UNIVERSE_ABSENT,
@@ -93,6 +94,7 @@ JUDGMENT_CODES = (
     WEIGHTS_MODE_CONFLICT,
     WEIGHTS_VENUE_CONFLICT,
     RUN_OUTPUT_REGISTERED,
+    RUN_OUTPUT_STALE,
 )
 """Every code `judgments` can emit, in the order the judges run and raise them.
 
@@ -126,9 +128,15 @@ def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
     **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
     letting it through would let a run nothing was proven about run to completion.
 
-    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means.
+    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means
+    -- with one judgment answered by `run`'s own door instead. `run.output_stale` says the run's
+    earlier output was written by another version of the component (`docs/issues/091`); `run`
+    without `--force` refuses that output anyway (`run.output_registered`, 409, at the run stage)
+    and `run --force` rewrites it, which is the very fix the judgment names. Raising it here would
+    refuse the command that repairs it, so it is `check`'s to report and `run`'s to resolve.
     """
     failures, blocked = judgments(definition, workspace)
+    failures = [failure for failure in failures if failure.code != RUN_OUTPUT_STALE]
     if not failures and not blocked:
         return
     raise VqaprError(stage=Stage.CHECK, failures=[*failures, *blocked])
@@ -190,7 +198,7 @@ def judgments(
             for member in _members(definition)
         ),
         ("weights", lambda: _judge_weights(definition, workspace, at)),
-        ("outputs", lambda: _judge_outputs(definition, registered, at)),
+        ("outputs", lambda: _judge_outputs(definition, registered, at, workspace)),
     )
     for name, judge in judges:
         try:
@@ -555,18 +563,29 @@ def _judge_member_datasets(
 
 
 def _judge_outputs(
-    definition: RunDefinition, registered: dict[str, Any], at: FailureSource
+    definition: RunDefinition,
+    registered: dict[str, Any],
+    at: FailureSource,
+    workspace: Workspace | None = None,
 ) -> list[Failure]:
     """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
 
     The refusal preflight raises as `run.output_registered` under `freeze`, asked here so `check`
     cannot certify a run that `run` then refuses. It was a datamodel-only question (record `148`)
     while only datamodels wrote; a strategy publishes its allocation now, so both do.
+
+    The run's own earlier output is not a defect of the declaration (see preflight) -- unless it
+    was written by a version of the component other than the one registered now
+    (`docs/issues/091`). That is `run.output_stale`, a 412: the declaration is sound, the
+    workspace holds a parquet the current component did not produce, and nothing but this
+    judgment would say so. The testbed found five of eight pooled alphas in that state, each with
+    a plausible number, by re-measuring every one by hand.
     """
     taken = registered.get(definition.writes)
-    # The run's own earlier output is not a defect of the declaration (see preflight).
-    if taken is None or getattr(taken, "produced_by", None) == definition.run_id:
+    if taken is None:
         return []
+    if getattr(taken, "produced_by", None) == definition.run_id:
+        return _judge_output_freshness(definition, taken, at, workspace)
     return [
         Failure.bounded(
             RUN_OUTPUT_REGISTERED,
@@ -577,6 +596,45 @@ def _judge_outputs(
                 f"existing {definition.writes} first: vqapr rm dataset {definition.writes}"
             ),
             status=Status.CONFLICT,
+            source=_key(at, "writes"),
+        )
+    ]
+
+
+def _judge_output_freshness(
+    definition: RunDefinition, taken: Any, at: FailureSource, workspace: Workspace | None
+) -> list[Failure]:
+    """The run's own output was written by the component version registered now, or say which.
+
+    Only asked when the dataset names its producing record: a document written before
+    `produced_by_record` existed has nothing to compare, and the member judge already reports a
+    component that does not resolve, so an unresolvable one is left to it rather than blocking
+    this judgment too.
+    """
+    written_by = getattr(taken, "produced_by_record", None)
+    if not written_by or workspace is None:
+        return []
+    member = definition.member
+    try:
+        ref = workspace.component(member.component_id)
+    except VqaprError:
+        return []
+    current = f"{member.component_id}@{ref.fingerprint[:FINGERPRINT_PREFIX]}"
+    if current == written_by:
+        return []
+    return [
+        Failure.bounded(
+            RUN_OUTPUT_STALE,
+            "a run's registered output was written by the component version registered now",
+            observed=(
+                f"{definition.writes!r} was written by record {written_by!r}; the registered "
+                f"component is {current!r}"
+            ),
+            fix=(
+                f"vqapr run {definition.run_id} --force to rewrite it from the current component, "
+                f"or re-register the component version that wrote it"
+            ),
+            status=Status.PRECONDITION,
             source=_key(at, "writes"),
         )
     ]

@@ -68,7 +68,7 @@ Beyond `fix`, an agent branches on three things, in this order:
    (the judgments `vqapr check` makes and `vqapr run` repeats), `freeze` (freezing a run's
    authority before it executes), `run` (executing: callbacks, fills, valuations, datamodel
    computations), `record` (writing a record or a datamodel's dataset). The same `code` can be
-   raised at more than one stage — `datamodel.output_registered` at `check` and at `freeze` — and
+   raised at more than one stage — `run.output_registered` at `check` and at `freeze` — and
    the stage tells you how far the command got.
 3. **`cause` — what actually happened, whole.** An object with `type`, `message`, `where`,
    `origin` and `traceback`. When an exception was involved, `type`/`message`/`traceback` are the

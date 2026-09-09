@@ -285,14 +285,18 @@ class RunOutput:
         writes: str,
         value_fields: Sequence[str],
         run_id: str | None = None,
+        record_ref: str | None = None,
         spill_bytes: int = SPILL_BYTES,
     ) -> None:
         # Not a `FrozenDataModel`: a strategy publishes through this door too (design §2), and
         # what both hand over is the name the run writes and the fields each row carries.
+        # `record_ref` is the member's `<component_id>@<fp8>`, so the dataset can say which
+        # version wrote it (`docs/issues/091`).
         self._root = Path(project_root)
         self._writes = writes
         self._value_fields = tuple(value_fields)
         self._run_id = run_id
+        self._record_ref = record_ref
         self._directory = output_directory(project_root, writes)
         self._schema: pa.Schema | None = None
         self._field_types: dict[str, ColumnType] = {}
@@ -484,9 +488,10 @@ class RunOutput:
             grain=Grain.INSTRUMENT_INSTANT,
         )
         if self._run_id is not None:
-            # The dataset names the run that wrote it (`docs/issues/archive/082`): known here and
-            # nowhere later, since the registration is the only thing that outlives this run.
-            registration = registration.with_producer(self._run_id)
+            # The dataset names the run that wrote it (`docs/issues/archive/082`) and the record
+            # -- the component version -- that did (`docs/issues/091`): known here and nowhere
+            # later, since the registration is the only thing that outlives this run.
+            registration = registration.with_producer(self._run_id, self._record_ref)
         source = SourceSpec.of(source_id, self._directory)
         try:
             # The rows land here, once, and only now: a dataset that is registered is complete.

@@ -11,10 +11,8 @@ guarded like every other, so the record already has a column for the cost it wil
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from vqapr.flow.engine.artifacts import SimulationStage
-from vqapr.flow.run.context import FlowContext
+from vqapr.flow.run.context import FlowContext, MarketInstant
 
 
 class AccrualHandler:
@@ -23,12 +21,12 @@ class AccrualHandler:
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
-    def accrue(self, instant: datetime) -> None:
-        """Recognise what the holding period up to `instant` earned. Nothing, for now."""
+    def accrue(self, instant: MarketInstant) -> MarketInstant:
+        """Recognise what the holding period up to the instant earned. Nothing, for now."""
         with self._context.guard(
-            SimulationStage.MARKET_ACCRUE, instant, owner=self._context.frozen_run.execution
+            SimulationStage.MARKET_ACCRUE, instant.at, owner=self._context.frozen_run.execution
         ):
-            return None
+            return instant
 
 
 __all__ = ["AccrualHandler"]

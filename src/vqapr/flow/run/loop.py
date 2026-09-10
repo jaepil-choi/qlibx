@@ -56,7 +56,7 @@ from vqapr.flow.run.context import (
     DueExecutionTrace,
     FailedAfterCommit,
     FlowContext,
-    HeldResult,
+    MarketInstant,
     MonitoringResult,
     OccurrenceTrace,
     SimulationResult,
@@ -268,22 +268,17 @@ class StrategyEventLoop(
                 raise RuntimeError("a pending intent's target instant was never walked")
             due = pending if pending is not None and pending.target.target_at == instant else None
 
-            self._accrual.accrue(instant)
-            filled = None if due is None else self._execution.fill(due)
-            if filled is not None and self._context.state.current.pending_accepted_intent:
-                raise RuntimeError("due execution failed to consume its pending identity")
-            marked = (
-                self._valuation.mark_held(instant)
-                if filled is None
-                else self._valuation.mark_fill(filled)
-            )
-            monitoring = self._compliance.observe(instant)
-            result: DueExecutionResult | HeldResult = (
-                HeldResult(marked.evidence, monitoring)  # type: ignore[arg-type]
-                if filled is None
-                else self._execution.close(filled, marked, monitoring)
-            )
-            return DueExecutionTrace(event, result, self._context.state.current.version)
+            # The fold (record `226`): every stage takes the instant as the stages before it
+            # left it and returns it with its own field set. The order is these five lines.
+            at = MarketInstant(at=instant, due=due)
+            at = self._accrual.accrue(at)
+            at = self._execution.fill(at)
+            at = self._valuation.mark(at)
+            at = self._compliance.observe(at)
+            at = self._execution.close(at)
+            if at.result is None:
+                raise RuntimeError("a market-clock instant closed without a result")
+            return DueExecutionTrace(event, at.result, self._context.state.current.version)
 
     def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:

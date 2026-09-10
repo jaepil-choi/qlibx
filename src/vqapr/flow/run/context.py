@@ -121,6 +121,31 @@ class Marked:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketInstant:
+    """One instant of the market clock as its stages leave it, in the order design §3.1 fixes.
+
+    ACCRUE, EXECUTE, VALUATION, COMPLIANCE and the instant's close each take this and return
+    it with their own field set (record `226`). What a stage may read is what the stages before
+    it left and nothing else, so the loop's five lines are a fold over this value rather than a
+    hand-off of four differently shaped locals: `due` is what the loop found pending for this
+    instant, `filled` what EXECUTE did with it, `marked` what VALUATION committed, `monitoring`
+    what the rules found, `result` what the instant's trace records.
+    """
+
+    at: datetime
+    due: AcceptedIntent | None
+    filled: Filled | None = None
+    marked: Marked | None = None
+    monitoring: MonitoringResult | None = None
+    result: DueExecutionResult | HeldResult | None = None
+
+    def require_marked(self) -> Marked:
+        if self.marked is None:
+            raise RuntimeError("this stage runs after VALUATION; the instant has not been marked")
+        return self.marked
+
+
+@dataclass(frozen=True, slots=True)
 class OccurrenceTrace:
     occurrence: OperationOccurrence
     result: Hold | EconomicPortfolioIntent

@@ -11,6 +11,7 @@ its publication. The loop's `_handle_market` is the one place the order is writt
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 
 from vqapr.domain.instruments import InstrumentRoster, require_declared
@@ -30,12 +31,11 @@ from vqapr.flow.engine.artifacts import (
 from vqapr.flow.engine.run_state import AcceptedRunState, PreparedRunState
 from vqapr.flow.run.context import (
     CALLBACK_STAGE,
-    AcceptedIntent,
     DueExecutionResult,
     Filled,
     FlowContext,
-    Marked,
-    MonitoringResult,
+    HeldResult,
+    MarketInstant,
 )
 
 
@@ -45,8 +45,12 @@ class ExecutionHandler:
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
-    def fill(self, pending: AcceptedIntent) -> Filled:
-        """Fill the pending intent at its target instant and commit the account (EXECUTE)."""
+    def fill(self, instant: MarketInstant) -> MarketInstant:
+        """EXECUTE: fill the intent due at this instant and commit the account; nothing when
+        none is due."""
+        pending = instant.due
+        if pending is None:
+            return instant
         execution_table = self._context.frozen_run.execution
         if execution_table is None:
             raise RuntimeError("due execution requires frozen execution dataset")
@@ -225,21 +229,33 @@ class ExecutionHandler:
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             committed_root = self._publish_account_commit(prepared_commit)
-        return Filled(
-            pending=pending,
-            snapshot=snapshot,
-            fills=fills,
-            prepared_fill=prepared_fill,
-            previous_mark=account_state.latest_mark,
-            commit_evidence=commit_evidence,
-            committed_root=committed_root,
+        if self._context.state.current.pending_accepted_intent is not None:
+            raise RuntimeError("due execution failed to consume its pending identity")
+        return replace(
+            instant,
+            filled=Filled(
+                pending=pending,
+                snapshot=snapshot,
+                fills=fills,
+                prepared_fill=prepared_fill,
+                previous_mark=account_state.latest_mark,
+                commit_evidence=commit_evidence,
+                committed_root=committed_root,
+            ),
         )
 
-    def close(
-        self, filled: Filled, marked: Marked, monitoring: MonitoringResult | None
-    ) -> DueExecutionResult:
-        """The fill's epilogue, once VALUATION and COMPLIANCE have run: publish the feedback."""
+    def close(self, instant: MarketInstant) -> MarketInstant:
+        """The instant's last stage: a held book leaves its valuation and monitoring as the
+        result; a fill, once VALUATION and COMPLIANCE have run on it, publishes its feedback."""
+        marked = instant.require_marked()
+        filled = instant.filled
+        if filled is None:
+            return replace(
+                instant,
+                result=HeldResult(marked.evidence, instant.monitoring),  # type: ignore[arg-type]
+            )
         pending = filled.pending
+        monitoring = instant.monitoring
         if not isinstance(marked.evidence, MarkEvidence):
             raise RuntimeError("a fill is closed with the mark evidence its valuation produced")
         with self._context.due_boundary(
@@ -274,8 +290,11 @@ class ExecutionHandler:
                 self._context.state.prepare_feedback((due_evidence,), evidence=feedback_evidence)
             )
         assert root.account is not None
-        return DueExecutionResult(
-            pending.pending_id, root.account.snapshot.version, due_evidence, monitoring
+        return replace(
+            instant,
+            result=DueExecutionResult(
+                pending.pending_id, root.account.snapshot.version, due_evidence, monitoring
+            ),
         )
 
     def _publish_account_commit(self, prepared: PreparedRunState) -> AcceptedRunState:

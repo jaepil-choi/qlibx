@@ -8,6 +8,7 @@ the book from the snapshot it just filled against. Record `209` moved monitoring
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 
@@ -29,6 +30,7 @@ from vqapr.flow.run.context import (
     Filled,
     FlowContext,
     Marked,
+    MarketInstant,
 )
 
 
@@ -90,6 +92,14 @@ class ValuationHandler:
 
     def __init__(self, context: FlowContext) -> None:
         self._context = context
+
+    def mark(self, instant: MarketInstant) -> MarketInstant:
+        """VALUATION: the just-filled book from the fill's own snapshot, or the held book from a
+        fresh one -- the same instant, the same prices either way."""
+        marked = (
+            self.mark_held(instant.at) if instant.filled is None else self.mark_fill(instant.filled)
+        )
+        return replace(instant, marked=marked)
 
     def mark_fill(self, filled: Filled) -> Marked:
         """VALUATION after EXECUTE: value the just-committed book from the snapshot the fill was

@@ -1,0 +1,441 @@
+{
+ "check bad-price-run": {
+  "envelope": {
+   "blocked": [
+    {
+     "cause": {
+      "message": "freeze: 1 failure(s)\n  [400 execution.price_not_a_field] the run's trade_price must be a numeric field of the execution dataset",
+      "origin": "framework",
+      "traceback": "<traceback>",
+      "type": "VqaprError",
+      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+     },
+     "code": "judgment.blocked",
+     "example_total": 0,
+     "examples": [],
+     "fix": "run `vqapr check bad-price-run` to see the full report, then fix what stopped the judgment from answering; the exception is in `cause`",
+     "observed": "execution_ordering could not answer: VqaprError: freeze: 1 failure(s)\n  [400 execution.price_not_a_field] the run's trade_price must be a numeric field of the execution dataset",
+     "requirement": "every judgment answers before a run is accepted",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-price-run",
+      "line": null
+     },
+     "status": 400
+    }
+   ],
+   "checked": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "failures": [
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+     },
+     "code": "execution.price_not_a_field",
+     "example_total": 0,
+     "examples": [],
+     "fix": "declare trade_price as one of close fields of 'sample-execution'",
+     "observed": "trade_price 'open'; 'sample-execution' exposes close",
+     "requirement": "the run's trade_price must be a numeric field of the execution dataset",
+     "source": {
+      "file": null,
+      "key_path": null,
+      "line": null
+     },
+     "status": 400
+    }
+   ],
+   "ok": false,
+   "passed": [
+    "workspace",
+    "run"
+   ],
+   "skipped": [],
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ },
+ "check bad-run": {
+  "envelope": {
+   "blocked": [],
+   "checked": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "failures": [
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_execution_ordering)"
+     },
+     "code": "execution.not_after_decision",
+     "example_total": 1,
+     "examples": [
+      "bad-run.agenda-2022-01-14T1530"
+     ],
+     "fix": "move the decision earlier than the instant it should fill at, extend the run end, or loosen the fill's `at`/`after`/`within`",
+     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 occurrence(s) with no such instant",
+     "requirement": "every decision must have an execution instant after it that the fill rule admits",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.strategies.sample-reversal-5d",
+      "line": null
+     },
+     "status": 412
+    },
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_weights)"
+     },
+     "code": "weights.venue_conflict",
+     "example_total": 3,
+     "examples": [
+      "K000001: long_only",
+      "K000002: long_only",
+      "K000003: long_only"
+     ],
+     "fix": "declare the account mode as LONG_ONLY, or list those instruments with signed access on the exchange",
+     "observed": "3 listing(s) not signed: K000001: long_only, K000002: long_only, K000003: long_only",
+     "requirement": "a signed account must trade on listings the venue permits a short on, or it declares a freedom the venue will not fill",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.initial_account.mode",
+      "line": null
+     },
+     "status": 412
+    },
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_outputs)"
+     },
+     "code": "run.output_registered",
+     "example_total": 0,
+     "examples": [],
+     "fix": "declare a new `writes` for run 'bad-run', or withdraw the existing sample-prices first: vqapr rm dataset sample-prices",
+     "observed": "'sample-prices' is already registered",
+     "requirement": "a run writes a dataset that does not exist yet",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.writes",
+      "line": null
+     },
+     "status": 409
+    },
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/preflight.py:<n> (_refuse_taken_output)"
+     },
+     "code": "run.output_registered",
+     "example_total": 0,
+     "examples": [],
+     "fix": "declare a new `writes` for run 'bad-run', or withdraw the existing sample-prices first: vqapr rm dataset sample-prices",
+     "observed": "'sample-prices' is already registered",
+     "requirement": "a run writes a dataset that does not exist yet",
+     "source": {
+      "file": null,
+      "key_path": null,
+      "line": null
+     },
+     "status": 409
+    }
+   ],
+   "ok": false,
+   "passed": [
+    "workspace",
+    "run"
+   ],
+   "skipped": [],
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ },
+ "check sample-features-run": {
+  "envelope": {
+   "blocked": [],
+   "checked": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "ok": true,
+   "passed": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "skipped": [],
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 0
+ },
+ "check sample-run": {
+  "envelope": {
+   "blocked": [],
+   "checked": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "ok": true,
+   "passed": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "skipped": [],
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 0
+ },
+ "check sample-run (execution table changed)": {
+  "envelope": {
+   "blocked": [
+    {
+     "cause": {
+      "message": "freeze: 1 failure(s)\n  [412 dataset.source_changed] the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
+      "origin": "framework",
+      "traceback": "<traceback>",
+      "type": "VqaprError",
+      "where": "vqapr/data/validation.py:<n> (require_verified)"
+     },
+     "code": "judgment.blocked",
+     "example_total": 0,
+     "examples": [],
+     "fix": "run `vqapr check sample-run` to see the full report, then fix what stopped the judgment from answering; the exception is in `cause`",
+     "observed": "execution_ordering could not answer: VqaprError: freeze: 1 failure(s)\n  [412 dataset.source_changed] the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
+     "requirement": "every judgment answers before a run is accepted",
+     "source": {
+      "file": null,
+      "key_path": "runs.sample-run",
+      "line": null
+     },
+     "status": 412
+    }
+   ],
+   "checked": [
+    "workspace",
+    "run",
+    "judgments",
+    "preflight"
+   ],
+   "failures": [
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/data/validation.py:<n> (require_verified)"
+     },
+     "code": "dataset.source_changed",
+     "example_total": 0,
+     "examples": [],
+     "fix": "register dataset 'sample-execution' again so its facts are measured on the file as it is now",
+     "observed": "dataset 'sample-execution': registered digest 49e4b4abef4f…, file now 34c1d63c3ab4…",
+     "requirement": "the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
+     "source": {
+      "file": "<root>\\execution.parquet",
+      "key_path": "datasets.sample-execution",
+      "line": null
+     },
+     "status": 412
+    }
+   ],
+   "ok": false,
+   "passed": [
+    "workspace",
+    "run"
+   ],
+   "skipped": [],
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ },
+ "run bad-price-run": {
+  "envelope": {
+   "correlation_id": "<id>",
+   "error": "VqaprError: check: 1 failure(s)\n  [400 judgment.blocked] every judgment answers before a run is accepted",
+   "failures": [
+    {
+     "cause": {
+      "message": "freeze: 1 failure(s)\n  [400 execution.price_not_a_field] the run's trade_price must be a numeric field of the execution dataset",
+      "origin": "framework",
+      "traceback": "<traceback>",
+      "type": "VqaprError",
+      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+     },
+     "code": "judgment.blocked",
+     "example_total": 0,
+     "examples": [],
+     "fix": "run `vqapr check bad-price-run` to see the full report, then fix what stopped the judgment from answering; the exception is in `cause`",
+     "observed": "execution_ordering could not answer: VqaprError: freeze: 1 failure(s)\n  [400 execution.price_not_a_field] the run's trade_price must be a numeric field of the execution dataset",
+     "requirement": "every judgment answers before a run is accepted",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-price-run",
+      "line": null
+     },
+     "status": 400
+    }
+   ],
+   "mutation": false,
+   "ok": false,
+   "retry_precondition": null,
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ },
+ "run bad-run": {
+  "envelope": {
+   "correlation_id": "<id>",
+   "error": "VqaprError: check: 3 failure(s)\n  [412 execution.not_after_decision] every decision must have an execution instant after it that the fill rule admits\n  [412 weights.venue_conflict] a signed account must trade on listings the venue permits a short on, or it declares a freedom the venue will not fill\n  [409 run.output_registered] a run writes a dataset that does not exist yet",
+   "failures": [
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_execution_ordering)"
+     },
+     "code": "execution.not_after_decision",
+     "example_total": 1,
+     "examples": [
+      "bad-run.agenda-2022-01-14T1530"
+     ],
+     "fix": "move the decision earlier than the instant it should fill at, extend the run end, or loosen the fill's `at`/`after`/`within`",
+     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 occurrence(s) with no such instant",
+     "requirement": "every decision must have an execution instant after it that the fill rule admits",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.strategies.sample-reversal-5d",
+      "line": null
+     },
+     "status": 412
+    },
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_weights)"
+     },
+     "code": "weights.venue_conflict",
+     "example_total": 3,
+     "examples": [
+      "K000001: long_only",
+      "K000002: long_only",
+      "K000003: long_only"
+     ],
+     "fix": "declare the account mode as LONG_ONLY, or list those instruments with signed access on the exchange",
+     "observed": "3 listing(s) not signed: K000001: long_only, K000002: long_only, K000003: long_only",
+     "requirement": "a signed account must trade on listings the venue permits a short on, or it declares a freedom the venue will not fill",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.initial_account.mode",
+      "line": null
+     },
+     "status": 412
+    },
+    {
+     "cause": {
+      "message": null,
+      "origin": "framework",
+      "traceback": null,
+      "type": null,
+      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_outputs)"
+     },
+     "code": "run.output_registered",
+     "example_total": 0,
+     "examples": [],
+     "fix": "declare a new `writes` for run 'bad-run', or withdraw the existing sample-prices first: vqapr rm dataset sample-prices",
+     "observed": "'sample-prices' is already registered",
+     "requirement": "a run writes a dataset that does not exist yet",
+     "source": {
+      "file": null,
+      "key_path": "runs.bad-run.writes",
+      "line": null
+     },
+     "status": 409
+    }
+   ],
+   "mutation": false,
+   "ok": false,
+   "retry_precondition": null,
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ },
+ "run sample-run (execution table changed)": {
+  "envelope": {
+   "correlation_id": "<id>",
+   "error": "VqaprError: check: 1 failure(s)\n  [412 judgment.blocked] every judgment answers before a run is accepted",
+   "failures": [
+    {
+     "cause": {
+      "message": "freeze: 1 failure(s)\n  [412 dataset.source_changed] the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
+      "origin": "framework",
+      "traceback": "<traceback>",
+      "type": "VqaprError",
+      "where": "vqapr/data/validation.py:<n> (require_verified)"
+     },
+     "code": "judgment.blocked",
+     "example_total": 0,
+     "examples": [],
+     "fix": "run `vqapr check sample-run` to see the full report, then fix what stopped the judgment from answering; the exception is in `cause`",
+     "observed": "execution_ordering could not answer: VqaprError: freeze: 1 failure(s)\n  [412 dataset.source_changed] the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
+     "requirement": "every judgment answers before a run is accepted",
+     "source": {
+      "file": null,
+      "key_path": "runs.sample-run",
+      "line": null
+     },
+     "status": 412
+    }
+   ],
+   "mutation": false,
+   "ok": false,
+   "retry_precondition": null,
+   "stage": "check",
+   "workspace_root": "<root>"
+  },
+  "exit": 1
+ }
+}

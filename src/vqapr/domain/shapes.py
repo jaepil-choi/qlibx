@@ -125,6 +125,92 @@ def normalize_rows(value: object) -> Rows:
     return tuple(normalized)
 
 
+_NONE = type(None)
+
+
+def normalize_column(values: object, *, name: str = "column") -> tuple[Scalar, ...]:
+    """One column of portable scalars, checked by type rather than by cell.
+
+    The rule is `normalize_scalar`'s; the pass is different. A column of 3,000 marked prices is
+    3,000 `Decimal`s, and asking each cell what it is cost as much as the arithmetic that
+    produced it (record `221`). The distinct types are found in one pass that stays in C, and
+    only the kinds that carry a per-value rule -- a float or a `Decimal` must be finite, a
+    datetime must be aware -- are visited again, and only their own cells.
+    """
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        raise TypeError(f"{name} must be a sequence of scalars")
+    column = tuple(values)
+    for kind in {type(value) for value in column}:
+        if kind is _NONE or issubclass(kind, (bool, str, int)):
+            continue
+        if issubclass(kind, float):
+            if not all(math.isfinite(value) for value in column if isinstance(value, float)):
+                raise ValueError(f"{name} float values must be finite")
+        elif issubclass(kind, Decimal):
+            if not all(value.is_finite() for value in column if isinstance(value, Decimal)):
+                raise ValueError(f"{name} decimal values must be finite")
+        elif issubclass(kind, datetime):
+            for value in column:
+                if isinstance(value, datetime):
+                    require_tz_aware(value, name=f"{name} datetime")
+        elif issubclass(kind, date):
+            continue
+        else:
+            raise TypeError(f"{name} values must be portable scalars; got {kind.__name__}")
+    return column
+
+
+@dataclass(frozen=True, slots=True)
+class RecordChunk:
+    """One table's rows from one publication, held as columns.
+
+    Rows are collected as rows -- an author appends one per target, a valuation one per held
+    name -- and travel as columns, because the writer wants columns for Arrow and every reader
+    in between only counts or forwards them. Until record `221` a chunk of 3,000 rows was 3,000
+    dicts, copied and re-wrapped at each hand-off from the recorder to the disk; now it is one
+    tuple per column, made once. `rows()` gives the row view back for the in-memory readers.
+
+    Every column holds the same number of cells. The cells are not checked here: the recorder
+    checked them as they were appended, and a chunk built from rows by `from_rows` is the
+    package's own (the fill journal, the writer's row-shaped door).
+    """
+
+    table_id: str
+    columns: Mapping[str, tuple[Scalar, ...]]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.table_id, str) or not self.table_id:
+            raise ValueError("table_id must be a non-empty string")
+        if not isinstance(self.columns, Mapping):
+            raise TypeError("columns must be a mapping of column name to cells")
+        detached = {str(name): tuple(cells) for name, cells in self.columns.items()}
+        if len({len(cells) for cells in detached.values()}) > 1:
+            raise ValueError(
+                f"every column of a {self.table_id!r} chunk holds the same number of rows"
+            )
+        object.__setattr__(self, "columns", MappingProxyType(detached))
+
+    @property
+    def row_count(self) -> int:
+        return len(next(iter(self.columns.values()), ()))
+
+    def rows(self) -> Iterator[Row]:
+        """The row view: one dict per row, in column order."""
+        names = tuple(self.columns)
+        for cells in zip(*(self.columns[name] for name in names), strict=True):
+            yield dict(zip(names, cells, strict=True))
+
+    @classmethod
+    def from_rows(cls, table_id: str, rows: Sequence[Mapping[str, object]]) -> RecordChunk:
+        """A chunk from row-shaped input; a column a row lacks is null there."""
+        materialized = tuple(rows)
+        names = sorted({str(name) for row in materialized for name in row})
+        return cls(
+            table_id,
+            {name: tuple(row.get(name) for row in materialized) for name in names},  # type: ignore[misc]
+        )
+
+
 def _identifier(value: object, *, name: str) -> str:
     if not isinstance(value, str) or not value or any(char.isspace() for char in value):
         raise ValueError(f"{name} must be a non-empty string without whitespace")
@@ -361,10 +447,12 @@ __all__ = [
     "Grain",
     "Observation",
     "Panel",
+    "RecordChunk",
     "Row",
     "Rows",
     "Scalar",
     "Series",
+    "normalize_column",
     "normalize_rows",
     "normalize_scalar",
 ]

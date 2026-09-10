@@ -5,18 +5,18 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from itertools import chain
 from types import MappingProxyType
 
 from vqapr.account.account import (
     PreparedAppend,
     PreparedMark,
 )
-from vqapr.authoring.records import InvocationRecorder, RecorderManifest
+from vqapr.authoring.records import InvocationRecorder
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
 from vqapr.domain.model_state import prepare_model_state
+from vqapr.domain.shapes import RecordChunk
 from vqapr.domain.values import ModelMemory, normalize_memory, opening_memory
 
 
@@ -55,13 +55,11 @@ class AcceptedRunState:
     account: AccountState | None = None
     pending_accepted_intent: object = None
     lifecycle_trace: tuple[LifecycleTrace, ...] = ()
-    recorder_manifests: tuple[RecorderManifest, ...] = ()
-    # Per table, the chunks appended by each accepted callback. Appending a chunk is O(new rows);
-    # re-wrapping the whole accumulated history on every root was O(all rows so far), which made
-    # total cost quadratic in run length. Readers see the flattened view through `recorder_rows`.
-    _recorder_chunks: Mapping[str, tuple[tuple[Mapping[str, object], ...], ...]] = MappingProxyType(
-        {}
-    )
+    # Per table, the chunks appended by each accepted callback -- columns, not rows (record
+    # `221`). Appending a chunk is O(new rows); re-wrapping the whole accumulated history on every
+    # root was O(all rows so far), which made total cost quadratic in run length. Readers see the
+    # flattened row view through `recorder_rows`.
+    _recorder_chunks: Mapping[str, tuple[RecordChunk, ...]] = MappingProxyType({})
     feedback: tuple[object, ...] = ()
     finalization: RunFinalization | None = None
     model_state_commit_count: int = 0
@@ -127,13 +125,13 @@ class AcceptedRunState:
     def recorder_rows(self) -> Mapping[str, tuple[Mapping[str, object], ...]]:
         """The flattened rows every reader has always seen.
 
-        Rows are wrapped read-only once, where the chunk is appended, so flattening here only
-        concatenates references. Read in tests and showcases; a run with a store has already
-        streamed every chunk to its record directory, which is what a later run reads.
+        The chunks are columns; this is the one place rows are rebuilt from them, read-only.
+        Read in tests and showcases; a run with a store has already streamed every chunk to its
+        record directory, which is what a later run reads, and holds none here.
         """
         return MappingProxyType(
             {
-                name: tuple(chain.from_iterable(chunks))
+                name: tuple(MappingProxyType(row) for chunk in chunks for row in chunk.rows())
                 for name, chunks in self._recorder_chunks.items()
             }
         )
@@ -194,10 +192,10 @@ class PreparedRunState:
 
     expected_version: int
     root: AcceptedRunState
-    new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
+    new_chunks: tuple[RecordChunk, ...] = ()
     """The recorder chunks this candidate adds, when the repository streams them.
 
-    Empty when the repository has no row sink: the chunks are then inside `root` as before.
+    Empty when the repository has no sink: the chunks are then inside `root` as before.
     With a sink they are here instead, handed over at publish and never retained by a root, so a
     run's heap holds one occurrence's rows rather than the run's.
     """
@@ -292,14 +290,14 @@ class RunStateRepository:
         initial_payload: bytes = b"",
         pending_accepted_intent: object = None,
         before_swap: Callable[[PreparedRunState], None] | None = None,
-        row_sink: Callable[[str, Sequence[Mapping[str, object]]], None] | None = None,
+        sink: Callable[[RecordChunk], None] | None = None,
         initial_component_memory: Mapping[str, object] | None = None,
     ) -> None:
         """`initial_component_memory` is each loaded stateful component's memory as assembled,
         by id -- the Compliance rules', the venue's -- and the run commits what every callback
         leaves from there (record `181`)."""
-        if row_sink is not None and not callable(row_sink):
-            raise TypeError("row_sink must be callable")
+        if sink is not None and not callable(sink):
+            raise TypeError("sink must be callable")
         # `{}` when nothing was handed over (`docs/issues/089`): the same opening memory the
         # frozen layers default to, so a repository seeded without one and a run frozen without
         # one name the same first state.
@@ -326,10 +324,11 @@ class RunStateRepository:
             component_state_refs=component_refs,
         )
         self._before_swap = before_swap
-        # Where accepted recorder rows go, when they go anywhere but the root. `orchestration.run`
-        # passes the run record writer's `append`; a flow assembled without a store keeps rows in
-        # its roots as it always did, so every in-memory reader of `recorder_rows` is unchanged.
-        self._row_sink = row_sink
+        # Where accepted recorder chunks go, when they go anywhere but the root. `orchestration.run`
+        # passes the run record writer's `append_chunk`; a flow assembled without a store keeps
+        # them in its roots as it always did, so every in-memory reader of `recorder_rows` is
+        # unchanged.
+        self._sink = sink
 
     @property
     def current(self) -> AcceptedRunState:
@@ -345,39 +344,37 @@ class RunStateRepository:
     def load_payload(self, ref: ModelStateRef) -> bytes:
         return self._root.load_payload(ref)
 
-    def _stage_rows(
+    def _stage(
         self,
-        chunks: dict[str, tuple[tuple[Mapping[str, object], ...], ...]],
-        staged_rows: Mapping[str, Sequence[Mapping[str, object]]],
-    ) -> tuple[tuple[str, tuple[Mapping[str, object], ...]], ...]:
-        """One occurrence's recorder rows: into the root, or out to the sink at publish.
+        chunks: dict[str, tuple[RecordChunk, ...]],
+        staged: Sequence[RecordChunk],
+    ) -> tuple[RecordChunk, ...]:
+        """One occurrence's recorder chunks: into the root, or out to the sink at publish.
 
-        `staged_rows()` already returned detached, normalized rows. Wrapping read-only happens
-        once, here, instead of on every subsequent root. Without a sink the chunk is appended to
+        A chunk is detached and validated where it was staged. Without a sink it is appended to
         the root's chunks as before -- O(new rows), so total cost stays linear in run length.
         With one, the root keeps nothing and the chunk rides on the prepared candidate until the
         swap that accepts it.
         """
-        new_rows: list[tuple[str, tuple[Mapping[str, object], ...]]] = []
-        for table_id, table_rows in staged_rows.items():
-            chunk = tuple(MappingProxyType(row) for row in table_rows)
-            if self._row_sink is None:
-                chunks[table_id] = (*chunks.get(table_id, ()), chunk)
+        new_chunks: list[RecordChunk] = []
+        for chunk in staged:
+            if self._sink is None:
+                chunks[chunk.table_id] = (*chunks.get(chunk.table_id, ()), chunk)
             else:
-                new_rows.append((table_id, chunk))
-        return tuple(new_rows)
+                new_chunks.append(chunk)
+        return tuple(new_chunks)
 
     def _deliver(self, prepared: PreparedRunState) -> None:
-        """Hand an accepted candidate's rows to the sink, before the swap makes it current.
+        """Hand an accepted candidate's chunks to the sink, before the swap makes it current.
 
         Before, not after: a sink that cannot take the rows -- a full disk -- fails the
         occurrence rather than accepting a root whose rows were lost, and everything up to the
         previous occurrence is already on disk.
         """
-        if self._row_sink is None or not prepared.new_rows:
+        if self._sink is None:
             return
-        for table_id, rows in prepared.new_rows:
-            self._row_sink(table_id, rows)
+        for chunk in prepared.new_chunks:
+            self._sink(chunk)
 
     def _advance(
         self,
@@ -391,8 +388,7 @@ class RunStateRepository:
         component_refs: Mapping[str, ModelStateRef] | None = None,
         account: object = _UNSET,
         pending: object = _UNSET,
-        chunks: Mapping[str, tuple[tuple[Mapping[str, object], ...], ...]] | None = None,
-        manifests: tuple[RecorderManifest, ...] | None = None,
+        chunks: Mapping[str, tuple[RecordChunk, ...]] | None = None,
         feedback: tuple[object, ...] | None = None,
         finalization: object = _UNSET,
         commits: int = 0,
@@ -421,7 +417,6 @@ class RunStateRepository:
             lifecycle_trace=(
                 root.lifecycle_trace if lifecycle is None else (*root.lifecycle_trace, lifecycle)
             ),
-            recorder_manifests=root.recorder_manifests if manifests is None else manifests,
             _recorder_chunks=root._recorder_chunks if chunks is None else chunks,
             feedback=root.feedback if feedback is None else feedback,
             finalization=(
@@ -458,7 +453,7 @@ class RunStateRepository:
         payloads = dict(root._payloads)
         payloads[candidate.ref] = candidate.payload
         component_refs, proved = _component_states(root, component_memory, states, payloads)
-        chunks, manifests, new_rows = self._staged(recorder)
+        chunks, new_chunks = self._staged(recorder)
         return PreparedRunState(
             expected,
             self._advance(
@@ -473,10 +468,9 @@ class RunStateRepository:
                 component_refs=component_refs,
                 pending=pending_accepted_intent,
                 chunks=chunks,
-                manifests=manifests,
                 commits=1,
             ),
-            new_rows,
+            new_chunks,
         )
 
     def publish(self, prepared: PreparedRunState) -> AcceptedRunState:
@@ -503,16 +497,14 @@ class RunStateRepository:
 
     def _staged(
         self, recorder: InvocationRecorder | None
-    ) -> tuple[dict, tuple[RecorderManifest, ...], tuple]:
-        """The root's chunks and manifests, extended by `recorder`'s rows when there is one."""
+    ) -> tuple[dict[str, tuple[RecordChunk, ...]], tuple[RecordChunk, ...]]:
+        """The root's chunks, extended by `recorder`'s when there is one; and what the sink gets."""
         root = self._root
         chunks = dict(root._recorder_chunks)
-        manifests = root.recorder_manifests
-        new_rows: tuple[tuple[str, tuple[Mapping[str, object], ...]], ...] = ()
+        new_chunks: tuple[RecordChunk, ...] = ()
         if recorder is not None:
-            new_rows = self._stage_rows(chunks, recorder.staged_rows())
-            manifests = manifests + recorder.manifests()
-        return chunks, manifests, new_rows
+            new_chunks = self._stage(chunks, recorder.staged_chunks())
+        return chunks, new_chunks
 
     def prepare_account(
         self,
@@ -539,7 +531,7 @@ class RunStateRepository:
         states = dict(root._model_states)
         payloads = dict(root._payloads)
         component_refs, proved = _component_states(root, component_memory, states, payloads)
-        chunks, manifests, new_rows = self._staged(recorder)
+        chunks, new_chunks = self._staged(recorder)
         pending: object = _UNSET
         if isinstance(account, PreparedAppend):
             if getattr(root.pending_accepted_intent, "pending_id", None) != pending_id:
@@ -550,7 +542,9 @@ class RunStateRepository:
             rows = _fill_rows(
                 account.entries, account.next_state.snapshot.version, envelope=envelope
             )
-            new_rows = (*new_rows, *self._stage_rows(chunks, {FILL_TABLE: rows} if rows else {}))
+            if rows:
+                fills = RecordChunk.from_rows(FILL_TABLE, rows)
+                new_chunks = (*new_chunks, *self._stage(chunks, (fills,)))
             kind, pending = LifecycleKind.ACCOUNT_COMMITTED, None
         else:
             if pending_id is not None:
@@ -568,9 +562,8 @@ class RunStateRepository:
                 account=account.next_state,
                 pending=pending,
                 chunks=chunks,
-                manifests=manifests,
             ),
-            new_rows,
+            new_chunks,
         )
 
     def prepare_monitoring(
@@ -590,7 +583,7 @@ class RunStateRepository:
         states = dict(root._model_states)
         payloads = dict(root._payloads)
         component_refs, proved = _component_states(root, component_memory, states, payloads)
-        chunks, manifests, new_rows = self._staged(recorder)
+        chunks, new_chunks = self._staged(recorder)
         return PreparedRunState(
             root.version,
             self._advance(
@@ -601,9 +594,8 @@ class RunStateRepository:
                 verified=root._verified | proved,
                 component_refs=component_refs,
                 chunks=chunks,
-                manifests=manifests,
             ),
-            new_rows,
+            new_chunks,
         )
 
     def prepare_feedback(

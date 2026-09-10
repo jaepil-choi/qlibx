@@ -327,36 +327,28 @@ class ValuationHandler:
             event_time=self._context.in_agenda_zone(cutoff),
         )
         priced = {selection.instrument_id: selection for selection in selected}
-        recorder.append(
+        # The `_ACCOUNT` row first -- cash and NAV, the values themselves and not their text, so
+        # a reader gets a Decimal back -- then one row per held name: its quantity, the price it
+        # was marked at and when that price was observed. As columns (record `221`): a 3,000-name
+        # book is seven tuples here, not 3,000 dicts, and is checked by column.
+        held = sorted(account.positions) if self._context.record_account_positions else []
+        selections = [priced.get(instrument) for instrument in held]
+        nothing = [None] * len(held)
+        recorder.append_columns(
             f"{DEFAULT_TABLE_PREFIX}account",
             {
-                "instrument": _ACCOUNT_IDENTITY,
-                # The values themselves, not their text: the run record writer records what
-                # type each column was encoded from, so a reader gets a Decimal back.
-                "cash": account.cash,
-                "nav": mark.nav,
-                "quantity": None,
-                "price": None,
-                "observed_at": mark.marked_at,
-                "account_version": account.version,
+                "instrument": [_ACCOUNT_IDENTITY, *held],
+                "cash": [account.cash, *nothing],
+                "nav": [mark.nav, *nothing],
+                "quantity": [None, *(account.positions[instrument] for instrument in held)],
+                "price": [None, *(None if s is None else s.price for s in selections)],
+                "observed_at": [
+                    mark.marked_at,
+                    *(None if s is None else s.observed_at for s in selections),
+                ],
+                "account_version": [account.version] * (len(held) + 1),
             },
         )
-        for instrument in (
-            sorted(account.positions) if self._context.record_account_positions else ()
-        ):
-            selection = priced.get(instrument)
-            recorder.append(
-                f"{DEFAULT_TABLE_PREFIX}account",
-                {
-                    "instrument": instrument,
-                    "cash": None,
-                    "nav": None,
-                    "quantity": account.positions[instrument],
-                    "price": None if selection is None else selection.price,
-                    "observed_at": None if selection is None else selection.observed_at,
-                    "account_version": account.version,
-                },
-            )
         self._context.recorded_measurements.add(mark.marked_at)
         return recorder
 

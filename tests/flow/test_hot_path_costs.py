@@ -577,3 +577,106 @@ def test_a_proof_that_outlives_its_callback_still_returns_the_unbounded_result(
             ), "a bounded read must return the declared fields and nothing else"
             seen.update(str(row["instrument"]) for row in bounded)
     assert seen == set(names), "a ladder that never reads the sparse names proves nothing"
+
+
+# --------------------------------------------------------------------------------------------
+# Record `221`: rows are collected as rows and travel as columns. On a 3,000-name book the
+# `vqapr.account` rows of one market-clock instant were 3,000 dicts, each cell asked what it was,
+# each field name re-checked for whitespace, then copied and re-wrapped at every hand-off to the
+# disk. These pin the shape, not the seconds.
+# --------------------------------------------------------------------------------------------
+
+_ACCOUNT_SPEC = TableSpec("vqapr.account", ("instrument", "quantity", "price"))
+
+
+def _account_recorder() -> InvocationRecorder:
+    return InvocationRecorder(
+        (_ACCOUNT_SPEC,), run_id="r", producer_id="p", stage="VALUATION", event_time=NOW
+    )
+
+
+def test_a_framework_column_is_checked_by_type_not_by_cell(monkeypatch) -> None:
+    """`append_columns` never asks a cell what it is; `append_batch` still asks every cell."""
+    from decimal import Decimal
+
+    from vqapr.domain import shapes
+
+    calls = 0
+    original = shapes.normalize_scalar
+
+    def counting(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(shapes, "normalize_scalar", counting)
+    monkeypatch.setattr("vqapr.authoring.records.normalize_scalar", counting)
+
+    names = [f"I{index:04d}" for index in range(1000)]
+    recorder = _account_recorder()
+    recorder.append_columns(
+        "vqapr.account",
+        {"instrument": names, "quantity": [Decimal(1)] * 1000, "price": [Decimal("10.5")] * 1000},
+    )
+    assert calls == 0, "a column is checked by its distinct types, not cell by cell"
+    assert recorder.manifests()[0].row_count == 1000
+
+    recorder.append_batch(
+        "vqapr.account", [{"instrument": "A", "quantity": Decimal(1), "price": Decimal(2)}]
+    )
+    assert calls == 3, "an author's row is still checked cell by cell"
+
+
+def test_a_column_refuses_what_a_cell_would_have_refused() -> None:
+    """The column pass keeps `normalize_scalar`'s rules: finite numbers, aware datetimes,
+    portable types."""
+    from datetime import datetime
+    from decimal import Decimal
+
+    recorder = _account_recorder()
+    with pytest.raises(ValueError, match="finite"):
+        recorder.append_columns(
+            "vqapr.account",
+            {"instrument": ["A"], "quantity": [Decimal("NaN")], "price": [None]},
+        )
+    with pytest.raises(ValueError, match="aware"):
+        recorder.append_columns(
+            "vqapr.account",
+            {"instrument": ["A"], "quantity": [None], "price": [datetime(2024, 1, 1)]},
+        )
+    with pytest.raises(TypeError, match="portable"):
+        recorder.append_columns(
+            "vqapr.account", {"instrument": ["A"], "quantity": [object()], "price": [None]}
+        )
+    with pytest.raises(ValueError, match="same number of rows"):
+        recorder.append_columns(
+            "vqapr.account", {"instrument": ["A", "B"], "quantity": [None], "price": [None]}
+        )
+    with pytest.raises(ValueError, match="exactly match declared fields"):
+        recorder.append_columns("vqapr.account", {"instrument": ["A"], "quantity": [None]})
+
+
+def test_the_writer_never_walks_the_rows_of_a_chunk(tmp_path: Path, monkeypatch) -> None:
+    """A chunk reaches the disk as the columns it was staged as; rows are not rebuilt on the way."""
+    from decimal import Decimal
+
+    from vqapr.domain.shapes import RecordChunk
+    from vqapr.record.writer import RunRecordWriter
+
+    def never(self):
+        raise AssertionError("the writer rebuilt rows from a chunk")
+
+    monkeypatch.setattr(RecordChunk, "rows", never)
+    recorder = _account_recorder()
+    recorder.append_columns(
+        "vqapr.account",
+        {"instrument": ["A", "B"], "quantity": [Decimal(1), Decimal(2)], "price": [None, None]},
+    )
+    writer = RunRecordWriter(tmp_path, "columns")
+    writer.open()
+    try:
+        for chunk in recorder.staged_chunks():
+            writer.append_chunk(chunk)
+        assert writer.counts()["vqapr.account"] == {"rows": 2, "instants": 1}
+    finally:
+        writer.release()

@@ -293,6 +293,7 @@ def run_record_path(root: Path, run_id: str) -> Path:
 
 
 _DECIMAL = {b"vqapr.type": b"decimal"}
+_NONE = type(None)
 """Field metadata marking a string column that holds `Decimal` text; see `PART_SUFFIX`."""
 
 
@@ -317,26 +318,29 @@ def _arrow_type(values: Sequence[object], table_id: str, column: str) -> pa.Fiel
     thing that is wrong, and a silent common type would hide it (`prefer fast, explicit
     failure`).
     """
+    # One pass that stays in C finds the distinct Python types; the few types are then classified
+    # once each. Asking every cell in turn cost as much as building the column (record `221`).
     kinds: set[str] = set()
-    first_instant: datetime | None = None
-    for value in values:
-        if value is None:
+    for kind in {type(value) for value in values}:
+        if kind is _NONE:
             continue
-        if isinstance(value, bool):
+        if issubclass(kind, bool):
             kinds.add("bool")
-        elif isinstance(value, Decimal):
+        elif issubclass(kind, Decimal):
             kinds.add("decimal")
-        elif isinstance(value, datetime):
+        elif issubclass(kind, datetime):
             kinds.add("datetime")
-            first_instant = first_instant or value
-        elif isinstance(value, int):
+        elif issubclass(kind, int):
             kinds.add("int")
-        elif isinstance(value, float):
+        elif issubclass(kind, float):
             kinds.add("float")
-        elif isinstance(value, str):
-            kinds.add("string")
         else:
             kinds.add("string")
+    first_instant: datetime | None = (
+        next((value for value in values if isinstance(value, datetime)), None)
+        if "datetime" in kinds
+        else None
+    )
     if kinds <= {"int", "float"} and kinds:
         return pa.field(column, pa.float64() if "float" in kinds else pa.int64())
     if len(kinds) > 1:
@@ -358,7 +362,7 @@ def _arrow_type(values: Sequence[object], table_id: str, column: str) -> pa.Fiel
 
 
 def _arrow_table(
-    rows: Sequence[Mapping[str, object]], table_id: str, remembered: dict[str, pa.Field]
+    columns: Mapping[str, Sequence[object]], table_id: str, remembered: dict[str, pa.Field]
 ) -> pa.Table:
     """One chunk as an Arrow table, each column typed as this writer first saw it.
 
@@ -366,12 +370,14 @@ def _arrow_table(
     cast to it; a column that was null in an earlier chunk was written `null`-typed there,
     which every reader unions with the later type. A later chunk that cannot be cast is
     refused by name.
+
+    Takes the chunk as columns (record `221`): the recorder staged them that way, so nothing
+    here walks rows.
     """
-    columns = sorted({str(key) for row in rows for key in row})
     fields: list[pa.Field] = []
     arrays: list[pa.Array] = []
-    for column in columns:
-        values = [row.get(column) for row in rows]
+    for column in sorted(columns):
+        values = columns[column]
         seen = _arrow_type(values, table_id, column)
         field = remembered.get(column)
         if field is None:

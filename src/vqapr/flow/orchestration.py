@@ -622,7 +622,7 @@ def _run_strategy(
             },
             # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
             # A hard kill preserves only spilled rows. Without a store, roots retain rows.
-            row_sink=None if writer is None else writer.append,
+            sink=None if writer is None else writer.append_chunk,
         )
         if state.root.current_model_state_ref != layer.initial_model_state_ref:
             raise RuntimeError("initial Model state does not match frozen run authority")

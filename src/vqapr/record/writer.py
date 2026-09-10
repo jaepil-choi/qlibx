@@ -26,6 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from vqapr._internal import atomic
+from vqapr.domain.shapes import RecordChunk
 from vqapr.record.reader import (
     LOCK_FILENAME,
     RunRecordLive,
@@ -494,20 +495,34 @@ class RunRecordWriter:
         if not rows:
             self.heartbeat()
             return
-        table = _arrow_table(rows, table_id, self._fields.setdefault(table_id, {}))
+        self.append_chunk(RecordChunk.from_rows(table_id, rows))
+
+    def append_chunk(self, chunk: RecordChunk) -> None:
+        """Take one chunk of one table, already columns (record `221`): the run state's sink.
+
+        The recorder staged the rows as columns and the run state forwarded them untouched, so
+        the Arrow table is built straight from them -- no row is walked here. An empty chunk is
+        the heartbeat alone.
+        """
+        if chunk.row_count == 0:
+            self.heartbeat()
+            return
+        table_id = chunk.table_id
+        table = _arrow_table(chunk.columns, table_id, self._fields.setdefault(table_id, {}))
         buffered = self._buffer.tables.setdefault(table_id, [])
         buffered.append(table)
         self._buffer.nbytes += table.nbytes
         instants = self._instants.setdefault(table_id, set())
-        for row in rows:
-            at = row.get("event_time")
+        # A recorder's chunk carries one `event_time` on every row; the distinct set is what is
+        # counted, so a column of one value is one lookup rather than one per row.
+        for at in set(chunk.columns.get("event_time", (None,))):
             instants.add(str(at))
             if isinstance(at, datetime):
                 self._buffer.occurrences.add(str(at))
                 last = self._buffer.last_event_time
                 if last is None or at > last:
                     self._buffer.last_event_time = at
-        self._rows[table_id] = self._rows.get(table_id, 0) + len(rows)
+        self._rows[table_id] = self._rows.get(table_id, 0) + chunk.row_count
         self.heartbeat()
         if self._buffer.nbytes >= self.spill_bytes:
             self._spill()

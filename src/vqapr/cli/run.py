@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.analysis.execution import fill_summary
-from vqapr.cli.envelope import success
+from vqapr.cli.envelope import failure, success
 
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
@@ -36,6 +36,8 @@ from vqapr.flow.orchestration import (
     COMPLETED,
     FAILED,
     in_workers,
+    require_independent_batch,
+    run_registered_datamodel,
     run_registered_strategy,
 )
 from vqapr.project.store import WORKSPACE_DIRECTORY
@@ -60,7 +62,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="jobs",
         type=int,
         default=1,
-        help="run the given runs in this many processes; each builds its own panels",
+        help=(
+            "run the given runs in this many processes, one run per process, strategy and "
+            "datamodel runs alike; each builds its own panels. A batch whose runs depend on one "
+            "another is refused: run the producer first"
+        ),
     )
     parser.add_argument(
         "--force",
@@ -215,20 +221,8 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
             record_account_positions=not getattr(args, "no_account_positions", False),
             workspace=workspace,
         )
-    except RunRecordLive as running:
-        raise _held_record(running) from running
-    except RunRecordExists as existing:
-        raise _standing_record(existing, frozen, target) from None
-    except RunRecordConflict as changed:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="a run id's records all belong to one configuration",
-            observed=str(changed),
-            retry=(
-                f"vqapr rm run {changed.run_id} to clear the old records, or register the "
-                "changed run under a new id"
-            ),
-        ) from changed
+    except (RunRecordLive, RunRecordExists, RunRecordConflict) as refused:
+        raise _record_refusal(refused, frozen, target) from refused
     if frozen.datamodel is not None:
         return success(
             "run.complete",
@@ -279,7 +273,9 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
 
     Each run is independent: one refusal is reported in that run's entry rather than ending the
     others, which is the same rule a run's members used to get (`docs/issues/archive/073`) at the
-    level the unit moved to.
+    level the unit moved to. The envelope says how many processes actually ran the batch
+    (`jobs`), because a caller cannot see a pool that is not there
+    (`docs/issues/report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs.md`).
     """
     targets = [str(name) for name in args.target]
     if len(targets) == 1:
@@ -294,45 +290,87 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
             runs[target] = _run_one(target, args, project_root=project_root)
         except (VqaprError, InputError) as refused:
             runs[target] = _refusal_envelope(refused)
-    return _runs_envelope(runs, store_root)
+    return _runs_envelope(runs, store_root, jobs=1)
 
 
 def _run_each_in_workers(
     targets: list[str], args: argparse.Namespace, *, project_root: Path, jobs: int
 ) -> dict[str, Any]:
-    """The runs in `jobs` spawned processes, each freezing its own run (design §2.3)."""
+    """The runs in `jobs` spawned processes, each freezing its own run (design §2.3).
+
+    Both kinds of run go through the pool. Datamodel runs ran here sequentially from record
+    `201` until the testbed measured `--jobs 16` at exactly one run at a time
+    (`docs/issues/report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs.md`): the
+    datamodel worker raises its refusal, and `in_workers` then ended the whole batch on the
+    first one. `in_workers` now returns what each worker raised as that run's entry, so the
+    reason is gone.
+
+    Before anything is spawned the batch is judged as a batch: a run that reads what another
+    run in it writes is refused whole (owner decision 2026-09-10), because a pool promises no
+    order and the reader would see the dataset as it stood before, or race the writer. Datamodel
+    runs are spawned first and strategy runs after, so a batch that passes that judgment still
+    sees every dataset it could.
+    """
     store_root = getattr(args, "store_root", None) or project_root / WORKSPACE_DIRECTORY
+    for target in targets:
+        refuse_a_path(target, verb="run")
     workspace = Workspace.open(project_root)
+    require_independent_batch(workspace, targets)
+    definitions = {target: workspace.run_definition(target) for target in targets}
     replace = bool(getattr(args, "force", False))
     positions = not getattr(args, "no_account_positions", False)
-    strategy_runs = [
-        target
-        for target in targets
-        if workspace.run_definition(target).strategy is not None
-    ]
-    datamodel_runs = [target for target in targets if target not in set(strategy_runs)]
-    runs: dict[str, Any] = {}
+    datamodel_runs = [t for t in targets if definitions[t].datamodel is not None]
+    strategy_runs = [t for t in targets if definitions[t].datamodel is None]
+    outcomes: dict[str, Any] = {}
+    if datamodel_runs:
+        outcomes.update(
+            in_workers(
+                datamodel_runs,
+                run_registered_datamodel,
+                (replace,),
+                jobs=jobs,
+                store=Path(store_root),
+                root_path=project_root,
+            )
+        )
     if strategy_runs:
-        for run_id, outcome in in_workers(
-            strategy_runs,
-            run_registered_strategy,
-            (replace, positions),
-            jobs=jobs,
-            store=Path(store_root),
-            root_path=project_root,
-        ).items():
-            runs[run_id] = _worker_envelope(run_id, outcome, store_root)
-    for target in datamodel_runs:
-        # Sequential: a datamodel worker raises its refusal rather than returning it, so running
-        # it here keeps one bounded refusal per run instead of one exception for the batch.
-        try:
-            runs[target] = _run_one(target, args, project_root=project_root)
-        except (VqaprError, InputError) as refused:
-            runs[target] = _refusal_envelope(refused)
-    return _runs_envelope(runs, store_root)
+        outcomes.update(
+            in_workers(
+                strategy_runs,
+                run_registered_strategy,
+                (replace, positions),
+                jobs=jobs,
+                store=Path(store_root),
+                root_path=project_root,
+            )
+        )
+    runs = {
+        target: _worker_entry(target, definitions[target], outcomes[target], store_root)
+        for target in targets
+    }
+    return _runs_envelope(runs, store_root, jobs=min(jobs, len(targets)))
 
 
-def _worker_envelope(run_id: str, outcome: Any, store_root: Path) -> dict[str, Any]:
+def _worker_entry(
+    run_id: str, definition: RunDefinition, outcome: Any, store_root: Path
+) -> dict[str, Any]:
+    """One run's entry of the batch envelope, from what its worker returned or raised.
+
+    A datamodel worker returns its record and raises its refusal; a strategy worker returns an
+    outcome that carries either (`docs/issues/archive/073`). A raised record exception -- a
+    standing record, a live lock, a changed configuration -- is rendered through the same door
+    `_run_one` uses, so a run refused in a worker reads exactly as one refused in this process.
+    """
+    if isinstance(outcome, Exception):
+        return _refusal_envelope(_record_refusal(outcome, definition, run_id))
+    if definition.datamodel is not None:
+        return success(
+            "run.complete",
+            run_id=run_id,
+            writes=definition.writes,
+            store_root=str(store_root),
+            datamodels={definition.datamodel.component_id: _datamodel_envelope(outcome)},
+        )
     if outcome.status == COMPLETED:
         return {
             "ok": True,
@@ -353,20 +391,45 @@ def _worker_envelope(run_id: str, outcome: Any, store_root: Path) -> dict[str, A
     }
 
 
+def _record_refusal(refused: Exception, frozen: object, target: str) -> Exception:
+    """The bounded refusal for an exception the record store raised, or the exception itself.
+
+    One door for the sequential path and the pool: `_run_one` raises what this returns, and a
+    worker's raised exception is passed through it before rendering. `frozen` is anything that
+    says `.datamodel` -- the frozen run in-process, the registered definition for a worker.
+    """
+    if isinstance(refused, RunRecordLive):
+        return _held_record(refused)
+    if isinstance(refused, RunRecordExists):
+        return _standing_record(refused, frozen, target)
+    if isinstance(refused, RunRecordConflict):
+        return InputError(
+            VALUE_INVALID,
+            requirement="a run id's records all belong to one configuration",
+            observed=str(refused),
+            retry=(
+                f"vqapr rm run {refused.run_id} to clear the old records, or register the "
+                "changed run under a new id"
+            ),
+        )
+    return refused
+
+
 def _refusal_envelope(refused: Exception) -> dict[str, Any]:
-    """One run's refusal as its entry, so the other runs in the batch still report."""
-    body = getattr(refused, "as_envelope", None)
-    rendered: dict[str, Any] = {"error": str(refused)}
-    if callable(body):
-        produced = body()
-        if isinstance(produced, dict):
-            rendered = produced
-    return {"ok": False, **rendered}
+    """One run's refusal as its entry, so the other runs in the batch still report.
+
+    The same rendering `main` gives a refusal that ends a single run: the bounded body when the
+    exception has one, `unhandled` with the whole traceback when it does not. It looked for an
+    `as_envelope` method nothing defines and so rendered every entry as a bare `error` string
+    until the batch path was exercised for real.
+    """
+    return failure(refused, stage=Stage.RUN)
 
 
-def _runs_envelope(runs: dict[str, Any], store_root: Path) -> dict[str, Any]:
+def _runs_envelope(runs: dict[str, Any], store_root: Path, *, jobs: int) -> dict[str, Any]:
+    """The batch envelope: every run's entry, and the number of processes that ran them."""
     ok = all(entry.get("ok", True) for entry in runs.values())
-    envelope = success("run.complete", store_root=str(store_root), runs=runs)
+    envelope = success("run.complete", store_root=str(store_root), jobs=jobs, runs=runs)
     envelope["ok"] = ok
     return envelope
 

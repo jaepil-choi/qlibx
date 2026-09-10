@@ -32,6 +32,7 @@ from vqapr.flow.declaration.preflight import preflight_run
 from vqapr.flow.orchestration import (
     RunResult,
     in_workers,
+    require_independent_batch,
     run,
     run_registered_datamodel,
 )
@@ -568,16 +569,21 @@ def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
     assert opposite[0][0] == pytest.approx(0.0)
 
 
-def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raises(
+def test_a_worker_refusal_is_that_runs_entry_and_the_other_run_completes(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """A datamodel refused in a `--jobs` worker is refused by its own code in the parent.
+    """A datamodel refused in a `--jobs` worker comes back as its own error, beside the other.
 
-    The strategy pool learned this in `docs/issues/archive/073` by returning an outcome; the
-    datamodel pool was a copy that never did, so a `VqaprError` raised in a worker failed to
-    unpickle (keyword-only constructor) and the run died as `stage: unhandled` with no failures.
-    One pool driver for both kinds and a picklable `VqaprError` close it (record `170`). The pool
-    spreads runs now; the rule it pins is the same.
+    The strategy pool learned the pickling half in `docs/issues/archive/073` by returning an
+    outcome; the datamodel pool was a copy that never did, so a `VqaprError` raised in a worker
+    failed to unpickle (keyword-only constructor) and the run died as `stage: unhandled` with no
+    failures. One pool driver for both kinds and a picklable `VqaprError` close it (record `170`).
+
+    The second half is `docs/issues/report-2026-09-10-run-jobs-does-not-parallelise-datamodel-
+    runs.md`: `in_workers` re-raised the first worker's exception out of its comprehension, which
+    ended the batch and lost the other workers' results -- and was the reason the CLI ran
+    datamodel runs one at a time. A raised refusal is now that run's entry, the same exception
+    the sequential path raises, and the other run's record is there beside it.
     """
     _prepared(
         tmp_path, model_price_parquet, ("reversal", "ReversalModel"), ("stray", "StrayNameModel")
@@ -593,20 +599,70 @@ def test_a_worker_refusal_comes_back_as_the_same_error_the_sequential_loop_raise
             is True
         )
 
-    with pytest.raises(VqaprError) as caught:
-        in_workers(
-            ["factors-reversal", "factors-stray"],
-            run_registered_datamodel,
-            (False,),
-            jobs=2,
-            store=_store(tmp_path),
-            root_path=tmp_path,
-        )
+    outcomes = in_workers(
+        ["factors-stray", "factors-reversal"],
+        run_registered_datamodel,
+        (False,),
+        jobs=2,
+        store=_store(tmp_path),
+        root_path=tmp_path,
+    )
 
-    assert caught.value.stage is Stage.RUN
-    (failure,) = caught.value.failures
+    assert set(outcomes) == {"factors-stray", "factors-reversal"}
+    refused = outcomes["factors-stray"]
+    assert isinstance(refused, VqaprError)
+    assert refused.stage is Stage.RUN
+    (failure,) = refused.failures
     assert failure.code == "datamodel.output.instrument_unrequested"
     assert "stray_2d" not in _dataset_ids(tmp_path)
+    completed = outcomes["factors-reversal"]
+    assert not isinstance(completed, Exception)
+    assert completed["dataset_id"] == "reversal_2d" and completed["rows"] == 4
+    assert datamodel_refs(_store(tmp_path), "factors-reversal") == (completed["datamodel_ref"],)
+
+
+def test_a_batch_in_which_one_run_reads_what_another_writes_is_refused_whole(
+    tmp_path: Path, model_price_parquet: Path
+) -> None:
+    """A pool promises no order, so a reader and its writer cannot share one batch.
+
+    Owner decision (2026-09-10, on the report above): refuse, do not schedule. The echo model
+    reads `reversal_2d`, which the reversal run writes; named together they are refused before
+    anything is spawned, by a code that says which run to run first. Two runs writing one name
+    are refused by the same door. A batch of independent runs passes without a word.
+    """
+    _prepared(
+        tmp_path,
+        model_price_parquet,
+        ("reversal", "ReversalModel"),
+        ("momentum", "MomentumModel"),
+        ("echo", "EchoModel"),
+    )
+    reversal = _definition("factors-reversal", DataModelEntry("reversal", ("score",)), writes="reversal_2d")
+    momentum = _definition("factors-momentum", DataModelEntry("momentum", ("score",)), writes="momentum_2d")
+    assert register_run(tmp_path, reversal) is True
+    assert register_run(tmp_path, momentum) is True
+    # The echo run can only be registered once `reversal_2d` exists -- which is exactly when a
+    # batch naming both becomes a hazard: a `--force` rerun of the writer beside its reader.
+    _run(tmp_path, reversal)
+    echo = _definition("factors-echo", DataModelEntry("echo", ("echo",)), writes="echo_2d")
+    assert register_run(tmp_path, echo) is True
+    workspace = Workspace.open(tmp_path)
+
+    require_independent_batch(workspace, ["factors-reversal", "factors-momentum"])
+
+    with pytest.raises(VqaprError) as caught:
+        require_independent_batch(workspace, ["factors-reversal", "factors-echo"])
+    assert caught.value.stage is Stage.CHECK
+    (dependent,) = caught.value.failures
+    assert dependent.code == "run.batch_dependent"
+    assert dependent.status == Status.INVALID
+    assert "'factors-echo' reads 'reversal_2d', which 'factors-reversal' writes" in str(
+        dependent.observed
+    )
+    assert "vqapr run factors-reversal first" in str(dependent.fix)
+    assert datamodel_refs(_store(tmp_path), "factors-echo") == ()
+    assert "echo_2d" not in _dataset_ids(tmp_path), "refused before anything was spawned"
 
 
 def test_memory_persists_across_the_sessions_of_one_run(

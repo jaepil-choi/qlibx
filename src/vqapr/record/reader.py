@@ -140,6 +140,15 @@ class RunRecordLive(FileExistsError):
             "abandoned record is removed with `vqapr rm strategy` once its lock has aged out"
         )
 
+    def __reduce__(self) -> tuple[object, ...]:
+        """Rebuild through this constructor, so the refusal crosses a `--jobs` process boundary.
+
+        The default pickling of an exception calls `cls(*args)` with the message alone, which
+        this constructor refuses; the parent then met a pickling `TypeError` in place of the
+        refusal (`docs/issues/archive/073`, the same rule `VqaprError.__reduce__` follows).
+        """
+        return (type(self), (self.run_id, self.directory, self.claim))
+
 
 def run_ids(root: Path) -> tuple[str, ...]:
     """Every run this root holds a record for, sorted.

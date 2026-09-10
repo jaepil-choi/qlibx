@@ -26,6 +26,9 @@ requires-python = ">=3.12,<3.15"
 # It is our dependency because our dependency will not declare its own.
 dependencies = [
     "duckdb>=1.5,<2",
+    # `numpy` is the panel's matrix (record `232`): a field is one `(instants x instruments)`
+    # block a model computes on. pyarrow already required it; naming it is naming what we use.
+    "numpy>=2,<3",
     "pyarrow>=25,<26",
     "pydantic>=2,<3",
     "pytz>=2024.1",

@@ -229,7 +229,7 @@ class DuckDbObservationStore:
             if span is None:
                 grid = self._instant_grid(source, registration.available_at)
                 span = (grid[0], grid[-1]) if grid else (evaluation_time, evaluation_time)
-            rows = scan.observation_rows(
+            table = scan.observation_table(
                 source,
                 instrument_field=registration.instrument_field,
                 available_at_field=registration.available_at,
@@ -242,8 +242,8 @@ class DuckDbObservationStore:
                 lower_bound=span[0],
                 session=self.__session,
             )
-            panel = self.__panels[identity] = Panel.from_rows(
-                rows,
+            panel = self.__panels[identity] = Panel.from_table(
+                table,
                 dataset_id=str(first.dataset_id),
                 fields=fields,
                 instruments=instruments,

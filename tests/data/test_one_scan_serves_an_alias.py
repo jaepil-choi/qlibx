@@ -6,7 +6,7 @@ scans of one window and a join in Python on `(available_at, instrument)`. The wi
 ranks each field's own last N rows separately, so one statement over the alias's `fields` returns
 exactly what the joined reads did -- and records one access naming every field.
 
-Measured by counting `scan.observation_rows` calls, which is the statement, not by timing.
+Measured by counting `scan.observation_table` calls, which is the statement, not by timing.
 """
 
 from __future__ import annotations
@@ -54,15 +54,15 @@ def _workspace(tmp_path: Path, parquet: Path) -> Workspace:
 
 @pytest.fixture
 def scans(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
-    """Every `observation_rows` statement issued, by the fields it asked for."""
+    """Every `observation_table` statement issued, by the fields it asked for."""
     issued: list[dict[str, str]] = []
-    original = store_module.scan.observation_rows
+    original = store_module.scan.observation_table
 
     def counting(spec, **kwargs):
         issued.append(dict(kwargs["fields"]))
         return original(spec, **kwargs)
 
-    monkeypatch.setattr(store_module.scan, "observation_rows", counting)
+    monkeypatch.setattr(store_module.scan, "observation_table", counting)
     return issued
 
 

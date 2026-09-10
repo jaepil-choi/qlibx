@@ -2900,7 +2900,7 @@ src/vqapr/
 │   ├── resolution.py    44   requirement → 물리 질의
 │   ├── scan.py        1471   SourceSpec을 여는 유일한 곳
 │   ├── store.py        414   ObservationStore + duckdb 구현
-│   ├── panel.py        318   Arrow 패널과 창 자르기
+│   ├── panel.py       ~400   필드마다 블록 하나(name-major Arrow 배열) · `matrix()` · 벡터화된 counts/current/latest — 기록 `232`
 │   └── windows.py      215   ModelWindow · AccessRecord
 │
 ├── transforms/      순수 leaf. 값을 값으로 (§5.6) — cross_section · fama_french · neutralize

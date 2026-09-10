@@ -491,6 +491,7 @@ version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "numpy" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pytz" },
@@ -509,6 +510,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.5,<2" },
+    { name = "numpy", specifier = ">=2,<3" },
     { name = "pyarrow", specifier = ">=25,<26" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pytz", specifier = ">=2024.1" },

@@ -90,6 +90,29 @@ class ExecutionHorizon:
         """Candidates strictly later than the decision, without rescanning the source."""
         return self._instants[bisect_right(self._instants, decision_time.astimezone(UTC)) :]
 
+    @classmethod
+    def between(
+        cls, instants: Iterable[datetime], *, start_time: datetime, end_time: datetime
+    ) -> ExecutionHorizon:
+        """The horizon `FillRule.build_horizon` would scan, cut from instants already read.
+
+        `scan.candidate_instants` answers `trade_at > start AND trade_at <= end`, distinct and
+        ascending; this is the same cut over the table's distinct instants when a caller already
+        holds them (the workspace reads them once per command to derive the run's agenda, record
+        `238`), so preflight and the judgments build the horizon without a second and third scan.
+        """
+        start_utc = start_time.astimezone(UTC)
+        end_utc = end_time.astimezone(UTC)
+        return cls(
+            tuple(
+                sorted(
+                    instant
+                    for instant in _instants(instants)
+                    if start_utc < instant <= end_utc
+                )
+            )
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class FillRule:

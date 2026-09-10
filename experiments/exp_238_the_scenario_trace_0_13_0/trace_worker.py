@@ -29,7 +29,7 @@ from trace import INTERESTING_LOCALS, SRC, _short  # noqa: E402 - the shared pro
 
 
 def trace_worker(out: Path, project: Path, run_id: str, others: list[str]) -> None:
-    from vqapr.flow.orchestration import _bake_for_batch, run_registered_strategy
+    from vqapr.flow.orchestration import _bake_for_batch, batch_reads, run_registered_strategy
     from vqapr.project.store import Workspace
 
     # The store root is passed as the CLI passes it (unresolved); the profiler matches the
@@ -37,7 +37,7 @@ def trace_worker(out: Path, project: Path, run_id: str, others: list[str]) -> No
     resolved = project.resolve()
     cubes = Path(tempfile.mkdtemp(prefix="cubes-", dir=project / ".vqapr"))
     workspace = Workspace.open(project)
-    _bake_for_batch(workspace, [run_id, *others], cubes)
+    _bake_for_batch(workspace, batch_reads(workspace, [run_id, *others]), cubes)
     baked = sorted(
         str(p.relative_to(cubes)).replace("\\", "/") for p in cubes.rglob("*") if p.is_file()
     )

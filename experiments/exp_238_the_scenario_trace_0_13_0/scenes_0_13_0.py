@@ -450,7 +450,7 @@ SCENES = [
               "<code>in_workers</code>가 두 결과를 돌려주자 <code>batch_cubes</code>의 <code>finally</code>가 heartbeat를 멈추고 <code>rmtree</code>로 cube 디렉터리를 지운다(45.0 ms; 프로파일러는 제너레이터의 재개를 두 번째 호출로 기록한다). 성공이든 거절이든 예외든 같다 — 아무것도 쌓이지 않는다. "
               "<code>_worker_entry</code>가 run마다 record를 읽어 봉투를 만든다: factor 계좌 v10 · 주문 73 · 체결 54, stop-loss 계좌 v34 · 주문 111 · 체결 59 — ④·⑤와 같은 수. 봉투의 <code>jobs: 2</code>가 실제로 돈 프로세스 수다. 명령 뒤의 파일 목록에 <code>.vqapr/cubes/</code> 아래 파일은 없다.",
               "<code>in_workers</code>(#3071) → <code>batch_cubes</code>(#3072, 45.0 ms: finally → rmtree) → <code>_worker_entry</code>(#3073, 25.7 ms: sample-factor-run) → <code>_strategy_envelope</code>(#3074) → <code>read_table</code>(#3075 …) → <code>_worker_entry</code>(#3304, 30.1 ms: sample-stoploss-run) → <code>_runs_envelope</code>(#3649) → <code>success</code>(#3653).",
-              fn="batch_cubes() — finally", code=at("src/vqapr/flow/orchestration.py", "_bake_for_batch(workspace, run_ids, directory)", 7, before=1),
+              fn="batch_cubes() — finally", code=at("src/vqapr/flow/orchestration.py", "_bake_for_batch(", 9, before=1),
               disk={".vqapr/cubes/": "비어 있음 (배치 디렉터리 삭제됨)", ".vqapr/runs/": "sample-factor-run · sample-stoploss-run 다시 씀 (--force)"}),
         ],
         "remember": [

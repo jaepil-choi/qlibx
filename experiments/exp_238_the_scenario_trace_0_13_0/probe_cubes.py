@@ -26,7 +26,7 @@ if __name__ == "__main__":
     for run_id in runs:
         reads = orchestration._reads(workspace, workspace.run_definition(run_id))
         print("reads", run_id, {name: sorted(fields) for name, fields in reads.items()})
-    orchestration._bake_for_batch(workspace, runs, out)
+    orchestration._bake_for_batch(workspace, orchestration.batch_reads(workspace, runs), out)
     for path in sorted(out.rglob("*")):
         if not path.is_file():
             continue

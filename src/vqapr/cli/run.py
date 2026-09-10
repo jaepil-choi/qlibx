@@ -36,6 +36,7 @@ from vqapr.flow.orchestration import (
     COMPLETED,
     FAILED,
     batch_cubes,
+    batch_reads,
     in_workers,
     require_independent_batch,
     run_registered_datamodel,
@@ -316,7 +317,10 @@ def _run_each_in_workers(
     for target in targets:
         refuse_a_path(target, verb="run")
     workspace = Workspace.open(project_root)
-    require_independent_batch(workspace, targets)
+    # What each run reads, asked of its components once and handed to both doors below
+    # (record `238`): the independence judgment and the bake each loaded every component again.
+    reads = batch_reads(workspace, targets)
+    require_independent_batch(workspace, targets, reads)
     definitions = {target: workspace.run_definition(target) for target in targets}
     replace = bool(getattr(args, "force", False))
     positions = not getattr(args, "no_account_positions", False)
@@ -325,7 +329,7 @@ def _run_each_in_workers(
     outcomes: dict[str, Any] = {}
     # The batch bakes each panel-grain dataset it reads once, every worker maps it, and the
     # files are gone when the batch returns (record `236`, `docs/issues/098`).
-    with batch_cubes(workspace, targets) as cubes:
+    with batch_cubes(workspace, targets, reads) as cubes:
         baked = "" if cubes is None else str(cubes)
         if datamodel_runs:
             outcomes.update(

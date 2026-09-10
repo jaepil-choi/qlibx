@@ -843,21 +843,26 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
         date(2024, 3, 5)
     ], "the agenda is the run's period, not the table's whole span"
 
+    from vqapr.project import store as store_module
+
+    # The READ is what is counted, not the asking: since record `238` the workspace hands the
+    # instants it read once to every judge and freeze that asks (the horizon asks too).
     calls: list[str] = []
-    original = Workspace.evaluation_times
+    original = store_module.scan.distinct_values
 
-    def counted(self: Workspace, dataset_id: str) -> tuple[datetime, ...]:
-        calls.append(dataset_id)
-        return original(self, dataset_id)
+    def counted(spec, field, **kwargs):
+        calls.append(field)
+        return original(spec, field, **kwargs)
 
-    monkeypatch.setattr(Workspace, "evaluation_times", counted)
-    failures, blocked = judgments(two_days, workspace)
+    monkeypatch.setattr(store_module.scan, "distinct_values", counted)
+    # A fresh snapshot: the one above already holds the instants `derived_agenda` read.
+    failures, blocked = judgments(two_days, Workspace.open(tmp_path))
     assert blocked == [] and failures == [], (failures, blocked)
-    assert calls == ["execution"], f"check derived the agenda {len(calls)} times"
+    assert calls == ["trade_at"], f"check read the sessions {len(calls)} times"
 
     calls.clear()
     frozen = preflight_run(tmp_path, two_days)
-    assert calls == ["execution"], f"preflight derived the agenda {len(calls)} times"
+    assert calls == ["trade_at"], f"preflight read the sessions {len(calls)} times"
     assert len(frozen.strategy.agenda.occurrences) == 1
 
 
@@ -928,3 +933,59 @@ def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
     ]
     assert "'limit'" in error.failures[0].observed
     assert "'position-cap'" in error.failures[0].observed
+
+
+def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned_again(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `238`. One `vqapr run` read the execution table's instant column five times: the
+    judgments and preflight each derived the agenda from its distinct instants, and the
+    ordering judgment, preflight's target proof and the run each scanned the candidate instants
+    for the horizon (`experiments/exp_238`, `08_run_factor`: `distinct_values` x2,
+    `candidate_instants` x3). The horizon is the same column cut to `(start, end]`, so the
+    judgments and the freeze now take it from the instants the workspace read once."""
+    from vqapr.exchange import conventions
+    from vqapr.flow.declaration.judgments import judgments
+    from vqapr.flow.declaration.preflight import bound_execution_horizon, bound_execution_table
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
+    )
+    assert definition.start is not None and definition.end is not None
+    table = bound_execution_table(workspace, definition)
+    scanned = table.build_horizon(start_time=definition.start, end_time=definition.end)
+    cut = bound_execution_horizon(workspace, definition)
+    assert cut.instants == scanned.instants, "the cut must be what the scan answered"
+    # The run is 3/5 09:00 .. 15:30: the day's two prints after 09:00 are 09:30 and 15:30.
+    assert [moment.astimezone(_ZONE).strftime("%m-%d %H:%M") for moment in cut.instants] == [
+        "03-05 09:30",
+        "03-05 15:30",
+    ]
+
+    candidates: list[object] = []
+    instants: list[str] = []
+    original_candidates = conventions.scan.candidate_instants
+    original_instants = Workspace.evaluation_times
+
+    def counting_candidates(*args, **kwargs):
+        candidates.append(args)
+        return original_candidates(*args, **kwargs)
+
+    def counting_instants(self: Workspace, dataset_id: str):
+        instants.append(dataset_id)
+        return original_instants(self, dataset_id)
+
+    monkeypatch.setattr(conventions.scan, "candidate_instants", counting_candidates)
+    monkeypatch.setattr(Workspace, "evaluation_times", counting_instants)
+
+    fresh = Workspace.open(tmp_path)
+    failures, blocked = judgments(definition, fresh)
+    assert failures == [] and blocked == [], (failures, blocked)
+    frozen = preflight_run(fresh, definition)
+    assert len(frozen.strategy.agenda.occurrences) == 1
+    assert candidates == [], f"the horizon was scanned {len(candidates)} times"
+    # Asked four times of one workspace object -- twice for the agenda, twice for the horizon
+    # -- and the column was read once: the memo is the workspace's, not the callers'.
+    assert instants == ["execution"] * 4

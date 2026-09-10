@@ -128,7 +128,15 @@ class Workspace:
     이후 run은 이 mutable workspace를 다시 읽지 않는 frozen input을 별도로 만들어야 한다.
     """
 
-    __slots__ = ("_components", "_datasets", "_runs", "_source_digests", "_sources", "project_root")
+    __slots__ = (
+        "_components",
+        "_datasets",
+        "_evaluation_times",
+        "_runs",
+        "_source_digests",
+        "_sources",
+        "project_root",
+    )
 
     def __init__(
         self,
@@ -151,6 +159,11 @@ class Workspace:
         # The digest of each source file this workspace object has hashed, by path: one hash per
         # source per command, however many judgments and freezes ask (record `234`).
         self._source_digests: dict[str, str] = {}
+        # The distinct instants of each dataset this workspace object has read, by dataset id:
+        # one scan per dataset per command, however many judgments and freezes ask (record
+        # `238`). The judgments derived the run's agenda from them and preflight derived it
+        # again, each with its own scan of the execution table.
+        self._evaluation_times: dict[str, tuple[datetime, ...]] = {}
 
     @classmethod
     def _from_state(
@@ -324,8 +337,13 @@ class Workspace:
         """Every distinct ``available_at`` the registered dataset carries, sorted.
 
         This is what a caller needs to build an agenda from the sessions a dataset actually has,
-        rather than assuming a calendar the data may not match.
+        rather than assuming a calendar the data may not match. Read once per dataset for the
+        life of this object (record `238`): a command's judgments and its freeze both derive the
+        run's agenda from these, and the execution horizon is cut from them too.
         """
+        memo = self._evaluation_times.get(raw_dataset_id)
+        if memo is not None:
+            return memo
         registration = self.dataset(raw_dataset_id)
         spec = self.source(str(registration.source))
         values = scan.distinct_values(spec, registration.available_at)
@@ -344,7 +362,8 @@ class Workspace:
                     retry="register the dataset with a timestamp available_at, then retry",
                 )
             instants.append(require_tz_aware(value, name="available_at"))
-        return tuple(sorted(instants))
+        self._evaluation_times[raw_dataset_id] = tuple(sorted(instants))
+        return self._evaluation_times[raw_dataset_id]
 
     def require_verified(self, raw_dataset_id: str) -> DatasetRegistration:
         """A registered dataset a run may read: measured at registration, and unchanged since.
@@ -356,10 +375,13 @@ class Workspace:
         """
         registration = self.dataset(raw_dataset_id)
         source = self.source(str(registration.source))
-        key = str(source.path)
-        self._source_digests[key] = require_verified(
-            registration, source, digest=self._source_digests.get(key)
-        )
+        if registration.source_digest is None:
+            # Refused by name before any byte is read; nothing to hash.
+            require_verified(registration, source)
+        # Hashed through the memo, so a compare that FAILS is still one hash per command: the
+        # judgments refuse a changed file, then preflight asks again and used to hash it again
+        # (record `238`; on a large source that second read was the whole cost of `check`).
+        require_verified(registration, source, digest=self.source_digest(source))
         return registration
 
     def source_digest(self, source: SourceSpec) -> str:

@@ -42,7 +42,11 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
-from vqapr.flow.declaration.preflight import bound_execution_table, derived_agenda
+from vqapr.flow.declaration.preflight import (
+    bound_execution_horizon,
+    bound_execution_table,
+    derived_agenda,
+)
 from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import FINGERPRINT_PREFIX, RunDefinition
 
@@ -390,7 +394,8 @@ def _judge_execution_ordering(
         definition.start, definition.end
     )
     table = bound_execution_table(workspace, definition)
-    horizon = table.build_horizon(start_time=definition.start, end_time=definition.end)
+    # Cut from the instants the agenda was derived from, not scanned again (record `238`).
+    horizon = bound_execution_horizon(workspace, definition)
     late = [
         occurrence.occurrence_id
         for occurrence in occurrences

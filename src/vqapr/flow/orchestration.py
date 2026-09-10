@@ -421,7 +421,21 @@ RUN_BATCH_DEPENDENT = "run.batch_dependent"
 RUN_BATCH_WRITES_COLLIDE = "run.batch_writes_collide"
 
 
-def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> None:
+def batch_reads(workspace: Workspace, run_ids: Sequence[str]) -> dict[str, dict[str, set[str]]]:
+    """What each run of a batch reads, by run id: asked of each run's components once.
+
+    Both doors of a `--jobs` batch need it -- the independence judgment and the bake -- and
+    each used to load every component again to ask (record `238`); the CLI asks here once and
+    hands the answer to both.
+    """
+    return {run_id: _reads(workspace, workspace.run_definition(run_id)) for run_id in run_ids}
+
+
+def require_independent_batch(
+    workspace: Workspace,
+    run_ids: Sequence[str],
+    reads: Mapping[str, Mapping[str, set[str]]] | None = None,
+) -> None:
     """Refuse a batch that one pool cannot hold: a run reading what another in it writes.
 
     The pool starts every run at once and promises nothing about order, so a strategy whose
@@ -435,9 +449,12 @@ def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> N
     What a run reads is what preflight would freeze as its `requirements` (the model's and its
     Compliance rules'), plus the two datasets the run layer itself names -- `agenda.days_from`
     and `execution.dataset`. A component that does not load contributes nothing here: its own
-    worker refuses it by name, and a run that cannot start cannot race anything.
+    worker refuses it by name, and a run that cannot start cannot race anything. `reads` is
+    `batch_reads` already asked; absent, it is asked here.
     """
     definitions = {run_id: workspace.run_definition(run_id) for run_id in run_ids}
+    if reads is None:
+        reads = batch_reads(workspace, run_ids)
     writers: dict[str, list[str]] = {}
     for run_id, definition in definitions.items():
         writers.setdefault(definition.writes, []).append(run_id)
@@ -459,8 +476,8 @@ def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> N
                 source=FailureSource(key_path=f"runs.{writing[0]}.writes"),
             )
         )
-    for run_id, definition in definitions.items():
-        for dataset_id in sorted(_datasets_read(workspace, definition)):
+    for run_id in definitions:
+        for dataset_id in sorted(reads[run_id]):
             producers = [other for other in writers.get(dataset_id, ()) if other != run_id]
             if not producers:
                 continue
@@ -483,11 +500,6 @@ def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> N
             )
     if failures:
         raise VqaprError(stage=Stage.CHECK, failures=failures)
-
-
-def _datasets_read(workspace: Workspace, definition: RunDefinition) -> set[str]:
-    """Every dataset id a run would read, from the components it names and its own layer."""
-    return set(_reads(workspace, definition))
 
 
 def _reads(workspace: Workspace, definition: RunDefinition) -> dict[str, set[str]]:
@@ -532,7 +544,11 @@ CUBE_HEARTBEAT = 30.0
 
 
 @contextmanager
-def batch_cubes(workspace: Workspace, run_ids: Sequence[str]) -> Iterator[Path | None]:
+def batch_cubes(
+    workspace: Workspace,
+    run_ids: Sequence[str],
+    reads: Mapping[str, Mapping[str, set[str]]] | None = None,
+) -> Iterator[Path | None]:
     """Bake what a `--jobs` batch reads once, hand the directory to its workers, remove it after.
 
     Record `236` (`docs/issues/098`). Every panel-grain dataset any run in the batch reads is
@@ -547,7 +563,7 @@ def batch_cubes(workspace: Workspace, run_ids: Sequence[str]) -> Iterator[Path |
     fresh for as long as the batch runs, so a batch of long runs is never mistaken for a dead
     one. What cannot be baked -- an unverified registration, a non-numeric field, a `rows`
     grain, a source that will not scan -- is simply not there, and the worker scans and refuses
-    exactly as it does outside a batch.
+    exactly as it does outside a batch. `reads` is `batch_reads` already asked (record `238`).
     """
     root = workspace.project_root / WORKSPACE_DIRECTORY / CUBES_DIRECTORY
     root.mkdir(parents=True, exist_ok=True)
@@ -560,7 +576,9 @@ def batch_cubes(workspace: Workspace, run_ids: Sequence[str]) -> Iterator[Path |
     beat = threading.Thread(target=_keep_alive, args=(lock, stop), daemon=True)
     beat.start()
     try:
-        _bake_for_batch(workspace, run_ids, directory)
+        _bake_for_batch(
+            workspace, reads if reads is not None else batch_reads(workspace, run_ids), directory
+        )
         yield directory
     finally:
         stop.set()
@@ -588,11 +606,13 @@ def _sweep_stale_cubes(root: Path) -> None:
             shutil.rmtree(child, ignore_errors=True)
 
 
-def _bake_for_batch(workspace: Workspace, run_ids: Sequence[str], directory: Path) -> None:
+def _bake_for_batch(
+    workspace: Workspace, reads: Mapping[str, Mapping[str, set[str]]], directory: Path
+) -> None:
     """One cube per panel-grain dataset the batch reads, over the union of the fields it names."""
     wanted: dict[str, set[str]] = {}
-    for run_id in run_ids:
-        for dataset_id, fields in _reads(workspace, workspace.run_definition(run_id)).items():
+    for run_reads in reads.values():
+        for dataset_id, fields in run_reads.items():
             wanted.setdefault(dataset_id, set()).update(fields)
     with ScanSession() as session:
         for dataset_id, fields in sorted(wanted.items()):

@@ -18,6 +18,7 @@ from vqapr.domain.agendas import OperationAgenda
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import agenda_id
 from vqapr.domain.values import ModelMemory, require_tz_aware
+from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -230,6 +231,26 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
             price_fields=prices,
         ),
         fill,
+    )
+
+
+def bound_execution_horizon(workspace: Workspace, definition: RunDefinition) -> ExecutionHorizon:
+    """The run's candidate execution instants, cut from the sessions the workspace already read.
+
+    The horizon is the execution table's distinct instants inside `(start, end]`, and the
+    workspace reads that table's distinct instants once per command to derive the run's agenda
+    (`derived_agenda`). Before record `238` the ordering judgment scanned the table for its
+    horizon, preflight scanned it again to prove every occurrence a target, and the agenda's
+    scan made three reads of one column for one fact (`experiments/exp_238`: three
+    `candidate_instants` and two `distinct_values` per `vqapr run`).
+    """
+    binding = definition.execution
+    if binding is None or definition.start is None or definition.end is None:
+        raise ValueError("an execution horizon requires an execution dataset, a start and an end")
+    return ExecutionHorizon.between(
+        workspace.evaluation_times(binding.dataset),
+        start_time=definition.start,
+        end_time=definition.end,
     )
 
 
@@ -561,7 +582,7 @@ def _validate_execution_targets(
     execution_table: ExecutionTable,
     strategy_agenda: FrozenAgenda,
     *,
-    start: datetime,
+    horizon: ExecutionHorizon,
     end: datetime,
 ) -> None:
     """Prove every strategy callback can bind an accepted intent before the run starts.
@@ -571,14 +592,11 @@ def _validate_execution_targets(
     after every earlier callback had already mutated account state. The horizon, the rule and
     the callback instants are all frozen facts, so that refusal belongs here.
 
-    The horizon is read once. Calling ``select_target`` without it would rescan the execution
-    table once per occurrence -- both slower and vulnerable to observing different bytes while
-    preflight is supposed to be proving one run.
+    The horizon is handed in, cut once per command from the instants the workspace read for the
+    agenda (`bound_execution_horizon`). Calling ``select_target`` without it would rescan the
+    execution table once per occurrence -- both slower and vulnerable to observing different
+    bytes while preflight is supposed to be proving one run.
     """
-    horizon = execution_table.build_horizon(
-        start_time=start,
-        end_time=end,
-    )
     missing = tuple(
         occurrence
         for occurrence in strategy_agenda.occurrences
@@ -632,6 +650,7 @@ def _freeze_strategy(
     compliance: tuple[str, ...],
     decide: OperationAgenda,
     execution_table: ExecutionTable,
+    horizon: ExecutionHorizon,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
@@ -660,7 +679,7 @@ def _freeze_strategy(
         requirement for rule in loaded_rules for requirement in rule.requirements()
     )
     agenda = _freeze_agenda(decide, start=start, end=end)
-    _validate_execution_targets(execution_table, agenda, start=start, end=end)
+    _validate_execution_targets(execution_table, agenda, horizon=horizon, end=end)
     return FrozenStrategy(
         config=config,
         compliance=ComplianceSet(rules),
@@ -795,6 +814,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     require_declared_roster(workspace, run_id=definition.run_id)
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_table = bound_execution_table(workspace, definition)
+    horizon = bound_execution_horizon(workspace, definition)
     _validate_execution_requirements(loaded_exchange, execution_table)
     _validate_instrument_universe(definition.instruments, loaded_exchange)
     _validate_initial_account(
@@ -811,6 +831,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
             compliance=definition.compliance,
             decide=decide,
             execution_table=execution_table,
+            horizon=horizon,
             start=start,
             end=end,
         ),

@@ -589,3 +589,86 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
 
     assert refused.value.failures[0].code == "dataset.span_absent"
     assert "register_dataset" in (refused.value.retry_precondition or "")
+
+
+def test_a_workspace_reads_a_datasets_instants_and_hashes_its_file_once_per_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `238`: the judgments and the freeze both derive the run's agenda from the execution
+    table's distinct instants, and both verify the file's digest. The sample project's `vqapr
+    run` scanned that column twice for the agenda and three times for the horizon, and a changed
+    file was hashed once by the judgment that refused it and again by preflight
+    (`experiments/exp_238`). A workspace object is one command's snapshot, so each fact is read
+    once for its life -- including the digest of a file whose compare FAILS."""
+    import duckdb
+
+    from vqapr.data.validation import verify_source
+    from vqapr.project import store as store_module
+
+    path = tmp_path / "prices.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT * FROM (VALUES
+                (TIMESTAMPTZ '2024-01-02 15:30:00+00', 'A', 1.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+00', 'A', 2.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+00', 'B', 3.0::DOUBLE)
+            ) AS t(available_at, instrument, close))
+            TO '{path.as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+    registration = DatasetRegistration.of(
+        "prices",
+        "prices-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        grain="instrument_instant",
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
+    )
+    source = SourceSpec.of("prices-source", path)
+    diagnosis, _, measured = verify_source(registration, source)
+    diagnosis.raise_if_failed()
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(measured, source)
+
+    scans: list[str] = []
+    original_scan = store_module.scan.distinct_values
+
+    def counted_scan(spec, field, **kwargs):
+        scans.append(field)
+        return original_scan(spec, field, **kwargs)
+
+    hashes: list[str] = []
+    original_hash = store_module.physical_digest
+
+    def counted_hash(target):
+        hashes.append(str(target))
+        return original_hash(target)
+
+    monkeypatch.setattr(store_module.scan, "distinct_values", counted_scan)
+    monkeypatch.setattr(store_module, "physical_digest", counted_hash)
+
+    workspace = Workspace.open(tmp_path)
+    instants = workspace.evaluation_times("prices")
+    assert [moment.astimezone(UTC).isoformat() for moment in instants] == [
+        "2024-01-02T15:30:00+00:00",
+        "2024-01-03T15:30:00+00:00",
+    ]
+    assert workspace.evaluation_times("prices") is instants
+    assert scans == ["available_at"], f"the instants were scanned {len(scans)} times"
+    workspace.require_verified("prices")
+    workspace.require_verified("prices")
+    assert len(hashes) == 1, f"the file was hashed {len(hashes)} times"
+
+    # The compare fails on other bytes -- and still hashes once, however many doors ask.
+    path.write_bytes(path.read_bytes() + b"\n")
+    changed = Workspace.open(tmp_path)
+    hashes.clear()
+    for _ in range(2):
+        with pytest.raises(VqaprError) as refused:
+            changed.require_verified("prices")
+        assert refused.value.failures[0].code == "dataset.source_changed"
+    assert len(hashes) == 1, f"a failed compare hashed the file {len(hashes)} times"

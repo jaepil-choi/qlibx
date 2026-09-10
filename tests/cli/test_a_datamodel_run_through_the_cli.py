@@ -612,3 +612,42 @@ def test_a_jobs_batch_bakes_once_maps_in_every_worker_and_leaves_nothing_behind(
     live_lock = live / "batch.lock"
     live_lock.unlink()
     live.rmdir()
+
+
+def test_the_batch_driver_asks_each_run_what_it_reads_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `238`: the independence judgment and the bake each loaded every component of the
+    batch to ask what it reads (`experiments/exp_238`, `15_run_batch`: `_reads` x4 for two
+    runs). The CLI asks once through `batch_reads` and hands the answer to both doors."""
+    from vqapr.flow.orchestration import batch_reads, require_independent_batch
+
+    project = ("--project-root", str(tmp_path))
+    code, registered = _cli(capsys, *project, "register", str(_declaration(tmp_path)))
+    assert code == 0, registered
+    workspace = Workspace.open(tmp_path)
+    targets = ["factors-reversal", "factors-momentum"]
+
+    asked: list[str] = []
+    original = orchestration._reads
+
+    def counting(space, definition):
+        asked.append(definition.run_id)
+        return original(space, definition)
+
+    monkeypatch.setattr(orchestration, "_reads", counting)
+
+    reads = batch_reads(workspace, targets)
+    assert set(reads) == set(targets)
+    assert reads["factors-reversal"]["price_daily"] == {"close"}
+    require_independent_batch(workspace, targets, reads)
+    with batch_cubes(workspace, targets, reads) as cubes:
+        assert cubes is not None and (cubes / "price_daily" / "close.npy").is_file()
+    assert asked == targets, f"the batch asked its runs {len(asked)} times"
+
+    # Without the answer handed in, each door still asks for itself.
+    asked.clear()
+    require_independent_batch(workspace, targets)
+    with batch_cubes(workspace, targets):
+        pass
+    assert asked == targets * 2

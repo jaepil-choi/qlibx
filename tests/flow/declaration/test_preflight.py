@@ -1115,6 +1115,57 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
         execute_run(tmp_path, stranger, workspace=workspace, resources=resources)
 
 
+def test_a_run_frames_what_each_callback_read_once(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `246`, the intent path: a callback that returns a `Rebalance` used to derive its
+    source refs for the intent's stamp and again for the evidence (`experiments/exp_246`,
+    `08_run_factor`: `_actual_source_refs` x2 per callback), and asked `inputs()` on every
+    decision. One framing per callback, one asking per run, and the record is the same."""
+    from vqapr.flow.declaration.verify import verify_run
+    from vqapr.flow.run.callback import CallbackHandler
+    from vqapr.public import run as execute_run
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
+    )
+    plain = definition.replace(compliance=())
+    frozen, resources = verify_run(workspace, plain).require_ready()
+    assert resources.strategy is not None
+
+    framed: list[str] = []
+    original_refs = CallbackHandler._actual_source_refs
+
+    def counting_refs(self, window):  # type: ignore[no-untyped-def]
+        framed.append("refs")
+        return original_refs(self, window)
+
+    asked: list[str] = []
+    original_inputs = type(resources.strategy).inputs
+
+    def counting_inputs(self):  # type: ignore[no-untyped-def]
+        asked.append("inputs")
+        return original_inputs(self)
+
+    monkeypatch.setattr(CallbackHandler, "_actual_source_refs", counting_refs)
+    monkeypatch.setattr(type(resources.strategy), "inputs", counting_inputs)
+
+    outcome = execute_run(tmp_path, frozen, workspace=workspace, resources=resources)
+    assert outcome.ok, outcome.errors
+    from vqapr.authoring import Hold
+
+    (simulation,) = outcome.results.values()
+    assert any(not isinstance(trace.result, Hold) for trace in simulation.occurrences), (
+        "the run must take the intent path"
+    )
+    callbacks = len(frozen.strategy.agenda.occurrences)
+    assert callbacks == 1
+    assert framed == ["refs"] * callbacks, f"{len(framed)} framings for {callbacks} callbacks"
+    assert asked == ["inputs"], f"inputs() asked {len(asked)} times for one run"
+
+
 def test_the_sessions_are_read_for_the_run_period_not_the_table(
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

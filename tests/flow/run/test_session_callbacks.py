@@ -283,3 +283,40 @@ def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> N
     # Before record `239` two more sat between them: the framing's input normalized on its own,
     # and the root framing the same memory and payload again.
     assert len(normalized) <= 5 * callbacks + 1, f"{len(normalized)} for {callbacks} callbacks"
+
+
+def test_a_callback_frames_what_it_read_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Record `246`. The 0.14.2 factor trace (`experiments/exp_246`, `08_run_factor`) showed
+    every callback deriving its source refs twice -- once for the intent's stamp, once for the
+    evidence -- from the same window's accesses, and asking the Strategy's `inputs()` again on
+    every decision (fifteen askings per ten-decision run). What a callback read is framed once
+    after `decide` and handed to both; the declaration is resolved once per run, as
+    `ComputeHandler` already did.
+    """
+    from vqapr.flow.run.callback import CallbackHandler
+
+    asked: list[str] = []
+
+    class CountsItsDeclaration(EveryThreeOccurrences):
+        def inputs(self):  # type: ignore[no-untyped-def]
+            asked.append("inputs")
+            return super().inputs()
+
+    framed: list[str] = []
+    original = CallbackHandler._actual_source_refs
+
+    def counting(self: CallbackHandler, window: ModelWindow):  # type: ignore[no-untyped-def]
+        framed.append("refs")
+        return original(self, window)
+
+    monkeypatch.setattr(CallbackHandler, "_actual_source_refs", counting)
+    # Two Holds: this flow has no execution table, so an intent cannot be accepted here; the
+    # intent path is counted on a real run in `tests/flow/declaration/test_preflight.py`.
+    occurrences = (_occurrence(1), _occurrence(2))
+    result = _flow(CountsItsDeclaration(), _state(), occurrences).run()
+
+    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
+    assert framed == ["refs"] * len(occurrences), (
+        f"{len(framed)} framings of the source refs for {len(occurrences)} callbacks"
+    )
+    assert asked == ["inputs"], f"inputs() asked {len(asked)} times for one run"

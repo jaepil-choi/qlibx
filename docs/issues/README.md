@@ -53,6 +53,7 @@
 |---|---|---|---|
 | ~~`report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs`~~ | `vqapr run --jobs N`이 datamodel run을 병렬로 돌리지 않는다 — 프로세스 하나, 한 번에 하나 | **닫힘 — record `230`.** 두 종류 모두 풀로; worker의 raise는 그 run의 entry; envelope에 `jobs`; 배치 안에서 남이 쓰는 것을 읽는 run은 통째로 거절(`run.batch_dependent`, 오너 결정) | 코드 + skill |
 | `report-2026-09-10-agenda-has-no-year-unit-and-the-refusal-reads-as-a-closed-set` | `agenda.every`에 `y` 단위가 없고, 거절문이 닫힌 집합처럼 읽힌다 | **미분류.** `12M`이 동작하는 spelling; 보고자는 거절문이 문법(count + unit)을 말하기를 청한다 | — |
+| `report-2026-09-10-check-derives-a-three-year-agenda-twice` | `check`가 run의 agenda를 두 번 유도한다 — 3년 run에서 check 3.6 s 중 3.5 s | **미분류.** 0.12.0 시나리오 트레이스(`exp_235`, `03_check_changed`): `derived_agenda` #362 1,782 ms(judgments) + #44533 1,673 ms(preflight). 집행표 스캔이 사라진 자리에 남은 것 | — |
 
 ### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
 

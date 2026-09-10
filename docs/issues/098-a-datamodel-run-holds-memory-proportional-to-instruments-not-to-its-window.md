@@ -1,6 +1,22 @@
-# A datamodel run's memory tracks its instrument count, not its declared lookback or its period
+# 098 — A datamodel run's memory tracks its instrument count, not its declared lookback or its period
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-10 -- records `235`, `236`.** Two layers, both real. (1) The 0.32 GB the
+report measured is the list of 877k Python row dicts 0.11.0's `Panel.from_rows` pivoted; record
+`232` (0.12.0) replaced it with an Arrow scan and a numpy pivot before this report arrived. (2) The
+panel was still scanned over the registered span whatever the run's period, and held each numeric
+field twice. Record `235`: a panel is scanned over the run's horizon (`[earliest lookback bound
+at start, end]`), a numeric field is one `(instants x names)` float64 block, and a window the
+panel never read is refused rather than truncated. Record `236`: a `--jobs` batch bakes each
+panel-grain dataset it reads once, over every instrument, into memory-mappable files under
+`.vqapr/cubes/<batch>/`; every worker takes its panel as a slice of them (a view for the whole
+universe), and the directory is removed when the batch returns. Measured on a source of the
+reported shape (`experiments/exp_236_the_panel_memory`): worker private memory for 309 names
++74 MB -> +7 MB; for all 4,975 names +372 MB -> +13 MB, peak 0.76 -> 0.17 GB; the 671 scans a
+671-run sweep made are one 1.6 s bake. `make-datamodel` and `run-backtest` now say what memory
+scales with.
+
+Filed as `report-2026-09-10-a-datamodel-run-holds-memory-proportional-to-instruments-not-to-its-window.md`;
+numbered on triage.
 
 | | |
 |---|---|

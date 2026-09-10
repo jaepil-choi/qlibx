@@ -63,6 +63,14 @@ the key width — every one read, boxed and handed across the boundary even when
 That is why a derived `instrument_instant` table computed once by a DataModel beats reading a
 vendor's long table repeatedly: one measured pair differed by **614×** with byte-identical output.
 
+**What memory scales with.** A run holds, per numeric field it reads, one float64 matrix of
+(the run's period + its longest lookback on that dataset) × its declared instruments — not the
+source's whole history, and not a copy per name. Halving the period halves it; the lookback and
+the instrument count are the other two knobs. Under `vqapr run ... --jobs N` the batch bakes each
+dataset once and every worker maps the same bytes, so a run over the whole universe costs the
+machine that matrix once, not once per worker. Size a sweep's `--jobs` by memory per worker (the
+interpreter's floor is about 130 MB), not by cores.
+
 ## Types in
 
 A value arrives as the type the dataset declared in `field_types`: `DOUBLE` → `float`, `INTEGER` →

@@ -95,6 +95,12 @@ another run in it writes is refused whole before anything starts (`run.batch_dep
 run the producer first, then the batch. Each run's entry under `runs` has the same shape a
 single run's envelope has.
 
+A batch reads each panel-grain dataset once: before the workers start it bakes every field the
+runs declare into memory-mappable files under `.vqapr/cubes/<batch>/`, each worker maps them
+instead of scanning the source, and the directory is removed when the batch returns. Memory per
+worker is therefore its own period × lookback × instruments (once, shared, for a whole-universe
+run) on top of about 130 MB of interpreter; size `--jobs` by that, not by core count.
+
 A YAML path handed to `run` or `check` is refused by name — both take a registered id.
 
 ### 6. Confirm

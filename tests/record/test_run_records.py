@@ -224,7 +224,9 @@ def test_a_dead_run_s_id_is_reclaimed_by_an_ordinary_retry(tmp_path: Path) -> No
     )
 
 
-def test_a_slow_run_keeps_its_id_because_it_refreshes_its_own_lock(tmp_path: Path) -> None:
+def test_a_slow_run_keeps_its_id_because_it_refreshes_its_own_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`LOCK_STALE_AFTER` is a heartbeat threshold, not a run-duration budget.
 
     Read as a duration budget it recreates the exact defect the lock exists to prevent. A factor
@@ -233,16 +235,23 @@ def test_a_slow_run_keeps_its_id_because_it_refreshes_its_own_lock(tmp_path: Pat
     against an unrefreshed lock: a live run and a thief wrote into one directory and the surviving
     record held `['B1', 'A2']`, which is neither run.
 
-    The run touches its lock as it works, so only a run that has STOPPED touching it reads as dead.
+    The run touches its lock as it works -- at most once a second since record `248`, which is
+    a hundred touches inside the window -- so only a run that has STOPPED touching it reads as dead.
     """
+    from vqapr.record import writer as writer_module
+    from vqapr.record.schema import LOCK_TOUCH_EVERY
+
     live = RunRecordWriter(tmp_path, "slow")
     live.open()
     live.append("vqapr.account", [{"nav": "A1"}])
 
-    # Age the lock past the window, as a long run would.
+    # Age the lock past the window, as a long run would -- and let the writer's own clock see
+    # that time pass, so its next chunk is one it touches the lock on.
     lock = live.directory / LOCK_FILENAME
     stale = _time.time() - (LOCK_STALE_AFTER + 60)
     os.utime(lock, (stale, stale))
+    later = writer_module._time.monotonic() + LOCK_TOUCH_EVERY
+    monkeypatch.setattr(writer_module._time, "monotonic", lambda: later)
 
     # The run is still working, and that is what keeps the claim alive.
     live.append("vqapr.account", [{"nav": "A2"}])

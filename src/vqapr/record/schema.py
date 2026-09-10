@@ -79,6 +79,11 @@ seconds of disk and the buffer never exceeds a quarter gigabyte. It is not a flu
 run below the line writes nothing until it ends -- and a hard kill loses at most this much."""
 
 PROGRESS_FILENAME = "progress.json"
+LOCK_TOUCH_EVERY = 1.0
+"""How often the heartbeat touches the run lock, at most. `LOCK_STALE_AFTER` is two minutes, so a
+touch a second says "alive" a hundred times over; touching on every record chunk instead was one
+`utime` per row batch (record `248`: 110 for a ten-decision run, 330 for thirty-seven), and on a
+network share each is a round trip."""
 PROGRESS_EVERY = 5.0
 """What a running member says about itself while its rows are still in memory: accepted
 occurrences, rows per table and the last `event_time`, rewritten by the heartbeat at most every

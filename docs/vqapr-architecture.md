@@ -2941,7 +2941,7 @@ src/vqapr/
 │   │   └── run_state.py 632  RunStateRepository — accepted state의 루트, `_advance` 하나로 전이
 │   ├── declaration/          run이 무엇을 선언하고 무엇이 얼려지는가 (층 63)
 │   │   ├── frozen.py   411   FrozenRun · FrozenStrategy · FrozenDataModel · FrozenAgenda + identity
-│   │   ├── verify.py    ~90  문 하나: verify_run → RunVerdict (판정의 답 + 얼린 run 또는 freeze의 거절) — 기록 `240`
+│   │   ├── verify.py   ~150  문 하나: verify_run → RunVerdict (판정의 답 + 얼린 run 또는 freeze의 거절 + RunResources) — 기록 `240` · `242`
 │   │   ├── preflight.py ~1000 §12 freeze 전부 + RunFacts(agenda · 집행표 · horizon · 컴포넌트 · venue, 명령당 한 번) — 기록 `241`
 │   │   ├── judgments.py ~700 check가 내리는 판정 — RunFacts를 읽는다
 │   │   └── roster.py    57

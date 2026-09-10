@@ -746,7 +746,7 @@ def _freeze_strategy(
     rules = tuple(_registered_compliance(workspace, name) for name in compliance)
     strategy_requirements = tuple(loaded_strategy.requirements())
     loaded_rules: tuple[Compliance, ...] = tuple(
-        load_compliance(rule, project_root=workspace.project_root) for rule in rules
+        facts.component(name, load_compliance) for name in compliance
     )
     compliance_requirements = tuple(
         requirement for rule in loaded_rules for requirement in rule.requirements()

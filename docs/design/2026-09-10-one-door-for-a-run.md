@@ -80,8 +80,9 @@ wrapper로 남긴다: `frozen = preflight_run(...)`을 쓰는 호출자가 `cli/
 
 ## 5. 범위 밖 (다음 단계)
 
-- **`RunResources`**: freeze가 이미 load한 컴포넌트와 horizon을 run에 넘겨 run 시작 때의 재유도(전략 import 1회 ·
-  `execution_horizon` 스캔 1회)를 없애는 것. `FrozenRun`은 record에 적히는 값이라 살아 있는 객체를 못 싣는다.
+- **`RunResources`** — 기록 `242`(0.14.1)로 닫힘: `RunVerdict.resources`가 검증이 load한 인스턴스와 자른 horizon을
+  들고 `run(..., resources=)`이 그것을 쓴다. `FrozenRun`은 record 값이라 살아 있는 객체를 못 싣는다는 점은 그대로이고,
+  그래서 값(`FrozenRun`)과 자원(`RunResources`)이 나란히 간다.
 - `--jobs` worker가 run마다 다시 `verify_run`을 도는 것(driver가 이미 판정했으므로 한 번이면 된다).
 
 ## 6. 위험

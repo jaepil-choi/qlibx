@@ -23,13 +23,68 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.domain.errors import Failure, Stage, VqaprError
+from vqapr.exchange.conventions import ExecutionHorizon
+from vqapr.exchange.venue import Exchange
+from vqapr.extension.loading import load_compliance, load_data_model, load_strategy_model
 from vqapr.flow.declaration.frozen import FrozenRun
 from vqapr.flow.declaration.judgments import RUN_OUTPUT_STALE, judgments
 from vqapr.flow.declaration.preflight import RunFacts
 from vqapr.flow.declaration.preflight import preflight_run as _freeze
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
+
+
+@dataclass(frozen=True, slots=True)
+class RunResources:
+    """What the verification loaded and read, handed to the run so it does not again.
+
+    A `FrozenRun` is a record value -- it is written to `run.json` -- so it cannot carry a live
+    strategy instance or a venue. The verification had to load them (to ask what they read, to
+    prove the initial memory, to judge the listings) and had to cut the execution horizon; the
+    run used to import every component again and scan the horizon again on its first accepted
+    intent (record `242`). `run_identity` is the frozen run these belong to: `run` refuses
+    resources frozen for another run.
+    """
+
+    run_identity: str
+    strategy: StrategyModel | None
+    datamodel: DataModel | None
+    exchange: Exchange | None
+    rules: tuple[Compliance, ...]
+    horizon: ExecutionHorizon | None
+
+    @classmethod
+    def of(cls, facts: RunFacts, frozen: FrozenRun) -> RunResources:
+        """The instances `facts` already holds for `frozen`; nothing is loaded or read here."""
+        strategy = frozen.strategy
+        datamodel = frozen.datamodel
+        return cls(
+            run_identity=frozen.identity,
+            strategy=(
+                facts.component(strategy.config.component.component_id, load_strategy_model)
+                if strategy is not None
+                else None
+            ),
+            datamodel=(
+                facts.component(datamodel.component_id, load_data_model)
+                if datamodel is not None
+                else None
+            ),
+            exchange=facts.exchange() if frozen.exchange is not None else None,
+            rules=(
+                tuple(
+                    facts.component(str(ref.component_id), load_compliance)
+                    for ref in strategy.compliance.rules
+                )
+                if strategy is not None
+                else ()
+            ),
+            horizon=(
+                facts.horizon() if strategy is not None and frozen.execution is not None else None
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +102,17 @@ class RunVerdict:
     blocked: tuple[Failure, ...]
     frozen: FrozenRun | None
     refusal: BaseException | None
+    resources: RunResources | None = None
 
     @property
     def ok(self) -> bool:
         return not self.failures and not self.blocked and self.frozen is not None
+
+    def require_ready(self) -> tuple[FrozenRun, RunResources]:
+        """The frozen run and what was loaded for it, or the refusal `require_frozen` raises."""
+        frozen = self.require_frozen()
+        assert self.resources is not None
+        return frozen, self.resources
 
     def require_frozen(self) -> FrozenRun:
         """The frozen run, or the refusal `run` raises: the judgments' first, then the freeze's.
@@ -86,7 +148,8 @@ def verify_run(workspace: Workspace, definition: RunDefinition) -> RunVerdict:
         frozen = _freeze(workspace, definition, facts)
     except Exception as error:  # rendered by the verb that asked; see the module docstring
         refusal = error
-    return RunVerdict(tuple(found), tuple(blocked), frozen, refusal)
+    resources = RunResources.of(facts, frozen) if frozen is not None else None
+    return RunVerdict(tuple(found), tuple(blocked), frozen, refusal, resources)
 
 
-__all__ = ["RunVerdict", "verify_run"]
+__all__ = ["RunResources", "RunVerdict", "verify_run"]

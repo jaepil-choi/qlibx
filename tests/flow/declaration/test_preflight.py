@@ -1053,3 +1053,63 @@ def test_one_door_reads_each_fact_of_a_run_once(
         "load:exchange": 1,
         "load:compliance": 1,
     }, counts
+
+
+def test_the_run_takes_what_the_verification_loaded_and_read(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `242`: a `FrozenRun` is a record value and carries no live object, so the run used
+    to import the strategy, the venue and every rule again and scan the execution horizon again
+    on its first accepted intent. The verdict now carries `RunResources` -- the instances the
+    verification loaded and the horizon it cut -- and `run` takes them: no import, no scan."""
+    from vqapr.extension import loading
+    from vqapr.exchange import conventions
+    from vqapr.flow.declaration.preflight import bound_execution_horizon
+    from vqapr.flow.declaration.verify import verify_run
+    from vqapr.public import run as execute_run
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
+    )
+    verdict = verify_run(workspace, definition)
+    frozen, resources = verdict.require_ready()
+    assert resources.run_identity == frozen.identity
+    assert resources.strategy is not None and resources.exchange is not None
+    assert len(resources.rules) == 1
+    assert resources.horizon is not None
+    assert resources.horizon.instants == bound_execution_horizon(workspace, definition).instants
+
+    # The fixture's rule is a stub whose `observe` returns nothing, so the run below is the
+    # same declaration without it; what is counted is the run's own loading and scanning.
+    plain = definition.replace(compliance=())
+    frozen, resources = verify_run(Workspace.open(tmp_path), plain).require_ready()
+
+    loads: list[str] = []
+    original_load = loading._load
+
+    def counted_load(ref, *, kind, project_root=None):
+        loads.append(kind.value)
+        return original_load(ref, kind=kind, project_root=project_root)
+
+    scans: list[object] = []
+    original_scan = conventions.scan.candidate_instants
+
+    def counted_scan(*args, **kwargs):
+        scans.append(args)
+        return original_scan(*args, **kwargs)
+
+    monkeypatch.setattr(loading, "_load", counted_load)
+    monkeypatch.setattr(conventions.scan, "candidate_instants", counted_scan)
+
+    outcome = execute_run(tmp_path, frozen, workspace=workspace, resources=resources)
+    assert outcome.ok, outcome.errors
+    assert loads == [], f"the run imported again: {loads}"
+    assert scans == [], "the run scanned the horizon again"
+
+    # Resources frozen for another run are refused rather than trusted.
+    other = plain.replace(run_id="other")
+    stranger = verify_run(Workspace.open(tmp_path), other).require_ready()[0]
+    with pytest.raises(ValueError, match="another frozen run"):
+        execute_run(tmp_path, stranger, workspace=workspace, resources=resources)

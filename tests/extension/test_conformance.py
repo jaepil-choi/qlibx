@@ -32,13 +32,13 @@ class Limit(Compliance):
     def inputs(self):
         return {}
 
-    def observe(self, call, account):
+    def observe(self, call):
         return None
 """
 
 STALE_OBSERVE = GOOD_RULE.replace(
-    "def observe(self, call, account):",
-    "def observe(self, account):",
+    "def observe(self, call):",
+    "def observe(self):",
 )
 """A rule written against an older observing contract.
 
@@ -70,56 +70,46 @@ def test_a_stale_callback_signature_is_caught_though_it_constructs(tmp_path: Pat
     """The gap between "loads" and "conforms", in one component.
 
     The object builds and implements `Compliance`, so every load-time check passes. Flow calls
-    `evaluate(window, account, marks, bounds)` positionally, and this class cannot receive it.
+    `observe(call)` positionally, and this class cannot receive it.
     """
     diagnosis = conformance(_ref(tmp_path, STALE_OBSERVE))
 
     assert not diagnosis.ok
     failure = diagnosis.failures[0]
     assert failure.code == "component.signature_invalid"
-    assert "observe() must accept 3 positional arguments" in failure.requirement
+    assert "observe() must accept 2 positional arguments" in failure.requirement
 
 
 def test_a_renamed_parameter_passes_because_flow_calls_positionally(tmp_path: Path) -> None:
     """Spelling is not a contract. Arity is.
 
-    Flow calls `observe(call, account)` positionally, so a component that names them
-    `c` and `book` receives exactly the same call. Failing it would punish a legal rename and
-    teach that the contract is about words rather than the shape of the call.
+    Flow calls `observe(call)` positionally, so a component that names it `c` receives exactly
+    the same call. Failing it would punish a legal rename and teach that the contract is about
+    words rather than the shape of the call.
     """
-    source = GOOD_RULE.replace(
-        "def observe(self, call, account):", "def observe(self, c, book):"
-    )
+    source = GOOD_RULE.replace("def observe(self, call):", "def observe(self, c):")
 
     assert conformance(_ref(tmp_path, source)).ok
 
 
 def test_a_star_args_component_passes_and_a_short_one_does_not(tmp_path: Path) -> None:
     """`*args` can absorb the call; a method one parameter short cannot."""
-    absorbing = GOOD_RULE.replace(
-        "def observe(self, call, account):", "def observe(self, *args):"
-    )
+    absorbing = GOOD_RULE.replace("def observe(self, call):", "def observe(self, *args):")
     assert conformance(_ref(tmp_path, absorbing)).ok
 
-    short = GOOD_RULE.replace(
-        "def observe(self, call, account):",
-        "def observe(self, call):",
-    )
+    short = GOOD_RULE.replace("def observe(self, call):", "def observe(self):")
     assert not conformance(_ref(tmp_path, short)).ok
 
 
 def test_an_optional_extra_parameter_passes(tmp_path: Path) -> None:
     """A default-valued extra is not a break: Flow's call still lands."""
-    source = GOOD_RULE.replace(
-        "def observe(self, call, account):",
-        "def observe(self, call, account, scale=1):",
-    )
+    source = GOOD_RULE.replace("def observe(self, call):", "def observe(self, call, scale=1):")
 
     assert conformance(_ref(tmp_path, source)).ok
 
 
 def test_a_missing_contract_method_is_named(tmp_path: Path) -> None:
-    source = GOOD_RULE.replace("def observe(self, call, account):", "def unused(self):")
+    source = GOOD_RULE.replace("def observe(self, call):", "def unused(self):")
 
     diagnosis = conformance(_ref(tmp_path, source))
 

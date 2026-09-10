@@ -80,7 +80,7 @@ def test_the_override_is_read_off_the_rule_and_a_wrong_one_is_refused() -> None:
         def compliance_id(self) -> str:
             return "plain"
 
-        def observe(self, call, account):  # pragma: no cover - not exercised
+        def observe(self, call):  # pragma: no cover - not exercised
             raise NotImplementedError
 
     class Declared(Plain):

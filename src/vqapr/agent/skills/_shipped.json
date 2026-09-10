@@ -60,13 +60,15 @@
   },
   "make-compliance/SKILL.md": {
     "330e4c02877ad61831e49820ac379af543bcaffe978240c0cb162f5ea191065d": "0.10.0",
-    "63a5bfb5b7819db5dece521c90bd1b2957e5c29200095498d1d38db2b4dff282": "0.11.0.dev0"
+    "63a5bfb5b7819db5dece521c90bd1b2957e5c29200095498d1d38db2b4dff282": "0.11.0.dev0",
+    "ce3b6f88898350f519831d058a4a8c22960d5987fd835766acb467f11c99c0e0": "0.11.0.dev0"
   },
   "make-compliance/references/declaring-data.md": {
     "c1324a254368607a5a7704c3239e8dd93f3b65eca7b255e0a062233b29d3d6e4": "0.10.0"
   },
   "make-compliance/references/observe.md": {
-    "60220169a9c94699eba252b58a440003fa948506b2ef1e02cb8079d7be3a1bd3": "0.10.0"
+    "60220169a9c94699eba252b58a440003fa948506b2ef1e02cb8079d7be3a1bd3": "0.10.0",
+    "69ab7a25aba9896e22e8535d6a117524c7a9c2fa249ca4fadc1096d87cd238fc": "0.11.0.dev0"
   },
   "make-compliance/references/the-box.md": {
     "c5b745342d46d5b7f8ea7e493d705e2700e3a9c480877735840215b31bfb921c": "0.11.0.dev0",

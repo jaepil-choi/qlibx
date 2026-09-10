@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.authoring import Compliance, ComplianceCall, ComplianceFinding, EconomicAccountView
+from vqapr.authoring import Compliance, ComplianceCall, ComplianceFinding
 
 FLOOR = Decimal("0")
 
@@ -27,14 +27,14 @@ class NoShort(Compliance):
     def compliance_id(self) -> str:
         return self._compliance_id
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         """Measured on quantity, deliberately.
 
         A short is a negative *holding*, and a name held short has a negative quantity whatever
-        its price does. Reading `account.weight(...)` here would make the answer depend on a NAV
-        the rule does not care about, and would report a breach differently in a drawdown.
+        its price does. Reading `call.account.weight(...)` here would make the answer depend on a
+        NAV the rule does not care about, and report a breach differently in a drawdown.
         """
-        positions = account.positions
+        positions = call.account.positions
         offenders = tuple(
             sorted(instrument for instrument, quantity in positions.items() if quantity < FLOOR)
         )

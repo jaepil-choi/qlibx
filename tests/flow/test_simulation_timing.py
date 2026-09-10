@@ -33,15 +33,15 @@ class _Rule(Compliance):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return ()
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
-        # No account version and no read provenance in the evidence: both are framework facts,
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
+        # No call.account version and no read provenance in the evidence: both are framework facts,
         # and `ComplianceReport` carries the version for the whole report rather than per finding.
         return ComplianceFinding(
             passed=self.passed,
             measured=Decimal("2"),
             bound=Decimal("1"),
             excess=Decimal("0") if self.passed else Decimal("1"),
-            details={"marked_names": len(account.values or ())},
+            details={"marked_names": len(call.account.values or ())},
         )
 
 

@@ -53,7 +53,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         f"        return {identifier!r}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n"
     )
     path.write_text(
@@ -718,7 +718,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         "    def requirements(self):\n"
         "        return (DataRequirement.of('absent', 'close', "
         "lookback=RowsLookback(1)),)\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -901,7 +901,7 @@ def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
         "        return '-'.join(['position', 'cap'])\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n",
         encoding="utf-8",
     )

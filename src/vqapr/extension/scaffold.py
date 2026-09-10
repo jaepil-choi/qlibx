@@ -252,17 +252,17 @@ class {class_name}(va.Compliance):
         """
         return {{}}
 
-    def observe(self, call, account: va.EconomicAccountView) -> va.ComplianceFinding:
+    def observe(self, call: va.ComplianceCall) -> va.ComplianceFinding:
         """Judge the book that was actually committed, after it was marked.
 
         Execution does not always fill what was intended, and rounding a weight into whole shares
         can push a position over a limit that the decision itself respected. Compare strictly:
         the framework judges the excess against its tolerance, once, for every rule.
         """
-        # `account.weights()` is each name's marked value over NAV. It refuses rather than
-        # returning zeros when the account has not been marked, so an unmarked book cannot look
+        # `call.account.weights()` is each name's marked value over NAV. It refuses rather than
+        # returning zeros when the call.account has not been marked, so an unmarked book cannot look
         # like a compliant one.
-        weights = account.weights() if account.nav else {{}}
+        weights = call.account.weights() if call.account.nav else {{}}
         offenders = tuple(sorted(name for name, w in weights.items() if abs(w) > CAP))
         worst = max((abs(w) for w in weights.values()), default=FLOOR)
         return va.ComplianceFinding(

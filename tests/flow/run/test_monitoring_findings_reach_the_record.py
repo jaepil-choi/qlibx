@@ -93,7 +93,7 @@ class _Rule(Compliance):
     def compliance_id(self) -> str:
         return self._compliance_id
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         return self._finding
 
 

@@ -68,11 +68,12 @@ class Cap(va.Compliance):
     @property
     def compliance_id(self) -> str: ...          # equals the id it is registered under
     def inputs(self): ...                        # what it reads, as of the instant observed
-    def observe(self, call, account) -> va.ComplianceFinding: ...
+    def observe(self, call) -> va.ComplianceFinding: ...
 ```
 
-`observe` receives the marked account from outside — cash, positions, marked values, NAV,
-`account.weights()` — and returns a `ComplianceFinding`: `passed`, `measured`, `bound`,
+`observe` receives one `call`, and everything the rule may reach is on it — the marked account
+as `call.account` (cash, positions, marked values, NAV, `call.account.weights()`) and the rule's
+own reads — and returns a `ComplianceFinding`: `passed`, `measured`, `bound`,
 `excess`, `offenders`. A rule keeps `memory` between observations, so *"out after three
 breaches"* can count. [references/observe.md](references/observe.md).
 

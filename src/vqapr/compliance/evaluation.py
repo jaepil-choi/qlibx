@@ -217,10 +217,10 @@ def evaluate_compliance(
                 rule.observe(
                     ComplianceContext(
                         window=window.for_consumer(rule.compliance_id),
+                        account=view,
                         instruments=window.instruments,
                         reads=rule.inputs(),
-                    ),
-                    view,
+                    )
                 )
             ),
             tolerance=_tolerance_override(rule),

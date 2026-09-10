@@ -925,7 +925,7 @@ def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_cras
         "        return 'position-cap'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n",
         encoding="utf-8",
     )

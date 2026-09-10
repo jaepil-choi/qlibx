@@ -220,7 +220,7 @@ def test_a_component_declaration_resolves_its_path_beside_the_document(
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n",
         encoding="utf-8",
     )
@@ -248,7 +248,7 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, account):\n"  # the contract passes two
+        "    def observe(self):\n"  # the contract passes one
         "        return None\n",
         encoding="utf-8",
     )
@@ -344,7 +344,7 @@ def _rule_source(returns: str) -> str:
         f"        return {returns}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def observe(self, call, account):\n"
+        "    def observe(self, call):\n"
         "        return None\n"
     )
 

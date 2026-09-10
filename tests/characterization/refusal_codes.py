@@ -974,7 +974,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
             def requirements(self):
                 return ()
 
-            def observe(self, call, account):
+            def observe(self, call):
                 return None
         """
     )
@@ -982,8 +982,8 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     # instantiation fails and `component.load.construction_failed` fires before the signature
     # check this fixture exists to provoke ever runs -- the exact silent-weakening this file's
     # own comment below warns about.
-    stale = good.replace("def observe(self, call, account):", "def observe(self, account):")
-    missing = good.replace("def observe(self, call, account):", "def unused(self):")
+    stale = good.replace("def observe(self, call):", "def observe(self):")
+    missing = good.replace("def observe(self, call):", "def unused(self):")
     broken = "class Limit:\n    pass\n"
 
     def _ref(source: str, name: str, *, component_id: str | None = None) -> ComponentRef:

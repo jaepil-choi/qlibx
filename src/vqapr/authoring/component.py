@@ -27,7 +27,6 @@ from vqapr.authoring.history import AccountHistoryInput
 from vqapr.authoring.reads import DatasetInput, requirements_for
 from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.authoring.result import ComplianceFinding, Hold, Rebalance
-from vqapr.authoring.view import EconomicAccountView
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.shapes import Rows
 from vqapr.domain.values import ModelMemory
@@ -272,11 +271,12 @@ class Compliance(Tool):
         return None
 
     @abstractmethod
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         """Measure the committed, marked account at the market-clock instant it was marked at.
 
-        `account.weight(instrument_id)` is the derivation a weight-based rule wants; `positions`
-        and `values` are there for a rule that asks about quantity or about money. `call` carries
-        the rule's own declared reads as of that instant, and its `memory` was restored before
-        this call and is committed after it, so a rule that counts can count.
+        `call.account.weight(instrument_id)` is the derivation a weight-based rule wants;
+        `positions` and `values` are there for a rule that asks about quantity or about money.
+        `call` also carries the rule's own declared reads as of that instant -- one Call, the
+        whole of the rule's authority (record `229`) -- and its `memory` was restored before this
+        call and is committed after it, so a rule that counts can count.
         """

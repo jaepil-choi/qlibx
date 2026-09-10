@@ -14,20 +14,36 @@ test is exercising:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
-from vqapr.authoring import ComplianceCall
+from vqapr.authoring import ComplianceCall, EconomicAccountView
 from vqapr.authoring.context import ComplianceContext
 from vqapr.data.windows import ModelWindow
 
 
-def reading_call(window: ModelWindow, instruments: tuple[str, ...], rule) -> ComplianceCall:
-    """The production context, aliased by whatever the rule declared."""
-    return ComplianceContext(window=window, instruments=tuple(instruments), reads=rule.inputs())
+def reading_call(
+    window: ModelWindow,
+    instruments: tuple[str, ...],
+    rule,
+    *,
+    account: EconomicAccountView | None = None,
+) -> ComplianceCall:
+    """The production context, aliased by whatever the rule declared, over `account`.
+
+    Without one, an empty unmarked book: what a test of the rule's *reads* (`ceilings`) is
+    handed, since it never looks at the account.
+    """
+    if account is None:
+        account = EconomicAccountView(cash=Decimal(0), positions={}, nav=None, nav_observed_at=None)
+    return ComplianceContext(
+        window=window, account=account, instruments=tuple(instruments), reads=rule.inputs()
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class _Weightless(ComplianceCall):
     instruments: tuple[str, ...]
+    account: EconomicAccountView
 
     @property
     def evaluation_time(self):
@@ -40,6 +56,8 @@ class _Weightless(ComplianceCall):
         raise AssertionError(f"this call serves no reads; {alias!r} was asked for")
 
 
-def weightless_call(instruments: tuple[str, ...]) -> ComplianceCall:
+def weightless_call(
+    instruments: tuple[str, ...], *, account: EconomicAccountView
+) -> ComplianceCall:
     """A call for a rule that declared no `inputs()`. Reading through it is an error."""
-    return _Weightless(tuple(instruments))
+    return _Weightless(tuple(instruments), account)

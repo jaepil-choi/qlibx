@@ -283,7 +283,7 @@ class StrategyEventLoop(
                 if filled is None
                 else self._execution.close(filled, marked, monitoring)
             )
-            return DueExecutionTrace(event, result, self._context.state.current)
+            return DueExecutionTrace(event, result, self._context.state.current.version)
 
     def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:

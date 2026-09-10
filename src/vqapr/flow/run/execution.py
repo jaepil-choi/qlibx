@@ -180,7 +180,7 @@ class ExecutionHandler:
             pending=pending,
             target=pending.target,
             fill_convention=execution_table.fill,
-            execution_snapshot=snapshot,
+            execution_snapshot=snapshot.summary(),
             planning_nav=nav,
             planning_cash_target=pending.intent.cash_target,
             planning_budget=pending.intent.budget,
@@ -257,7 +257,7 @@ class ExecutionHandler:
                 occurrence=pending.occurrence,
                 cutoff=pending.target.target_at,
                 pending=pending,
-                candidates=(filled.fills, marked.mark),
+                candidates=(filled.fills, marked.mark.summary()),
                 root_version=marked.root.version,
                 account_version=marked_account.snapshot.version,
             )

@@ -32,7 +32,7 @@ from vqapr.domain.account_state import AccountMark, AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
+from vqapr.domain.values import MarkBatch, MarkSummary, ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
@@ -126,7 +126,10 @@ class OccurrenceTrace:
     result: Hold | EconomicPortfolioIntent
     """The decision as the callback left it: a `Hold`, or a `Rebalance` stamped into the intent
     the run accepted."""
-    state: AcceptedRunState
+    root_version: int
+    """The version of the root this callback published. The root itself is not kept: a trace
+    that held it held that instant's whole account, marks and all, until the run ended (record
+    `224`), and nothing read it back -- `final_state` is the run's authority."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +139,8 @@ class DueExecutionTrace:
 
     due: MarketEvent
     result: DueExecutionResult | HeldResult
-    state: AcceptedRunState
+    root_version: int
+    """The version of the root this instant left (record `224`: the root is not kept)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,10 +206,10 @@ class FailedAfterCommit(SimulationFailure):
 
 @dataclass(frozen=True, slots=True)
 class ValuationResult:
-    """A complete selected mark set for one committed AccountSnapshot."""
+    """One committed AccountSnapshot and the summary of the marks that valued it."""
 
     account: AccountSnapshot
-    marks: MarkBatch
+    marks: MarkSummary
     evidence: ValuationEvidence
 
 

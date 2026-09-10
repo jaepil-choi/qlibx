@@ -333,6 +333,22 @@ class ExactExecutionRow:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionSnapshotSummary:
+    """A snapshot's partitions and how many rows it held: what the fill's evidence keeps of it.
+
+    The rows are the venue's data and are read again from the table; keeping one row per name
+    per fill on the run's lineage held instants x names objects until the run ended (record
+    `224`). The partitions are the facts the fill was judged on and stay.
+    """
+
+    target_at: datetime
+    rows: int
+    duplicate_instruments: tuple[str, ...]
+    missing_target_instruments: tuple[str, ...]
+    missing_held_instruments: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ExactExecutionSnapshot:
     """Exact rows plus explicit absence partitions for execution and later NAV checks."""
 
@@ -341,6 +357,15 @@ class ExactExecutionSnapshot:
     duplicate_instruments: tuple[str, ...]
     missing_target_instruments: tuple[str, ...]
     missing_held_instruments: tuple[str, ...]
+
+    def summary(self) -> ExecutionSnapshotSummary:
+        return ExecutionSnapshotSummary(
+            target_at=self.target_at,
+            rows=len(self.rows),
+            duplicate_instruments=self.duplicate_instruments,
+            missing_target_instruments=self.missing_target_instruments,
+            missing_held_instruments=self.missing_held_instruments,
+        )
 
 
 def exact_execution_snapshot(

@@ -76,11 +76,11 @@ class ComplianceHandler:
             occurrence=None,
             cutoff=instant,
             account=current,
-            marks=marks,
+            marks=marks.summary(),
             root_version=self._context.state.current.version,
             account_version=current.version,
         )
-        valuation = ValuationResult(current, marks, valuation_evidence)
+        valuation = ValuationResult(current, marks.summary(), valuation_evidence)
         report = evaluate_compliance(self._context.compliance, window, current, marks)
         evidence = MonitoringEvidence(
             run_identity=self._context.frozen_run.identity,

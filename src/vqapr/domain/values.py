@@ -383,3 +383,27 @@ class MarkBatch:
     def quantities(self) -> dict[str, Decimal]:
         """Return the complete immutable batch's explicitly marked quantities."""
         return {mark.instrument_id: mark.quantity for mark in self.marks}
+
+    def summary(self) -> MarkSummary:
+        """What outlives the batch once its rows are on the record."""
+        return MarkSummary(total_value=self.total_value, marked=len(self.marks))
+
+
+@dataclass(frozen=True, slots=True)
+class MarkSummary:
+    """A valuation's total and its count: what the run's evidence keeps of a `MarkBatch`.
+
+    A batch is one `Mark` per held name, made at every instant of the market clock, and until
+    record `224` every batch hung off the run's evidence and traces until the run ended --
+    instants x names objects, 290 million for 3,000 names over a year of minutes. Nothing read
+    them back: by the time a batch was made, its marks were `vqapr.account` rows. The evidence
+    keeps this instead, and the batch is garbage as soon as the next instant's is committed.
+    """
+
+    total_value: Decimal
+    marked: int
+
+    def __post_init__(self) -> None:
+        _decimal(self.total_value, name="total_value")
+        if isinstance(self.marked, bool) or not isinstance(self.marked, int) or self.marked < 0:
+            raise ValueError("marked must be a non-negative count")

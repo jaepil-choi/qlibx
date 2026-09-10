@@ -196,7 +196,7 @@ class CallbackHandler:
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
-        return OccurrenceTrace(occurrence, result, root)
+        return OccurrenceTrace(occurrence, result, root.version)
 
     def load_visible_state(self) -> None:
         """Load the Strategy's visible memory pair before any callback mutation (record `181`)."""

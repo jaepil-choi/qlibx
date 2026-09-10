@@ -141,7 +141,7 @@ class ValuationHandler:
                     root_version=committed_root.version,
                     cutoff=at,
                     account=prepared_fill.next_snapshot,
-                    marks=mark,
+                    marks=mark.summary(),
                     account_version=prepared_fill.next_snapshot.version,
                 ),
             )
@@ -150,8 +150,8 @@ class ValuationHandler:
             agenda=self._context.layer.agenda,
             occurrence=pending.occurrence,
             cutoff=at,
-            selected_marks=selected_marks,
-            marks=mark,
+            selected=len(selected_marks),
+            marks=mark.summary(),
             limitations=(),
             account=prepared_account.next_state.snapshot,
             root_version=committed_root.version,
@@ -244,7 +244,7 @@ class ValuationHandler:
             occurrence=None,
             cutoff=instant,
             account=before,
-            marks=mark,
+            marks=mark.summary(),
             root_version=self._context.state.current.version,
             account_version=before.version,
         )

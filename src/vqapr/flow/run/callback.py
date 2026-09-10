@@ -388,9 +388,9 @@ class CallbackHandler:
         if mark is not None and mark.marked_at is not None:
             return build_account_view(state.snapshot, mark.marks, mark.marked_at)
         snapshot = state.snapshot
-        return EconomicAccountView(
+        return EconomicAccountView._trusted(
             cash=snapshot.cash,
-            positions=dict(snapshot.positions),
+            positions=snapshot.positions,
             nav=None,
             nav_observed_at=None,
         )

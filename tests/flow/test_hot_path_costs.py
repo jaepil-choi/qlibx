@@ -805,3 +805,63 @@ def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
     assert unknown.missing_target_instruments == ("Z",)
     assert exact_reads == 2, "an instant off the clock and a name outside the window fall through"
 
+# --------------------------------------------------------------------------------------------
+# Record `223`: the view a Compliance rule observes is built from proved values without proving
+# them again, and an identifier's whitespace check is one search rather than one step per
+# character. Both were a third of the compliance stage on a 3,000-name book.
+# --------------------------------------------------------------------------------------------
+
+
+def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> None:
+    from datetime import UTC
+    from decimal import Decimal
+
+    from vqapr.authoring import view as view_module
+    from vqapr.authoring.view import EconomicAccountView
+    from vqapr.compliance.evaluation import build_account_view
+    from vqapr.domain.account_state import AccountSnapshot
+    from vqapr.domain.values import Mark, MarkBatch
+
+    validated = 0
+    original = view_module._copy_weights
+
+    def counting(*args, **kwargs):
+        nonlocal validated
+        validated += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(view_module, "_copy_weights", counting)
+    names = [f"I{index:04d}" for index in range(500)]
+    snapshot = AccountSnapshot(3, Decimal("10"), {name: Decimal(2) for name in names})
+    marks = MarkBatch(
+        tuple(Mark(name, Decimal(2), Decimal("1.5"), Decimal(3)) for name in names), Decimal(1500)
+    )
+    at = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
+
+    trusted = build_account_view(snapshot, marks, at)
+    assert validated == 0, "the framework's view proves nothing twice"
+
+    authored = EconomicAccountView(
+        cash=snapshot.cash,
+        positions=dict(snapshot.positions),
+        values={mark.instrument_id: mark.value for mark in marks.marks},
+        nav=marks.total_value + snapshot.cash,
+        nav_observed_at=at,
+    )
+    assert validated == 2, "an author's constructor still proves its two cross-sections"
+    assert trusted == authored
+    assert list(trusted.positions) == sorted(names) and trusted.weight("I0007") == authored.weight("I0007")
+
+
+def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
+    """Same verdicts as `str.isspace` per character, in C."""
+    from vqapr.authoring._validation import _identifier
+    from vqapr.domain.identifiers import instrument_id
+
+    for good in ("A", "BRK/B", "_KOSPI", "005930", "a\u00e9"):
+        assert _identifier(good, name="x") == good and instrument_id(good) == good
+    for bad in ("", "A B", "A\tB", "A\u00a0B", "A\u2003B", "\nA"):
+        with pytest.raises(ValueError):
+            _identifier(bad, name="x")
+        with pytest.raises(ValueError):
+            instrument_id(bad)

@@ -14,6 +14,7 @@ package has no reason to.
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
@@ -63,8 +64,11 @@ def _tz_aware(value: object, *, name: str) -> datetime:
     return require_tz_aware(value, name=name)
 
 
+_WHITESPACE = re.compile(r"\s")
+
+
 def _identifier(value: object, *, name: str) -> str:
-    if not isinstance(value, str) or not value or any(char.isspace() for char in value):
+    if not isinstance(value, str) or not value or _WHITESPACE.search(value):
         raise ValueError(f"{name} must be a non-empty string without whitespace")
     return value
 

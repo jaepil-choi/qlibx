@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import NewType
 
@@ -11,6 +12,11 @@ InstrumentId = NewType("InstrumentId", str)
 ComponentId = NewType("ComponentId", str)
 AgendaId = NewType("AgendaId", str)
 OccurrenceId = NewType("OccurrenceId", str)
+
+_WHITESPACE = re.compile(r"\s")
+"""`str.isspace` as one C-level search: an id is checked wherever it enters, and a 3,000-name run
+checks its names at every market-clock instant (record `223`); a per-character generator was a
+measurable share of that."""
 
 
 def _clean(kind: str, raw: str) -> str:
@@ -26,7 +32,7 @@ def _clean(kind: str, raw: str) -> str:
 def dataset_id(raw: str) -> DatasetId:
     """등록된 dataset의 이름. project 안에서 사람이 고르는 손잡이다."""
     value = _clean("dataset_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"dataset_id must not contain whitespace: {value!r}")
     return DatasetId(value)
 
@@ -34,28 +40,28 @@ def dataset_id(raw: str) -> DatasetId:
 def source_id(raw: str) -> SourceId:
     """물리 원천의 이름."""
     value = _clean("source_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"source_id must not contain whitespace: {value!r}")
     return SourceId(value)
 
 
 def component_id(raw: str) -> ComponentId:
     value = _clean("component_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"component_id must not contain whitespace: {value!r}")
     return ComponentId(value)
 
 
 def agenda_id(raw: str) -> AgendaId:
     value = _clean("agenda_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"agenda_id must not contain whitespace: {value!r}")
     return AgendaId(value)
 
 
 def occurrence_id(raw: str) -> OccurrenceId:
     value = _clean("occurrence_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"occurrence_id must not contain whitespace: {value!r}")
     return OccurrenceId(value)
 
@@ -70,7 +76,7 @@ def instrument_id(raw: str) -> InstrumentId:
     합성 instrument(`_KOSPI`, `_CD91`)도 같은 규칙을 통과한다.
     """
     value = _clean("instrument_id", raw)
-    if any(c.isspace() for c in value):
+    if _WHITESPACE.search(value):
         raise ValueError(f"instrument_id must not contain whitespace: {value!r}")
     return InstrumentId(value)
 

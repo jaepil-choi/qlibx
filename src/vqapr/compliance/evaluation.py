@@ -264,9 +264,11 @@ def build_account_view(
     it was taken is a property of the instant that took it.
     """
     nav = marks.total_value + account.cash
-    return EconomicAccountView(
+    # Trusted (record `223`): the snapshot and the marks proved every id and value when they
+    # were committed, and this runs once per market-clock instant on every held name.
+    return EconomicAccountView._trusted(
         cash=account.cash,
-        positions=dict(account.positions),
+        positions=account.positions,
         values={mark.instrument_id: mark.value for mark in marks.marks},
         nav=nav,
         nav_observed_at=observed_at,

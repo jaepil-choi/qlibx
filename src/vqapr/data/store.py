@@ -144,7 +144,7 @@ class DuckDbObservationStore:
         # unaffected. public.run() passes a run-lifetime session.
         self.__session = session
         # One store instance lives for exactly one run, and a run's sources are frozen for its
-        # whole duration. StrategyEventLoop._actual_source_refs already refuses a callback that
+        # whole duration. CallbackHandler._actual_source_refs already refuses a callback that
         # observes two digests for one source, so caching per instance does not weaken that
         # contract -- it makes violating it impossible instead of merely detected.
         self.__digests: dict[Path, str] = {}

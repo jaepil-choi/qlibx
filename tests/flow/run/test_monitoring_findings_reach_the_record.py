@@ -51,7 +51,7 @@ from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.run.loop import DueExecutionTrace, StrategyEventLoop
+from vqapr.flow.run.loop import RunLoop, DueExecutionTrace, strategy_loop
 from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
 
@@ -170,7 +170,7 @@ def _flow(
     state: RunStateRepository,
     sessions: tuple[date, ...],
     rules: tuple[Compliance, ...] = RULES,
-) -> StrategyEventLoop:
+) -> RunLoop:
     occurrences = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="monitored",
@@ -213,7 +213,7 @@ def _flow(
             allowed_requirements=(),
         )
 
-    return StrategyEventLoop(
+    return strategy_loop(
         frozen,
         _Holds(),
         state,

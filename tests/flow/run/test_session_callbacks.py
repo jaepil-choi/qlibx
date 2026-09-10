@@ -23,7 +23,7 @@ from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.run.loop import StrategyEventLoop
+from vqapr.flow.run.loop import RunLoop, strategy_loop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.project.run import ComplianceSet, StrategyConfig
@@ -92,7 +92,7 @@ def _flow(
     strategy: StrategyModel,
     state: RunStateRepository,
     occurrences: tuple[OperationOccurrence, ...],
-) -> StrategyEventLoop:
+) -> RunLoop:
     strategy_agenda = FrozenAgenda("strategy", occurrences)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
@@ -123,7 +123,7 @@ def _flow(
             consumer_id="test-consumer",
         )
 
-    return StrategyEventLoop(
+    return strategy_loop(
         frozen,
         strategy,
         state,

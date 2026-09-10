@@ -2,7 +2,7 @@
 
 **This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
 executes runs is not a facade. The run layer is frozen, and its model runs in its own
-`StrategyEventLoop` with its own `Account` and its own record directory (design §4.1, §7-4).
+`strategy_loop` with its own `Account` and its own record directory (design §4.1, §7-4).
 
 **One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3).
 Record `139` had made it several so that a comparison would share one frozen layer; determinism
@@ -65,10 +65,10 @@ from vqapr.flow.roster import (
 )
 from vqapr.flow.run.context import DEFAULT_TABLE_PREFIX
 from vqapr.flow.run.loop import (
-    DataModelEventLoop,
     DataModelResult,
     SimulationResult,
-    StrategyEventLoop,
+    datamodel_loop,
+    strategy_loop,
 )
 from vqapr.flow.run.output import RunOutput
 from vqapr.project.run import RunDefinition
@@ -644,7 +644,7 @@ def _run_datamodel(
             allowed_requirements=layer.requirements,
             consumer_id=layer.component_id,
         )
-        flow = DataModelEventLoop(
+        flow = datamodel_loop(
             frozen,
             layer,
             model,
@@ -818,7 +818,7 @@ def _run_strategy(
             allowed_requirements=layer.compliance_requirements,
             consumer_id=None,
         )
-        flow = StrategyEventLoop(
+        flow = strategy_loop(
             frozen,
             strategy,
             state,

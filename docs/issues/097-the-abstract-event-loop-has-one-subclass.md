@@ -1,7 +1,9 @@
 # 097 — `flow/engine/loop.py` is an abstract loop with one subclass, and the two assemblies are classes that only construct
 
-**Status: OPEN 2026-09-10 -- owner-filed, from the 0.11.0 spine trace
-(`experiments/exp_230_the_spine_trace/`). Plan: `.agent/plans/active/one-door-campaign.md`, milestone L.**
+**Status: CLOSED 2026-09-10 -- record `231`.** `EventLoop` is gone; `RunLoop.run` is the walk;
+`strategy_loop`/`datamodel_loop` are functions returning a `RunLoop`; `flow/engine/loop.py` keeps
+the events and their order. Filed the same day from the 0.11.0 spine trace
+(`experiments/exp_230_the_spine_trace/`); plan `.agent/plans/active/one-door-campaign.md`, milestone L.
 
 | | |
 |---|---|

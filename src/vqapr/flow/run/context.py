@@ -476,7 +476,7 @@ def _resolved(filename: str) -> Path:
 @dataclass(kw_only=True, slots=True)
 class FlowContext:
     """What every phase of one strategy's run shares: the frozen run, this strategy's layer, the run
-    state, the account and venue, and the failure envelope. Built by `StrategyEventLoop`, read by
+    state, the account and venue, and the failure envelope. Built by `strategy_loop`, read by
     `CallbackHandler`, `ExecutionHandler` and `ValuationHandler`; nothing here dispatches."""
 
     frozen_run: FrozenRun

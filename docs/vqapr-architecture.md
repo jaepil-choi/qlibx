@@ -17,7 +17,7 @@ flowchart LR
     DM -->|writes| Raw
     Agenda[run agenda: 전략 시계] --> Freeze[RunDefinition preflight]
     Table[(execution table: 시장 시계)] --> Freeze
-    Freeze --> Loop[EventLoop: 두 시계의 정렬 병합]
+    Freeze --> Loop[RunLoop: 두 시계의 정렬 병합]
     Loop -->|DECIDE| S[StrategyModel.decide]
     Raw -->|PIT View| S
     Acc[(Account)] -->|snapshot| S
@@ -882,7 +882,7 @@ Strategy callback agenda는 DataModel materialization과 공유하지 않는다.
   앞에서 끝나고, 그 결과를 여러 소비자가 나눠 쓸 수 있다.
 - **account를 안 받는 것은 그 결과다.** 받으면 결과가 그 run에 묶여 나눠 쓸 수 없게 된다.
 - **시계가 하나다.** datamodel run은 전략 시계만 걷고 시장 시계가 없다 — 같은 `RunLoop`를 `MarketClock` 없이
-  조립한 것이 `flow/run/loop.py`의 `DataModelEventLoop`다(기록 `227`).
+  조립하는 것이 `flow/run/loop.py`의 `datamodel_loop`다(기록 `227`, 함수가 된 것은 `231`).
   한 번 만든 dataset을 여러 run이 `reads`로 공유한다.
 - **없어도 된다.** StrategyModel이 같은 계산을 직접 수행해도 된다(PRD §2.3). DataModel은 공유와 절약을
   위한 선택이다.
@@ -892,7 +892,7 @@ Strategy callback agenda는 DataModel materialization과 공유하지 않는다.
 > **2026-09-03 정정 (기록 `148`), 2026-09-10 갱신 (기록 `201`-`214`).** `materialize()`와 spec 파일은 삭제됐다.
 > DataModel은 **등록된 run**이다 — `runs:` 항목의 `datamodel:`이 component 하나와 `value_fields`를, run이
 > `writes`(만들 dataset의 이름, 필수)와 `agenda`(`every` · `at` | `from`/`to` · `days_from`: 거래일을 빌려 올
-> 체결 테이블)를 든다. `flow/engine/loop.py`의 `EventLoop`가 strategy run과 같은 걸음이고
+> 체결 테이블)를 든다. `flow/run/loop.py`의 `RunLoop`가 strategy run과 같은 걸음이고
 > `flow/run/compute.py`의 `ComputeHandler`가 callback 자리에 선다: account도 venue도 시장 시계도 없다.
 > 행은 `.vqapr/materialized/<dataset_id>/`에 모여 마지막 세션 뒤 한 번 등록된다(`flow/run/output.py`).
 > 아래 본문은 그 결정 전의 설명이며 `compute()`의 계약(한 frozen evaluation time, PIT window,
@@ -2445,13 +2445,10 @@ run마다 다르면 두 run의 성과를 비교할 수 없다.
 ### 8.1 하나의 Flow — 두 시계의 정렬 병합
 
 ```python
-class EventLoop[EventT, TraceT, ResultT](ABC):        # flow/engine/loop.py
-    def events(self) -> tuple[EventT, ...]: ...       # 정적 소스의 합. 실행 중 아무것도 만들지 않는다
-    def run(self) -> ResultT: ...                     # sorted(events) 를 한 번 걷는다. override 불가
-    def handle(self, event) -> TraceT: ...
-    def finish(self, traces) -> ResultT: ...
+# flow/engine/loop.py — 이벤트와 그 순서만: OccurrenceEvent · MarketEvent(같은 시각이면 먼저, sort_key -1)
 
-class RunLoop[TraceT, ResultT](EventLoop):           # flow/run/loop.py — 루프 하나 (기록 227)
+class RunLoop[TraceT, ResultT]:                      # flow/run/loop.py — 루프 하나 (기록 227 · 231)
+    run()                   → start · sorted(events) 를 한 번 걷는다 · finish. 여기 한 번 쓰여 있다
     events = OccurrenceEvent(부품의 agenda) ∪ MarketEvent(market.instants(), 시장 시계가 있을 때)
     start(cutoff)           → part.start
     handle(OccurrenceEvent) → part.dispatch(occurrence)       # DECIDE 또는 compute
@@ -2467,9 +2464,13 @@ class MarketClock:                                    # 시장 시계: 도구들
         accrual.accrue → execution.fill → valuation.mark → compliance.observe → execution.close
         단계마다 (MarketInstant) -> MarketInstant. 순서는 이 다섯 줄이다
 
-StrategyEventLoop(RunLoop)   조립: 권한 검사 · FlowContext · handler 다섯 · MarketClock
-DataModelEventLoop(RunLoop)  조립: ComputeHandler · DataModelPart · 시장 시계 없음
+strategy_loop(...) -> RunLoop    조립: 권한 검사 · FlowContext · handler 다섯 · MarketClock
+datamodel_loop(...) -> RunLoop   조립: ComputeHandler · DataModelPart · 시장 시계 없음
 ```
+
+> **2026-09-10 (기록 `231`).** 추상 `EventLoop`는 서브클래스가 `RunLoop` 하나뿐이었고(`docs/issues/097`),
+> 조립 둘은 `__init__`만 있는 클래스였다. 걷기는 `RunLoop.run`으로 접혔고 조립은 함수 둘이 됐다.
+> `flow/engine/loop.py`에는 이벤트 둘과 정렬 규칙만 남는다.
 
 책임: run 동결과 preflight · 두 시계의 merge · 이벤트 dispatch · requirement resolution과 View 생성 ·
 Model current-occurrence callback과 result validation · Flow-owned timing stamp · `FillRule` target resolution ·
@@ -2932,7 +2933,7 @@ src/vqapr/
 │
 ├── flow/            조립·배달·동결. 경제 규칙 없음 (닫힘)
 │   ├── engine/               두 kind가 함께 구현하는 걸음 (층 60)
-│   │   ├── loop.py     127   **EventLoop** — 정적 소스 둘의 정렬 병합 · OccurrenceEvent · MarketEvent
+│   │   ├── loop.py      60   OccurrenceEvent · MarketEvent와 그 정렬 규칙 (걷기는 run/loop.py, 기록 `231`)
 │   │   ├── artifacts.py 368  SimulationFailure 봉투 + 단계별 evidence 값 · SimulationStage
 │   │   └── run_state.py 632  RunStateRepository — accepted state의 루트, `_advance` 하나로 전이
 │   ├── declaration/          run이 무엇을 선언하고 무엇이 얼려지는가 (층 63)
@@ -2941,7 +2942,7 @@ src/vqapr/
 │   │   ├── judgments.py 695  check가 내리는 판정
 │   │   └── roster.py    57
 │   ├── run/                  run 하나를 돈다 — 시계로 배열 (층 65, 기록 `214`)
-│   │   ├── loop.py     ~480  RunLoop(루프 하나) · Part · MarketClock · StrategyEventLoop/DataModelEventLoop(조립) — 기록 `227`
+│   │   ├── loop.py     ~480  RunLoop(루프 하나, 걷기 포함) · Part · MarketClock · strategy_loop/datamodel_loop(조립 함수) — 기록 `227` · `231`
 │   │   ├── callback.py 654   전략 시계: decide → 도장 찍힌 intent
 │   │   ├── compute.py  107   전략 시계: compute → 출력
 │   │   ├── accrual.py   34   시장 시계 1: 자리
@@ -4646,8 +4647,8 @@ execution을 거치면 StrategyModel, 거치지 않고 loop만 돌며 score를 �
 > 체결·평가 phase를, DataModel은 `DataModelPhase` 하나를 거친다(`flow/loop.py`, `flow/datamodel.py`).
 >
 > **2026-09-10 정정 (기록 `201`-`214`).** 사용법이 하나가 됐다: 둘 다 run의 `strategy:`/`datamodel:` 항목이고, 같은
-> `agenda`로 불리며, 같은 `EventLoop`(`flow/engine/loop.py`)가 걷는다 — StrategyModel은 시계 둘, DataModel은 시계
-> 하나(`flow/run/loop.py`). 저자 표면도 하나다: `Component → Part(DataModel · StrategyModel) / Tool(Compliance)`,
+> `agenda`로 불리며, 같은 `RunLoop`(`flow/run/loop.py`)가 걷는다 — StrategyModel은 시계 둘, DataModel은 시계
+> 하나. 저자 표면도 하나다: `Component → Part(DataModel · StrategyModel) / Tool(Compliance)`,
 > `Exchange`도 `Tool`이다(`authoring/component.py`, `exchange/venue.py`). `Constraint`는 사라졌고 `Compliance`는
 > `memory`를 가진 도구다.
 >

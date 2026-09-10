@@ -309,7 +309,7 @@ def test_public_exports_are_fixed() -> None:
         "validate_allocation",
     )
     assert "Workspace" not in public.__all__
-    assert "StrategyEventLoop" not in public.__all__
+    assert "strategy_loop" not in public.__all__
     assert "DuckDbObservationStore" not in public.__all__
     assert "RunStateRepository" not in public.__all__
     assert "AccountState" not in public.__all__
@@ -498,7 +498,7 @@ def test_public_run_uses_frozen_initial_model_memory(
         lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
     )
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
-    monkeypatch.setattr(orchestration, "StrategyEventLoop", Flow)
+    monkeypatch.setattr(orchestration, "strategy_loop", Flow)
 
     outcome = public.run(tmp_path, frozen)
     assert outcome.result() is finished

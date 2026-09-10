@@ -42,7 +42,7 @@ from vqapr.domain.values import LocalInstantDeclaration
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.run.loop import StrategyEventLoop
+from vqapr.flow.run.loop import strategy_loop
 from vqapr.project.run import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
@@ -483,7 +483,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         )
 
     state = RunStateRepository(initial_account=arrived_marked)
-    result = StrategyEventLoop(
+    result = strategy_loop(
         frozen,
         _Holds(),
         state,

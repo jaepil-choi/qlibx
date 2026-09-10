@@ -42,7 +42,7 @@ from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.run.loop import StrategyEventLoop
+from vqapr.flow.run.loop import RunLoop, strategy_loop
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 
 ROWS_PER_OCCURRENCE = 200
@@ -108,7 +108,7 @@ def _state(sink=None) -> RunStateRepository:
 
 def _flow(
     state: RunStateRepository, occurrences: tuple[OperationOccurrence, ...], on_progress=None
-) -> StrategyEventLoop:
+) -> RunLoop:
     requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
@@ -137,7 +137,7 @@ def _flow(
             consumer_id="test-consumer",
         )
 
-    return StrategyEventLoop(
+    return strategy_loop(
         frozen,
         RecordsEveryOccurrence(),
         state,

@@ -57,7 +57,7 @@ from vqapr.flow.engine.artifacts import (
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.run.loop import AcceptedIntent, DueExecutionTrace, StrategyEventLoop
+from vqapr.flow.run.loop import RunLoop, AcceptedIntent, DueExecutionTrace, strategy_loop
 from vqapr.portfolio.budgets import Budget, PortfolioDirection
 from vqapr.portfolio.intents import (
     EconomicPortfolioIntent,
@@ -237,8 +237,8 @@ def _flow(
     compliance: tuple[Compliance, ...] = (_Rule(),),
     compliance_window_at: object = None,
     strategy_window_for_occurrence: object = None,
-) -> StrategyEventLoop:
-    return StrategyEventLoop(
+) -> RunLoop:
+    return strategy_loop(
         frozen,
         strategy,
         state,
@@ -587,7 +587,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         strategy_requirements=(requirement,),
     )
 
-    result = StrategyEventLoop(
+    result = strategy_loop(
         frozen,
         ReadingStrategy(),
         _state(),
@@ -922,7 +922,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow._callback.dispatch(frozen.strategy.agenda.occurrences[0])
+        flow.part.callback.dispatch(frozen.strategy.agenda.occurrences[0])
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_INTENT
@@ -1037,7 +1037,7 @@ def test_shared_compliance_identity_is_the_only_rule_authority() -> None:
     # body, so it surfaced through the CLI as `stage: "unhandled"` with an empty `failures` list --
     # the framework announcing its own breakage when a component was registered under the wrong id.
     with pytest.raises(VqaprError) as caught:
-        StrategyEventLoop(
+        strategy_loop(
             frozen,
             _Strategy((Hold(reason="x"),)),
             _state(),
@@ -1396,7 +1396,9 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     elif boundary == "exchange":
         monkeypatch.setattr(AcademicExchange, "execute", fail)
     elif boundary == "account":
-        monkeypatch.setattr(flow._context.account, "append", fail)
+        # The loop holds no context since record `231`; the account the fill appends to is the
+        # one `_flow` built, and its class is the seam.
+        monkeypatch.setattr(Account, "append", fail)
     elif boundary == "publication":
         monkeypatch.setattr(state, "prepare_feedback", fail)
     else:

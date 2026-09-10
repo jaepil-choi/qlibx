@@ -87,7 +87,7 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     """Re-hashed bytes used to equal query count times full source size.
 
     A run's sources are frozen for its whole duration, so the digest cannot change between two
-    queries of the same run. `StrategyEventLoop._actual_source_refs` already refuses a callback that
+    queries of the same run. `CallbackHandler._actual_source_refs` already refuses a callback that
     observes two digests for one source; computing it once per store makes that unrepresentable
     rather than merely detected.
     """

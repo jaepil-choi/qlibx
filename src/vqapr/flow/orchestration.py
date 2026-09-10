@@ -56,8 +56,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.declaration.judgments import require_judged
-from vqapr.flow.declaration.preflight import preflight_run as _preflight_run
+from vqapr.flow.declaration.verify import verify_run
 from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.freeze import (
@@ -96,11 +95,12 @@ def preflight_run(
 ) -> FrozenRun:
     """Judge a run definition against registered declarations, then freeze it, without running it.
 
-    The judgments come first, and here rather than in the CLI: the CLI and the Python surface are
-    two spellings of one process, and a run the CLI refused must not freeze from Python (record
-    `168`; before it, `vqapr run` asked the judgments and this function did not, so the sample's
-    own `execute` ran what `vqapr run` refused). A refused or blocked judgment raises the
-    `VqaprError` `check` renders, in `check`'s codes.
+    One door (`flow/declaration/verify.py`, record `240`): the CLI, the Python surface and the
+    `--jobs` worker are spellings of one process, and a run one refused must not freeze from
+    another (record `168`; before it, `vqapr run` asked the judgments and this function did not,
+    so the sample's own `execute` ran what `vqapr run` refused). A refused or blocked judgment
+    raises the `VqaprError` `check` renders, in `check`'s codes; a run the judgments passed is
+    refused by the freeze's own error.
 
     Takes the `Workspace` a caller already holds, or a root to open one from. A CLI command
     opens the document once and hands that one snapshot to every step (`docs/issues/archive/070`):
@@ -114,8 +114,7 @@ def preflight_run(
         if isinstance(workspace_or_root, Workspace)
         else Workspace.open(workspace_or_root)
     )
-    require_judged(definition, workspace)
-    return _preflight_run(workspace, definition)
+    return verify_run(workspace, definition).require_frozen()
 
 
 class _FrozenCatalog:
@@ -654,7 +653,10 @@ def run_registered_datamodel(
     objects that were refused; that is why it returns a `StrategyOutcome` instead.
     """
     workspace = Workspace.open(project_root)
-    frozen = _preflight_run(workspace, workspace.run_definition(run_id))
+    # The same door the sequential path passes: the judgments too, not the freeze alone. A
+    # batch worker used to freeze without asking them, so `run a b --jobs 2` ran what `check`
+    # and `run a` refused (the `docs/issues/archive/015` gap, again, one door over).
+    frozen = verify_run(workspace, workspace.run_definition(run_id)).require_frozen()
     layer = frozen.datamodel
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a datamodel run")
@@ -856,7 +858,7 @@ def run_registered_strategy(
     the strategies that had finished (`docs/issues/archive/073`).
     """
     workspace = Workspace.open(project_root)
-    frozen = _preflight_run(workspace, workspace.run_definition(run_id))
+    frozen = verify_run(workspace, workspace.run_definition(run_id)).require_frozen()
     layer = frozen.strategy
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a strategy run")

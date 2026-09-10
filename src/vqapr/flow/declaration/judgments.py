@@ -62,7 +62,6 @@ __all__ = [
     "JUDGMENT_CODES",
     "JUDGMENT_STAGE",
     "judgments",
-    "require_judged",
 ]
 
 JUDGMENT_STAGE = Stage.CHECK
@@ -112,38 +111,9 @@ JUDGMENT_BLOCKED = "judgment.blocked"
 
 Not in `JUDGMENT_CODES`: it is not a judgment. `judgments` builds one such failure per judge that
 raised, carrying the exception whole in `cause` and its status by whose frame raised; `check`
-reports them AS blocked and `require_judged` (`preflight_run`, hence `run` and the sample's
-`execute`) refuses on them beside the refusals proper.
+reports them AS blocked and `verify.RunVerdict.require_frozen` (`preflight_run`, hence `run`
+and the sample's `execute`) refuses on them beside the refusals proper.
 """
-
-
-def require_judged(definition: RunDefinition, workspace: Workspace) -> None:
-    """Ask the judgments and refuse when one refused, or when one could not answer.
-
-    This is the one gate in front of the freeze, and every door passes through it: the public
-    `preflight_run`, which the CLI's `run` and the sample's `execute` both call (record `168`).
-    `check` asked these questions and `run` did not, so a run with a real look-ahead -- a fill at
-    15:30 with decisions at or after it -- was refused by one verb and executed by the other, and
-    wrote a permanent record nothing marked (`docs/issues/archive/015`); `run` then asked them and
-    the Python surface still did not, so the same run was refused by the CLI and executed from
-    Python (record `167`, R7). Refusing outright, with no flag to bypass, is the decision recorded
-    in `docs/implementations/087`.
-
-    **Blocked counts as refused.** A judgment that could not answer is not a judgment that passed;
-    letting it through would let a run nothing was proven about run to completion.
-
-    The refusals keep the codes `check` publishes: a green `run` means what a green `check` means
-    -- with one judgment answered by `run`'s own door instead. `run.output_stale` says the run's
-    earlier output was written by another version of the component (`docs/issues/091`); `run`
-    without `--force` refuses that output anyway (`run.output_registered`, 409, at the run stage)
-    and `run --force` rewrites it, which is the very fix the judgment names. Raising it here would
-    refuse the command that repairs it, so it is `check`'s to report and `run`'s to resolve.
-    """
-    failures, blocked = judgments(definition, workspace)
-    failures = [failure for failure in failures if failure.code != RUN_OUTPUT_STALE]
-    if not failures and not blocked:
-        return
-    raise VqaprError(stage=Stage.CHECK, failures=[*failures, *blocked])
 
 
 def judgments(

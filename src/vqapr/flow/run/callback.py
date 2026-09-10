@@ -196,7 +196,7 @@ class CallbackHandler:
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
-        return OccurrenceTrace(occurrence, result, root)
+        return OccurrenceTrace(occurrence, result, root.version)
 
     def load_visible_state(self) -> None:
         """Load the Strategy's visible memory pair before any callback mutation (record `181`)."""
@@ -388,9 +388,9 @@ class CallbackHandler:
         if mark is not None and mark.marked_at is not None:
             return build_account_view(state.snapshot, mark.marks, mark.marked_at)
         snapshot = state.snapshot
-        return EconomicAccountView(
+        return EconomicAccountView._trusted(
             cash=snapshot.cash,
-            positions=dict(snapshot.positions),
+            positions=snapshot.positions,
             nav=None,
             nav_observed_at=None,
         )
@@ -435,6 +435,7 @@ class CallbackHandler:
             producer_id=str(self._context.layer.config.component.component_id),
             stage=CALLBACK_STAGE,
             event_time=occurrence.evaluation_time,
+            sequencer=self._context.next_sequence,
         )
 
     def _candidate_callback_state(

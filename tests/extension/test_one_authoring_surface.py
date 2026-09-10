@@ -84,7 +84,7 @@ def test_each_scaffold_differs_only_in_its_own_verb() -> None:
     verbs = {
         ComponentKind.STRATEGY_MODEL: ("def decide(self, call)",),
         ComponentKind.DATA_MODEL: ("def compute(self, context)",),
-        ComponentKind.COMPLIANCE: ("def observe(self, call, account",),
+        ComponentKind.COMPLIANCE: ("def observe(self, call",),
     }
     for kind, expected in verbs.items():
         source = render(kind, "sample", dataset_id="px")
@@ -132,7 +132,7 @@ class Model(va.Compliance):
     def inputs(self):
         return {}
 
-    def observe(self, call, account):
+    def observe(self, call):
         raise NotImplementedError
 '''
 

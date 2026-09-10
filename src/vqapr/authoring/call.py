@@ -98,12 +98,25 @@ class StrategyCall(ABC):
 
 
 class ComplianceCall(ABC):
-    """The bounded capability surface for one Compliance observation.
+    """The complete, bounded capability surface for one Compliance observation.
 
     An abstract contract, like `DataCall` and `StrategyCall`; `vqapr.authoring.context` supplies
-    the one concrete implementation. The committed account the rule observes is `observe`'s own
-    argument rather than a member here, so the capability is present exactly where it is used.
+    the one concrete implementation. Everything a rule may reach is here -- its declared reads
+    as of the instant, the run's instruments, and the committed, marked account -- and nothing
+    is handed beside it (record `229`): a role's Call is the whole of its authority, which is
+    what makes point-in-time correctness a matter of what a rule cannot reach rather than of
+    what it remembers not to do. The wiring table already said so (`COMMITTED_ACCOUNT` is a View
+    Compliance receives); the signature now agrees.
     """
+
+    @property
+    @abstractmethod
+    def account(self) -> EconomicAccountView:
+        """The committed account, marked at this instant.
+
+        `weight(instrument_id)` is the derivation a weight-based rule wants; `positions` and
+        `values` are there for a rule that asks about quantity or about money.
+        """
 
     @property
     @abstractmethod

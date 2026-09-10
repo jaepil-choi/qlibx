@@ -14,7 +14,7 @@ from __future__ import annotations
 import inspect
 import time
 import unicodedata
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -32,8 +32,13 @@ from vqapr.domain.account_state import AccountMark, AccountSnapshot
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
+from vqapr.domain.values import MarkBatch, MarkSummary, ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
+from vqapr.exchange.execution_table import (
+    ExactExecutionSnapshot,
+    ExecutionSnapshots,
+    exact_execution_snapshot,
+)
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
@@ -116,12 +121,40 @@ class Marked:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketInstant:
+    """One instant of the market clock as its stages leave it, in the order design §3.1 fixes.
+
+    ACCRUE, EXECUTE, VALUATION, COMPLIANCE and the instant's close each take this and return
+    it with their own field set (record `226`). What a stage may read is what the stages before
+    it left and nothing else, so the loop's five lines are a fold over this value rather than a
+    hand-off of four differently shaped locals: `due` is what the loop found pending for this
+    instant, `filled` what EXECUTE did with it, `marked` what VALUATION committed, `monitoring`
+    what the rules found, `result` what the instant's trace records.
+    """
+
+    at: datetime
+    due: AcceptedIntent | None
+    filled: Filled | None = None
+    marked: Marked | None = None
+    monitoring: MonitoringResult | None = None
+    result: DueExecutionResult | HeldResult | None = None
+
+    def require_marked(self) -> Marked:
+        if self.marked is None:
+            raise RuntimeError("this stage runs after VALUATION; the instant has not been marked")
+        return self.marked
+
+
+@dataclass(frozen=True, slots=True)
 class OccurrenceTrace:
     occurrence: OperationOccurrence
     result: Hold | EconomicPortfolioIntent
     """The decision as the callback left it: a `Hold`, or a `Rebalance` stamped into the intent
     the run accepted."""
-    state: AcceptedRunState
+    root_version: int
+    """The version of the root this callback published. The root itself is not kept: a trace
+    that held it held that instant's whole account, marks and all, until the run ended (record
+    `224`), and nothing read it back -- `final_state` is the run's authority."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +164,8 @@ class DueExecutionTrace:
 
     due: MarketEvent
     result: DueExecutionResult | HeldResult
-    state: AcceptedRunState
+    root_version: int
+    """The version of the root this instant left (record `224`: the root is not kept)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,10 +231,10 @@ class FailedAfterCommit(SimulationFailure):
 
 @dataclass(frozen=True, slots=True)
 class ValuationResult:
-    """A complete selected mark set for one committed AccountSnapshot."""
+    """One committed AccountSnapshot and the summary of the marks that valued it."""
 
     account: AccountSnapshot
-    marks: MarkBatch
+    marks: MarkSummary
     evidence: ValuationEvidence
 
 
@@ -466,6 +500,9 @@ class FlowContext:
     # measurements are the mark instants whose NAV already reached `vqapr.account`.
     recorded_measurements: set[datetime] = field(default_factory=set)
     horizon: ExecutionHorizon | None = None
+    snapshots: ExecutionSnapshots | None = None
+    """The execution table read ahead along the market clock (record `222`), built on the first
+    snapshot a handler asks for, once the horizon is known."""
     timing: dict[str, float] = field(default_factory=dict)
 
     @contextmanager
@@ -512,6 +549,10 @@ class FlowContext:
             for component_id, component in self.stateful_components()
         }
 
+    def next_sequence(self) -> int:
+        """The run's next row position, for every recorder a handler builds (record `225`)."""
+        return self.state.next_sequence()
+
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.
 
@@ -521,6 +562,56 @@ class FlowContext:
         """
         zone = self.layer.agenda.timezone
         return instant.astimezone(ZoneInfo(zone)) if zone else instant
+
+    def execution_snapshot(
+        self,
+        target_at: datetime,
+        *,
+        target_instruments: Sequence[str],
+        held_instruments: Sequence[str],
+        trade_price: str,
+        with_reference: bool = True,
+    ) -> ExactExecutionSnapshot:
+        """The venue's rows at one market-clock instant: the fill's and the valuation's one read.
+
+        Served from `snapshots`, the table read ahead in windows of the clock (record `222`),
+        which exists once the horizon does -- `events()` reads it before the first market instant
+        is handled. Without a horizon, or for a price the run did not freeze, the exact
+        per-instant read answers instead; both return the same snapshot.
+        """
+        execution_table = self.frozen_run.execution
+        if execution_table is None:
+            raise RuntimeError("an execution snapshot requires a frozen execution dataset")
+        if self.snapshots is None and self.horizon is not None:
+            account = self.state.current.account
+            held = () if account is None else tuple(account.snapshot.positions)
+            self.snapshots = ExecutionSnapshots(
+                execution_table.table,
+                instants=self.horizon.instants,
+                # The run's declared names and whatever the opening book holds: a fill's targets
+                # are inside the first (`_validate_intent_authority`) and its holdings inside the
+                # union, so every read stays within the window; one that does not falls through.
+                instruments=(*self.frozen_run.instruments, *held),
+                trade_price=execution_table.fill.trade_price,
+                reference_price=self.reference_price,
+                session=self.scan_session,
+            )
+        if self.snapshots is None or trade_price != execution_table.fill.trade_price:
+            return exact_execution_snapshot(
+                execution_table.table,
+                target_at=target_at,
+                target_instruments=target_instruments,
+                held_instruments=held_instruments,
+                trade_price=trade_price,
+                reference_price=self.reference_price if with_reference else None,
+                session=self.scan_session,
+            )
+        return self.snapshots.at(
+            target_at,
+            target_instruments=target_instruments,
+            held_instruments=held_instruments,
+            with_reference=with_reference,
+        )
 
     @contextmanager
     def guard(

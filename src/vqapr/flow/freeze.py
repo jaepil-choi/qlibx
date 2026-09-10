@@ -16,7 +16,8 @@ from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.extension.component import ComponentRef
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import LifecycleKind
 from vqapr.flow.run.loop import DataModelResult, SimulationResult
 from vqapr.record import (
@@ -112,6 +113,26 @@ def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[
     return write_run_record(root, frozen.run_id, record)
 
 
+def _component_block(component_id: str, component: ComponentRef) -> dict[str, object]:
+    """The member's component as both records state it: id, source, and registered fingerprint."""
+    return {
+        "component_id": component_id,
+        "path": str(component.path),
+        "object_name": component.object_name,
+        "config": dict(component.config),
+        "fingerprint": component.fingerprint,
+    }
+
+
+def _agenda_block(agenda: FrozenAgenda) -> dict[str, object]:
+    """The member's frozen agenda as both records state it."""
+    return {
+        "agenda_id": str(agenda.agenda_id),
+        "content_identity": agenda.content_identity,
+        "occurrences": len(agenda.occurrences),
+    }
+
+
 def freeze_strategy_record(
     writer: RunRecordWriter,
     result: SimulationResult,
@@ -151,18 +172,8 @@ def freeze_strategy_record(
         strategy_id=layer.component_id,
         # The registered fingerprint, in full; the directory name carries its first eight.
         fingerprint=component.fingerprint,
-        component={
-            "component_id": layer.component_id,
-            "path": str(component.path),
-            "object_name": component.object_name,
-            "config": dict(component.config),
-            "fingerprint": component.fingerprint,
-        },
-        agenda={
-            "agenda_id": str(layer.agenda.agenda_id),
-            "content_identity": layer.agenda.content_identity,
-            "occurrences": len(layer.agenda.occurrences),
-        },
+        component=_component_block(layer.component_id, component),
+        agenda=_agenda_block(layer.agenda),
         compliance=[
             {"component_id": str(rule.component_id), "fingerprint": rule.fingerprint}
             for rule in layer.compliance.rules
@@ -230,18 +241,8 @@ def freeze_datamodel_record(
         datamodel_ref=str(writer.strategy_ref),
         datamodel_id=layer.component_id,
         fingerprint=component.fingerprint,
-        component={
-            "component_id": layer.component_id,
-            "path": str(component.path),
-            "object_name": component.object_name,
-            "config": dict(component.config),
-            "fingerprint": component.fingerprint,
-        },
-        agenda={
-            "agenda_id": str(layer.agenda.agenda_id),
-            "content_identity": layer.agenda.content_identity,
-            "occurrences": len(layer.agenda.occurrences),
-        },
+        component=_component_block(layer.component_id, component),
+        agenda=_agenda_block(layer.agenda),
         dataset_id=frozen.writes,
         value_fields=list(layer.value_fields),
         rows=result.rows,

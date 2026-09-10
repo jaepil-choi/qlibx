@@ -251,11 +251,11 @@ class SingleNameCap(Compliance):
     def inputs(self):
         return {}
 
-    def observe(self, call, account):
-        # `account.weights()` is each name's marked value over NAV, and NAV is cash plus the
+    def observe(self, call):
+        # `call.account.weights()` is each name's marked value over NAV, and NAV is cash plus the
         # marked total. The arithmetic used to be written out here from a MarkBatch; doing it in
         # one place is what keeps every rule measuring the same book the same way.
-        weights = account.weights() if account.nav else {}
+        weights = call.account.weights() if call.account.nav else {}
         measured = max((abs(w) for w in weights.values()), default=Decimal("0"))
         excess = measured - CAP if measured > CAP else Decimal("0")
         offenders = tuple(sorted(n for n, w in weights.items() if abs(w) > CAP))

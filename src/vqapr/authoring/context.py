@@ -167,12 +167,13 @@ class ComplianceContext(_DeclaredReads, ComplianceCall):
     """What a Compliance rule may reach, and the third role to reach it the same way.
 
     Records `126` and `128` gave DataModel and StrategyModel one declaration (`inputs()`) and one
-    read verb (`context.read(alias)`); the observing role reads the same way. The committed
-    account it observes is `observe`'s own argument, so the capability is present exactly where
-    it is used and absent everywhere else.
+    read verb (`context.read(alias)`); the observing role reads the same way. The committed,
+    marked account it observes is on the call too (record `229`), so a rule's authority is one
+    object rather than an argument beside it.
     """
 
     window: ModelWindow
+    account: EconomicAccountView
     instruments: tuple[str, ...] = ()
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 

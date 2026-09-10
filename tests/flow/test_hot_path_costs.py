@@ -577,3 +577,377 @@ def test_a_proof_that_outlives_its_callback_still_returns_the_unbounded_result(
             ), "a bounded read must return the declared fields and nothing else"
             seen.update(str(row["instrument"]) for row in bounded)
     assert seen == set(names), "a ladder that never reads the sparse names proves nothing"
+
+
+# --------------------------------------------------------------------------------------------
+# Record `221`: rows are collected as rows and travel as columns. On a 3,000-name book the
+# `vqapr.account` rows of one market-clock instant were 3,000 dicts, each cell asked what it was,
+# each field name re-checked for whitespace, then copied and re-wrapped at every hand-off to the
+# disk. These pin the shape, not the seconds.
+# --------------------------------------------------------------------------------------------
+
+_ACCOUNT_SPEC = TableSpec("vqapr.account", ("instrument", "quantity", "price"))
+
+
+def _account_recorder() -> InvocationRecorder:
+    return InvocationRecorder(
+        (_ACCOUNT_SPEC,), run_id="r", producer_id="p", stage="VALUATION", event_time=NOW
+    )
+
+
+def test_a_framework_column_is_checked_by_type_not_by_cell(monkeypatch) -> None:
+    """`append_columns` never asks a cell what it is; `append_batch` still asks every cell."""
+    from decimal import Decimal
+
+    from vqapr.domain import shapes
+
+    calls = 0
+    original = shapes.normalize_scalar
+
+    def counting(value):
+        nonlocal calls
+        calls += 1
+        return original(value)
+
+    monkeypatch.setattr(shapes, "normalize_scalar", counting)
+    monkeypatch.setattr("vqapr.authoring.records.normalize_scalar", counting)
+
+    names = [f"I{index:04d}" for index in range(1000)]
+    recorder = _account_recorder()
+    recorder.append_columns(
+        "vqapr.account",
+        {"instrument": names, "quantity": [Decimal(1)] * 1000, "price": [Decimal("10.5")] * 1000},
+    )
+    assert calls == 0, "a column is checked by its distinct types, not cell by cell"
+    assert recorder.manifests()[0].row_count == 1000
+
+    recorder.append_batch(
+        "vqapr.account", [{"instrument": "A", "quantity": Decimal(1), "price": Decimal(2)}]
+    )
+    assert calls == 3, "an author's row is still checked cell by cell"
+
+
+def test_a_column_refuses_what_a_cell_would_have_refused() -> None:
+    """The column pass keeps `normalize_scalar`'s rules: finite numbers, aware datetimes,
+    portable types."""
+    from datetime import datetime
+    from decimal import Decimal
+
+    recorder = _account_recorder()
+    with pytest.raises(ValueError, match="finite"):
+        recorder.append_columns(
+            "vqapr.account",
+            {"instrument": ["A"], "quantity": [Decimal("NaN")], "price": [None]},
+        )
+    with pytest.raises(ValueError, match="aware"):
+        recorder.append_columns(
+            "vqapr.account",
+            {"instrument": ["A"], "quantity": [None], "price": [datetime(2024, 1, 1)]},
+        )
+    with pytest.raises(TypeError, match="portable"):
+        recorder.append_columns(
+            "vqapr.account", {"instrument": ["A"], "quantity": [object()], "price": [None]}
+        )
+    with pytest.raises(ValueError, match="same number of rows"):
+        recorder.append_columns(
+            "vqapr.account", {"instrument": ["A", "B"], "quantity": [None], "price": [None]}
+        )
+    with pytest.raises(ValueError, match="exactly match declared fields"):
+        recorder.append_columns("vqapr.account", {"instrument": ["A"], "quantity": [None]})
+
+
+def test_the_writer_never_walks_the_rows_of_a_chunk(tmp_path: Path, monkeypatch) -> None:
+    """A chunk reaches the disk as the columns it was staged as; rows are not rebuilt on the way."""
+    from decimal import Decimal
+
+    from vqapr.domain.shapes import RecordChunk
+    from vqapr.record.writer import RunRecordWriter
+
+    def never(self):
+        raise AssertionError("the writer rebuilt rows from a chunk")
+
+    monkeypatch.setattr(RecordChunk, "rows", never)
+    recorder = _account_recorder()
+    recorder.append_columns(
+        "vqapr.account",
+        {"instrument": ["A", "B"], "quantity": [Decimal(1), Decimal(2)], "price": [None, None]},
+    )
+    writer = RunRecordWriter(tmp_path, "columns")
+    writer.open()
+    try:
+        for chunk in recorder.staged_chunks():
+            writer.append_chunk(chunk)
+        assert writer.counts()["vqapr.account"] == {"rows": 2, "instants": 1}
+    finally:
+        writer.release()
+
+
+# --------------------------------------------------------------------------------------------
+# Record `222`: the execution table is read ahead along the market clock. One instant used to be
+# one query with every name in its `IN` list -- 390 a day on a minute table. `ExecutionSnapshots`
+# reads a window of instants per query and answers each instant from it, with the rows and the
+# absence partitions `exact_execution_snapshot` would have produced.
+# --------------------------------------------------------------------------------------------
+
+
+def _execution_table(tmp_path: Path):
+    """Six minutes of two names; B twice at 09:02 (a duplicate), A absent at 09:03."""
+    import duckdb
+
+    from vqapr.exchange.execution_table import ExecutionTableSpec
+
+    path = tmp_path / "execution.parquet"
+    rows = []
+    for minute in range(6):
+        for name in ("A", "B"):
+            if name == "A" and minute == 3:
+                continue
+            rows.append(
+                f"(TIMESTAMPTZ '2024-03-05 09:0{minute}:00+09', '{name}', true, {100 + minute}.0)"
+            )
+    rows.append("(TIMESTAMPTZ '2024-03-05 09:02:00+09', 'B', false, 999.0)")
+    con = duckdb.connect()
+    try:
+        con.execute(
+            "COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close FROM (VALUES "
+            + ",\n".join(rows)
+            + ") AS t(trade_at, instrument, is_tradable, close)) "
+            f"TO '{path.as_posix()}' (FORMAT PARQUET)"
+        )
+    finally:
+        con.close()
+    return ExecutionTableSpec(
+        source=SourceSpec.of("venue-source", path),
+        trade_at_field="trade_at",
+        instrument_field="instrument",
+        is_tradable_field="is_tradable",
+        price_fields={"close": "close"},
+    )
+
+
+def _minutes():
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    first = datetime(2024, 3, 5, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    return tuple(first + timedelta(minutes=k) for k in range(6))
+
+
+def test_a_window_answers_every_instant_of_the_clock_with_one_query(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Six instants, one query; each answer equal to the exact per-instant read."""
+    from vqapr.exchange import execution_table as module
+    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+
+    spec = _execution_table(tmp_path)
+    queries = 0
+    original = scan.execution_window_table
+
+    def counting(*args, **kwargs):
+        nonlocal queries
+        queries += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module.scan, "execution_window_table", counting)
+    snapshots = ExecutionSnapshots(
+        spec, instants=_minutes(), instruments=("A", "B"), trade_price="close"
+    )
+    for at in _minutes():
+        ahead = snapshots.at(at, target_instruments=("A",), held_instruments=("B",))
+        exact = exact_execution_snapshot(
+            spec,
+            target_at=at,
+            target_instruments=("A",),
+            held_instruments=("B",),
+            trade_price="close",
+        )
+        assert ahead == exact, at
+    assert queries == 1, "six instants inside one window are one read"
+    twice = snapshots.at(_minutes()[2], target_instruments=("B",), held_instruments=())
+    assert twice.duplicate_instruments == ("B",)
+    absent = snapshots.at(_minutes()[3], target_instruments=("A",), held_instruments=())
+    assert absent.missing_target_instruments == ("A",)
+
+
+def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from vqapr.exchange import execution_table as module
+    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+
+    spec = _execution_table(tmp_path)
+    windows = 0
+    exact_reads = 0
+    window_read = scan.execution_window_table
+    exact_read = scan.exact_snapshot_rows
+
+    def counting_window(*args, **kwargs):
+        nonlocal windows
+        windows += 1
+        return window_read(*args, **kwargs)
+
+    def counting_exact(*args, **kwargs):
+        nonlocal exact_reads
+        exact_reads += 1
+        return exact_read(*args, **kwargs)
+
+    minutes = _minutes()
+    off_the_clock = minutes[0] + timedelta(seconds=30)
+    expected_outside = exact_execution_snapshot(
+        spec,
+        target_at=off_the_clock,
+        target_instruments=("A",),
+        held_instruments=(),
+        trade_price="close",
+    )
+    monkeypatch.setattr(module.scan, "execution_window_table", counting_window)
+    monkeypatch.setattr(module.scan, "exact_snapshot_rows", counting_exact)
+    snapshots = ExecutionSnapshots(
+        spec, instants=minutes, instruments=("A", "B"), trade_price="close", window=4
+    )
+    for at in minutes:
+        snapshots.at(at, target_instruments=("A", "B"), held_instruments=())
+    assert windows == 2, "six instants over a window of four are two reads"
+    assert exact_reads == 0
+
+    outside = snapshots.at(off_the_clock, target_instruments=("A",), held_instruments=())
+    assert outside == expected_outside
+    unknown = snapshots.at(minutes[0], target_instruments=("Z",), held_instruments=("A",))
+    assert unknown.missing_target_instruments == ("Z",)
+    assert exact_reads == 2, "an instant off the clock and a name outside the window fall through"
+
+# --------------------------------------------------------------------------------------------
+# Record `223`: the view a Compliance rule observes is built from proved values without proving
+# them again, and an identifier's whitespace check is one search rather than one step per
+# character. Both were a third of the compliance stage on a 3,000-name book.
+# --------------------------------------------------------------------------------------------
+
+
+def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> None:
+    from datetime import UTC
+    from decimal import Decimal
+
+    from vqapr.authoring import view as view_module
+    from vqapr.authoring.view import EconomicAccountView
+    from vqapr.compliance.evaluation import build_account_view
+    from vqapr.domain.account_state import AccountSnapshot
+    from vqapr.domain.values import Mark, MarkBatch
+
+    validated = 0
+    original = view_module._copy_weights
+
+    def counting(*args, **kwargs):
+        nonlocal validated
+        validated += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(view_module, "_copy_weights", counting)
+    names = [f"I{index:04d}" for index in range(500)]
+    snapshot = AccountSnapshot(3, Decimal("10"), {name: Decimal(2) for name in names})
+    marks = MarkBatch(
+        tuple(Mark(name, Decimal(2), Decimal("1.5"), Decimal(3)) for name in names), Decimal(1500)
+    )
+    at = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
+
+    trusted = build_account_view(snapshot, marks, at)
+    assert validated == 0, "the framework's view proves nothing twice"
+
+    authored = EconomicAccountView(
+        cash=snapshot.cash,
+        positions=dict(snapshot.positions),
+        values={mark.instrument_id: mark.value for mark in marks.marks},
+        nav=marks.total_value + snapshot.cash,
+        nav_observed_at=at,
+    )
+    assert validated == 2, "an author's constructor still proves its two cross-sections"
+    assert trusted == authored
+    assert list(trusted.positions) == sorted(names)
+    assert trusted.weight("I0007") == authored.weight("I0007")
+
+
+def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
+    """Same verdicts as `str.isspace` per character, in C."""
+    from vqapr.authoring._validation import _identifier
+    from vqapr.domain.identifiers import instrument_id
+
+    for good in ("A", "BRK/B", "_KOSPI", "005930", "a\u00e9"):
+        assert _identifier(good, name="x") == good and instrument_id(good) == good
+    for bad in ("", "A B", "A\tB", "A\u00a0B", "A\u2003B", "\nA"):
+        with pytest.raises(ValueError):
+            _identifier(bad, name="x")
+        with pytest.raises(ValueError):
+            instrument_id(bad)
+
+
+# --------------------------------------------------------------------------------------------
+# Record `225`: `sequence` is the run's one order. It was `len(staged)` inside one table of one
+# recorder, and a recorder is built per callback, so it restarted at zero every occurrence.
+# --------------------------------------------------------------------------------------------
+
+
+def test_sequence_is_one_order_across_every_recorder_and_fill_of_a_run() -> None:
+    from decimal import Decimal
+
+    from vqapr.domain.account_state import AccountSnapshot, AccountState
+    from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
+    from vqapr.flow.engine.run_state import _fill_rows
+
+    state = RunStateRepository(initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})))
+
+    first = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="STRATEGY_CALLBACK",
+        event_time=NOW,
+        sequencer=state.next_sequence,
+    )
+    first.append_batch("diagnostics", [{"message": "a"}, {"message": "b"}])
+    second = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="VALUATION",
+        event_time=NOW,
+        sequencer=state.next_sequence,
+    )
+    second.append_columns("diagnostics", {"message": ["c", "d", "e"]})
+    fills = _fill_rows(
+        (
+            LedgerEntry(
+                at=NOW,
+                cash=Decimal("-1"),
+                positions={"A": Decimal(1)},
+                origin=FILL_ORIGIN,
+                detail={
+                    "instrument": "A",
+                    "requested_quantity": Decimal(1),
+                    "dealt_quantity": Decimal(1),
+                },
+            ),
+        ),
+        1,
+        envelope={
+            "run_id": "run-1", "producer_id": "p", "stage": "EXECUTION", "event_time": NOW
+        },
+        sequencer=state.next_sequence,
+    )
+
+    assert [row["sequence"] for row in first.staged_rows()["diagnostics"]] == [0, 1]
+    assert [row["sequence"] for row in second.staged_rows()["diagnostics"]] == [2, 3, 4]
+    assert [row["sequence"] for row in fills] == [5]
+
+    alone = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="STRATEGY_CALLBACK",
+        event_time=NOW,
+    )
+    alone.append("diagnostics", {"message": "x"})
+    assert [row["sequence"] for row in alone.staged_rows()["diagnostics"]] == [0], (
+        "a recorder built by hand, without a run, counts for itself"
+    )

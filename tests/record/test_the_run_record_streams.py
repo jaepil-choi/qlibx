@@ -3,7 +3,7 @@
 Campaign Step 3; the testbed's A4. `freeze_record` used to walk `final_state.recorder_rows`
 after `flow.run()` returned, so a 2.6M-row table was 2.6M dicts on the heap until the end and a
 killed run left nothing. The writer had always appended in chunks (`run-record-layout.md`); what
-was missing was a caller that streamed. `RunStateRepository(row_sink=...)` is that caller's seam:
+was missing was a caller that streamed. `RunStateRepository(sink=...)` is that caller's seam:
 accepted rows go to the sink at the swap and no root retains them.
 
 Two properties, asserted directly:
@@ -99,10 +99,10 @@ def _occurrences(count: int) -> tuple[OperationOccurrence, ...]:
     )
 
 
-def _state(row_sink=None) -> RunStateRepository:
+def _state(sink=None) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})),
-        row_sink=row_sink,
+        sink=sink,
     )
 
 
@@ -162,7 +162,7 @@ def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_e
     def observe() -> None:
         sizes.append(len(list(table.glob("*.parquet"))) if table.exists() else 0)
 
-    state = _state(row_sink=writer.append)
+    state = _state(sink=writer.append_chunk)
     result = _flow(state, _occurrences(3), on_progress=observe).run()
 
     assert len(sizes) == 3
@@ -201,7 +201,7 @@ def test_a_streamed_run_s_peak_heap_is_a_fraction_of_the_same_run_kept_in_memory
 
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
-    streamed = _peak_bytes(lambda: _flow(_state(row_sink=writer.append), occurrences).run())
+    streamed = _peak_bytes(lambda: _flow(_state(sink=writer.append_chunk), occurrences).run())
 
     assert streamed * 2 < in_memory, (
         f"streaming should remove the rows from the heap: {streamed} bytes streamed vs "

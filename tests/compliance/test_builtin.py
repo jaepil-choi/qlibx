@@ -169,12 +169,22 @@ def test_no_short_measures_the_worst_negative_holding_and_its_excess() -> None:
     marks = MarkBatch((Mark("LONG", Decimal("1"), Decimal("10"), Decimal("10")),), Decimal("10"))
 
     clean = rule.observe(
-        weightless_call(("LONG", "SHORT")),
-        _view(AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("5"), "SHORT": Decimal("2")}), marks),
+        weightless_call(
+            ("LONG", "SHORT"),
+            account=_view(
+                AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("5"), "SHORT": Decimal("2")}),
+                marks,
+            ),
+        )
     )
     dirty = rule.observe(
-        weightless_call(("LONG", "SHORT")),
-        _view(AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("6"), "SHORT": Decimal("-2")}), marks),
+        weightless_call(
+            ("LONG", "SHORT"),
+            account=_view(
+                AccountSnapshot(1, Decimal("100"), {"LONG": Decimal("6"), "SHORT": Decimal("-2")}),
+                marks,
+            ),
+        )
     )
 
     assert clean.passed
@@ -238,7 +248,7 @@ def test_single_name_cap_refuses_an_invariant_violating_benchmark(
     account = AccountSnapshot(5, Decimal("1"), {instruments[0]: Decimal("1")})
 
     with pytest.raises(AllocationViolation, match="long_only"):
-        rule.observe(reading_call(window, instruments, rule), _view(account, marks))
+        rule.observe(reading_call(window, instruments, rule, account=_view(account, marks)))
 
 
 def test_single_name_cap_measures_excess_above_its_ceiling(
@@ -269,7 +279,9 @@ def test_single_name_cap_observes_marked_weights(
     marks = MarkBatch((Mark(heavy, Decimal("1"), Decimal("900"), Decimal("900")),), Decimal("900"))
     account = AccountSnapshot(5, Decimal("100"), {heavy: Decimal("1")})
 
-    finding = rule.observe(reading_call(window, instruments, rule), _view(account, marks))
+    finding = rule.observe(
+        reading_call(window, instruments, rule, account=_view(account, marks))
+    )
 
     assert finding.measured == Decimal("0.9")
     assert not finding.passed
@@ -312,7 +324,7 @@ class LocalCap(Compliance):
     def compliance_id(self):
         return "local-cap"
 
-    def observe(self, call, account):
+    def observe(self, call):
         return ComplianceFinding(
             passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
@@ -375,8 +387,10 @@ def test_single_name_cap_enforces_its_declared_tolerance_on_the_real_benchmark(
     account = AccountSnapshot(5, Decimal("1"), {instruments[0]: Decimal("1")})
 
     with pytest.raises(AllocationViolation, match="above the declared"):
-        rule.observe(reading_call(inflated, instruments, rule), _view(account, marks))
+        rule.observe(reading_call(inflated, instruments, rule, account=_view(account, marks)))
 
     # The unmodified panel, well under the ceiling, still observes cleanly.
     clean = _benchmark_window(manifest, instruments, requirement)
-    assert rule.observe(reading_call(clean, instruments, rule), _view(account, marks)).measured
+    assert rule.observe(
+        reading_call(clean, instruments, rule, account=_view(account, marks))
+    ).measured

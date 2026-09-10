@@ -1,29 +1,37 @@
-"""A run's walk: the strategy clock, and the market clock when the run has one.
+"""One loop walks both kinds of run: a part on the strategy clock, tools on the market clock.
 
-Both loops of the framework live here, side by side, because the difference between them is the
-one design §3 leaves: **how many clocks the run walks.** A `StrategyEventLoop` walks two -- the
-frozen agenda where its `StrategyModel` decides, and every instant of the execution table inside
-the run, where a pending decision fills, the book is valued and the declared `Compliance` rules
-observe it. A `DataModelEventLoop` walks one -- the agenda where its `DataModel` computes -- and
-nothing happens between two of its sessions, because a datamodel sees no account and passes
-through no venue (architecture 4.4). The walk itself is `flow/engine/loop.py`'s `EventLoop`
-(record `182`), shared by both; what each loop adds is its clocks and its handlers.
+Design §3 leaves one difference between a strategy run and a datamodel run -- how many clocks it
+walks -- and until record `227` that difference was two loop classes side by side (record `214`
+put them in one file and stopped there: *"folding them into one class is a spine change"*). The
+spine was that each loop stood on its own receiver, `RunStateRepository` for a strategy and
+`RunOutput` for a datamodel. `RunLoop` does not stand on either. It walks the merged clocks and
+hands each event to one of two things:
+
+    the part      `Part.dispatch(occurrence)`   the strategy clock: `StrategyModel.decide` or
+                                                `DataModel.compute`, and what follows the answer
+    the market    `MarketClock.at(event)`        the market clock: ACCRUE -> EXECUTE -> VALUATION ->
+                                                COMPLIANCE -> close, the fold of record `226`
+
+A part owns its receiver and its opening and closing (`start`, `finish`); a datamodel run simply
+has no market clock. `StrategyEventLoop` and `DataModelEventLoop` remain as the two assemblies --
+their constructors are where a run's authorities are checked and its handlers built -- and are
+`RunLoop`s otherwise. The walk itself is `flow/engine/loop.py`'s `EventLoop` (record `182`).
 
 The handlers are the other modules of this package, one per wiring-table row (design §4,
 `domain/wiring.py`): on the strategy clock `callback.py` (decide) and `compute.py` (compute); on
 the market clock, in the order §3.1 fixes, `accrual.py`, `execution.py`, `valuation.py` (the
 framework's own step) and `compliance.py`. `context.py` is what a strategy run's handlers share;
-`output.py` is the warehouse door a datamodel run writes through. Record `147` split the loop
-from the work; record `214` put the two kinds' work in one package.
+`output.py` is the warehouse door a datamodel run writes through.
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Protocol
 
 from vqapr.account.account import Account
 from vqapr.account.marking import ValuationService
@@ -56,7 +64,7 @@ from vqapr.flow.run.context import (
     DueExecutionTrace,
     FailedAfterCommit,
     FlowContext,
-    HeldResult,
+    MarketInstant,
     MonitoringResult,
     OccurrenceTrace,
     SimulationResult,
@@ -73,14 +81,19 @@ __all__ = [
     "DEFAULT_TABLE_PREFIX",
     "AcceptedIntent",
     "DataModelEventLoop",
+    "DataModelPart",
     "DataModelResult",
     "DueExecutionResult",
     "DueExecutionTrace",
     "FailedAfterCommit",
+    "MarketClock",
     "MonitoringResult",
     "OccurrenceTrace",
+    "Part",
+    "RunLoop",
     "SimulationResult",
     "StrategyEventLoop",
+    "StrategyPart",
     "ValuationResult",
     "callback_evidence",
 ]
@@ -90,18 +103,207 @@ def _no_compliance_window(instant: datetime) -> ModelWindow:
     raise RuntimeError("a run that declared no Compliance rule never asks for their window")
 
 
-class StrategyEventLoop(
-    EventLoop[
-        OccurrenceEvent | MarketEvent, OccurrenceTrace | DueExecutionTrace, SimulationResult
-    ]
-):
-    """Walk two clocks -- the strategy clock and the market clock, merged (design §3).
+class Part[TraceT, ResultT](Protocol):
+    """What the strategy clock calls, and what opens and closes the run: the part's own side.
 
-    The Flow owns timestamp stamping, exact execution, account mutation, and marking. The walk
-    itself is `EventLoop`'s, shared with a datamodel run (record `148`); what this adds is the
-    market clock -- every instant the execution table has inside the run -- and the handlers:
-    a market instant accrues, fills the pending intent due there, values the book and has the
-    declared Compliance rules observe it; an occurrence asks the strategy to decide.
+    A part declares the run's clock (design §4.3) and owns the receiver its answers go to -- the
+    run state for a strategy, the warehouse door for a datamodel. The loop knows neither; it
+    knows that a part starts, is dispatched once per occurrence, and finishes with the traces.
+    """
+
+    def start(self, cutoff: datetime) -> None: ...
+
+    def dispatch(self, occurrence: OperationOccurrence) -> TraceT: ...
+
+    def finish(
+        self, traces: tuple[TraceT | DueExecutionTrace, ...], *, elapsed: float
+    ) -> ResultT: ...
+
+
+class MarketClock:
+    """The market clock of a strategy run: its instants, and what happens at each.
+
+    The instants are every row-instant the execution table has inside the run, read once
+    through the horizon (the same read the fill rule bisects, so the instants a decision can
+    fill at and the instants the book is valued at are one set). What happens at one is the
+    fold of record `226`, in the order design §3.1 fixes and `domain.wiring.MARKET_CLOCK_ORDER`
+    states -- written once, in `at`, and held to the table by the wiring test.
+    """
+
+    def __init__(
+        self,
+        context: FlowContext,
+        *,
+        accrual: AccrualHandler,
+        execution: ExecutionHandler,
+        valuation: ValuationHandler,
+        compliance: ComplianceHandler,
+        callback: CallbackHandler,
+    ) -> None:
+        self._context = context
+        self._accrual = accrual
+        self._execution = execution
+        self._valuation = valuation
+        self._compliance = compliance
+        self._callback = callback
+
+    def instants(self) -> tuple[datetime, ...]:
+        """Every instant of the clock inside the run; none for a run without execution authority.
+
+        Read lazily, so building a loop still opens no physical source.
+        """
+        execution_table = self._context.frozen_run.execution
+        if execution_table is None:
+            return ()
+        return self._callback.execution_horizon(execution_table).instants
+
+    def at(self, event: MarketEvent) -> DueExecutionTrace:
+        """One instant of the market clock, in the order design §3.1 fixes -- written once, here,
+        and held to `domain.wiring.MARKET_CLOCK_ORDER` by the wiring test.
+
+            1. ACCRUE      what the holding period up to now earned         (a place, for now)
+            2. EXECUTE     the pending intent whose target is this instant  (when there is one)
+            3. VALUATION   the committed book, from the fill's snapshot or a fresh one
+            4. COMPLIANCE  the declared Compliance rules observe the committed, marked book
+            (5. DECIDE     a decision at this same instant is a separate event, sorted after)
+
+        A pending intent whose target has already passed is a broken invariant, not a late fill:
+        targets are selected from this same clock, so the instant was walked.
+        """
+        instant = event.instant
+        with (
+            self._context.timed("due"),
+            self._context.guard(
+                SimulationStage.DUE_SNAPSHOT, instant, owner=self._context.frozen_run.execution
+            ),
+        ):
+            pending = self._context.state.current.pending_accepted_intent
+            if pending is not None and not isinstance(pending, AcceptedIntent):
+                raise TypeError("run state pending must be an AcceptedIntent")
+            if pending is not None and pending.target.target_at < instant:
+                raise RuntimeError("a pending intent's target instant was never walked")
+            due = pending if pending is not None and pending.target.target_at == instant else None
+
+            # The fold (record `226`): every stage takes the instant as the stages before it
+            # left it and returns it with its own field set. The order is these five lines.
+            at = MarketInstant(at=instant, due=due)
+            at = self._accrual.accrue(at)
+            at = self._execution.fill(at)
+            at = self._valuation.mark(at)
+            at = self._compliance.observe(at)
+            at = self._execution.close(at)
+            if at.result is None:
+                raise RuntimeError("a market-clock instant closed without a result")
+            return DueExecutionTrace(event, at.result, self._context.state.current.version)
+
+
+class RunLoop[TraceT, ResultT](
+    EventLoop[OccurrenceEvent | MarketEvent, TraceT | DueExecutionTrace, ResultT]
+):
+    """The one loop: a part on the strategy clock, and a market clock when the run has one.
+
+    Knows nothing of accounts, venues, warehouses or records: the part opens, is dispatched and
+    finishes; the market clock, when present, contributes its instants to the walk and handles
+    each of them. Whether the run is a strategy or a datamodel is decided by what was assembled
+    here, and nowhere below.
+    """
+
+    def __init__(
+        self,
+        *,
+        schedule: tuple[OperationOccurrence, ...],
+        start_cutoff: datetime,
+        part: Part[TraceT, ResultT],
+        market: MarketClock | None = None,
+        on_progress: Callable[[], None] | None = None,
+    ) -> None:
+        super().__init__(schedule=schedule, start_cutoff=start_cutoff, on_progress=on_progress)
+        self._part = part
+        self._market = market
+        self._started = 0.0
+
+    def start(self, cutoff: datetime) -> None:
+        self._started = time.perf_counter()
+        self._part.start(cutoff)
+
+    def events(self) -> tuple[OccurrenceEvent | MarketEvent, ...]:
+        """The strategy clock, merged with the market clock when the run has one (design §3)."""
+        occurrences: tuple[OccurrenceEvent | MarketEvent, ...] = tuple(
+            OccurrenceEvent(item) for item in self.schedule
+        )
+        if self._market is None:
+            return occurrences
+        return (*occurrences, *(MarketEvent(instant) for instant in self._market.instants()))
+
+    def handle(self, event: OccurrenceEvent | MarketEvent) -> TraceT | DueExecutionTrace:
+        if isinstance(event, MarketEvent):
+            if self._market is None:
+                raise RuntimeError("a market-clock event reached a run without a market clock")
+            return self._market.at(event)
+        # A scheduled event is the part's, always (record `182`: an occurrence carries no role to
+        # branch on).
+        return self._part.dispatch(event.occurrence)
+
+    def finish(self, traces: tuple[TraceT | DueExecutionTrace, ...]) -> ResultT:
+        # `elapsed` covers the loop itself; the panel build and the record freeze happen outside
+        # it and are the caller's to time (`docs/issues/archive/068`).
+        return self._part.finish(traces, elapsed=time.perf_counter() - self._started)
+
+
+class StrategyPart:
+    """The strategy clock's side of a strategy run: the callback and the state it publishes to."""
+
+    def __init__(self, context: FlowContext, callback: CallbackHandler) -> None:
+        self._context = context
+        self._callback = callback
+
+    def start(self, cutoff: datetime) -> None:
+        with self._context.guard(
+            SimulationStage.START,
+            cutoff,
+            owner=self._context.layer.config,
+        ):
+            self._callback.load_visible_state()
+
+    def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
+        # `callback` is the whole scheduled side: the window built for the model and the model's
+        # own `decide` (`docs/issues/archive/068`: a user learns their strategy is 5% of the wall
+        # clock from the record, not from cProfile).
+        with self._context.timed("callback"):
+            return self._callback.dispatch(occurrence)
+
+    def finish(
+        self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...], *, elapsed: float
+    ) -> SimulationResult:
+        if self._context.state.current.pending_accepted_intent is not None:
+            raise RuntimeError("simulation finalized with a pending accepted intent")
+        if self._context.frozen_run.end is None:
+            raise RuntimeError("simulation finalization requires a frozen end")
+        account = self._context.state.current.account
+        finalization = FinalizationEvidence(
+            run_identity=self._context.frozen_run.identity,
+            strategy_agenda=self._context.layer.agenda,
+            root_version=self._context.state.current.version,
+            cutoff=self._context.frozen_run.end,
+            account=None if account is None else account.snapshot,
+        )
+        with self._context.guard(
+            SimulationStage.FINALIZE,
+            self._context.frozen_run.end,
+            owner=finalization,
+        ):
+            root = self._context.state.finalize(RunFinalization(finalization))
+        # The phases the context accumulated, plus the whole: what the record reports as `timing`.
+        timing = {**self._context.timing, "total": elapsed}
+        return SimulationResult(tuple(traces), root, timing)
+
+
+class StrategyEventLoop(RunLoop[OccurrenceTrace, SimulationResult]):
+    """A strategy run, assembled: two clocks -- the strategy's agenda and the market's instants.
+
+    The Flow owns timestamp stamping, exact execution, account mutation, and marking. This
+    constructor is where a strategy run's authorities are checked against each other and its
+    handlers built; the walk is `RunLoop`'s.
     """
 
     def __init__(
@@ -165,11 +367,8 @@ class StrategyEventLoop(
                 f"{sorted(stateful)!r}"
             )
 
-        # All handler dependencies exist before the first handler is constructed. The loop owns
-        # its schedule and progress hook; the context owns this strategy's runtime and bookkeeping.
-        super().__init__(
-            schedule=frozen_run.dispatch_order(layer), start_cutoff=cutoff, on_progress=on_progress
-        )
+        # All handler dependencies exist before the first handler is constructed. The context
+        # owns this strategy's runtime and bookkeeping; the loop owns the walk.
         self._context = FlowContext(
             frozen_run=frozen_run,
             layer=layer,
@@ -187,124 +386,24 @@ class StrategyEventLoop(
             record_account_positions=record_account_positions,
             account_history_declaration=declared_history,
         )
-        self._accrual = AccrualHandler(self._context)
-        self._valuation = ValuationHandler(self._context)
-        self._compliance = ComplianceHandler(self._context)
-        self._callback = CallbackHandler(self._context)
-        self._execution = ExecutionHandler(self._context)
-        account.bind(initial)
-
-    def run(self) -> SimulationResult:
-        """Synchronously process the static merge and all due items in its horizon."""
-        started = time.perf_counter()
-        result = super().run()
-        # The phases the context accumulated, plus the whole: what the record reports as `timing`
-        # (`docs/issues/archive/068`). `total` covers the loop itself; the panel build and the
-        # record freeze happen outside it and are the caller's to time.
-        timing = {**self._context.timing, "total": time.perf_counter() - started}
-        return replace(result, timing=timing)
-
-    def start(self, cutoff: datetime) -> None:
-        with self._context.guard(
-            SimulationStage.START,
-            cutoff,
-            owner=self._context.layer.config,
-        ):
-            self._callback.load_visible_state()
-
-    def events(self) -> tuple[OccurrenceEvent | MarketEvent, ...]:
-        """The strategy clock merged with the market clock (design §3).
-
-        The market clock is every instant the execution table has inside `[start, end]`, read
-        once through the run's horizon -- the same read the fill rule bisects, so the instants a
-        decision can fill at and the instants the book is valued at are one set. A run declared
-        without execution authority has no market clock and is the plain sequence of decisions.
-        """
-        occurrences: tuple[OccurrenceEvent | MarketEvent, ...] = tuple(
-            OccurrenceEvent(item) for item in self.schedule
-        )
-        execution_table = self._context.frozen_run.execution
-        if execution_table is None:
-            return occurrences
-        horizon = self._callback.execution_horizon(execution_table)
-        return (*occurrences, *(MarketEvent(instant) for instant in horizon.instants))
-
-    def handle(
-        self, event: OccurrenceEvent | MarketEvent
-    ) -> OccurrenceTrace | DueExecutionTrace:
-        if isinstance(event, MarketEvent):
-            return self._handle_market(event)
-        # A scheduled event is a callback, always (record `182`: an occurrence carries no role to
-        # branch on). `callback` is the whole scheduled side: the window built for the model and
-        # the model's own `decide` (`docs/issues/archive/068`: a user learns their strategy is 5%
-        # of the wall clock from the record, not from cProfile).
-        with self._context.timed("callback"):
-            return self._callback.dispatch(event.occurrence)
-
-    def _handle_market(self, event: MarketEvent) -> DueExecutionTrace:
-        """One instant of the market clock, in the order design §3.1 fixes -- written once, here,
-        and held to `domain.wiring.MARKET_CLOCK_ORDER` by the wiring test.
-
-            1. ACCRUE      what the holding period up to now earned         (a place, for now)
-            2. EXECUTE     the pending intent whose target is this instant  (when there is one)
-            3. VALUATION   the committed book, from the fill's snapshot or a fresh one
-            4. COMPLIANCE  the declared Compliance rules observe the committed, marked book
-            (5. DECIDE     a decision at this same instant is a separate event, sorted after)
-
-        A pending intent whose target has already passed is a broken invariant, not a late fill:
-        targets are selected from this same clock, so the instant was walked.
-        """
-        instant = event.instant
-        with (
-            self._context.timed("due"),
-            self._context.guard(
-                SimulationStage.DUE_SNAPSHOT, instant, owner=self._context.frozen_run.execution
+        callback = CallbackHandler(self._context)
+        # Kept by name: a test that injects a fault into the callback reaches it here.
+        self._callback = callback
+        super().__init__(
+            schedule=frozen_run.dispatch_order(layer),
+            start_cutoff=cutoff,
+            part=StrategyPart(self._context, callback),
+            market=MarketClock(
+                self._context,
+                accrual=AccrualHandler(self._context),
+                execution=ExecutionHandler(self._context),
+                valuation=ValuationHandler(self._context),
+                compliance=ComplianceHandler(self._context),
+                callback=callback,
             ),
-        ):
-            pending = self._context.state.current.pending_accepted_intent
-            if pending is not None and not isinstance(pending, AcceptedIntent):
-                raise TypeError("run state pending must be an AcceptedIntent")
-            if pending is not None and pending.target.target_at < instant:
-                raise RuntimeError("a pending intent's target instant was never walked")
-            due = pending if pending is not None and pending.target.target_at == instant else None
-
-            self._accrual.accrue(instant)
-            filled = None if due is None else self._execution.fill(due)
-            if filled is not None and self._context.state.current.pending_accepted_intent:
-                raise RuntimeError("due execution failed to consume its pending identity")
-            marked = (
-                self._valuation.mark_held(instant)
-                if filled is None
-                else self._valuation.mark_fill(filled)
-            )
-            monitoring = self._compliance.observe(instant)
-            result: DueExecutionResult | HeldResult = (
-                HeldResult(marked.evidence, monitoring)  # type: ignore[arg-type]
-                if filled is None
-                else self._execution.close(filled, marked, monitoring)
-            )
-            return DueExecutionTrace(event, result, self._context.state.current)
-
-    def finish(self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...]) -> SimulationResult:
-        if self._context.state.current.pending_accepted_intent is not None:
-            raise RuntimeError("simulation finalized with a pending accepted intent")
-        if self._context.frozen_run.end is None:
-            raise RuntimeError("simulation finalization requires a frozen end")
-        account = self._context.state.current.account
-        finalization = FinalizationEvidence(
-            run_identity=self._context.frozen_run.identity,
-            strategy_agenda=self._context.layer.agenda,
-            root_version=self._context.state.current.version,
-            cutoff=self._context.frozen_run.end,
-            account=None if account is None else account.snapshot,
+            on_progress=on_progress,
         )
-        with self._context.guard(
-            SimulationStage.FINALIZE,
-            self._context.frozen_run.end,
-            owner=finalization,
-        ):
-            root = self._context.state.finalize(RunFinalization(finalization))
-        return SimulationResult(tuple(traces), root)
+        account.bind(initial)
 
 
 @dataclass(frozen=True, slots=True)
@@ -317,13 +416,36 @@ class DataModelResult:
     registration: DatasetRegistration | None = None
 
 
-class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelResult]):
-    """Walk one clock: the datamodel's sessions -- compute at each, chunk the rows, register at
-    the end.
+class DataModelPart:
+    """The datamodel's side of its run: compute at each session, and the warehouse door."""
 
-    No market clock: a datamodel sees no account and passes through no venue (architecture 4.4),
-    so nothing happens between two sessions and the walk is the plain sequence of occurrences
-    (`EventLoop.events`'s default). What it shares with `StrategyEventLoop` is everything else.
+    def __init__(self, compute: ComputeHandler, output: RunOutput) -> None:
+        self._compute = compute
+        self._output = output
+
+    def start(self, cutoff: datetime) -> None:
+        self._output.open()
+
+    def dispatch(self, occurrence: OperationOccurrence) -> DataModelTrace:
+        return self._compute.dispatch(occurrence)
+
+    def finish(
+        self, traces: tuple[DataModelTrace | DueExecutionTrace, ...], *, elapsed: float
+    ) -> DataModelResult:
+        sessions = tuple(trace for trace in traces if isinstance(trace, DataModelTrace))
+        return DataModelResult(
+            occurrences=sessions,
+            rows=self._output.rows,
+            output_path=self._output.directory,
+        )
+
+
+class DataModelEventLoop(RunLoop[DataModelTrace, DataModelResult]):
+    """A datamodel run, assembled: one clock, the agenda where its `DataModel` computes.
+
+    No market clock: a datamodel sees no account and passes through no venue (architecture
+    4.4), so nothing happens between two sessions and the walk is the plain sequence of
+    occurrences. What it shares with a strategy run is everything else -- the same `RunLoop`.
     """
 
     def __init__(
@@ -343,27 +465,16 @@ class DataModelEventLoop(EventLoop[OccurrenceEvent, DataModelTrace, DataModelRes
         cutoff = frozen_run.start or frozen_run.end
         if cutoff is None:
             raise RuntimeError("a datamodel run requires a frozen boundary")
-        super().__init__(
-            schedule=frozen_run.dispatch_order(layer), start_cutoff=cutoff, on_progress=on_progress
-        )
-        self._output = output
-        self._phase = ComputeHandler(
+        compute = ComputeHandler(
             frozen_run=frozen_run,
             layer=layer,
             model=model,
             window_for_occurrence=window_for_occurrence,
             output=output,
         )
-
-    def start(self, cutoff: datetime) -> None:
-        self._output.open()
-
-    def handle(self, event: OccurrenceEvent) -> DataModelTrace:
-        return self._phase.dispatch(event.occurrence)
-
-    def finish(self, traces: tuple[DataModelTrace, ...]) -> DataModelResult:
-        return DataModelResult(
-            occurrences=traces,
-            rows=self._output.rows,
-            output_path=self._output.directory,
+        super().__init__(
+            schedule=frozen_run.dispatch_order(layer),
+            start_cutoff=cutoff,
+            part=DataModelPart(compute, output),
+            on_progress=on_progress,
         )

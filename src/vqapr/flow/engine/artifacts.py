@@ -10,7 +10,7 @@ from typing import Final
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import Failure, FailureSource, VqaprError, status_of
 from vqapr.domain.identifiers import ModelStateRef
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.values import MarkSummary, require_tz_aware
 
 MAX_OBSERVED_CHARS = 500
 """Upper bound for one serialized observation. The unbounded body belongs in a dump file."""
@@ -275,6 +275,8 @@ class AccountCommitEvidence:
     target: object
     fill_convention: object
     execution_snapshot: object
+    """The snapshot's partitions and row count (`ExecutionSnapshotSummary`, record `224`), not its
+    rows: a 3,000-name book's rows per fill are the venue's data, read again from the table."""
     planning_nav: object
     planning_cash_target: object
     planning_budget: object
@@ -291,14 +293,20 @@ class AccountCommitEvidence:
 
 @dataclass(frozen=True, slots=True)
 class MarkEvidence:
-    """Valuation declaration, selected marks, and post-mark Account authority."""
+    """Valuation declaration, the marks' summary, and post-mark Account authority.
+
+    `selected` is how many names the venue's snapshot priced and `marks` the batch's total and
+    count (record `224`): the marks themselves are `vqapr.account` rows by the time this exists,
+    and keeping a `SelectedMark` and a `Mark` per name per fill held instants x names objects
+    until the run ended.
+    """
 
     run_identity: str
     agenda: object
     occurrence: object
     cutoff: datetime
-    selected_marks: object
-    marks: object
+    selected: int
+    marks: MarkSummary
     limitations: tuple[object, ...]
     account: AccountSnapshot
     root_version: int
@@ -332,12 +340,15 @@ class DueExecutionEvidence:
 
 @dataclass(frozen=True, slots=True)
 class ValuationEvidence:
+    """A held book valued at a market-clock instant: the account it valued and the marks'
+    summary (record `224`; the marks are `vqapr.account` rows)."""
+
     run_identity: str
     agenda: object
     occurrence: object
     cutoff: datetime
     account: AccountSnapshot
-    marks: object
+    marks: MarkSummary
     root_version: int
     account_version: int
     mutation: bool = False

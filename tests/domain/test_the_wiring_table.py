@@ -25,7 +25,7 @@ from vqapr.domain.wiring import (
 )
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentKind
-from vqapr.flow.run.loop import StrategyEventLoop
+from vqapr.flow.run.loop import MarketClock
 
 
 def test_every_role_has_exactly_one_row_and_no_row_is_without_a_role() -> None:
@@ -93,10 +93,10 @@ def test_every_registrable_kind_is_a_row_and_accrual_is_not_yet_a_kind() -> None
 
 
 def test_the_loop_calls_the_market_clock_roles_in_the_tables_order() -> None:
-    """The order §3.1 fixes, written once as calls in `_handle_market`, and once as data here."""
+    """The order §3.1 fixes, written once as calls in `MarketClock.at`, and once as data here."""
     assert MARKET_CLOCK_ORDER == (Role.ACCRUAL, Role.EXCHANGE, Role.COMPLIANCE)
     assert set(MARKET_CLOCK_ORDER) == set(roles_on(Clock.MARKET))
-    source = inspect.getsource(StrategyEventLoop._handle_market)
+    source = inspect.getsource(MarketClock.at)
     handlers = {
         Role.ACCRUAL: "._accrual.",
         Role.EXCHANGE: "._execution.fill(",

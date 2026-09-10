@@ -55,7 +55,7 @@ class Limit(Compliance):
     def requirements(self):
         return ()
 
-    def observe(self, call, account):
+    def observe(self, call):
         return None
 """
 

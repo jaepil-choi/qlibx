@@ -8,13 +8,13 @@ the book from the snapshot it just filled against. Record `209` moved monitoring
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 
 from vqapr.account.marking import SelectedMark
 from vqapr.authoring.records import InvocationRecorder
 from vqapr.domain.account_state import AccountMark, AccountSnapshot
-from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.engine.artifacts import (
     MarkEvidence,
     SimulationFailureKind,
@@ -30,6 +30,7 @@ from vqapr.flow.run.context import (
     Filled,
     FlowContext,
     Marked,
+    MarketInstant,
 )
 
 
@@ -92,6 +93,14 @@ class ValuationHandler:
     def __init__(self, context: FlowContext) -> None:
         self._context = context
 
+    def mark(self, instant: MarketInstant) -> MarketInstant:
+        """VALUATION: the just-filled book from the fill's own snapshot, or the held book from a
+        fresh one -- the same instant, the same prices either way."""
+        marked = (
+            self.mark_held(instant.at) if instant.filled is None else self.mark_fill(instant.filled)
+        )
+        return replace(instant, marked=marked)
+
     def mark_fill(self, filled: Filled) -> Marked:
         """VALUATION after EXECUTE: value the just-committed book from the snapshot the fill was
         priced from, and publish the mark on the same root (record `148`: the marked account and
@@ -142,7 +151,7 @@ class ValuationHandler:
                     root_version=committed_root.version,
                     cutoff=at,
                     account=prepared_fill.next_snapshot,
-                    marks=mark,
+                    marks=mark.summary(),
                     account_version=prepared_fill.next_snapshot.version,
                 ),
             )
@@ -151,8 +160,8 @@ class ValuationHandler:
             agenda=self._context.layer.agenda,
             occurrence=pending.occurrence,
             cutoff=at,
-            selected_marks=selected_marks,
-            marks=mark,
+            selected=len(selected_marks),
+            marks=mark.summary(),
             limitations=(),
             account=prepared_account.next_state.snapshot,
             root_version=committed_root.version,
@@ -213,13 +222,12 @@ class ValuationHandler:
             owner=execution_table,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            snapshot = exact_execution_snapshot(
-                execution_table.table,
-                target_at=instant,
+            snapshot = self._context.execution_snapshot(
+                instant,
                 target_instruments=(),
                 held_instruments=held_instruments,
                 trade_price=execution_table.fill.trade_price,
-                session=self._context.scan_session,
+                with_reference=False,
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
@@ -246,7 +254,7 @@ class ValuationHandler:
             occurrence=None,
             cutoff=instant,
             account=before,
-            marks=mark,
+            marks=mark.summary(),
             root_version=self._context.state.current.version,
             account_version=before.version,
         )
@@ -325,38 +333,31 @@ class ValuationHandler:
             producer_id=str(self._context.layer.config.component.component_id),
             stage=VALUATION_STAGE,
             event_time=self._context.in_agenda_zone(cutoff),
+            sequencer=self._context.next_sequence,
         )
         priced = {selection.instrument_id: selection for selection in selected}
-        recorder.append(
+        # The `_ACCOUNT` row first -- cash and NAV, the values themselves and not their text, so
+        # a reader gets a Decimal back -- then one row per held name: its quantity, the price it
+        # was marked at and when that price was observed. As columns (record `221`): a 3,000-name
+        # book is seven tuples here, not 3,000 dicts, and is checked by column.
+        held = sorted(account.positions) if self._context.record_account_positions else []
+        selections = [priced.get(instrument) for instrument in held]
+        nothing = [None] * len(held)
+        recorder.append_columns(
             f"{DEFAULT_TABLE_PREFIX}account",
             {
-                "instrument": _ACCOUNT_IDENTITY,
-                # The values themselves, not their text: the run record writer records what
-                # type each column was encoded from, so a reader gets a Decimal back.
-                "cash": account.cash,
-                "nav": mark.nav,
-                "quantity": None,
-                "price": None,
-                "observed_at": mark.marked_at,
-                "account_version": account.version,
+                "instrument": [_ACCOUNT_IDENTITY, *held],
+                "cash": [account.cash, *nothing],
+                "nav": [mark.nav, *nothing],
+                "quantity": [None, *(account.positions[instrument] for instrument in held)],
+                "price": [None, *(None if s is None else s.price for s in selections)],
+                "observed_at": [
+                    mark.marked_at,
+                    *(None if s is None else s.observed_at for s in selections),
+                ],
+                "account_version": [account.version] * (len(held) + 1),
             },
         )
-        for instrument in (
-            sorted(account.positions) if self._context.record_account_positions else ()
-        ):
-            selection = priced.get(instrument)
-            recorder.append(
-                f"{DEFAULT_TABLE_PREFIX}account",
-                {
-                    "instrument": instrument,
-                    "cash": None,
-                    "nav": None,
-                    "quantity": account.positions[instrument],
-                    "price": None if selection is None else selection.price,
-                    "observed_at": None if selection is None else selection.observed_at,
-                    "account_version": account.version,
-                },
-            )
         self._context.recorded_measurements.add(mark.marked_at)
         return recorder
 

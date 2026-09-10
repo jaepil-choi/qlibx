@@ -28,7 +28,14 @@ Usage::
     uv run python scripts/showcase_record_digest.py --check PATH     # compare against a baseline
 
 `--check` exits non-zero and names every difference. Run the showcases first; this script only
-reads what they left.
+reads what they left. `--showcases PATH` digests another checkout's `showcases/` directory -- a
+worktree compared against develop's own outputs.
+
+Sixty-four-hex digests are masked everywhere (one-loop campaign, 2026-09-10): a run identity folds
+the sources' paths, so the same declaration run from two checkouts writes two `run_id`s into
+otherwise identical rows, and a baseline recorded in one checkout could never match the other.
+What a component's fingerprint or a run's identity computes is pinned by its own tests; what this
+digest pins is everything else the run wrote.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -49,18 +57,22 @@ DROPPED_KEYS = frozenset({"timing"})
 """Keys whose whole subtree is wall clock, dropped wherever they appear."""
 
 ROOT_PLACEHOLDER = "<REPOSITORY>"
+HEX64 = re.compile(r"\b[0-9a-f]{64}\b")
+HEX_PLACEHOLDER = "<HEX64>"
 
 
-def _normalise(value: Any) -> Any:
+def _normalise(value: Any, repository: Path = REPOSITORY) -> Any:
     """Drop wall-clock subtrees and rewrite the repository root out of every string."""
     if isinstance(value, dict):
-        return {k: _normalise(v) for k, v in sorted(value.items()) if k not in DROPPED_KEYS}
+        return {
+            k: _normalise(v, repository) for k, v in sorted(value.items()) if k not in DROPPED_KEYS
+        }
     if isinstance(value, list):
-        return [_normalise(item) for item in value]
+        return [_normalise(item, repository) for item in value]
     if isinstance(value, str):
-        for spelling in (str(REPOSITORY), str(REPOSITORY).replace("\\", "/")):
+        for spelling in (str(repository), str(repository).replace("\\", "/")):
             value = value.replace(spelling, ROOT_PLACEHOLDER)
-        return value.replace("\\", "/")
+        return HEX64.sub(HEX_PLACEHOLDER, value.replace("\\", "/"))
     return value
 
 
@@ -68,15 +80,18 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def _facts_entry(path: Path) -> dict[str, Any]:
-    payload = _normalise(json.loads(path.read_text(encoding="utf-8")))
+def _facts_entry(path: Path, repository: Path = REPOSITORY) -> dict[str, Any]:
+    payload = _normalise(json.loads(path.read_text(encoding="utf-8")), repository)
     return {"kind": "facts", "digest": _digest(json.dumps(payload, sort_keys=True, indent=None))}
 
 
 def _table_entry(path: Path) -> dict[str, Any]:
     table = pq.read_table(path)
     columns = [str(name) for name in table.column_names]
-    rows = ["\t".join(f"{k}={v!r}" for k, v in sorted(row.items())) for row in table.to_pylist()]
+    rows = [
+        HEX64.sub(HEX_PLACEHOLDER, "\t".join(f"{k}={v!r}" for k, v in sorted(row.items())))
+        for row in table.to_pylist()
+    ]
     return {
         "kind": "table",
         "rows": table.num_rows,
@@ -85,19 +100,20 @@ def _table_entry(path: Path) -> dict[str, Any]:
     }
 
 
-def digest() -> dict[str, dict[str, Any]]:
+def digest(showcases: Path = SHOWCASES) -> dict[str, dict[str, Any]]:
     """Every record file under every showcase's outputs, keyed by repository-relative path."""
     entries: dict[str, dict[str, Any]] = {}
-    for showcase in sorted(SHOWCASES.glob("show_*")):
+    repository = showcases.resolve().parent
+    for showcase in sorted(showcases.glob("show_*")):
         outputs = showcase / "outputs"
         if not outputs.is_dir():
             continue
         for path in sorted(outputs.rglob("*")):
             if not path.is_file() or ".vqapr" not in path.parts or "runs" not in path.parts:
                 continue
-            key = path.relative_to(REPOSITORY).as_posix()
+            key = path.relative_to(repository).as_posix()
             if path.suffix == ".json":
-                entries[key] = _facts_entry(path)
+                entries[key] = _facts_entry(path, repository)
             elif path.suffix == ".parquet":
                 entries[key] = _table_entry(path)
     return entries
@@ -124,9 +140,12 @@ def main(argv: list[str] | None = None) -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--write", type=Path, help="save the digest to this path")
     group.add_argument("--check", type=Path, help="compare the digest against this baseline")
+    parser.add_argument(
+        "--showcases", type=Path, default=SHOWCASES, help="another checkout's showcases/ directory"
+    )
     args = parser.parse_args(argv)
 
-    current = digest()
+    current = digest(args.showcases)
     if not current:
         print("no showcase records found -- run the showcases first", file=sys.stderr)
         return 2

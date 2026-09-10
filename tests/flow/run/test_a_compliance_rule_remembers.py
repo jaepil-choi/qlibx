@@ -89,7 +89,7 @@ class ThreeStrikes(Compliance):
         memory = self.memory if isinstance(self.memory, dict) else {}
         return int(memory.get("breaches", 0))
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         seen = self._count()
         self.observed_with.append(seen)
         self.memory = {"breaches": seen + 1}
@@ -106,7 +106,7 @@ class ThreeStrikes(Compliance):
 class MutateThenFail(ThreeStrikes):
     """Mutates memory inside `observe`, then fails."""
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         self.memory = {"breaches": 99}
         raise RuntimeError("observe fault after the mutation")
 

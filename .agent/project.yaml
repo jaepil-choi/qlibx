@@ -22,7 +22,11 @@ canonical_documents:
   # 현행 계약은 그 두 문서가 authority이고 wiring_design은 결정의 근거 기록이다. 현행 캠페인 없음.
   # 2026-09-10: 0.9.0.dev1 testbed 보고 7건(docs/issues/089-095) 처리, records 215-220. develop은
   # 0.11.0.dev0 (record 215가 run identity를 바꿈; docs/releases/0.11.0.md).
-  active_campaign: docs/refactoring/2026-09-09-the-two-clocks-campaign.md
+  # 2026-09-10: 한 루프 캠페인 착수 (branch redesign/one-loop). 시장 시계 한 점의 비용(P1-P5)을 먼저,
+  # 그 위에서 루프 하나(L1-L5). 측정은 experiments/exp_221_the_market_clock_cost/.
+  # 2026-09-10: 한 루프 캠페인 완료(records 221-229). 3,000 종목 분봉 하루 117 s -> 34 s, 보유 Mark 1.17M -> 3k,
+  # 루프 하나(RunLoop·Part·MarketClock), Compliance.observe(call). 현행 캠페인 없음.
+  active_campaign: docs/refactoring/2026-09-10-the-one-loop-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.
   wiring_design: docs/design/two-clocks-and-the-wiring-table.md

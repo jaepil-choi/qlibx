@@ -2,7 +2,7 @@
 
     ACCRUE -> EXECUTE -> VALUATION -> COMPLIANCE -> DECIDE
 
-The market clock's four stages are dispatched by one method, `_handle_market`, and a decision
+The market clock's four stages are dispatched by one method, `MarketClock.at`, and a decision
 at the same instant is a separate event the loop sorts after it. Both halves are pinned here:
 the source order of the dispatcher (a boundary, so a later edit cannot quietly reorder the
 stages) and the lifecycle a real run leaves at an instant where a fill and a decision coincide.
@@ -22,7 +22,7 @@ from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _wo
 from tests.cli.test_commands import _cli
 from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
 from vqapr.flow.engine.run_state import LifecycleKind
-from vqapr.flow.run.loop import DueExecutionTrace, OccurrenceTrace, StrategyEventLoop
+from vqapr.flow.run.loop import DueExecutionTrace, MarketClock, OccurrenceTrace
 from vqapr.public import Workspace, preflight_run, run
 
 _ZONE = ZoneInfo("Asia/Seoul")
@@ -30,8 +30,14 @@ _ZONE = ZoneInfo("Asia/Seoul")
 
 def test_the_dispatcher_writes_the_stage_order_down_once() -> None:
     """The order is a fact about the code, checked as text so a reordering is a visible diff."""
-    source = inspect.getsource(StrategyEventLoop._handle_market)
-    calls = ["._accrual.accrue(", "._execution.fill(", ".mark_", "._compliance.observe(", "._execution.close("]
+    source = inspect.getsource(MarketClock.at)
+    calls = [
+        "._accrual.accrue(",
+        "._execution.fill(",
+        "._valuation.mark(",
+        "._compliance.observe(",
+        "._execution.close(",
+    ]
     positions = [source.index(call) for call in calls]
     assert positions == sorted(positions), (
         "ACCRUE, EXECUTE, VALUATION, COMPLIANCE and the fill's epilogue must be called in that order"

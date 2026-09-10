@@ -9,10 +9,11 @@ into whole shares can push a position over a limit the decision itself respected
 
 ## What it receives
 
-`call` — the rule's own declared reads, as of the instant observed, and the run's instruments.
-`account` — an `EconomicAccountView`: `cash`, `positions` (quantities), `values` (marked), `nav`,
-and the derivations every weight rule needs, `weight(name)` and `weights()`, computed once in one
-place so two rules cannot disagree about what a weight is.
+One `call`, and it is the whole of what the rule may reach: its own declared reads as of the
+instant observed, the run's instruments, and `call.account` — an `EconomicAccountView`: `cash`,
+`positions` (quantities), `values` (marked), `nav`, and the derivations every weight rule needs,
+`weight(name)` and `weights()`, computed once in one place so two rules cannot disagree about what
+a weight is. Nothing is handed beside the call; what is not on it, a rule cannot see.
 
 ## What it returns
 

@@ -64,6 +64,38 @@ class EconomicAccountView:
                 _tz_aware(self.nav_observed_at, name="nav_observed_at"),
             )
 
+    @classmethod
+    def _trusted(
+        cls,
+        *,
+        cash: Decimal,
+        positions: Mapping[str, Decimal],
+        nav: Decimal | None,
+        nav_observed_at: datetime | None,
+        values: Mapping[str, Decimal] | None = None,
+    ) -> EconomicAccountView:
+        """The view from values the framework already proved, without proving them again.
+
+        The engine builds one of these at every market-clock instant, from an `AccountSnapshot`
+        whose ids and quantities were validated when it was committed and a `MarkBatch` whose
+        values were validated when it was marked. Re-checking 3,000 ids and 6,000 Decimals per
+        instant was a third of the compliance stage (record `223`). Same shape, same read-only
+        cross-sections, same sorted order; only the author's constructor validates.
+        """
+        view = object.__new__(cls)
+        object.__setattr__(view, "cash", cash)
+        object.__setattr__(
+            view, "positions", CrossSection._trusted(dict(sorted(positions.items())))
+        )
+        object.__setattr__(
+            view,
+            "values",
+            None if values is None else CrossSection._trusted(dict(sorted(values.items()))),
+        )
+        object.__setattr__(view, "nav", nav)
+        object.__setattr__(view, "nav_observed_at", nav_observed_at)
+        return view
+
     def quantity(self, instrument_id: str) -> Decimal:
         """The current quantity held, or `Decimal(0)` for a valid absent instrument."""
         checked = _identifier(instrument_id, name="instrument_id")

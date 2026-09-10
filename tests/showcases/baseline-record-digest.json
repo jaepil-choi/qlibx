@@ -1,46 +1,38 @@
 {
   "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/absolute-run/datamodels/absolute-scores@17279ec7/datamodel.json": {
-    "digest": "8f9ae9c79112ec72",
+    "digest": "e875c1dc79b69a8b",
     "kind": "facts"
   },
   "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/absolute-run/run.json": {
-    "digest": "74b8d86b2ce05f90",
+    "digest": "9fb8c7d25f43fd1b",
     "kind": "facts"
   },
   "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/forging-run/run.json": {
-    "digest": "2ea5faad7f73e221",
+    "digest": "8731d51e624ce690",
     "kind": "facts"
   },
   "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/reversal-run/datamodels/reversal-features@31dc3913/datamodel.json": {
-    "digest": "9b1b906a062670a1",
+    "digest": "30c609f221685eaa",
     "kind": "facts"
   },
   "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/reversal-run/run.json": {
-    "digest": "59afff3d766428bb",
-    "kind": "facts"
-  },
-  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/datamodels/showcase-model@ec7d081d/datamodel.json": {
-    "digest": "02c188cb4cb74637",
-    "kind": "facts"
-  },
-  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/run.json": {
-    "digest": "3e3bd1b006adb209",
+    "digest": "6e55d76d254911de",
     "kind": "facts"
   },
   "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/datamodels/momentum-model@549831eb/datamodel.json": {
-    "digest": "4075dd0800b5308d",
+    "digest": "be996ea31629100e",
     "kind": "facts"
   },
   "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/run.json": {
-    "digest": "cc4799c1bb0d5829",
+    "digest": "1a1bb092b3c0d99b",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/run.json": {
-    "digest": "d2f76f4fc3e8579f",
+    "digest": "32e55cdac005b839",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
-    "digest": "6ba5207134eb5cfd",
+    "digest": "9ad64dd539c44b95",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
@@ -53,7 +45,7 @@
       "signal",
       "stage"
     ],
-    "digest": "f13ffec9f4945749",
+    "digest": "ede8ef0747d4de5a",
     "kind": "table",
     "rows": 105
   },
@@ -72,7 +64,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "44c82620c5bd7942",
+    "digest": "722de11e74f763d8",
     "kind": "table",
     "rows": 126
   },
@@ -94,7 +86,7 @@
       "stage",
       "tax"
     ],
-    "digest": "1c3b78e07b8d2afa",
+    "digest": "ba1e49ca27a22951",
     "kind": "table",
     "rows": 105
   },
@@ -108,16 +100,16 @@
       "stage",
       "weight"
     ],
-    "digest": "d2521155d97c3a74",
+    "digest": "be5c31204dace397",
     "kind": "table",
     "rows": 105
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/run.json": {
-    "digest": "d2f76f4fc3e8579f",
+    "digest": "32e55cdac005b839",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
-    "digest": "8b461657a1c6a870",
+    "digest": "6c89fa5ea5107f38",
     "kind": "facts"
   },
   "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
@@ -130,7 +122,7 @@
       "signal",
       "stage"
     ],
-    "digest": "f13ffec9f4945749",
+    "digest": "ede8ef0747d4de5a",
     "kind": "table",
     "rows": 105
   },
@@ -149,7 +141,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "44c82620c5bd7942",
+    "digest": "722de11e74f763d8",
     "kind": "table",
     "rows": 126
   },
@@ -171,7 +163,7 @@
       "stage",
       "tax"
     ],
-    "digest": "1c3b78e07b8d2afa",
+    "digest": "ba1e49ca27a22951",
     "kind": "table",
     "rows": 105
   },
@@ -185,16 +177,16 @@
       "stage",
       "weight"
     ],
-    "digest": "d2521155d97c3a74",
+    "digest": "be5c31204dace397",
     "kind": "table",
     "rows": 105
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/run.json": {
-    "digest": "3def4b5fdc662bc2",
+    "digest": "a684765eb52feeae",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
-    "digest": "329df70836e9a681",
+    "digest": "f0464b67fe2b5aae",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
@@ -212,7 +204,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "f5edbc46d38d8bc7",
+    "digest": "d6bec2a80ce9a1da",
     "kind": "table",
     "rows": 65
   },
@@ -234,7 +226,7 @@
       "stage",
       "tax"
     ],
-    "digest": "25a853b3233705c9",
+    "digest": "c9907575b88dee56",
     "kind": "table",
     "rows": 44
   },
@@ -248,16 +240,16 @@
       "stage",
       "weight"
     ],
-    "digest": "6a1f2da2b92a0364",
+    "digest": "5331a97d3bf42cc5",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/run.json": {
-    "digest": "72a7c9c94a89a3b5",
+    "digest": "fc832025f08e4f92",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
-    "digest": "10c28c833c6eedda",
+    "digest": "8572bb0bbb98cd9a",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -275,7 +267,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "5966637d374dae61",
+    "digest": "9be9ec1ac9f34b7b",
     "kind": "table",
     "rows": 85
   },
@@ -297,7 +289,7 @@
       "stage",
       "tax"
     ],
-    "digest": "461834cc7ee7e8c9",
+    "digest": "02437c0f887eefd9",
     "kind": "table",
     "rows": 64
   },
@@ -311,16 +303,16 @@
       "stage",
       "weight"
     ],
-    "digest": "cd851b9c712cf0a4",
+    "digest": "96ce173d3c6a8e18",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/run.json": {
-    "digest": "3def4b5fdc662bc2",
+    "digest": "a684765eb52feeae",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
-    "digest": "e292082d76e2dce9",
+    "digest": "f83ead6976eaa356",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
@@ -338,7 +330,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "f5edbc46d38d8bc7",
+    "digest": "d6bec2a80ce9a1da",
     "kind": "table",
     "rows": 65
   },
@@ -360,7 +352,7 @@
       "stage",
       "tax"
     ],
-    "digest": "25a853b3233705c9",
+    "digest": "c9907575b88dee56",
     "kind": "table",
     "rows": 44
   },
@@ -374,16 +366,16 @@
       "stage",
       "weight"
     ],
-    "digest": "6a1f2da2b92a0364",
+    "digest": "5331a97d3bf42cc5",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/run.json": {
-    "digest": "72a7c9c94a89a3b5",
+    "digest": "fc832025f08e4f92",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/strategy.json": {
-    "digest": "d0baec3fb63cc0e6",
+    "digest": "03c0c8c37be00ea0",
     "kind": "facts"
   },
   "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -401,7 +393,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "5966637d374dae61",
+    "digest": "9be9ec1ac9f34b7b",
     "kind": "table",
     "rows": 85
   },
@@ -423,7 +415,7 @@
       "stage",
       "tax"
     ],
-    "digest": "461834cc7ee7e8c9",
+    "digest": "02437c0f887eefd9",
     "kind": "table",
     "rows": 64
   },
@@ -437,16 +429,16 @@
       "stage",
       "weight"
     ],
-    "digest": "cd851b9c712cf0a4",
+    "digest": "96ce173d3c6a8e18",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/run.json": {
-    "digest": "f75d63998faeb1e4",
+    "digest": "44e17327391cf271",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "069df5c7f408bbea",
+    "digest": "072708df5cec45b0",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -460,7 +452,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "47878c0fdeda815a",
+    "digest": "18a205ebbfef8c5c",
     "kind": "table",
     "rows": 64
   },
@@ -479,7 +471,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "a86448558d018af2",
+    "digest": "9f7d6a3f6e2ebd11",
     "kind": "table",
     "rows": 85
   },
@@ -501,7 +493,7 @@
       "stage",
       "tax"
     ],
-    "digest": "339b8af130704dd8",
+    "digest": "6a50465cc05d2a19",
     "kind": "table",
     "rows": 64
   },
@@ -515,16 +507,16 @@
       "stage",
       "weight"
     ],
-    "digest": "6cb4488a0f55403f",
+    "digest": "3808ecf33a4744f1",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/run.json": {
-    "digest": "f75d63998faeb1e4",
+    "digest": "44e17327391cf271",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/strategy.json": {
-    "digest": "a3be3dd343090e18",
+    "digest": "6ba98b7e43dc6d6d",
     "kind": "facts"
   },
   "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@5001622f/tables/signal.measurement/all.parquet": {
@@ -538,7 +530,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "47878c0fdeda815a",
+    "digest": "18a205ebbfef8c5c",
     "kind": "table",
     "rows": 64
   },
@@ -557,7 +549,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "a86448558d018af2",
+    "digest": "9f7d6a3f6e2ebd11",
     "kind": "table",
     "rows": 85
   },
@@ -579,7 +571,7 @@
       "stage",
       "tax"
     ],
-    "digest": "339b8af130704dd8",
+    "digest": "6a50465cc05d2a19",
     "kind": "table",
     "rows": 64
   },
@@ -593,16 +585,16 @@
       "stage",
       "weight"
     ],
-    "digest": "6cb4488a0f55403f",
+    "digest": "3808ecf33a4744f1",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/run.json": {
-    "digest": "d1bf7df31eea86ea",
+    "digest": "75635866c8b20e20",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
-    "digest": "f22ee3677da960d4",
+    "digest": "acb9dc75f1ef264b",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/tables/vqapr.account/all.parquet": {
@@ -620,7 +612,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ea61734ed0a96c4e",
+    "digest": "afd430a52f5c7913",
     "kind": "table",
     "rows": 65
   },
@@ -642,7 +634,7 @@
       "stage",
       "tax"
     ],
-    "digest": "9dde5b9d82020c5d",
+    "digest": "d36b5207ae1bd63f",
     "kind": "table",
     "rows": 44
   },
@@ -656,16 +648,16 @@
       "stage",
       "weight"
     ],
-    "digest": "34d9d4cfa9b0aad9",
+    "digest": "c5bf70d8c36361d0",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/run.json": {
-    "digest": "3749dff8d710a603",
+    "digest": "492fdfb9c85b162a",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
-    "digest": "11b990f35cba9d67",
+    "digest": "16dcc80dead307d4",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/tables/vqapr.account/all.parquet": {
@@ -683,7 +675,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ada01559022b2964",
+    "digest": "1da8ab4803865fdc",
     "kind": "table",
     "rows": 65
   },
@@ -705,7 +697,7 @@
       "stage",
       "tax"
     ],
-    "digest": "0918e7babf95ce1a",
+    "digest": "966efe45d1c2f011",
     "kind": "table",
     "rows": 44
   },
@@ -719,16 +711,16 @@
       "stage",
       "weight"
     ],
-    "digest": "9b7f15ca93af7e5e",
+    "digest": "1f56814adf42e4f0",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/run.json": {
-    "digest": "eefaa843777c3297",
+    "digest": "e43d0bf01db7f70d",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
-    "digest": "2a78378f1fbf9d22",
+    "digest": "a04da81cdb97c6f5",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -746,7 +738,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "958a70af3801458a",
+    "digest": "125db064458cbc17",
     "kind": "table",
     "rows": 85
   },
@@ -768,7 +760,7 @@
       "stage",
       "tax"
     ],
-    "digest": "45702ce73b0f525d",
+    "digest": "5f925f963c2a2ada",
     "kind": "table",
     "rows": 64
   },
@@ -782,16 +774,16 @@
       "stage",
       "weight"
     ],
-    "digest": "4da157452eeda239",
+    "digest": "06309e2b1b50f9c8",
     "kind": "table",
     "rows": 64
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/run.json": {
-    "digest": "d1bf7df31eea86ea",
+    "digest": "75635866c8b20e20",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/strategy.json": {
-    "digest": "d48942bc3a8a9601",
+    "digest": "9b43a982fa2650ed",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@3a36bbd4/tables/vqapr.account/all.parquet": {
@@ -809,7 +801,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ea61734ed0a96c4e",
+    "digest": "afd430a52f5c7913",
     "kind": "table",
     "rows": 65
   },
@@ -831,7 +823,7 @@
       "stage",
       "tax"
     ],
-    "digest": "9dde5b9d82020c5d",
+    "digest": "d36b5207ae1bd63f",
     "kind": "table",
     "rows": 44
   },
@@ -845,16 +837,16 @@
       "stage",
       "weight"
     ],
-    "digest": "34d9d4cfa9b0aad9",
+    "digest": "c5bf70d8c36361d0",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/run.json": {
-    "digest": "3749dff8d710a603",
+    "digest": "492fdfb9c85b162a",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/strategy.json": {
-    "digest": "e3a8974d1d4e6b33",
+    "digest": "034141ab603101bf",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@50905d59/tables/vqapr.account/all.parquet": {
@@ -872,7 +864,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ada01559022b2964",
+    "digest": "1da8ab4803865fdc",
     "kind": "table",
     "rows": 65
   },
@@ -894,7 +886,7 @@
       "stage",
       "tax"
     ],
-    "digest": "0918e7babf95ce1a",
+    "digest": "966efe45d1c2f011",
     "kind": "table",
     "rows": 44
   },
@@ -908,16 +900,16 @@
       "stage",
       "weight"
     ],
-    "digest": "9b7f15ca93af7e5e",
+    "digest": "1f56814adf42e4f0",
     "kind": "table",
     "rows": 44
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/run.json": {
-    "digest": "eefaa843777c3297",
+    "digest": "e43d0bf01db7f70d",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/strategy.json": {
-    "digest": "c1ae88338329f948",
+    "digest": "4b55f1bcbacdcd70",
     "kind": "facts"
   },
   "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@d20f7ff6/tables/vqapr.account/all.parquet": {
@@ -935,7 +927,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "958a70af3801458a",
+    "digest": "125db064458cbc17",
     "kind": "table",
     "rows": 85
   },
@@ -957,7 +949,7 @@
       "stage",
       "tax"
     ],
-    "digest": "45702ce73b0f525d",
+    "digest": "5f925f963c2a2ada",
     "kind": "table",
     "rows": 64
   },
@@ -971,7 +963,7 @@
       "stage",
       "weight"
     ],
-    "digest": "4da157452eeda239",
+    "digest": "06309e2b1b50f9c8",
     "kind": "table",
     "rows": 64
   }

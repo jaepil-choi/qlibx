@@ -21,7 +21,6 @@ from vqapr.authoring import (
     ComplianceCall,
     ComplianceFinding,
     DatasetInput,
-    EconomicAccountView,
     RowsLookback,
 )
 from vqapr.portfolio.allocation import (
@@ -152,21 +151,21 @@ class SingleNameCap(Compliance):
                 measured, bound = size, ceiling
         return measured, bound, tuple(offenders)
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         """The realised book as weights, taken from the view rather than rebuilt from marks.
 
-        `account.weights()` is `value / nav` per name, and `nav` is `cash` plus the marked total.
+        `call.account.weights()` is `value / nav` per name; `nav` is `cash` plus the marked total.
         An account with no NAV has no weights. An empty book measures zero against the cap, which
         is what "nothing is held" means for a concentration rule.
         """
         ceilings = self.ceilings(call)
-        weights = account.weights() if account.nav else {}
+        weights = call.account.weights() if call.account.nav else {}
         measured, bound, offenders = self._worst(weights, ceilings)
         return ComplianceFinding(
             passed=not offenders,
             measured=measured,
             bound=bound,
             excess=max(measured - bound, Decimal(0)),
-            details={"nav": account.nav if account.nav is not None else Decimal(0)},
+            details={"nav": call.account.nav if call.account.nav is not None else Decimal(0)},
             offenders=offenders,
         )

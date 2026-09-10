@@ -409,17 +409,16 @@ def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
 # --------------------------------------------------------------------------------------
 
 
-def test_compliance_call_is_a_contract_and_carries_no_account() -> None:
+def test_compliance_call_is_a_contract_and_carries_the_account() -> None:
     """A contract like the other two roles' calls, supplied by the framework. The committed
-    account a rule observes is `observe`'s own argument, so the capability is present exactly
-    where it is used and absent everywhere else."""
+    account a rule observes is on the call (record `229`): one Call is the whole of a role's
+    authority, so nothing is handed beside it."""
     assert isinstance(authoring.ComplianceCall, type)
     with pytest.raises(TypeError):
         authoring.ComplianceCall()  # type: ignore[abstract]
 
     members = set(authoring.ComplianceCall.__abstractmethods__)
-    assert members == {"evaluation_time", "instruments", "read", "rows"}, members
-    assert "account" not in members
+    assert members == {"account", "evaluation_time", "instruments", "read", "rows"}, members
 
 
 def test_compliance_finding_bounds_details_to_32_keys() -> None:
@@ -459,10 +458,8 @@ def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
         def compliance_id(self) -> str:
             return "cap"
 
-        def observe(
-            self, call: authoring.ComplianceCall, account: authoring.EconomicAccountView
-        ) -> authoring.ComplianceFinding:
-            worst = max((abs(q) for q in account.positions.values()), default=Decimal("0"))
+        def observe(self, call: authoring.ComplianceCall) -> authoring.ComplianceFinding:
+            worst = max((abs(q) for q in call.account.positions.values()), default=Decimal("0"))
             return authoring.ComplianceFinding(
                 passed=worst <= Decimal("0.1"),
                 measured=worst,
@@ -478,9 +475,14 @@ def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
     assert not hasattr(authoring.ComplianceFinding, "compliance_id")
     assert not hasattr(rule, "project"), "the box is the strategy's kit call, not a member here"
 
+    view = authoring.EconomicAccountView(
+        cash=Decimal("100"), positions={"A": Decimal("0.2")}, nav=None, nav_observed_at=None
+    )
+
     class _Call(authoring.ComplianceCall):
         evaluation_time = UTC_NOW
         instruments = ("A",)
+        account = view
 
         def read(self, alias: str, field: str):
             raise AssertionError("this rule declared no reads")
@@ -488,10 +490,7 @@ def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
         def rows(self, alias: str):
             raise AssertionError("this rule declared no reads")
 
-    view = authoring.EconomicAccountView(
-        cash=Decimal("100"), positions={"A": Decimal("0.2")}, nav=None, nav_observed_at=None
-    )
-    finding = rule.observe(_Call(), view)
+    finding = rule.observe(_Call())
     assert finding.passed is False and finding.excess == Decimal("0.1")
 
 

@@ -17,6 +17,7 @@ import multiprocessing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -29,6 +30,7 @@ from vqapr.compliance.evaluation import (
     compliance_requirements as declared_compliance_requirements,
 )
 from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
@@ -73,6 +75,7 @@ from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
+    STRATEGY_KIND,
     RunRecordWriter,
     read_datamodel_record,
     read_strategy_record,
@@ -419,6 +422,76 @@ def run_registered_datamodel(
     return record
 
 
+def _window_factory(
+    frozen: FrozenRun,
+    observation_store: DuckDbObservationStore,
+    *,
+    allowed_requirements: Sequence[DataRequirement],
+    consumer_id: str | None,
+) -> Callable[[datetime], ModelWindow]:
+    """A window over the run's declared instruments at one instant, for one consumer.
+
+    Three loops built this lambda by hand (record `228`); the part's window and the rules'
+    window differ only in what they may read and on whose behalf.
+    """
+
+    def at(instant: datetime) -> ModelWindow:
+        return ModelWindow(
+            evaluation_time=instant,
+            instruments=frozen.instruments,
+            store=observation_store,
+            allowed_requirements=allowed_requirements,
+            consumer_id=consumer_id,
+        )
+
+    return at
+
+
+def _run_member[ResultT](
+    frozen: FrozenRun,
+    *,
+    record_ref: Callable[[], str],
+    member_kind: str,
+    store: Path | None,
+    replace_record: bool,
+    body: Callable[[DuckDbObservationStore, ScanSession, RunRecordWriter | None], ResultT],
+    read_record: Callable[[Path, str, str], Mapping[str, object]],
+) -> tuple[ResultT, Mapping[str, object] | None]:
+    """Run one member of a run inside the resources every member needs, and read its record back.
+
+    What a strategy and a datamodel share (record `228`): one scan session for the whole member
+    (duckdb caches parquet metadata per connection, and closing per query threw that away), one
+    observation store over the frozen catalog, a record writer opened before the loop and
+    released if the member dies -- a member that died still held its record's lock, which
+    stranded the directory until the lock went stale -- and the record read back from disk once
+    the member is complete. What the member does between those is `body`'s: the loads and the
+    drift checks come before, so a component that drifted claims no record directory.
+
+    `record_ref` is asked for only when there is a store: a member run in memory (an in-process
+    caller, a test with a stand-in component) names no record and needs no fingerprint.
+    """
+    catalog = _FrozenCatalog(frozen)
+    session = ScanSession()
+    writer = None
+    try:
+        observation_store = DuckDbObservationStore(catalog, session=session)
+        if store is not None:
+            opened_writer = RunRecordWriter(
+                store, frozen.run_id, record_ref(), member_kind=member_kind
+            )
+            opened_writer.open(replace=replace_record)
+            writer = opened_writer
+        result = body(observation_store, session, writer)
+    except BaseException:
+        if writer is not None:
+            writer.release()
+        raise
+    finally:
+        session.close()
+    record = None if writer is None else read_record(writer.root, frozen.run_id, record_ref())
+    return result, record
+
+
 def _run_datamodel(
     root_path: Path,
     frozen: FrozenRun,
@@ -439,17 +512,12 @@ def _run_datamodel(
     if tuple(model.requirements()) != layer.requirements:
         raise ValueError("loaded DataModel requirements drifted from FrozenRun")
     model.memory = normalize_memory(layer.initial_model_memory)
-    catalog = _FrozenCatalog(frozen)
-    session = ScanSession()
-    writer = None
-    try:
-        observation_store = DuckDbObservationStore(catalog, session=session)
-        if store is not None:
-            opened_writer = RunRecordWriter(
-                store, frozen.run_id, layer.record_ref, member_kind=DATAMODEL_KIND
-            )
-            opened_writer.open(replace=replace_record)
-            writer = opened_writer
+
+    def body(
+        observation_store: DuckDbObservationStore,
+        session: ScanSession,
+        writer: RunRecordWriter | None,
+    ) -> DataModelResult:
         output = RunOutput(
             root_path,
             writes=frozen.writes,
@@ -457,17 +525,17 @@ def _run_datamodel(
             run_id=frozen.run_id,
             record_ref=layer.record_ref,
         )
+        window_at = _window_factory(
+            frozen,
+            observation_store,
+            allowed_requirements=layer.requirements,
+            consumer_id=layer.component_id,
+        )
         flow = DataModelEventLoop(
             frozen,
             layer,
             model,
-            window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=frozen.instruments,
-                store=observation_store,
-                allowed_requirements=layer.requirements,
-                consumer_id=layer.component_id,
-            ),
+            window_for_occurrence=lambda occurrence: window_at(occurrence.evaluation_time),
             output=output,
             on_progress=writer.heartbeat if writer is not None else None,
         )
@@ -481,18 +549,17 @@ def _run_datamodel(
         )
         if writer is not None:
             freeze_datamodel_record(writer, result, frozen, layer, as_loaded)
-    except BaseException:
-        if writer is not None:
-            writer.release()
-        raise
-    finally:
-        session.close()
-    record = (
-        None
-        if writer is None
-        else read_datamodel_record(writer.root, frozen.run_id, layer.record_ref)
+        return result
+
+    return _run_member(
+        frozen,
+        record_ref=lambda: layer.record_ref,
+        member_kind=DATAMODEL_KIND,
+        store=store,
+        replace_record=replace_record,
+        body=body,
+        read_record=read_datamodel_record,
     )
-    return result, record
 
 
 def run_registered_strategy(
@@ -579,31 +646,25 @@ def _run_strategy(
     # run never executed. Recording only those would leave a receipt that looks authoritative
     # and is stale, which is worse than the gate it replaced.
     as_loaded = _as_loaded_fingerprints(frozen, layer, root_path)
+    if strategy.requirements() != layer.requirements:
+        raise ValueError("loaded Strategy requirements drifted from FrozenRun")
+    if declared_compliance_requirements(rules) != layer.compliance_requirements:
+        raise ValueError("loaded Compliance requirements drifted from FrozenRun")
     # The record is written from the ONE roster read `run` made, never from a second one.
     # `roster` carries the digest and the table list beside the registry, so a `vqapr register`
     # landing during the run cannot make the record state a digest the fills were never classified
     # by (`docs/issues/archive/050`).
     registry = roster.registry if roster is not None else None
-    catalog = _FrozenCatalog(frozen)
-    # One physical handle for the whole strategy. duckdb caches parquet metadata for a
-    # connection's lifetime, and closing per query threw that away on every observation.
-    session = ScanSession()
-    writer = None
-    try:
-        observation_store = DuckDbObservationStore(catalog, session=session)
-        strategy_requirements = strategy.requirements()
-        if strategy_requirements != layer.requirements:
-            raise ValueError("loaded Strategy requirements drifted from FrozenRun")
-        compliance_requirements = declared_compliance_requirements(rules)
-        if compliance_requirements != layer.compliance_requirements:
-            raise ValueError("loaded Compliance requirements drifted from FrozenRun")
+    frozen_exchange = frozen.exchange
+
+    def body(
+        observation_store: DuckDbObservationStore,
+        session: ScanSession,
+        writer: RunRecordWriter | None,
+    ) -> SimulationResult:
         root = AccountState(initial_snapshot)
         strategy.memory = normalize_memory(layer.initial_model_memory)
         strategy.load_payload(BytesIO(layer.initial_payload))
-        if store is not None:
-            opened_writer = RunRecordWriter(store, frozen.run_id, layer.record_ref)
-            opened_writer.open(replace=replace_record)
-            writer = opened_writer
         state = RunStateRepository(
             initial_account=root,
             initial_model_memory=layer.initial_model_memory,
@@ -622,34 +683,37 @@ def _run_strategy(
             },
             # Accepted rows enter the writer buffer; normal and exceptional exits flush it.
             # A hard kill preserves only spilled rows. Without a store, roots retain rows.
-            row_sink=None if writer is None else writer.append,
+            sink=None if writer is None else writer.append_chunk,
         )
         if state.root.current_model_state_ref != layer.initial_model_state_ref:
             raise RuntimeError("initial Model state does not match frozen run authority")
         initial_ref = state.root.current_model_state_ref
         if initial_ref is None or state.load_payload(initial_ref) != layer.initial_payload:
             raise RuntimeError("initial Strategy payload does not match frozen run authority")
+        strategy_window_at = _window_factory(
+            frozen,
+            observation_store,
+            allowed_requirements=layer.requirements,
+            consumer_id=layer.component_id,
+        )
+        # The rules read as of the market-clock instant they observe at (design §7.2). No
+        # consumer: this window serves every loaded rule, and which one is reading is known
+        # only inside the evaluation that calls them.
+        compliance_window_at = _window_factory(
+            frozen,
+            observation_store,
+            allowed_requirements=layer.compliance_requirements,
+            consumer_id=None,
+        )
         flow = StrategyEventLoop(
             frozen,
             strategy,
             state,
             layer=layer,
-            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
-                instruments=frozen.instruments,
-                store=observation_store,
-                allowed_requirements=layer.requirements,
-                consumer_id=layer.component_id,
+            strategy_window_for_occurrence=lambda occurrence: strategy_window_at(
+                occurrence.evaluation_time
             ),
-            # The rules read as of the market-clock instant they observe at (design §7.2). No
-            # consumer: this window serves every loaded rule, and which one is reading is known
-            # only inside the evaluation that calls them.
-            compliance_window_at=lambda instant: ModelWindow(
-                evaluation_time=instant,
-                instruments=frozen.instruments,
-                store=observation_store,
-                allowed_requirements=layer.compliance_requirements,
-            ),
+            compliance_window_at=compliance_window_at,
             # Each strategy has its own Account (design §7-4): the run shares the initial
             # DECLARATION, not the book. It retains the marks this strategy declared it would
             # read; declaring nothing keeps one.
@@ -660,9 +724,9 @@ def _run_strategy(
             exchange=exchange,
             compliance=rules,
             scan_session=session,
-            # The strategy's liveness signal. Without it the record's lock is stamped once at `open`
-            # and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as dead WHILE
-            # STILL EXECUTING, and a peer takes its id and deletes its tables.
+            # The strategy's liveness signal. Without it the record's lock is stamped once at
+            # `open` and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as
+            # dead WHILE STILL EXECUTING, and a peer takes its id and deletes its tables.
             on_progress=writer.heartbeat if writer is not None else None,
             registry=registry,
             record_account_positions=record_account_positions,
@@ -685,8 +749,8 @@ def _run_strategy(
                 # models (design §6.1). Recorded so a reader can tell a tax-free KRX from a
                 # taxed one without opening the source at its digest.
                 exchange={
-                    "component_id": str(frozen.exchange.component_id),
-                    "fingerprint": frozen.exchange.fingerprint,
+                    "component_id": str(frozen_exchange.component_id),
+                    "fingerprint": frozen_exchange.fingerprint,
                     "settings": normalize_memory(dict(exchange.settings)),
                 },
             )
@@ -702,20 +766,17 @@ def _run_strategy(
             else read_table(writer.root, frozen.run_id, WEIGHT_TABLE, layer.record_ref),
             workspace=workspace,
         )
-    except BaseException:
-        # A strategy that died still holds its record's lock. Releasing here turns a crash into
-        # an ordinary retry instead of stranding the directory until the lock goes stale.
-        if writer is not None:
-            writer.release()
-        raise
-    finally:
-        session.close()
-    record = (
-        None
-        if writer is None
-        else read_strategy_record(writer.root, frozen.run_id, layer.record_ref)
+        return result
+
+    return _run_member(
+        frozen,
+        record_ref=lambda: layer.record_ref,
+        member_kind=STRATEGY_KIND,
+        store=store,
+        replace_record=replace_record,
+        body=body,
+        read_record=read_strategy_record,
     )
-    return result, record
 
 
 def _own_output_or_refuse(

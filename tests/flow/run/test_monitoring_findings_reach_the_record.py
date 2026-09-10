@@ -93,7 +93,7 @@ class _Rule(Compliance):
     def compliance_id(self) -> str:
         return self._compliance_id
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         return self._finding
 
 
@@ -225,10 +225,10 @@ def _flow(
     )
 
 
-def _state(row_sink=None, rules: tuple[Compliance, ...] = RULES) -> RunStateRepository:
+def _state(sink=None, rules: tuple[Compliance, ...] = RULES) -> RunStateRepository:
     return RunStateRepository(
         initial_account=AccountState(AccountSnapshot(0, Decimal(100), {"A": Decimal(1)})),
-        row_sink=row_sink,
+        sink=sink,
         initial_component_memory={rule.compliance_id: rule.memory for rule in rules},
     )
 
@@ -238,7 +238,7 @@ def test_each_finding_reaches_the_record_typed_and_the_roots_keep_none(tmp_path:
     writer.open()
     sessions = _sessions(2)
 
-    result = _flow(tmp_path, _state(row_sink=writer.append), sessions).run()
+    result = _flow(tmp_path, _state(sink=writer.append_chunk), sessions).run()
     writer.release()
 
     rows = list(read_typed_table(tmp_path, "monitored", TABLE))
@@ -298,7 +298,7 @@ def test_a_run_that_declared_no_rule_writes_no_monitoring_table(tmp_path: Path) 
     writer.open()
 
     result = _flow(
-        tmp_path, _state(row_sink=writer.append, rules=()), _sessions(2), rules=()
+        tmp_path, _state(sink=writer.append_chunk, rules=()), _sessions(2), rules=()
     ).run()
     writer.release()
 

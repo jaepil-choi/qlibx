@@ -147,7 +147,7 @@ class _Rule(Compliance):
     def requirements(self) -> tuple[DataRequirement, ...]:
         return (_requirement(),)
 
-    def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+    def observe(self, call: ComplianceCall) -> ComplianceFinding:
         return ComplianceFinding(
             passed=True, measured=Decimal("0"), bound=Decimal("1"), excess=Decimal("0"), details={}
         )
@@ -454,7 +454,7 @@ def test_compliance_observes_at_the_fill_instant_with_its_own_reads(
         def __init__(self) -> None:
             self.observed_at: list[datetime] = []
 
-        def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+        def observe(self, call: ComplianceCall) -> ComplianceFinding:
             self.observed_at.append(call.evaluation_time)
             return ComplianceFinding(
                 passed=False,
@@ -774,7 +774,7 @@ def test_a_compliance_failure_is_after_the_commit_and_names_the_rules(tmp_path: 
     fill = datetime(2024, 3, 5, 15, 30, tzinfo=KST)
 
     class FailingRule(_Rule):
-        def observe(self, call: ComplianceCall, account: EconomicAccountView) -> ComplianceFinding:
+        def observe(self, call: ComplianceCall) -> ComplianceFinding:
             raise RuntimeError("compliance observation fault")
 
     rule = FailingRule()
@@ -1388,7 +1388,9 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         raise RuntimeError(f"{boundary} fault")
 
     if boundary == "data":
-        monkeypatch.setattr(execution_phase, "exact_execution_snapshot", fail)
+        # The fill reads its snapshot through the context since record `222` (the execution
+        # table is read ahead along the market clock), so that method is the data seam.
+        monkeypatch.setattr(execution_phase.FlowContext, "execution_snapshot", fail)
     elif boundary == "order":
         monkeypatch.setattr(execution_phase, "plan_orders", fail)
     elif boundary == "exchange":

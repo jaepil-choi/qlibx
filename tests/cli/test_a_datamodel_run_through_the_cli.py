@@ -651,3 +651,42 @@ def test_the_batch_driver_asks_each_run_what_it_reads_once(
     with batch_cubes(workspace, targets):
         pass
     assert asked == targets * 2
+
+
+def test_a_jobs_worker_refuses_what_check_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Record `240`: the worker passes the same door as `run a` -- the judgments included.
+
+    Until then the worker froze the run without asking them, so a run `check` refused as
+    `field.absent` (the model reads `close`, the dataset exposes `px`) was refused under
+    `--jobs` by the freeze's own bare `ValueError` -- a different code for the same defect, or
+    for a defect only the judgments know, no refusal at all. Now each run's entry in the batch
+    is the refusal `check` gave, in `check`'s code, and no record is written.
+    """
+    project = ("--project-root", str(tmp_path))
+    declaration = _declaration(tmp_path)
+    text = declaration.read_text(encoding="utf-8")
+    renamed = text.replace("      close: close\n", "      px: close\n")
+    renamed = renamed.replace("      close: DOUBLE\n", "      px: DOUBLE\n")
+    assert renamed != text
+    declaration.write_text(renamed, encoding="utf-8")
+    code, registered = _cli(capsys, *project, "register", str(declaration))
+    assert code == 0, registered
+
+    code, checked = _cli(capsys, *project, "check", "factors-momentum")
+    assert code == 1
+    refused = {failure["code"] for failure in checked["failures"]}
+    # `check` also lists the freeze's own bare refusal of the same defect (`preflight.refused`);
+    # `run` refuses on the judgments first, in their code.
+    assert "field.absent" in refused, checked
+
+    code, body = _cli(
+        capsys, *project, "run", "factors-reversal", "factors-momentum", "--jobs", "2"
+    )
+    assert code == 1, body
+    for run_id in ("factors-reversal", "factors-momentum"):
+        entry = body["runs"][run_id]
+        assert entry["ok"] is False, entry
+        assert {failure["code"] for failure in entry["failures"]} == {"field.absent"}, entry
+        assert not (tmp_path / ".vqapr" / "runs" / run_id).exists(), "a refused run wrote a record"

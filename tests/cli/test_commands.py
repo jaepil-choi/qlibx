@@ -470,7 +470,11 @@ def test_show_dataset_reads_back_what_a_dataset_holds(
     code, everything = _cli(
         capsys, "--project-root", str(tmp_path), "show", "dataset", "prices", "--limit", "0"
     )
-    assert everything["returned"] == everything["rows_total"] == 3, "--limit 0 reads every row"
+    # A count is a count: 0 rows, and the registration's facts. It used to mean "every row", which
+    # on a 430 MB source read 8.7 million rows into memory before answering
+    # (`docs/issues/report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source`).
+    assert everything["returned"] == 0 and everything["items"] == []
+    assert everything["rows_total"] == 3 and everything["span"] is not None
 
     code, refused = _cli(capsys, "--project-root", str(tmp_path), "show", "dataset", "nope")
     assert code == 1

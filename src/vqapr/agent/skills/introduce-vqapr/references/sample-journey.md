@@ -61,7 +61,7 @@ records the store holds.
 ## What to look at next
 
 ```bash
-vqapr show strategy sample-run/<record> --table vqapr.fill --limit 0
+vqapr show strategy sample-run/<record> --table vqapr.fill --limit 1000
 vqapr show strategy sample-run/<record> --table vqapr.account --instrument _ACCOUNT
 ```
 

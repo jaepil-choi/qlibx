@@ -99,7 +99,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="limit",
         type=int,
         default=100,
-        help="rows to return when --table is given, or for `show dataset`; 0 returns every row",
+        help=(
+            "rows to return when --table is given, or for `show dataset`: at most this many, and "
+            "0 returns none. The envelope's rows_total says how many there are, so a page that "
+            "wants them all asks for that many"
+        ),
     )
     parser.add_argument(
         "--source",
@@ -375,7 +379,7 @@ def _rows(
             if instrument is not None and row.get("instrument") != instrument:
                 continue
             matched += 1
-            if limit == 0 or len(rows) < limit:
+            if len(rows) < limit:
                 rows.append(row)
     except ValueError as damaged:
         raise InputError(

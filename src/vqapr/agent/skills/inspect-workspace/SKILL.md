@@ -91,7 +91,7 @@ directory with rows and no record.
 ```bash
 vqapr show run <run-id>                              # the configuration every strategy shared
 vqapr show strategy <run-id>/<id>@<fp8>              # one strategy's output
-vqapr show strategy <run-id>/<ref> --table <t> --limit 0 --instrument <id>
+vqapr show strategy <run-id>/<ref> --table <t> --limit 1000 --instrument <id>
 vqapr show datamodel <run-id>/<id>@<fp8>
 vqapr show dataset <id> --limit 20
 vqapr show model <id>                                # what a component declares it reads and does
@@ -101,7 +101,8 @@ vqapr show model <id>                                # what a component declares
 exists.
 
 **`rows_total`, `matched` and `returned` are reported separately**, so a truncated page never reads
-as a short run. Quote the right one; `--limit 0` returns everything.
+as a short run. Quote the right one; `--limit N` returns at most N rows and `0` returns none, so a
+whole table is `--limit <rows_total>`.
 
 `show dataset` returns the **declared projection**: `items` holds the fields the registration
 names, with the values a model reading it receives, and `items_are: "projection"` says so. For an

@@ -21,12 +21,13 @@ re-running to answer a question about a run would be a different run.
 ## Rows
 
 ```bash
-vqapr show strategy <run-id>/<ref> --table vqapr.fill --limit 0
+vqapr show strategy <run-id>/<ref> --table vqapr.fill --limit 1000
 vqapr show strategy <run-id>/<ref> --table vqapr.account --instrument _ACCOUNT
 ```
 
-`--limit 0` returns everything. The envelope reports `rows_total`, `matched` and `returned`
-**separately**, so a truncated page never reads as a short run. Quote the right one.
+`--limit N` returns at most N rows; `0` returns none. The envelope reports `rows_total`, `matched`
+and `returned` **separately**, so a truncated page never reads as a short run. Quote the right
+one, and to read a whole table ask for `rows_total` rows.
 
 ## From Python
 
@@ -68,4 +69,4 @@ vqapr show dataset <id> [--limit N]
 
 Works for any registered dataset, not only a materialized one. It reports the registration's own
 facts — source, path, declared fields, span — alongside the rows, and reports `rows_total`
-separately from `returned`. `--limit 0` returns every row.
+separately from `returned`. `--limit 0` returns the facts and no rows, whatever the file's size.

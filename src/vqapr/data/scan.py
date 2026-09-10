@@ -632,7 +632,9 @@ def head(
     spec: SourceSpec, *, limit: int = 100, relation: str | None = None
 ) -> list[dict[str, object]]:
     """The first rows of a source -- or of a `projection_relation` over it -- as plain dicts.
-    `limit=0` reads every row.
+    `limit=0` reads none and runs no query: `show dataset --limit 0` on a 430 MB source used to
+    read its 8.7 million rows into dicts, which exhausted the machine before it returned
+    (`docs/issues/report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source`).
 
     A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback.
     `show dataset` is the caller. With `relation` it answers "what does this dataset yield" --
@@ -642,11 +644,12 @@ def head(
     disagree with the windows a run actually reads. `LIMIT` over a grouped projection still
     evaluates the whole grouping, so on a large source the projected head costs a full pass.
     """
+    if limit <= 0:
+        return []
     con = _open(spec)
     try:
-        sql = f"SELECT * FROM {_relation(spec) if relation is None else relation}"
-        if limit:
-            sql += f" LIMIT {int(limit)}"
+        target = _relation(spec) if relation is None else relation
+        sql = f"SELECT * FROM {target} LIMIT {int(limit)}"
         cursor = con.execute(sql)
         names = [column[0] for column in cursor.description]
         return [

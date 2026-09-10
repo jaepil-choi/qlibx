@@ -264,7 +264,7 @@ def test_show_strategy_table_filters_by_instrument(tmp_path: Path) -> None:
                 identifier=identifier,
                 store_root=tmp_path,
                 table="vqapr.account",
-                limit=0,
+                limit=100,
                 instrument="_ACCOUNT",
             ),
             project_root=tmp_path,

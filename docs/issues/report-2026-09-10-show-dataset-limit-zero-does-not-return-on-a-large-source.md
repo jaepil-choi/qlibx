@@ -1,6 +1,6 @@
 # `show dataset --limit 0` does not return on a large source, and exhausted memory before it did
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED by record `245` (2026-09-10, 0.14.2) — `--limit 0` returns no rows (a count is a count) for `show dataset` and `--table` alike; on a 4.2M-row source `--limit 0` answers in 0.86 s where it read every row into memory before.**
 
 | | |
 |---|---|

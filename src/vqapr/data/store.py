@@ -119,13 +119,27 @@ class ObservationBatch:
 class DuckDbObservationStore:
     """Resolve workspace declarations and execute bounded physical queries through scan.py."""
 
-    __slots__ = ("__catalog", "__digests", "__panels", "__session")
+    __slots__ = ("__catalog", "__digests", "__horizon", "__panels", "__requirements", "__session")
 
-    def __init__(self, catalog: DatasetCatalog, *, session: scan.ScanSession | None = None) -> None:
+    def __init__(
+        self,
+        catalog: DatasetCatalog,
+        *,
+        session: scan.ScanSession | None = None,
+        horizon: tuple[datetime, datetime] | None = None,
+        requirements: Sequence[DataRequirement] = (),
+    ) -> None:
         self.__catalog = catalog
         # None keeps the connect-per-query behaviour, so every existing caller and test is
         # unaffected. public.run() passes a run-lifetime session.
         self.__session = session
+        # The run's period, and every requirement the run declared (record `235`,
+        # `docs/issues/098`). A panel is scanned from the earliest instant any of the run's
+        # lookbacks on that dataset can reach at `start`, up to `end` -- the run's horizon --
+        # rather than over the registered span, so a one-year run over a ten-year source holds
+        # one year. `None` (a test store, an in-process caller) scans the registered span.
+        self.__horizon = horizon
+        self.__requirements = tuple(requirements)
         # One store instance lives for exactly one run, and a run's sources are frozen for its
         # whole duration. CallbackHandler._actual_source_refs already refuses a callback that
         # observes two digests for one source, so caching per instance does not weaken that
@@ -201,17 +215,10 @@ class DuckDbObservationStore:
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
         names = tuple(instruments) if keyed_by_instrument else ()
-        identity = panel_identity(
-            source_digest, str(first.dataset_id), fields, names, registration.span
-        )
+        bounds = self._scan_bounds(source, registration, declared, evaluation_time)
+        identity = panel_identity(source_digest, str(first.dataset_id), fields, names, bounds)
         panel = self.__panels.get(identity)
         if panel is None:
-            # The registered span bounds the one scan. A registration that was never validated
-            # (a test catalog) carries none, so the source's own first and last instants stand in.
-            span = registration.span
-            if span is None:
-                grid = self._instant_grid(source, registration.available_at)
-                span = (grid[0], grid[-1]) if grid else (evaluation_time, evaluation_time)
             table = scan.observation_table(
                 source,
                 instrument_field=registration.instrument_field,
@@ -220,9 +227,9 @@ class DuckDbObservationStore:
                 fields={item.field_id: resolve_field(registration, item) for item in declared},
                 aggregated=registration.aggregated,
                 instruments=instruments,
-                # The whole registered span: one scan, and every later window is a slice.
-                evaluation_time=span[1],
-                lower_bound=span[0],
+                # One scan over the bounds, and every later window is a slice.
+                evaluation_time=bounds[1],
+                lower_bound=bounds[0],
                 session=self.__session,
             )
             panel = self.__panels[identity] = Panel.from_table(
@@ -233,6 +240,7 @@ class DuckDbObservationStore:
                 keyed_by_instrument=keyed_by_instrument,
                 identity=identity,
                 source_digest=source_digest,
+                bounds=bounds if self.__horizon is not None else None,
             )
         # `lookback_fits_grain` already refused the one kind a panel cannot take; this only lets
         # the window's signature see it.
@@ -256,6 +264,48 @@ class DuckDbObservationStore:
             max_available_at=window.max_available_at,
         )
         return window, access
+
+    def _scan_bounds(
+        self,
+        source: SourceSpec,
+        registration: DatasetRegistration,
+        declared: Sequence[DataRequirement],
+        evaluation_time: datetime,
+    ) -> tuple[datetime, datetime]:
+        """The instants one panel scan must cover.
+
+        With a horizon: from the earliest instant any lookback the run declared on this dataset
+        reaches back to at the run's `start` -- a calendar lookback by its bound, a rows lookback
+        by arithmetic on the source's instant grid (design §2.4) -- up to the run's `end`. Every
+        window the run will ask for lies inside that, and `Panel.window` refuses one that does
+        not. Without a horizon: the registered span, which is everything the registration holds;
+        a registration that was never verified (a test catalog) carries none, so the source's own
+        first and last instants stand in.
+        """
+        if self.__horizon is None:
+            span = registration.span
+            if span is not None:
+                return span
+            grid = self._instant_grid(source, registration.available_at)
+            if not grid:
+                return (evaluation_time, evaluation_time)
+            return (grid[0], grid[-1])  # type: ignore[return-value]
+        start, end = self.__horizon
+        lower = start
+        dataset_id = declared[0].dataset_id
+        lookbacks: list[Lookback] = []
+        for item in (*self.__requirements, *declared):
+            if item.dataset_id == dataset_id and item.lookback not in lookbacks:
+                lookbacks.append(item.lookback)
+        for lookback in lookbacks:
+            if isinstance(lookback, RowsLookback):
+                bound = self._grid_bound(source, registration.available_at, start, lookback.rows)
+            elif isinstance(lookback, CalendarLookback):
+                bound = lookback.lower_bound(start)
+            else:
+                continue
+            lower = min(lower, bound)
+        return (lower, end)
 
     def _instant_grid(self, source: SourceSpec, available_at_field: str) -> tuple[object, ...]:
         """Every distinct instant of one source, ascending; once per run when a session is held."""

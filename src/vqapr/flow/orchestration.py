@@ -585,7 +585,15 @@ def _run_member[ResultT](
     session = ScanSession()
     writer = None
     try:
-        observation_store = DuckDbObservationStore(catalog, session=session)
+        observation_store = DuckDbObservationStore(
+            catalog,
+            session=session,
+            # The run's horizon bounds every panel scan (record `235`): a run holds its period
+            # plus its lookbacks, not the registered span. A stand-in frozen run (a boundary
+            # test's) may carry neither, and then the store scans the registered span.
+            horizon=_horizon(frozen),
+            requirements=tuple(getattr(frozen, "requirements", ())),
+        )
         if store is not None:
             opened_writer = RunRecordWriter(
                 store, frozen.run_id, record_ref(), member_kind=member_kind
@@ -601,6 +609,15 @@ def _run_member[ResultT](
         session.close()
     record = None if writer is None else read_record(writer.root, frozen.run_id, record_ref())
     return result, record
+
+
+def _horizon(frozen: FrozenRun) -> tuple[datetime, datetime] | None:
+    """The run's period as the store's scan horizon, or `None` when the run has none frozen."""
+    start = getattr(frozen, "start", None)
+    end = getattr(frozen, "end", None)
+    if isinstance(start, datetime) and isinstance(end, datetime):
+        return (start, end)
+    return None
 
 
 def _run_datamodel(

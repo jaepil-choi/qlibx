@@ -25,8 +25,8 @@ from vqapr.data.panel import NO_INSTRUMENT, PanelWindow
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.public import register_dataset
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -142,14 +142,16 @@ def test_the_panel_is_built_once_and_every_later_read_is_a_slice(
     assert first.panel.identity == later.panel.identity
 
 
-def test_a_window_shares_the_panels_buffers(tmp_path: Path, model_price_parquet: Path) -> None:
+def test_a_window_is_a_view_of_the_panels_block(tmp_path: Path, model_price_parquet: Path) -> None:
+    """Record `235`: a numeric field is one block, and the window's matrix is rows of it."""
+    import numpy as np
+
     store = DuckDbObservationStore(_workspace(tmp_path, model_price_parquet))
     window = _context(store, 7).read("prices", "close")
 
-    column = window.panel.column("close", "A")
-    sliced = column.slice(window.start, window.stop - window.start)
-    assert sliced.buffers()[1] is not None
-    assert sliced.buffers()[1].address == column.buffers()[1].address, "a slice, not a copy"
+    block = window.panel.block("close")
+    assert np.shares_memory(window.matrix(), block), "a view, not a copy"
+    assert "close" not in window.panel.columns, "no Arrow copy beside the block"
 
 
 def test_a_calendar_lookback_is_a_slice_from_its_bound(

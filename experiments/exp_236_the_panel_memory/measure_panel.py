@@ -1,8 +1,8 @@
 """Peak working set of one datamodel-shaped read: build the panel, then window it per session.
 
-usage: measure.py N_INSTRUMENTS full|bounded RUN_START RUN_END [LOOKBACK_DAYS]
-`bounded` emulates the proposed fix by registering the span as [run start - lookback, run end]
-(the store bounds its one scan by the registered span), so the panel holds only the run's horizon.
+usage: measure_panel.py N_INSTRUMENTS full|horizon RUN_START RUN_END [LOOKBACK_DAYS]
+`full` builds the store with no horizon (the registered span, what every run did before record
+235); `horizon` hands the store the run's period, so the panel holds only the run's horizon.
 """
 import ctypes, ctypes.wintypes as w, sys, time, gc
 from datetime import datetime, timedelta, timezone
@@ -51,7 +51,7 @@ if os.environ.get("THREADS"):
 source = SourceSpec.of("equity_daily", here / "equity_daily.parquet")
 first, last = datetime(2015, 1, 2, 16, tzinfo=timezone.utc), datetime(2026, 4, 30, 16, tzinfo=timezone.utc)
 lookback = CalendarLookback(days=days)
-span = (first, last) if mode == "full" else (lookback.lower_bound(run_start), run_end)
+span = (first, last)
 registration = DatasetRegistration(
     dataset_id=dataset_id("equity_daily"), source=source_id("equity_daily"), instrument_field="instrument",
     available_at="available_at", key_fields=("available_at", "instrument"), fields={"close": "close"},
@@ -64,14 +64,20 @@ instruments = tuple(f"A{i:05d}" for i in range(0, 4975, 16))[:n]
 requirement = DataRequirement.of("equity_daily", "close", lookback=lookback)
 
 session = ScanSession()
-store = DuckDbObservationStore(Catalog(), session=session)
+store = (
+    DuckDbObservationStore(Catalog(), session=session)
+    if mode == "full"
+    else DuckDbObservationStore(
+        Catalog(), session=session, horizon=(run_start, run_end), requirements=(requirement,)
+    )
+)
 t0 = time.perf_counter()
 window, access = store.panel_window((requirement,), "close", evaluation_time=run_start, instruments=instruments, consumer_id="probe")
 gc.collect()
 mark(f"panel built ({time.perf_counter() - t0:.1f} s)")
 panel = window.panel
-print(f"  panel: {len(panel.instants)} instants x {len(panel.names)} names; arrow bytes "
-      f"{sum(a.nbytes for a in (panel.columns['close'] if isinstance(panel.columns['close'], dict) else {0: panel.columns['close']}).values()) if not hasattr(panel.columns['close'], 'values') or isinstance(panel.columns['close'], dict) else 0}")
+held = panel.block("close").nbytes if hasattr(panel, "blocks") else sum(a.nbytes for a in panel.columns["close"].values())
+print(f"  panel: {len(panel.instants)} instants x {len(panel.names)} names; held {held / 1e6:.1f} MB")
 # walk the run's sessions the way the loop does: one window per session, touch the matrix if it exists
 at = run_start; touched = 0
 while at <= run_end:

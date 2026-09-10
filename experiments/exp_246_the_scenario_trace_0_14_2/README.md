@@ -112,3 +112,18 @@ One thing the traces show that no record changed: `registered_roster` -> `verify
 start costs 354-407 ms in each single-process run (08 #4496, 10 #7196, 12 #4858) and 19.9 ms in
 the worker (16 #3863). It is the process's first pyarrow parquet read, and it is by design read
 fresh every run (issue 009: a roster grows daily); the page says so on the scene 4 frame.
+
+## What the traces led to
+
+Read for duplicate work rather than for the story (the owner's question, 2026-09-10), the same
+traces showed each callback deriving its source refs twice (`_actual_source_refs` x20 in 08, x71
+in 10) and asking `inputs()` on every decision (x15, x42), a ten-session run reading the whole
+three-year instant column to keep ten instants (`distinct_values` #752), and the record writer
+touching the run lock on every chunk (`heartbeat` x110, x404). The one-callback campaign
+(`docs/refactoring/2026-09-10-the-one-callback-campaign.md`, records `246`-`248`, 0.14.3) closes
+those four; three more candidates were looked at and left (the exchange's memory framed at every
+fill is the contract; `verify_roster`'s cost is the pyarrow import the first record chunk would pay
+instead; the as-loaded re-hash is record 242's decision). Re-traced on the fixed tree with `--force`
+(`traces_after/`, not committed): `_actual_source_refs` 20 -> 10 and 71 -> 37, `inputs` 15 -> 6
+and 42 -> 6, instants read 735 -> 11 and 735 -> 38, calls 27,853 -> 25,913 and 68,066 -> 63,021.
+The page above still shows the traces as they were taken.

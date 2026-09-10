@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
+from vqapr.data.cube import Cube, open_cube, panel_from_cube
 from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
@@ -119,7 +120,16 @@ class ObservationBatch:
 class DuckDbObservationStore:
     """Resolve workspace declarations and execute bounded physical queries through scan.py."""
 
-    __slots__ = ("__catalog", "__digests", "__horizon", "__panels", "__requirements", "__session")
+    __slots__ = (
+        "__catalog",
+        "__cubes",
+        "__digests",
+        "__horizon",
+        "__opened",
+        "__panels",
+        "__requirements",
+        "__session",
+    )
 
     def __init__(
         self,
@@ -128,6 +138,7 @@ class DuckDbObservationStore:
         session: scan.ScanSession | None = None,
         horizon: tuple[datetime, datetime] | None = None,
         requirements: Sequence[DataRequirement] = (),
+        cubes: Path | None = None,
     ) -> None:
         self.__catalog = catalog
         # None keeps the connect-per-query behaviour, so every existing caller and test is
@@ -140,6 +151,11 @@ class DuckDbObservationStore:
         # one year. `None` (a test store, an in-process caller) scans the registered span.
         self.__horizon = horizon
         self.__requirements = tuple(requirements)
+        # The directory a `--jobs` batch baked its cubes into (record `236`), or None. A panel
+        # whose dataset has a cube there, over the same bytes and carrying every field asked
+        # for, is taken from the memory-mapped cube instead of a scan; anything else scans.
+        self.__cubes = cubes
+        self.__opened: dict[str, Cube | None] = {}
         # One store instance lives for exactly one run, and a run's sources are frozen for its
         # whole duration. CallbackHandler._actual_source_refs already refuses a callback that
         # observes two digests for one source, so caching per instance does not weaken that
@@ -218,6 +234,22 @@ class DuckDbObservationStore:
         bounds = self._scan_bounds(source, registration, declared, evaluation_time)
         identity = panel_identity(source_digest, str(first.dataset_id), fields, names, bounds)
         panel = self.__panels.get(identity)
+        cube = self._cube(str(first.dataset_id))
+        if (
+            panel is None
+            and cube is not None
+            and cube.source_digest == source_digest
+            and all(name in cube.kinds for name in fields)
+        ):
+            panel = self.__panels[identity] = panel_from_cube(
+                cube,
+                fields=fields,
+                instruments=instruments,
+                keyed_by_instrument=keyed_by_instrument,
+                identity=identity,
+                source_digest=source_digest,
+                bounds=bounds,
+            )
         if panel is None:
             table = scan.observation_table(
                 source,
@@ -264,6 +296,14 @@ class DuckDbObservationStore:
             max_available_at=window.max_available_at,
         )
         return window, access
+
+    def _cube(self, dataset_id: str) -> Cube | None:
+        """The batch's cube for one dataset, opened once per store; `None` outside a batch."""
+        if self.__cubes is None:
+            return None
+        if dataset_id not in self.__opened:
+            self.__opened[dataset_id] = open_cube(self.__cubes, dataset_id)
+        return self.__opened[dataset_id]
 
     def _scan_bounds(
         self,

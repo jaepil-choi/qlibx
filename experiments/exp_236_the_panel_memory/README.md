@@ -7,6 +7,7 @@ Issue: `docs/issues/report-2026-09-10-a-datamodel-run-holds-memory-proportional-
     uv run python experiments/exp_236_the_panel_memory/measure_panel.py 309 full 2019-01-02 2026-04-30
     uv run python experiments/exp_236_the_panel_memory/measure_panel.py 309 horizon 2025-05-01 2026-04-30
     uv run python experiments/exp_236_the_panel_memory/share_across_processes.py
+    uv run python experiments/exp_236_the_panel_memory/measure_cube.py
 
 `gen_source.py` writes a source of the reported shape: 4,975 names, 2,955 sessions 2015-2026,
 8.0M rows, 407 MB. `measure_panel.py` builds one panel through `DuckDbObservationStore` and walks
@@ -44,3 +45,15 @@ the registered-span scan and two copies per field (Arrow name-major + numpy bloc
 A memory-mapped file is held once in the OS page cache for every process that maps it; RSS
 counts the shared pages in every process and is the wrong number to sum. Pages nobody touches are
 never read.
+
+## A worker's panel from the batch's cube (record 236)
+
+`measure_cube.py` bakes `close` of the synthetic source for all 4,975 names (1.6 s, 132 MB on
+disk) and builds a 7-year run's panel in a fresh process two ways.
+
+| worker | names | panel build | 2,676 windows | private +GB | peak GB |
+|---|---|---|---|---|---|
+| scan (record 235) | 309 | 0.58 s | 0.36 s | 0.074 | 0.17 |
+| cube | 309 | 0.29 s | 0.34 s | 0.007 | 0.17 |
+| scan (record 235) | 4,975 | 1.30 s | 4.04 s | 0.372 | 0.76 |
+| cube | 4,975 | 0.30 s | 3.94 s | 0.013 | 0.17 |

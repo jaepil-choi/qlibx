@@ -85,6 +85,49 @@ def _is_numeric(kind: pa.DataType) -> bool:
     return pa.types.is_floating(kind) or pa.types.is_integer(kind)
 
 
+def placement(
+    table: pa.Table, names: Sequence[str], keyed_by_instrument: bool
+) -> tuple[tuple[datetime, ...], np.ndarray, np.ndarray, np.ndarray]:
+    """Where each row of a scan lands in an `(instants x names)` block.
+
+    The instant axis is every distinct `available_at` the table carries, ascending. Returns it
+    with three arrays: `keep`, true for the rows whose instrument is one of `names`; and for
+    those rows, their instant index and their name index. No row is walked in Python. Shared by
+    `Panel.from_table` and the cube bake (record `236`), so the two lay a field out identically.
+    """
+    available = table.column("available_at").combine_chunks()
+    # pyarrow's stubs omit these kernels; each exists at runtime.
+    distinct = pc.unique(available)  # type: ignore[attr-defined]
+    instants_array = pc.take(distinct, pc.sort_indices(distinct))  # type: ignore[attr-defined]
+    instants = tuple(instants_array.to_pylist())
+    at = pc.index_in(available, value_set=instants_array).to_numpy(  # type: ignore[attr-defined]
+        zero_copy_only=False
+    )
+    if keyed_by_instrument:
+        instrument = table.column("instrument").combine_chunks()
+        value_set = pa.array(names).cast(instrument.type)
+        placed = pc.fill_null(pc.index_in(instrument, value_set=value_set), -1)  # type: ignore[attr-defined]
+        name_index = placed.to_numpy(zero_copy_only=False).astype(np.int64)
+    else:
+        name_index = np.zeros(len(table), dtype=np.int64)
+    keep = name_index >= 0
+    return instants, keep, at.astype(np.int64)[keep], name_index[keep]
+
+
+def dense_block(
+    values: pa.Array,
+    count: int,
+    width: int,
+    keep: np.ndarray,
+    rows: np.ndarray,
+    cols: np.ndarray,
+) -> np.ndarray:
+    """One numeric field as an `(count x width)` float64 matrix, `NaN` where no row landed."""
+    dense = np.full((count, width), np.nan)
+    dense[rows, cols] = pc.cast(values, pa.float64()).to_numpy(zero_copy_only=False)[keep]
+    return dense
+
+
 @dataclass(frozen=True, slots=True)
 class Panel:
     """One dataset's declared fields over a shared instant axis, one block per field.
@@ -140,25 +183,8 @@ class Panel:
         integers, computed for every row at once.
         """
         names = tuple(instruments) if keyed_by_instrument else (NO_INSTRUMENT,)
-        available = table.column("available_at").combine_chunks()
-        # pyarrow's stubs omit these kernels; each exists at runtime.
-        distinct = pc.unique(available)  # type: ignore[attr-defined]
-        instants_array = pc.take(distinct, pc.sort_indices(distinct))  # type: ignore[attr-defined]
-        instants = tuple(instants_array.to_pylist())
+        instants, keep, rows, cols = placement(table, names, keyed_by_instrument)
         count = len(instants)
-        at = pc.index_in(available, value_set=instants_array).to_numpy(  # type: ignore[attr-defined]
-            zero_copy_only=False
-        )
-        if keyed_by_instrument:
-            instrument = table.column("instrument").combine_chunks()
-            value_set = pa.array(names).cast(instrument.type)
-            placed = pc.fill_null(pc.index_in(instrument, value_set=value_set), -1)  # type: ignore[attr-defined]
-            name_index = placed.to_numpy(zero_copy_only=False).astype(np.int64)
-        else:
-            name_index = np.zeros(len(table), dtype=np.int64)
-        keep = name_index >= 0
-        rows = at.astype(np.int64)[keep]
-        cols = name_index[keep]
         blocks: dict[str, np.ndarray] = {}
         kinds: dict[str, pa.DataType] = {}
         columns: dict[str, pa.Array] = {}
@@ -167,11 +193,7 @@ class Panel:
             if _is_numeric(values.type):
                 # The float path: one matrix, nulls as NaN. An integer field rides in it and is
                 # cast back when a cell is handed to a model, so `values[name]` still hands ints.
-                dense = np.full((count, len(names)), np.nan)
-                dense[rows, cols] = pc.cast(values, pa.float64()).to_numpy(zero_copy_only=False)[
-                    keep
-                ]
-                blocks[name] = dense
+                blocks[name] = dense_block(values, count, len(names), keep, rows, cols)
                 kinds[name] = values.type
             else:
                 cells = np.full(len(names) * count, None, dtype=object)

@@ -35,6 +35,7 @@ from vqapr.flow.engine.run_state import FILL_TABLE
 from vqapr.flow.orchestration import (
     COMPLETED,
     FAILED,
+    batch_cubes,
     in_workers,
     require_independent_batch,
     run_registered_datamodel,
@@ -322,28 +323,32 @@ def _run_each_in_workers(
     datamodel_runs = [t for t in targets if definitions[t].datamodel is not None]
     strategy_runs = [t for t in targets if definitions[t].datamodel is None]
     outcomes: dict[str, Any] = {}
-    if datamodel_runs:
-        outcomes.update(
-            in_workers(
-                datamodel_runs,
-                run_registered_datamodel,
-                (replace,),
-                jobs=jobs,
-                store=Path(store_root),
-                root_path=project_root,
+    # The batch bakes each panel-grain dataset it reads once, every worker maps it, and the
+    # files are gone when the batch returns (record `236`, `docs/issues/098`).
+    with batch_cubes(workspace, targets) as cubes:
+        baked = "" if cubes is None else str(cubes)
+        if datamodel_runs:
+            outcomes.update(
+                in_workers(
+                    datamodel_runs,
+                    run_registered_datamodel,
+                    (replace, baked),
+                    jobs=jobs,
+                    store=Path(store_root),
+                    root_path=project_root,
+                )
             )
-        )
-    if strategy_runs:
-        outcomes.update(
-            in_workers(
-                strategy_runs,
-                run_registered_strategy,
-                (replace, positions),
-                jobs=jobs,
-                store=Path(store_root),
-                root_path=project_root,
+        if strategy_runs:
+            outcomes.update(
+                in_workers(
+                    strategy_runs,
+                    run_registered_strategy,
+                    (replace, positions, baked),
+                    jobs=jobs,
+                    store=Path(store_root),
+                    root_path=project_root,
+                )
             )
-        )
     runs = {
         target: _worker_entry(target, definitions[target], outcomes[target], store_root)
         for target in targets
@@ -385,9 +390,7 @@ def _worker_entry(
     return {
         "ok": False,
         "run_id": run_id,
-        "strategies": {
-            outcome.component_id: {"status": FAILED, **dict(outcome.failure or {})}
-        },
+        "strategies": {outcome.component_id: {"status": FAILED, **dict(outcome.failure or {})}},
     }
 
 

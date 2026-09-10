@@ -19,6 +19,14 @@
     "digest": "6e55d76d254911de",
     "kind": "facts"
   },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/datamodels/showcase-model@ec7d081d/datamodel.json": {
+    "digest": "41a79a8242097230",
+    "kind": "facts"
+  },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/run.json": {
+    "digest": "0e681c89af62ae5b",
+    "kind": "facts"
+  },
   "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/datamodels/momentum-model@549831eb/datamodel.json": {
     "digest": "be996ea31629100e",
     "kind": "facts"

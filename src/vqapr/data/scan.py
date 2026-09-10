@@ -801,6 +801,68 @@ def exact_snapshot_rows(
         borrowed.close()
 
 
+def execution_window_table(
+    spec: SourceSpec,
+    *,
+    trade_at_field: str,
+    instrument_field: str,
+    since: object,
+    until: object,
+    instruments: Sequence[str],
+    fields: Mapping[str, str],
+    session: ScanSession | None = None,
+) -> Any:
+    """Every execution row with `since <= trade_at <= until` for `instruments`, as one Arrow table.
+
+    The window read behind `ExecutionSnapshots` (record `222`): the same projection
+    `exact_snapshot_rows` makes for one instant, over a span of them, ordered by instant then
+    instrument so a caller can slice one instant's rows out by offset. Arrow, not rows: the
+    caller converts the slice it needs, when it needs it.
+    """
+    if not instruments:
+        raise ValueError("an execution window requires at least one instrument")
+    if not fields:
+        raise ValueError("an execution window requires at least one field")
+    trade_at = _quote(trade_at_field)
+    instrument = _quote(instrument_field)
+    placeholders = ", ".join("?" for _ in instruments)
+    projections = [
+        f"{trade_at} AS {_quote('trade_at')}",
+        f"{instrument} AS {_quote('instrument')}",
+        *(f"{_field_sql(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
+    ]
+    borrowed = _Borrowed(spec, session)
+    try:
+        cursor = borrowed.connection.execute(
+            f"SELECT {', '.join(projections)} FROM {_relation(spec)} "
+            f"WHERE {trade_at} >= ? AND {trade_at} <= ? AND {instrument} IN ({placeholders}) "
+            f"ORDER BY {trade_at}, {instrument}",
+            [since, until, *instruments],
+        )
+        return cursor.fetch_arrow_table()
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage=Stage.READ,
+            failures=[
+                Failure.bounded(
+                    code="source.execution_snapshot_unreadable",
+                    status=Status.UNAVAILABLE,
+                    requirement="the exact execution snapshot fields must be queryable",
+                    observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm {trade_at_field!r}, {instrument_field!r}, and the requested "
+                        f"fields all exist with those exact names in '{spec.path}', then retry"
+                    ),
+                    cause=exc,
+                )
+            ],
+            mutation=False,
+        ) from exc
+    finally:
+        borrowed.close()
+
+
 def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
     """logical key가 null 없이 유일한지 확인한다.
 

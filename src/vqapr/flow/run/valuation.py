@@ -14,7 +14,6 @@ from decimal import Decimal
 from vqapr.account.marking import SelectedMark
 from vqapr.authoring.records import InvocationRecorder
 from vqapr.domain.account_state import AccountMark, AccountSnapshot
-from vqapr.exchange.execution_table import exact_execution_snapshot
 from vqapr.flow.engine.artifacts import (
     MarkEvidence,
     SimulationFailureKind,
@@ -213,13 +212,12 @@ class ValuationHandler:
             owner=execution_table,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            snapshot = exact_execution_snapshot(
-                execution_table.table,
-                target_at=instant,
+            snapshot = self._context.execution_snapshot(
+                instant,
                 target_instruments=(),
                 held_instruments=held_instruments,
                 trade_price=execution_table.fill.trade_price,
-                session=self._context.scan_session,
+                with_reference=False,
             )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,

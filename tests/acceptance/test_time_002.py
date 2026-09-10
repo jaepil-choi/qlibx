@@ -1388,7 +1388,9 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         raise RuntimeError(f"{boundary} fault")
 
     if boundary == "data":
-        monkeypatch.setattr(execution_phase, "exact_execution_snapshot", fail)
+        # The fill reads its snapshot through the context since record `222` (the execution
+        # table is read ahead along the market clock), so that method is the data seam.
+        monkeypatch.setattr(execution_phase.FlowContext, "execution_snapshot", fail)
     elif boundary == "order":
         monkeypatch.setattr(execution_phase, "plan_orders", fail)
     elif boundary == "exchange":

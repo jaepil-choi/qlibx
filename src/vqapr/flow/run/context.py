@@ -14,7 +14,7 @@ from __future__ import annotations
 import inspect
 import time
 import unicodedata
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -34,6 +34,11 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import MarkBatch, ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
+from vqapr.exchange.execution_table import (
+    ExactExecutionSnapshot,
+    ExecutionSnapshots,
+    exact_execution_snapshot,
+)
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
@@ -466,6 +471,9 @@ class FlowContext:
     # measurements are the mark instants whose NAV already reached `vqapr.account`.
     recorded_measurements: set[datetime] = field(default_factory=set)
     horizon: ExecutionHorizon | None = None
+    snapshots: ExecutionSnapshots | None = None
+    """The execution table read ahead along the market clock (record `222`), built on the first
+    snapshot a handler asks for, once the horizon is known."""
     timing: dict[str, float] = field(default_factory=dict)
 
     @contextmanager
@@ -521,6 +529,56 @@ class FlowContext:
         """
         zone = self.layer.agenda.timezone
         return instant.astimezone(ZoneInfo(zone)) if zone else instant
+
+    def execution_snapshot(
+        self,
+        target_at: datetime,
+        *,
+        target_instruments: Sequence[str],
+        held_instruments: Sequence[str],
+        trade_price: str,
+        with_reference: bool = True,
+    ) -> ExactExecutionSnapshot:
+        """The venue's rows at one market-clock instant: the fill's and the valuation's one read.
+
+        Served from `snapshots`, the table read ahead in windows of the clock (record `222`),
+        which exists once the horizon does -- `events()` reads it before the first market instant
+        is handled. Without a horizon, or for a price the run did not freeze, the exact
+        per-instant read answers instead; both return the same snapshot.
+        """
+        execution_table = self.frozen_run.execution
+        if execution_table is None:
+            raise RuntimeError("an execution snapshot requires a frozen execution dataset")
+        if self.snapshots is None and self.horizon is not None:
+            account = self.state.current.account
+            held = () if account is None else tuple(account.snapshot.positions)
+            self.snapshots = ExecutionSnapshots(
+                execution_table.table,
+                instants=self.horizon.instants,
+                # The run's declared names and whatever the opening book holds: a fill's targets
+                # are inside the first (`_validate_intent_authority`) and its holdings inside the
+                # union, so every read stays within the window; one that does not falls through.
+                instruments=(*self.frozen_run.instruments, *held),
+                trade_price=execution_table.fill.trade_price,
+                reference_price=self.reference_price,
+                session=self.scan_session,
+            )
+        if self.snapshots is None or trade_price != execution_table.fill.trade_price:
+            return exact_execution_snapshot(
+                execution_table.table,
+                target_at=target_at,
+                target_instruments=target_instruments,
+                held_instruments=held_instruments,
+                trade_price=trade_price,
+                reference_price=self.reference_price if with_reference else None,
+                session=self.scan_session,
+            )
+        return self.snapshots.at(
+            target_at,
+            target_instruments=target_instruments,
+            held_instruments=held_instruments,
+            with_reference=with_reference,
+        )
 
     @contextmanager
     def guard(

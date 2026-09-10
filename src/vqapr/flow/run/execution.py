@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from vqapr.domain.instruments import InstrumentRoster, require_declared
 from vqapr.domain.ledger import fill_entries
-from vqapr.exchange.execution_table import ExactExecutionSnapshot, exact_execution_snapshot
+from vqapr.exchange.execution_table import ExactExecutionSnapshot
 from vqapr.exchange.listings import ExchangeRulesView
 from vqapr.exchange.planning import plan_orders
 from vqapr.exchange.venue import ExecutionCall
@@ -72,14 +72,11 @@ class ExecutionHandler:
             # zero-dealt evidence, and the Exchange publishes it as ABSENT. Refusing here would
             # end the run on the first delisting, which in a 3,000-name universe is the first
             # week.
-            return exact_execution_snapshot(
-                execution_table.table,
-                target_at=pending.target.target_at,
+            return self._context.execution_snapshot(
+                pending.target.target_at,
                 target_instruments=target_instruments,
                 held_instruments=held_instruments,
                 trade_price=pending.target.trade_price,
-                reference_price=self._context.reference_price,
-                session=self._context.scan_session,
             )
 
         with self._context.due_boundary(

@@ -680,3 +680,128 @@ def test_the_writer_never_walks_the_rows_of_a_chunk(tmp_path: Path, monkeypatch)
         assert writer.counts()["vqapr.account"] == {"rows": 2, "instants": 1}
     finally:
         writer.release()
+
+
+# --------------------------------------------------------------------------------------------
+# Record `222`: the execution table is read ahead along the market clock. One instant used to be
+# one query with every name in its `IN` list -- 390 a day on a minute table. `ExecutionSnapshots`
+# reads a window of instants per query and answers each instant from it, with the rows and the
+# absence partitions `exact_execution_snapshot` would have produced.
+# --------------------------------------------------------------------------------------------
+
+
+def _execution_table(tmp_path: Path):
+    """Six minutes of two names; B twice at 09:02 (a duplicate), A absent at 09:03."""
+    import duckdb
+
+    from vqapr.exchange.execution_table import ExecutionTableSpec
+
+    path = tmp_path / "execution.parquet"
+    rows = []
+    for minute in range(6):
+        for name in ("A", "B"):
+            if name == "A" and minute == 3:
+                continue
+            rows.append(f"(TIMESTAMPTZ '2024-03-05 09:0{minute}:00+09', '{name}', true, {100 + minute}.0)")
+    rows.append("(TIMESTAMPTZ '2024-03-05 09:02:00+09', 'B', false, 999.0)")
+    con = duckdb.connect()
+    try:
+        con.execute(
+            "COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close FROM (VALUES "
+            + ",\n".join(rows)
+            + ") AS t(trade_at, instrument, is_tradable, close)) "
+            f"TO '{path.as_posix()}' (FORMAT PARQUET)"
+        )
+    finally:
+        con.close()
+    return ExecutionTableSpec(
+        source=SourceSpec.of("venue-source", path),
+        trade_at_field="trade_at",
+        instrument_field="instrument",
+        is_tradable_field="is_tradable",
+        price_fields={"close": "close"},
+    )
+
+
+def _minutes():
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    first = datetime(2024, 3, 5, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+    return tuple(first + timedelta(minutes=k) for k in range(6))
+
+
+def test_a_window_answers_every_instant_of_the_clock_with_one_query(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Six instants, one query; each answer equal to the exact per-instant read."""
+    from vqapr.exchange import execution_table as module
+    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+
+    spec = _execution_table(tmp_path)
+    queries = 0
+    original = scan.execution_window_table
+
+    def counting(*args, **kwargs):
+        nonlocal queries
+        queries += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module.scan, "execution_window_table", counting)
+    snapshots = ExecutionSnapshots(spec, instants=_minutes(), instruments=("A", "B"), trade_price="close")
+    for at in _minutes():
+        ahead = snapshots.at(at, target_instruments=("A",), held_instruments=("B",))
+        exact = exact_execution_snapshot(
+            spec, target_at=at, target_instruments=("A",), held_instruments=("B",), trade_price="close"
+        )
+        assert ahead == exact, at
+    assert queries == 1, "six instants inside one window are one read"
+    assert snapshots.at(_minutes()[2], target_instruments=("B",), held_instruments=()).duplicate_instruments == ("B",)
+    assert snapshots.at(_minutes()[3], target_instruments=("A",), held_instruments=()).missing_target_instruments == ("A",)
+
+
+def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from datetime import timedelta
+
+    from vqapr.exchange import execution_table as module
+    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+
+    spec = _execution_table(tmp_path)
+    windows = 0
+    exact_reads = 0
+    window_read = scan.execution_window_table
+    exact_read = scan.exact_snapshot_rows
+
+    def counting_window(*args, **kwargs):
+        nonlocal windows
+        windows += 1
+        return window_read(*args, **kwargs)
+
+    def counting_exact(*args, **kwargs):
+        nonlocal exact_reads
+        exact_reads += 1
+        return exact_read(*args, **kwargs)
+
+    minutes = _minutes()
+    off_the_clock = minutes[0] + timedelta(seconds=30)
+    expected_outside = exact_execution_snapshot(
+        spec, target_at=off_the_clock, target_instruments=("A",), held_instruments=(), trade_price="close"
+    )
+    monkeypatch.setattr(module.scan, "execution_window_table", counting_window)
+    monkeypatch.setattr(module.scan, "exact_snapshot_rows", counting_exact)
+    snapshots = ExecutionSnapshots(
+        spec, instants=minutes, instruments=("A", "B"), trade_price="close", window=4
+    )
+    for at in minutes:
+        snapshots.at(at, target_instruments=("A", "B"), held_instruments=())
+    assert windows == 2, "six instants over a window of four are two reads"
+    assert exact_reads == 0
+
+    outside = snapshots.at(off_the_clock, target_instruments=("A",), held_instruments=())
+    assert outside == expected_outside
+    unknown = snapshots.at(minutes[0], target_instruments=("Z",), held_instruments=("A",))
+    assert unknown.missing_target_instruments == ("Z",)
+    assert exact_reads == 2, "an instant off the clock and a name outside the window fall through"
+

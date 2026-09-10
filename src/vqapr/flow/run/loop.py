@@ -44,6 +44,7 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.instruments import InstrumentRoster
 from vqapr.domain.values import require_tz_aware
+from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
@@ -347,6 +348,7 @@ def strategy_loop(
     on_progress: Callable[[], None] | None = None,
     registry: InstrumentRoster | None = None,
     record_account_positions: bool = True,
+    horizon: ExecutionHorizon | None = None,
 ) -> RunLoop[OccurrenceTrace, SimulationResult]:
     """A strategy run, assembled: two clocks -- the strategy's agenda and the market's instants.
 
@@ -416,6 +418,9 @@ def strategy_loop(
         reference_price=next(iter(prices), None),
         record_account_positions=record_account_positions,
         account_history_declaration=declared_history,
+        # The execution horizon the verification already cut (record `242`), or `None` and
+        # the callback reads it once on the first accepted intent (record `162`).
+        horizon=horizon,
     )
     callback = CallbackHandler(context)
     loop = RunLoop(

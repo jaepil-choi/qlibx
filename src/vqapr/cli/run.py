@@ -31,6 +31,7 @@ from vqapr.domain.errors import (
     status_of,
 )
 from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.flow.declaration.verify import verify_run
 from vqapr.flow.engine.run_state import FILL_TABLE
 from vqapr.flow.orchestration import (
     COMPLETED,
@@ -43,7 +44,7 @@ from vqapr.flow.orchestration import (
     run_registered_strategy,
 )
 from vqapr.project.store import WORKSPACE_DIRECTORY
-from vqapr.public import RunDefinition, Workspace, preflight_run
+from vqapr.public import RunDefinition, Workspace
 from vqapr.public import run as execute_run
 from vqapr.record import (
     RunRecordConflict,
@@ -197,7 +198,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
     # this verb and a Python caller refuse the same run for the same reasons (record `168`); a
     # refusal arrives as the `VqaprError` below deliberately lets through.
     try:
-        frozen = preflight_run(workspace, definition)
+        frozen, resources = verify_run(workspace, definition).require_ready()
     except (TypeError, ValueError) as refused:
         # `check` renders exactly this as a bounded refusal; letting it escape here rendered the
         # SAME judgment as `stage: "unhandled"` (`docs/issues/archive/076`).
@@ -222,6 +223,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
             replace_record=replace,
             record_account_positions=not getattr(args, "no_account_positions", False),
             workspace=workspace,
+            resources=resources,
         )
     except (RunRecordLive, RunRecordExists, RunRecordConflict) as refused:
         raise _record_refusal(refused, frozen, target) from refused

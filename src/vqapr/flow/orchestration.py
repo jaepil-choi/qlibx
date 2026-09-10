@@ -56,7 +56,7 @@ from vqapr.extension.loading import (
     load_strategy_model,
 )
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.declaration.verify import verify_run
+from vqapr.flow.declaration.verify import RunResources, verify_run
 from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.freeze import (
@@ -234,8 +234,14 @@ def run(
     replace_record: bool = False,
     record_account_positions: bool = True,
     workspace: Workspace | None = None,
+    resources: RunResources | None = None,
 ) -> RunResult:
     """Execute a frozen run: each of its strategies (or those named), each in its own flow.
+
+    `resources` is what the verification loaded and read for this frozen run
+    (`verify.RunVerdict.resources`, record `242`): the strategy, the venue, the rules and the
+    execution horizon. Handed in, the run imports and scans none of them again; omitted (a
+    caller holding only a `FrozenRun`), it loads them itself as it always did.
 
     `workspace` is the document the caller already opened, when it did: the roster is read
     through it rather than by opening the document again (`docs/issues/archive/070`), so a command
@@ -258,6 +264,8 @@ def run(
         raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
     root_path = Path(project_root)
     frozen = frozen_run
+    if resources is not None and resources.run_identity != frozen.identity:
+        raise ValueError("resources were loaded for another frozen run")
     _own_output_or_refuse(
         workspace if workspace is not None else root_path, frozen, replace_record=replace_record
     )
@@ -267,6 +275,7 @@ def run(
             frozen,
             store_root=store_root,
             replace_record=replace_record,
+            resources=resources,
         )
     if frozen.initial_account_snapshot is None or frozen.initial_account_mode is None:
         raise ValueError("public run requires frozen initial account authority")
@@ -300,6 +309,7 @@ def run(
                 record_account_positions=record_account_positions,
                 roster=roster,
                 workspace=workspace,
+                resources=resources,
             )
         except SimulationFailure as failed:
             # The run's refusal is its outcome, reported rather than raised
@@ -338,6 +348,7 @@ def _run_datamodels(
     *,
     store_root: str | Path | None,
     replace_record: bool,
+    resources: RunResources | None = None,
 ) -> RunResult:
     """Execute a datamodel run: its one datamodel, in its own flow.
 
@@ -357,7 +368,12 @@ def _run_datamodels(
     records: dict[str, Mapping[str, object]] = {}
     for layer in layers:
         result, record = _run_datamodel(
-            root_path, frozen, layer, store=store, replace_record=replace_record
+            root_path,
+            frozen,
+            layer,
+            store=store,
+            replace_record=replace_record,
+            resources=resources,
         )
         results[layer.component_id] = result
         if record is not None:
@@ -656,7 +672,7 @@ def run_registered_datamodel(
     # The same door the sequential path passes: the judgments too, not the freeze alone. A
     # batch worker used to freeze without asking them, so `run a b --jobs 2` ran what `check`
     # and `run a` refused (the `docs/issues/archive/015` gap, again, one door over).
-    frozen = verify_run(workspace, workspace.run_definition(run_id)).require_frozen()
+    frozen, resources = verify_run(workspace, workspace.run_definition(run_id)).require_ready()
     layer = frozen.datamodel
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a datamodel run")
@@ -667,6 +683,7 @@ def run_registered_datamodel(
         store=Path(store_root),
         replace_record=replace_record,
         cubes=Path(cubes) if cubes else None,
+        resources=resources,
     )
     assert record is not None
     return record
@@ -770,6 +787,7 @@ def _run_datamodel(
     store: Path | None,
     replace_record: bool,
     cubes: Path | None = None,
+    resources: RunResources | None = None,
 ) -> tuple[DataModelResult, Mapping[str, object] | None]:
     """Execute exactly one datamodel of a frozen run: its sessions, its dataset, its record.
 
@@ -778,7 +796,12 @@ def _run_datamodel(
     a record that said "wrote dataset X" beside a registration that never happened would be the
     invisibility `059` measured.
     """
-    model = load_data_model(layer.component, project_root=root_path)
+    # The instance the verification loaded, when the caller handed it over (record `242`).
+    model = (
+        resources.datamodel
+        if resources is not None and resources.datamodel is not None
+        else load_data_model(layer.component, project_root=root_path)
+    )
     as_loaded = {layer.component_id: as_loaded_fingerprint(layer.component, project_root=root_path)}
     if tuple(model.requirements()) != layer.requirements:
         raise ValueError("loaded DataModel requirements drifted from FrozenRun")
@@ -858,7 +881,7 @@ def run_registered_strategy(
     the strategies that had finished (`docs/issues/archive/073`).
     """
     workspace = Workspace.open(project_root)
-    frozen = verify_run(workspace, workspace.run_definition(run_id)).require_frozen()
+    frozen, resources = verify_run(workspace, workspace.run_definition(run_id)).require_ready()
     layer = frozen.strategy
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a strategy run")
@@ -872,6 +895,7 @@ def run_registered_strategy(
             record_account_positions=record_account_positions,
             roster=registered_roster(workspace),
             cubes=Path(cubes) if cubes else None,
+            resources=resources,
         )
     except SimulationFailure as failed:
         return _failed_outcome(layer.component_id, failed)
@@ -903,6 +927,7 @@ def _run_strategy(
     roster: RegisteredRoster | None,
     workspace: Workspace | None = None,
     cubes: Path | None = None,
+    resources: RunResources | None = None,
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
@@ -911,7 +936,14 @@ def _run_strategy(
     the command opened, when it did, so publishing the allocation registers through that one
     open rather than a second.
     """
-    strategy = load_strategy_model(layer.config.component, project_root=root_path)
+    # The instances the verification loaded, when the caller handed them over (record `242`);
+    # otherwise loaded here, once, as before. Either way the run's own `as_loaded` receipt
+    # below fingerprints the bytes on disk now.
+    strategy = (
+        resources.strategy
+        if resources is not None and resources.strategy is not None
+        else load_strategy_model(layer.config.component, project_root=root_path)
+    )
     # `run` refused a strategy run frozen without a venue or an initial account before
     # dispatching here; a worker process rebuilds the frozen run and re-states that.
     if frozen.exchange is None:
@@ -920,8 +952,17 @@ def _run_strategy(
     initial_mode = frozen.initial_account_mode
     if initial_snapshot is None or initial_mode is None:
         raise RuntimeError("a frozen strategy run reached execution without an initial account")
-    exchange = load_exchange(frozen.exchange, project_root=root_path)
-    rules = tuple(load_compliance(ref, project_root=root_path) for ref in layer.compliance.rules)
+    exchange = (
+        resources.exchange
+        if resources is not None and resources.exchange is not None
+        else load_exchange(frozen.exchange, project_root=root_path)
+    )
+    rules = (
+        resources.rules
+        if resources is not None and len(resources.rules) == len(layer.compliance.rules)
+        else tuple(load_compliance(ref, project_root=root_path) for ref in layer.compliance.rules)
+    )
+    horizon = resources.horizon if resources is not None else None
     # What was ACTUALLY loaded, computed beside the loads that read it.
     #
     # Since the drift refusal went (issue 009), an edited component runs instead of being
@@ -1006,6 +1047,7 @@ def _run_strategy(
             ),
             exchange=exchange,
             compliance=rules,
+            horizon=horizon,
             scan_session=session,
             # The strategy's liveness signal. Without it the record's lock is stamped once at
             # `open` and never touched again, so any run longer than `LOCK_STALE_AFTER` reads as

@@ -1,0 +1,8 @@
+# A rule written for 0.10.0: observe(self, call, account). 0.11.0 refuses it at registration.
+components:
+  stale-cap:
+    kind: compliance
+    path: stale_rule.py
+    object_name: StaleCap
+    config:
+      compliance_id: stale-cap

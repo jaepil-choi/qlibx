@@ -1,0 +1,30 @@
+components:
+  sample-features:
+    kind: datamodel
+    path: features.py
+    object_name: SampleFeatures
+runs:
+  sample-features-run:
+    instruments:
+    - K000001
+    - K000002
+    - K000003
+    - K000004
+    - K000005
+    - K000006
+    - K000007
+    - K000008
+    - K000009
+    - K000010
+    start: '2022-01-04T00:00:00+09:00'
+    end: '2022-01-25T23:00:00+09:00'
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d
+      at: '16:00'
+      days_from: sample-prices
+    writes: sample-features-values
+    datamodel:
+      component: sample-features
+      value_fields:
+      - value

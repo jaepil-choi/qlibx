@@ -18,7 +18,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import (
     DECLARABLE_FIELD_TYPE_NAMES,
     DECLARABLE_FIELD_TYPES,
@@ -27,6 +27,7 @@ from vqapr.data.scan import (
 )
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import AccessRecord
+from vqapr.data.validation import verify_source
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.shapes import Grain, Row, Rows, normalize_rows
@@ -496,7 +497,7 @@ class RunOutput:
         try:
             # The rows land here, once, and only now: a dataset that is registered is complete.
             self._seal()
-            diagnosis, _, registration = validate(registration, source)
+            diagnosis, _, registration = verify_source(registration, source)
             diagnosis.raise_if_failed()
             with Workspace.transaction(workspace.project_root) as transaction:
                 transaction.register_dataset(registration, source)

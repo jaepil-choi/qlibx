@@ -21,7 +21,6 @@ from vqapr.domain.values import ModelMemory, require_tz_aware
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
-    validate_execution_table,
 )
 from vqapr.exchange.listings import TradeRule
 from vqapr.exchange.venue import Exchange
@@ -80,9 +79,7 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
                 return (session.astimezone(zone) if session.tzinfo is not None else session).date()
             return session
 
-        sessions = tuple(
-            session for session in sessions if first <= _local_date(session) <= last
-        )
+        sessions = tuple(session for session in sessions if first <= _local_date(session) <= last)
     return OperationAgenda.expand(
         agenda_id=agenda_id(definition.agenda_id),
         days=sessions,
@@ -115,7 +112,9 @@ def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSp
     """
     if not isinstance(requirement, DataRequirement):
         raise TypeError("requirement must be a DataRequirement")
-    registration = workspace.dataset(str(requirement.dataset_id))
+    # Measured at registration and unchanged since (record `234`): the only physical question
+    # preflight asks of a source is its identity.
+    registration = workspace.require_verified(str(requirement.dataset_id))
     require_declared(registration)
     mismatch = lookback_fits_grain(requirement.lookback, registration.grain)
     if mismatch is not None:
@@ -139,7 +138,7 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
     """
     binding = definition.execution
     assert binding is not None
-    registration = workspace.dataset(binding.dataset)
+    registration = workspace.require_verified(binding.dataset)
     require_declared(registration)
     role = registration.execution
     if role is None:
@@ -175,8 +174,7 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
                     code="execution.price_not_a_field",
                     status=Status.INVALID,
                     requirement=(
-                        "the run's trade_price must be a numeric field of the "
-                        "execution dataset"
+                        "the run's trade_price must be a numeric field of the execution dataset"
                     ),
                     observed=(
                         f"trade_price {fill.trade_price!r}; {binding.dataset!r} exposes "
@@ -191,6 +189,36 @@ def bound_execution_table(workspace: Workspace, definition: RunDefinition) -> Ex
             ],
             mutation=False,
             retry_precondition="name a price field the execution dataset exposes, then retry",
+        )
+    # Registration measured which prices are finite and positive wherever a row is tradable
+    # (record `234`); the run's choice is judged against that fact here, where the choice is
+    # made, instead of scanning the table again for the one price it chose.
+    positive = registration.execution_prices or ()
+    if fill.trade_price not in positive:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="execution.price_not_positive",
+                    status=Status.PRECONDITION,
+                    requirement=(
+                        "the run's trade_price must be finite and positive on every tradable "
+                        "row of the execution dataset"
+                    ),
+                    observed=(
+                        f"trade_price {fill.trade_price!r}; registration measured "
+                        f"{', '.join(positive) or 'no field'} as positive on every tradable "
+                        f"row of {binding.dataset!r}"
+                    ),
+                    fix=(
+                        f"repair {fill.trade_price!r} in the prepared source and register "
+                        f"{binding.dataset!r} again, or fill at one of "
+                        f"{', '.join(positive) or 'the fields the table can offer'}"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="fix the execution price or choose another, then retry",
         )
     return ExecutionTable(
         registration.dataset_id,
@@ -236,9 +264,7 @@ def _validate_initial_model_state(
     component_id = component.component_id
 
     def staged(step: str) -> ValueError:
-        return ValueError(
-            f"strategy initial payload for {component_id!r} cannot be staged: {step}"
-        )
+        return ValueError(f"strategy initial payload for {component_id!r} cannot be staged: {step}")
 
     try:
         strategy.memory = memory
@@ -516,10 +542,7 @@ def _require_execution_authority(definition: RunDefinition) -> None:
                     "execution price is required even when the Strategy reads no observation "
                     "dataset"
                 ),
-                observed=(
-                    f"exchange={definition.exchange!r}, "
-                    f"execution={definition.execution!r}"
-                ),
+                observed=(f"exchange={definition.exchange!r}, execution={definition.execution!r}"),
                 fix=(
                     "declare both an Exchange and `execution: {dataset, fill}` on the "
                     "RunDefinition before calling preflight_run"
@@ -772,7 +795,6 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     require_declared_roster(workspace, run_id=definition.run_id)
     loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
     execution_table = bound_execution_table(workspace, definition)
-    validate_execution_table(execution_table).raise_if_failed()
     _validate_execution_requirements(loaded_exchange, execution_table)
     _validate_instrument_universe(definition.instruments, loaded_exchange)
     _validate_initial_account(
@@ -811,6 +833,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     return FrozenRun(
         run_id=definition.run_id,
         writes=definition.writes,
+        source_digests={
+            str(source.source_id): workspace.source_digest(source) for source in sources
+        },
         strategy=strategies[0],
         exchange=exchange,
         execution=execution_table,
@@ -859,6 +884,9 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     return FrozenRun(
         run_id=definition.run_id,
         writes=definition.writes,
+        source_digests={
+            str(source.source_id): workspace.source_digest(source) for source in sources
+        },
         datamodel=datamodels[0],
         start=start,
         end=end,

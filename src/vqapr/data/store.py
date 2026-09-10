@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -21,7 +20,7 @@ from vqapr.data.lookback import (
 from vqapr.data.panel import Panel, panel_identity
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
-from vqapr.data.sources import SourceSpec
+from vqapr.data.sources import SourceSpec, physical_digest
 from vqapr.domain.identifiers import DatasetId
 from vqapr.domain.shapes import Grain, Rows, normalize_rows
 from vqapr.domain.values import require_tz_aware
@@ -31,22 +30,6 @@ class DatasetCatalog(Protocol):
     def dataset(self, raw_dataset_id: str) -> DatasetRegistration: ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
-
-
-def physical_digest(path: Path) -> str:
-    """The sha256 of a source's parquet bytes: what a registration's id and path stand for.
-
-    Public since record `139`: `run.json` records it per source (testbed A7), so a run says which
-    bytes it read and not only which path it was pointed at.
-    """
-    files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
-    if not files:
-        raise FileNotFoundError(f"source has no readable parquet bytes: {path}")
-    digest = hashlib.sha256()
-    for file_path in files:
-        with file_path.open("rb") as stream:
-            hashlib.file_digest(stream, lambda: digest)
-    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

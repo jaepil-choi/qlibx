@@ -25,19 +25,19 @@ binding, and the judgments derive the one agenda the run fires on from exactly t
 from __future__ import annotations
 
 import hashlib
-
-import duckdb
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
+import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
 from vqapr.cli.check import CODES, check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
+from vqapr.data.validation import verify_source
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import FailureSource
 from vqapr.extension.component import ComponentKind, ComponentRef
@@ -141,21 +141,27 @@ def _venue_dataset(
         )
     finally:
         con.close()
+    # A real table is measured through the one door (record `234`): the run that reads it asks
+    # for the digest registration kept, and a hand-registered table would be refused as
+    # `dataset.unverified` before the ordering judgment could look at its rows.
+    source = SourceSpec.of(f"{dataset_id}-src", exec_dir)
+    diagnosis, _, measured = verify_source(
+        DatasetRegistration.of(
+            dataset_id,
+            f'{dataset_id}-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        source,
+    )
+    diagnosis.raise_if_failed()
     with Workspace.transaction(root) as t:
-        t.register_dataset(
-            DatasetRegistration.of(
-                dataset_id,
-                f'{dataset_id}-src',
-                instrument_field="instrument",
-                available_at="trade_at",
-                grain="instrument_instant",
-                key_fields=("trade_at", "instrument"),
-                fields={"close": "close", "is_tradable": "is_tradable"},
-                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
-                execution={"is_tradable": "is_tradable"},
-            ).with_span(*_SPAN),
-            SourceSpec.of(f"{dataset_id}-src", exec_dir),
-        )
+        t.register_dataset(measured, source)
 
 
 def _fill(fill_at: str = "15:30", dataset: str = "my-exec") -> RunExecution:
@@ -283,6 +289,29 @@ def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: 
     assert body["ok"] is False
     reported = {entry["code"] for entry in body["failures"]}
     assert reported >= FOUR, f"a judgment did not report its own defect: {sorted(reported)}"
+
+
+def test_check_reads_no_file_content(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Record `234`: `check` judged the execution table by scanning it again for the schema, the
+    key and the price -- 11.8 s of the sample project's `check` trace (`docs/issues/095`). Every
+    fact it needs was measured at registration; what it verifies now is the file's identity."""
+    from vqapr.data import validation
+
+    scans: list[str] = []
+    for name in ("describe", "describe_projection", "key_check", "span_check", "finite_check",
+                 "positive_finite_when_true"):
+        original = getattr(validation.scan, name)
+
+        def counting(*args, _name=name, _original=original, **kwargs):
+            scans.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(validation.scan, name, counting)
+
+    body = check(RUN, workspace)
+
+    assert {entry["code"] for entry in body["failures"]} >= FOUR
+    assert scans == [], "check scanned a file registration had already measured"
 
 
 def test_each_judgment_carries_the_fields_a_reader_acts_on(workspace: Path) -> None:

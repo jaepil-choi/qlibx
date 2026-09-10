@@ -10,7 +10,8 @@ import duckdb
 import pytest
 
 from vqapr.account.account import AccountMode
-from vqapr.data.datasets import DatasetRegistration, validate
+from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.validation import verify_source
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
@@ -225,7 +226,7 @@ def _execution_exchange(
             execution={"is_tradable": "is_tradable"},
         )
         source = SourceSpec.of("execution-source", execution_path)
-        diagnosis, _, measured = validate(registration, source)
+        diagnosis, _, measured = verify_source(registration, source)
         diagnosis.raise_if_failed()
         with Workspace.transaction(workspace) as t:
             t.register_dataset(measured, source)

@@ -518,7 +518,9 @@ package는 그것이 어떤 가정에서 나왔는지 묻지도 평가하지도 
 
 - **없으면**: 규칙을 config로 받아 평가하는 경로가 생기고, 그 평가가 읽기마다 돌며, 같은 의미를
   표현하는 방법이 둘(컬럼 vs 규칙)이 되어 소비자가 어느 쪽인지 알아야 한다.
-- **그래서 `data/availability.py`가 없다.** 남는 것이 스키마 검증뿐이라 `datasets.py`와 `scan.py`가 한다.
+- **그래서 `data/availability.py`가 없다.** 남는 것이 스키마 검증뿐이고, 그것은 `data/validation.py`
+  한 문이 한다(기록 `234`): 파일은 workspace에 들어오는 문에서 한 번 재고, 이후의 모든 읽기는 내용이
+  아니라 identity(digest)를 대조한다.
 
 #### `query`를 두지 않는다
 
@@ -2893,12 +2895,13 @@ src/vqapr/
 │   └── _validation.py  140   예약 키 · 저자 선언 검증
 │
 ├── data/            그때 무엇을 읽을 수 있는가 (층 10)
-│   ├── sources.py       52   SourceSpec — 물리 배치
-│   ├── datasets.py    1074   DatasetRegistration + 등록 문의 판정 전부. execution role 포함
+│   ├── sources.py       70   SourceSpec — 물리 배치 · physical_digest
+│   ├── datasets.py     560   DatasetRegistration — 선언과 측정된 사실(span · source_digest · execution_prices). 검사는 없다
+│   ├── validation.py   833   **물리 읽기의 한 문** — verify_source(한 번 재기) · require_verified(digest 대조, 스캔 없음) · verify_roster — 기록 `234`
 │   ├── lookback.py     170   RowsLookback · InstantsLookback · CalendarLookback. **미래 방향 부재가 계약**
 │   ├── requirements.py  55   DataRequirement — 소비자가 선언한다
 │   ├── resolution.py    44   requirement → 물리 질의
-│   ├── scan.py        1471   SourceSpec을 여는 유일한 곳
+│   ├── scan.py        1652   SourceSpec을 여는 유일한 곳. 검사 커널(describe · key_check · span_check · finite_check · positive_finite_when_true)은 validation.py만 부른다
 │   ├── store.py        414   ObservationStore + duckdb 구현
 │   ├── panel.py       ~400   필드마다 블록 하나(name-major Arrow 배열) · `matrix()` · 벡터화된 counts/current/latest — 기록 `232`
 │   └── windows.py      215   ModelWindow · AccessRecord
@@ -2915,7 +2918,7 @@ src/vqapr/
 │   ├── planning.py     489   plan_orders — intended → requested. **함수** (닫힘)
 │   ├── listings.py     608   TradeRule · ExchangeRulesView · TradeTerms — 종목 사전에 묶인다
 │   ├── conventions.py  233   FillRule · ExactExecutionTarget — 결정 이후 첫 시장 시계 점
-│   ├── execution_table.py 544 ExecutionTableSpec + 집합 단위 점 조회 + 시장 시계 horizon
+│   ├── execution_table.py 590 ExecutionTableSpec + 집합 단위 점 조회 + 시장 시계 horizon. 검증은 없다 (기록 `234`)
 │   └── venues/krx.py   557   KRX 프로파일 — KrxSettings · KRX_NOT_MODELLED
 │
 ├── account/         append 권한 (닫힘, 층 10)
@@ -4559,7 +4562,7 @@ pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 
 
 **트리.**
 
-- 유일성 검사는 있다. `check_key`(`datasets.py:355`)가 **선언된 `key_fields`**에 대해 전체 스캔으로
+- 유일성 검사는 있다. `check_key`(`data/validation.py`, 기록 `234` 전에는 `datasets.py`)가 **선언된 `key_fields`**에 대해 전체 스캔으로
   null과 중복을 잡고, `dataset.register.key.null` / `.duplicate`로 예시와 함께 거절한다.
 - **그러나 그 축은 저자가 고른다.** `key_fields`가 여섯 개인 long 등록은 그 여섯에 대해 유일하면
   통과하고, `(available_at, instrument)`에 대해 유일한지는 **묻지 않는다.** `049`가 측정한
@@ -4576,6 +4579,8 @@ pivot 하는 필드는 등록의 기본 조건인 timestamp와 instrument id를 
 없으므로 grouped 등록만 그 성질을 갖고, 그것도 부수적으로 갖는다.
 
 > **2026-09-02 정정 (기록 `137`).** `grain`이 선언이 됐다. `instrument_instant`는 `(available_at, instrument)`의 유일성을, `instant`는 `available_at`의 유일성을 등록에서 검사하고, `rows`만 저자의 `key_fields`를 검사한다. grouped projection은 구성으로 유일하므로 스캔하지 않는다.
+
+> **2026-09-10 정정 (기록 `234`, `docs/issues/095`).** 검사는 **등록에서 한 번**이다. `data/validation.py::verify_source`가 스키마 → key → span → 값 → execution 가격 → digest를 재고, 등록이 그 결과(`span`, `source_digest`, `execution_prices`)를 문서에 둔다. preflight·run·`check`는 `Workspace.require_verified`로 **digest만 대조**하고(`dataset.source_changed` / `dataset.unverified`), 집행표를 다시 스캔하지 않는다 — `validate_execution_table`과 그 세 diagnosis는 삭제됐다. 파일이 바뀌면 같은 선언으로 다시 등록하는 것이 수리이고, 측정된 반쪽만 바뀐다(`project/merge.py`). `tests/boundaries/test_physical_reads_pass_one_door.py`가 문을 지킨다.
 
 ### 17.1.3 한 번 읽은 parquet은 메모리에 남지 않는다 — 커넥션과 메타데이터만 남는다
 

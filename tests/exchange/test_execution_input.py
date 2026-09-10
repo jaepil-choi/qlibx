@@ -5,13 +5,11 @@ from pathlib import Path
 
 import duckdb
 
+from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
+from vqapr.data.validation import verify_source
 from vqapr.exchange.conventions import FillRule
-from vqapr.exchange.execution_table import (
-    ExecutionTable,
-    ExecutionTableSpec,
-    validate_execution_table,
-)
+from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 
 
 def _write(path: Path, rows: str) -> Path:
@@ -37,41 +35,63 @@ def _registration(path: Path, *, local_time: time = time(15, 30)) -> ExecutionTa
     )
 
 
+def _dataset(path: Path) -> tuple[DatasetRegistration, SourceSpec]:
+    """The same venue table as a dataset with an execution role (record `185`): what
+    registration measures through the one door (record `234`)."""
+    return (
+        DatasetRegistration.of(
+            "krx-daily",
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            key_fields=("trade_at", "instrument"),
+            fields={"open": "open", "close": "close", "is_tradable": "is_tradable"},
+            field_types={"open": "DOUBLE", "close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            grain="instrument_instant",
+            execution={"is_tradable": "is_tradable"},
+        ),
+        SourceSpec.of("krx-execution", path),
+    )
+
+
 def test_valid_execution_input_accepts_a_halted_row_with_a_retained_price(tmp_path: Path) -> None:
     target = _write(
         tmp_path / "valid.parquet",
         """
         SELECT * FROM (VALUES
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0, 100.0),
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B', false, 48.0, 50.0),
-          (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 101.0, 103.0)
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0::DOUBLE, 100.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B', false, 48.0::DOUBLE, 50.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 101.0::DOUBLE, 103.0::DOUBLE)
         ) AS t(trade_at, instrument, is_tradable, open, close)
         """,
     )
 
-    diagnosis = validate_execution_table(_registration(target))
+    diagnosis, _, measured = verify_source(*_dataset(target))
 
     assert diagnosis.ok
     assert diagnosis.mutation is False
+    assert measured.execution_prices == ("close", "open"), "both prices positive when tradable"
+    assert measured.verified
 
 
-def test_selected_price_does_not_fall_back_to_another_valid_price(tmp_path: Path) -> None:
+def test_a_non_positive_price_is_measured_not_refused_and_the_run_cannot_choose_it(
+    tmp_path: Path,
+) -> None:
+    """Record `234`: registration measures which prices are positive on every tradable row;
+    the refusal lands at preflight, where a run chooses one (`execution.price_not_positive`),
+    instead of scanning the table again for the price it chose."""
     target = _write(
         tmp_path / "bad-price.parquet",
         """
         SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
-               'A' AS instrument, true AS is_tradable, 99.0 AS open, 0.0 AS close
+               'A' AS instrument, true AS is_tradable, 99.0::DOUBLE AS open, 0.0::DOUBLE AS close
         """,
     )
 
-    diagnosis = validate_execution_table(_registration(target))
+    diagnosis, _, measured = verify_source(*_dataset(target))
 
-    assert not diagnosis.ok
-    assert [failure.code for failure in diagnosis.failures] == [
-        "execution_table.price_invalid"
-    ]
-    assert diagnosis.failures[0].example_total == 1
-    assert "close" in diagnosis.failures[0].requirement
+    assert diagnosis.ok
+    assert measured.execution_prices == ("open",), "close is 0 on a tradable row"
 
 
 def test_duplicate_execution_identity_is_rejected(tmp_path: Path) -> None:
@@ -79,32 +99,16 @@ def test_duplicate_execution_identity_is_rejected(tmp_path: Path) -> None:
         tmp_path / "duplicate.parquet",
         """
         SELECT * FROM (VALUES
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0, 100.0),
-          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0, 100.0)
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0::DOUBLE, 100.0::DOUBLE),
+          (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 99.0::DOUBLE, 100.0::DOUBLE)
         ) AS t(trade_at, instrument, is_tradable, open, close)
         """,
     )
 
-    diagnosis = validate_execution_table(_registration(target))
+    diagnosis, _, _ = verify_source(*_dataset(target))
 
     assert not diagnosis.ok
-    assert [failure.code for failure in diagnosis.failures] == [
-        "execution_table.key_duplicate"
-    ]
-
-
-def test_execution_rows_are_passive_to_fill_local_time_validation(tmp_path: Path) -> None:
-    target = _write(
-        tmp_path / "wrong-time.parquet",
-        """
-        SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
-               'A' AS instrument, true AS is_tradable, 99.0 AS open, 100.0 AS close
-        """,
-    )
-
-    diagnosis = validate_execution_table(_registration(target, local_time=time(9)))
-
-    assert diagnosis.ok
+    assert [failure.code for failure in diagnosis.failures] == ["dataset.key_duplicate"]
 
 
 def test_fill_selects_one_exact_same_day_target_with_stable_identity(tmp_path: Path) -> None:

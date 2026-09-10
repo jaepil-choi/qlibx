@@ -10,6 +10,7 @@ records pick fields by name, which is why these stay dataclasses rather than bec
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -184,9 +185,7 @@ class FrozenDataModel:
             raise ValueError("component must identify a DATA_MODEL")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
-        object.__setattr__(
-            self, "initial_model_memory", opening_memory(self.initial_model_memory)
-        )
+        object.__setattr__(self, "initial_model_memory", opening_memory(self.initial_model_memory))
 
     @property
     def component_id(self) -> str:
@@ -244,6 +243,10 @@ class FrozenRun:
     requirements: tuple[DataRequirement, ...] = ()
     datasets: tuple[DatasetRegistration, ...] = ()
     sources: tuple[SourceSpec, ...] = ()
+    source_digests: Mapping[str, str] = field(default_factory=dict, kw_only=True, compare=False)
+    """The digest registration measured for each frozen source, by source id (record `234`):
+    what preflight verified the bytes against, carried so the run record states it without
+    hashing the files a second time. Empty for a run frozen in memory by a test."""
     _identity: str = field(default="", init=False, repr=False, compare=False)
     """Memo for `identity`, which every frozen field already determines.
 
@@ -304,6 +307,8 @@ class FrozenRun:
                     if dataset.field_types is None
                     else MappingProxyType(dict(dataset.field_types)),
                     aggregated=dataset.aggregated,
+                    source_digest=dataset.source_digest,
+                    execution_prices=dataset.execution_prices,
                 )
                 for dataset in self.datasets
             ),
@@ -350,7 +355,7 @@ class FrozenRun:
             raise RuntimeError("initial account snapshot and mode were frozen apart")
         return _identity(
             {
-                        "writes": self.writes,
+                "writes": self.writes,
                 "run_id": self.run_id,
                 "exchange": (
                     (self.exchange.component_id, self.exchange.fingerprint)

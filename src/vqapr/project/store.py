@@ -17,7 +17,8 @@ import yaml
 from vqapr._internal import atomic, filelock
 from vqapr.data import scan
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.sources import SourceSpec, physical_digest
+from vqapr.data.validation import require_verified
 from vqapr.domain.errors import FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import (
     ComponentId,
@@ -120,7 +121,6 @@ Without this a crash leaves the workspace permanently unwritable, and the recove
 _CONSTRUCTION_TOKEN = object()
 
 
-
 class Workspace:
     """명시적으로 선택한 project root의 등록 선언 모음.
 
@@ -128,13 +128,7 @@ class Workspace:
     이후 run은 이 mutable workspace를 다시 읽지 않는 frozen input을 별도로 만들어야 한다.
     """
 
-    __slots__ = (
-        "_components",
-        "_datasets",
-        "_runs",
-        "_sources",
-        "project_root",
-    )
+    __slots__ = ("_components", "_datasets", "_runs", "_source_digests", "_sources", "project_root")
 
     def __init__(
         self,
@@ -149,15 +143,14 @@ class Workspace:
         if _token is not _CONSTRUCTION_TOKEN:
             raise TypeError("construct a workspace with Workspace.create() or Workspace.open()")
         self.project_root = Path(project_root)
-        self._datasets = {
-            key: value for key, value in (datasets or {}).items()
-        }
+        self._datasets = {key: value for key, value in (datasets or {}).items()}
         self._sources = dict(sources or {})
-        self._components = {
-            key: value for key, value in (components or {}).items()
-        }
+        self._components = {key: value for key, value in (components or {}).items()}
         # A `RunDefinition` is frozen and holds only ids and values, so it needs no detaching.
         self._runs = dict(runs or {})
+        # The digest of each source file this workspace object has hashed, by path: one hash per
+        # source per command, however many judgments and freezes ask (record `234`).
+        self._source_digests: dict[str, str] = {}
 
     @classmethod
     def _from_state(
@@ -353,6 +346,30 @@ class Workspace:
             instants.append(require_tz_aware(value, name="available_at"))
         return tuple(sorted(instants))
 
+    def require_verified(self, raw_dataset_id: str) -> DatasetRegistration:
+        """A registered dataset a run may read: measured at registration, and unchanged since.
+
+        The one check every later reader makes (`data/validation.py::require_verified`, record
+        `234`): no content scan, one digest compare, hashed once per source for the life of this
+        object. Refuses by name a dataset registered before the measurement existed or whose
+        file changed since.
+        """
+        registration = self.dataset(raw_dataset_id)
+        source = self.source(str(registration.source))
+        key = str(source.path)
+        self._source_digests[key] = require_verified(
+            registration, source, digest=self._source_digests.get(key)
+        )
+        return registration
+
+    def source_digest(self, source: SourceSpec) -> str:
+        """The digest of one source's bytes, hashed at most once per workspace object."""
+        key = str(source.path)
+        digest = self._source_digests.get(key)
+        if digest is None:
+            digest = self._source_digests[key] = physical_digest(source.path)
+        return digest
+
     def source(self, raw_source_id: str) -> SourceSpec:
         """등록된 물리 source 선언 하나를 조회한다."""
         try:
@@ -441,14 +458,10 @@ class Workspace:
     # Every refusal a registration can raise lives here, once.
     # ------------------------------------------------------------------------------------------
 
-
-
     def _merge_run(self, state: _State, definition: RunDefinition) -> tuple[_State, bool]:
         """Fold one run into the document, refusing any id it names that is not registered."""
         self._require_run_references(state, definition)
-        return merge_declaration(
-            state, "runs", definition.run_id, definition, noun="run_id"
-        )
+        return merge_declaration(state, "runs", definition.run_id, definition, noun="run_id")
 
     def _require_run_references(self, state: _State, definition: RunDefinition) -> None:
         def component(component_id: str, kind: ComponentKind, role: str) -> None:
@@ -503,7 +516,6 @@ class Workspace:
                 f"{definition.agenda.days_from!r}, which must be registered",
                 fix=f"register dataset {definition.agenda.days_from!r} first",
             )
-
 
     @property
     def roster_path(self) -> Path:
@@ -645,9 +657,6 @@ class Workspace:
         `_references_in` below (`docs/issues/archive/043`).
         """
         return references_in(self._read(), kind, identity)
-
-
-
 
     def _locked_refusal(self, lock: Path, timeout: float) -> VqaprError:
         """The refusal a waiter gets when another writer held the workspace for the whole timeout.
@@ -796,22 +805,6 @@ class Workspace:
             ) from error
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def _roster_payload(tables: Mapping[str, Path | str], *, digest: str) -> dict[str, object]:
     if not isinstance(tables, Mapping) or not tables:
         raise ValueError("instrument registration requires at least one table")
@@ -953,17 +946,3 @@ def _require_span(dataset_id: str, registration: DatasetRegistration) -> None:
             "document declares this dataset and the source it reads"
         ),
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-

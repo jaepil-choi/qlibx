@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
@@ -50,3 +51,20 @@ class SourceSpec(BaseModel):
             path=Path(path),
             hive_partitioned=hive_partitioned,
         )
+
+
+def physical_digest(path: Path) -> str:
+    """The sha256 of a source's parquet bytes: what a registration's id and path stand for.
+
+    Public since record `139`: `run.json` records it per source (testbed A7), so a run says which
+    bytes it read and not only which path it was pointed at. Since record `234` registration
+    measures it (`data/validation.py::verify_source`) and every later read compares against it.
+    """
+    files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
+    if not files:
+        raise FileNotFoundError(f"source has no readable parquet bytes: {path}")
+    digest = hashlib.sha256()
+    for file_path in files:
+        with file_path.open("rb") as stream:
+            hashlib.file_digest(stream, lambda: digest)
+    return digest.hexdigest()

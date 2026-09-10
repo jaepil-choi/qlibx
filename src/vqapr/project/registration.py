@@ -27,9 +27,10 @@ from typing import Any
 from pydantic import BaseModel, ValidationError
 
 from vqapr.account.account import AccountMode
-from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration, validate
+from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
 from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
 from vqapr.data.sources import SourceSpec
+from vqapr.data.validation import verify_roster, verify_source
 from vqapr.domain import identifiers
 from vqapr.domain.errors import (
     Diagnosis,
@@ -81,8 +82,7 @@ _SECTION_NOTES: dict[str, tuple[str, str]] = {
         ". Note: there is no top-level sources: section. A source is declared "
         "inline under its dataset (source_id + path), because a dataset and its "
         "file register as a pair",
-        "move each source under its dataset as source_id + path, then delete the "
-        "sources: section",
+        "move each source under its dataset as source_id + path, then delete the sources: section",
     ),
 }
 """A note and a fix for a section an author reasonably expects to exist, but that does not.
@@ -92,12 +92,6 @@ nearest permitted name answers it; `sources` is not a misspelling of anything --
 the author was right to look for and that this package deliberately does not have, so the answer
 has to be written out. Everything reachable by spelling stays out of this table.
 """
-
-
-
-
-
-
 
 
 # Moved here from `vqapr.public` by record `112`, and re-exported there. Unlike the other
@@ -115,13 +109,14 @@ def register_dataset(
     새 등록이면 ``True``, 디스크에 이미 같은 선언이 있으면 ``False``다. 검증이나 persistence가
     실패하면 ``VqaprError``를 발생시키며, 검증 실패는 workspace를 만들거나 바꾸지 않는다.
     """
-    diagnosis, _, measured = validate(registration, source)
+    diagnosis, _, measured = verify_source(registration, source)
     diagnosis.raise_if_failed()
     # `measured` is the registration with its span filled in from the scan validation just ran.
     # Registering the caller's copy instead would persist a declaration missing the one fact only
     # a full read can establish, and the next reader would have to read the file again to get it.
     with Workspace.transaction(project_root) as transaction:
         return transaction.register_dataset(measured, source)
+
 
 def register_instruments(
     project_root: str | Path,
@@ -175,16 +170,13 @@ def _nearest_hint(
     close = get_close_matches(written.lower(), [value.lower() for value in permitted], n=1)
     if close:
         return (
-            f"set {key_path} to {close[0]!r}, which is the closest permitted value "
-            f"to {written!r}"
+            f"set {key_path} to {close[0]!r}, which is the closest permitted value to {written!r}"
         )
     if removable:
         # A top-level section IS its own key path, and "remove 'agendas' at agendas" says the
         # name twice. Deeper, `runs.r.foo` is where a bare `foo` would leave the reader looking.
         where = "" if key_path == written else f" at {key_path}"
-        return (
-            f"remove {written!r}{where}, or replace it with one of: {', '.join(permitted)}"
-        )
+        return f"remove {written!r}{where}, or replace it with one of: {', '.join(permitted)}"
     return f"replace {written!r} at {key_path} with one of: {', '.join(permitted)}"
 
 
@@ -263,9 +255,9 @@ def refusals_from(
                     examples=[key],
                     source=_at(f"{parent}.{key}"),
                     fix=(
-                        _nearest_hint(
-                            key, permitted, f"{parent}.{key}", removable=True
-                        ).replace("set ", "rename ", 1)
+                        _nearest_hint(key, permitted, f"{parent}.{key}", removable=True).replace(
+                            "set ", "rename ", 1
+                        )
                         if permitted
                         else f"remove {key} from {parent}"
                     ),
@@ -451,7 +443,7 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
     """
     import hashlib
 
-    from vqapr.domain.instruments import build_roster, read_roster_table
+    from vqapr.domain.instruments import build_roster
 
     name = "instruments"
     retired = bool(bodies) and all(
@@ -490,25 +482,26 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
         raise  # unreachable
     tables = declared.tables
 
-    resolved: dict[str, Path] = {}
-    rows: dict[str, dict[str, str]] = {}
+    resolved = {
+        str(kind): (base / str(raw_path)).resolve() for kind, raw_path in sorted(tables.items())
+    }
+    # The tables are read through the one door (record `234`); a table that cannot be read is
+    # still an input refusal here, naming the file and what it lacks.
+    diagnosis, rows = verify_roster(resolved)
+    if not diagnosis.ok:
+        first = diagnosis.failures[0]
+        raise InputError(
+            VALUE_INVALID,
+            requirement=first.requirement,
+            observed=first.observed or "",
+            fix=first.fix,
+            source=first.source,
+        )
     digest = hashlib.sha256()
-    for kind, raw_path in sorted(tables.items()):
-        path = (base / str(raw_path)).resolve()
-        try:
-            rows[str(kind)] = read_roster_table(path)
-        except (FileNotFoundError, ValueError) as error:
-            raise InputError(
-                VALUE_INVALID,
-                requirement=f"{name}.tables.{kind} must name a readable instrument table",
-                observed=str(error),
-                fix=f"write {path.name} with instrument_id and kind columns, then re-register",
-                source=FailureSource(file=str(path)),
-            ) from error
-        resolved[str(kind)] = path
+    for kind in sorted(resolved):
         # Digested over the file bytes, the same discipline `fingerprint_component` uses for a
         # user-authored component. Stated in the run record, never compared against it.
-        digest.update(path.read_bytes())
+        digest.update(resolved[kind].read_bytes())
 
     try:
         roster = build_roster(rows)
@@ -518,9 +511,7 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
         # identically, and that is the case this refusal is for -- an unsupported `kind` in a row
         # never comes from `instruments.py`, only from editing its output or writing the parquet
         # directly. `build_roster` names the instrument; this names the files it came from.
-        declared_files = ", ".join(
-            f"{kind}={path.name}" for kind, path in sorted(resolved.items())
-        )
+        declared_files = ", ".join(f"{kind}={path.name}" for kind, path in sorted(resolved.items()))
         raise InputError(
             VALUE_INVALID,
             requirement=f"{name} must describe every instrument exactly once, under its own kind",
@@ -725,7 +716,6 @@ def _require_grain_key(body: dict[str, Any], *, name: str) -> None:
     found.done().raise_if_failed()
 
 
-
 _DECLARED_IDS = {
     "datasets": ("dataset id", identifiers.dataset_id),
     "components": ("component id", identifiers.component_id),
@@ -867,9 +857,9 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     examples=[section_name],
                     source=_at(section_name),
                     fix=remedy
-                    or _nearest_hint(
-                        section_name, SECTIONS, section_name, removable=True
-                    ).replace("set ", "rename ", 1),
+                    or _nearest_hint(section_name, SECTIONS, section_name, removable=True).replace(
+                        "set ", "rename ", 1
+                    ),
                 )
             )
         found.done().raise_if_failed()
@@ -888,7 +878,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
 
     for dataset_id, body in section("datasets").items():
         registration, source = _dataset(str(dataset_id), body, base=base)
-        diagnosis, _, measured = validate(registration, source)
+        diagnosis, _, measured = verify_source(registration, source)
         diagnosis.raise_if_failed()
         transaction.register_dataset(measured, source)
         registered.setdefault("datasets", []).append(str(dataset_id))
@@ -1175,6 +1165,7 @@ def cli_kind(kind: object) -> str:
         if authored is kind:
             return spelling
     return str(getattr(kind, "value", kind))
+
 
 # ---------------------------------------------------------------------------------------
 # Registering one authored component, without a declaration document.

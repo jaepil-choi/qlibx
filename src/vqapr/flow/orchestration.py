@@ -38,7 +38,6 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.values import normalize_memory
-from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
@@ -267,7 +266,6 @@ def run(
         raise ValueError("public run requires a frozen Exchange authority")
     if frozen.execution is None:
         raise ValueError("public run requires a frozen execution dataset")
-    validate_execution_table(frozen.execution).raise_if_failed()
 
     # ONE read of the roster, through the caller's workspace when it has one
     # (`docs/issues/archive/070`); the record is written from this read and so is the report.
@@ -719,8 +717,16 @@ def run_registered_strategy(
 
 
 def _source_digests(frozen: FrozenRun) -> dict[str, str]:
-    """The physical digest of every source the run reads, keyed by source id (A7)."""
-    return {str(source.source_id): physical_digest(source.path) for source in frozen.sources}
+    """The physical digest of every source the run reads, keyed by source id (A7).
+
+    Preflight verified each source against the digest registration measured and carried it on
+    the frozen run (record `234`); a run frozen in memory without them hashes here.
+    """
+    return {
+        str(source.source_id): frozen.source_digests.get(str(source.source_id))
+        or physical_digest(source.path)
+        for source in frozen.sources
+    }
 
 
 def _run_strategy(

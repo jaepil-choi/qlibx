@@ -359,9 +359,9 @@ callback과 같은 instant이면 시장 시계가 먼저 돌므로 callback은 c
 
 **valuation은 거래가 있는 날에만 돌지 않는다.** 흔한 오독은 "체결이 commit된 다음이 valuation 시점"인데,
 그렇게 구현되어 있다면 **거래가 없는 날에는 valuation이 돌지 않게 되고, 그것이 정확히 `implementations/056`이
-제거한 결함이다** — 거래가 있을 때만 움직이는 NAV 시계열. 지금 코드는 `StrategyEventLoop._handle_market`
+제거한 결함이다** — 거래가 있을 때만 움직이는 NAV 시계열. 지금 코드는 `MarketClock.at`
 (`flow/run/loop.py`)이 시장 시계의 매 점에서 pending이 있으면 체결 뒤 그 스냅샷으로, 없으면 새 스냅샷으로
-장부를 잰다(`flow/run/valuation.py`의 `mark_fill`/`mark_held`). 일별 테이블이면 NAV 시계열은 거래일마다 한
+장부를 잰다(`flow/run/valuation.py`의 `ValuationHandler.mark`, 기록 `226`). 일별 테이블이면 NAV 시계열은 거래일마다 한
 점, 1분 테이블이면 분마다 한 점이다. execution authority가 없는 run(callback만 돌리는 연구 run)은 시장 시계가
 없으므로 venue 가격으로 재지 않는다.
 
@@ -881,7 +881,8 @@ Strategy callback agenda는 DataModel materialization과 공유하지 않는다.
 - **체결될 것이 없다.** 시가총액이나 베타를 체결한다는 말은 성립하지 않는다. 그래서 계산이 execution
   앞에서 끝나고, 그 결과를 여러 소비자가 나눠 쓸 수 있다.
 - **account를 안 받는 것은 그 결과다.** 받으면 결과가 그 run에 묶여 나눠 쓸 수 없게 된다.
-- **시계가 하나다.** datamodel run은 전략 시계만 걷고 시장 시계가 없다(`flow/run/loop.py`의 `DataModelEventLoop`).
+- **시계가 하나다.** datamodel run은 전략 시계만 걷고 시장 시계가 없다 — 같은 `RunLoop`를 `MarketClock` 없이
+  조립한 것이 `flow/run/loop.py`의 `DataModelEventLoop`다(기록 `227`).
   한 번 만든 dataset을 여러 run이 `reads`로 공유한다.
 - **없어도 된다.** StrategyModel이 같은 계산을 직접 수행해도 된다(PRD §2.3). DataModel은 공유와 절약을
   위한 선택이다.
@@ -1605,7 +1606,7 @@ PRD §7이 제약의 두 일을 갈랐다: **판단 시점의 bound**(구성)와
 ```text
 portfolio/bounds.py    순수 함수 kit.  no_short · single_name_cap · intersect → (lower, upper) box
                        전략이 콜백 안에서 부른다.  확장점이 아니다
-compliance/            Compliance 확장점.  시장 시계 위, VALUATION 직후.  observe(call, account) → finding
+compliance/            Compliance 확장점.  시장 시계 위, VALUATION 직후.  observe(call) → finding
                        run이 exchange: 옆에 compliance: [...] 로 선언한다.  built-in 둘은 compliance/builtin/
 ```
 
@@ -2450,15 +2451,24 @@ class EventLoop[EventT, TraceT, ResultT](ABC):        # flow/engine/loop.py
     def handle(self, event) -> TraceT: ...
     def finish(self, traces) -> ResultT: ...
 
-class StrategyEventLoop(EventLoop):                   # flow/run/loop.py — 시계 둘
-    events = OccurrenceEvent(agenda 전개) ∪ MarketEvent(run 안의 execution table instant)
-    handle(OccurrenceEvent) → CallbackHandler.dispatch        # DECIDE
-    handle(MarketEvent)     → _handle_market:                 # ACCRUE → EXECUTE → VALUATION → COMPLIANCE
-                               AccrualHandler.accrue · ExecutionHandler.fill · ValuationHandler.mark_* · ComplianceHandler.observe
+class RunLoop[TraceT, ResultT](EventLoop):           # flow/run/loop.py — 루프 하나 (기록 227)
+    events = OccurrenceEvent(부품의 agenda) ∪ MarketEvent(market.instants(), 시장 시계가 있을 때)
+    start(cutoff)           → part.start
+    handle(OccurrenceEvent) → part.dispatch(occurrence)       # DECIDE 또는 compute
+    handle(MarketEvent)     → market.at(event)                # ACCRUE → EXECUTE → VALUATION → COMPLIANCE → close
+    finish(traces)          → part.finish(traces, elapsed)
 
-class DataModelEventLoop(EventLoop):                  # flow/run/loop.py — 시계 하나
-    events = OccurrenceEvent(agenda 전개)
-    handle(OccurrenceEvent) → ComputeHandler.dispatch          # compute → output
+class Part[TraceT, ResultT](Protocol):               # 부품: 자기 시계를 선언하고 수신자를 소유한다
+    StrategyPart    CallbackHandler.dispatch · root 확정 · timing
+    DataModelPart   ComputeHandler.dispatch · 창고 문(RunOutput)
+
+class MarketClock:                                    # 시장 시계: 도구들이 붙는다
+    at(event): MarketInstant 위의 fold (기록 226) —
+        accrual.accrue → execution.fill → valuation.mark → compliance.observe → execution.close
+        단계마다 (MarketInstant) -> MarketInstant. 순서는 이 다섯 줄이다
+
+StrategyEventLoop(RunLoop)   조립: 권한 검사 · FlowContext · handler 다섯 · MarketClock
+DataModelEventLoop(RunLoop)  조립: ComputeHandler · DataModelPart · 시장 시계 없음
 ```
 
 책임: run 동결과 preflight · 두 시계의 merge · 이벤트 dispatch · requirement resolution과 View 생성 ·
@@ -2468,9 +2478,10 @@ mark · Compliance 호출 · evidence · finalize.
 
 - **Academic Flow와 KRX Flow를 따로 만들지 않는다.** Exchange, AccountMode, execution input, compliance 규칙을
   주입한다.
-- **strategy run과 datamodel run은 같은 걸음이다.** 차이는 시계가 둘이냐 하나냐뿐이고, 두 루프가 `flow/run/loop.py`
-  한 파일에 나란히 있다(기록 `214`). handler는 배선표의 행마다 하나 — `callback`·`compute`(전략 시계),
-  `accrual`·`execution`·`valuation`·`compliance`(시장 시계, §3.2의 순서).
+- **strategy run과 datamodel run은 같은 루프다.** `RunLoop` 하나가 둘을 걷고(기록 `227`; `214`가 척추 변경이라
+  미뤘던 것을, 루프가 수신자 위에 서지 않게 하여 접었다), 차이는 생성자가 무엇을 조립했는가 — 부품(`Part`)과
+  시장 시계(`MarketClock`)의 유무 — 뿐이다. handler는 배선표의 행마다 하나 — `callback`·`compute`(전략 시계),
+  `accrual`·`execution`·`valuation`·`compliance`(시장 시계, §3.2의 순서), 모두 `(MarketInstant) -> MarketInstant`.
 - Flow는 StrategyModel의 decision cadence를 모른다. frozen callback occurrences를 전달하고 Strategy state가
   `Hold | Rebalance`를 결정한다.
 - **Compliance도 여기서 dispatch만 한다.** 그 경제 규칙은 `compliance/evaluation.py`와 각 규칙에 있다(§5.7).
@@ -2930,7 +2941,7 @@ src/vqapr/
 │   │   ├── judgments.py 695  check가 내리는 판정
 │   │   └── roster.py    57
 │   ├── run/                  run 하나를 돈다 — 시계로 배열 (층 65, 기록 `214`)
-│   │   ├── loop.py     369   StrategyEventLoop(시계 둘) · DataModelEventLoop(시계 하나) — 나란히
+│   │   ├── loop.py     ~480  RunLoop(루프 하나) · Part · MarketClock · StrategyEventLoop/DataModelEventLoop(조립) — 기록 `227`
 │   │   ├── callback.py 654   전략 시계: decide → 도장 찍힌 intent
 │   │   ├── compute.py  107   전략 시계: compute → 출력
 │   │   ├── accrual.py   34   시장 시계 1: 자리
@@ -3037,7 +3048,7 @@ Compliance      시장 시계   창 + committed 계좌                게시판 
 **이 표는 프레임워크가 소유하고 닫혀 있다.** 역할이 서로 다른 것은 둘뿐이다 — 언제 불리는가, 답을 누가
 받는가 — 그리고 그 둘은 base가 아니라 표가 갖는다. 확장점을 하나 더 만들려면 행을 하나 더 만들어야 하고,
 행은 시계와 수신자를 정하는 일이라 프레임워크의 결정이다. `tests/domain/test_the_wiring_table.py`가 `Role`
-없는 행과 행 없는 `Role`을 거절하고, `_handle_market`의 호출 순서를 `MARKET_CLOCK_ORDER`에 묶는다.
+없는 행과 행 없는 `Role`을 거절하고, `MarketClock.at`의 호출 순서를 `MARKET_CLOCK_ORDER`에 묶는다.
 
 **부품과 도구.** 기준은 하나 — 자기 시계를 선언하는가. 부품(`Part`)은 선언한다: run당 하나, run의 `agenda`가
 그 시계다. 도구(`Tool`)는 남의 시계에 붙는다: 여럿이거나 없다. **부품 = 도구 + 시계**가 상속 방향이고

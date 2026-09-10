@@ -94,6 +94,38 @@ P1·P3·P5   횟수 단언 (tests/flow/test_hot_path_costs.py 방식)
 착지 전    uv run pytest tests/ -q -m ""    showcase digest 83/83
 ```
 
-## 4. 진행
+## 4. 결과 (2026-09-10)
 
-ExecPlan: `.agent/plans/active/one-loop-campaign.md`.
+```text
+3,000 종목 × 1분 execution table × 1일     117.4 s  →  34 s 안팎  (실행 간 잡음 ±25%, 두 번 중 작은 값)
+끝난 run이 든 Mark 객체                    1,167,000  →  3,000  (계좌가 든 batch 하나; 점 수에 O(1))
+루프 클래스                                2  →  1 (RunLoop · Part · MarketClock)
+역할의 콜백                                 넷 다 Call 하나
+```
+
+| | 기록 | 3,000 × 1일 |
+|---|---|---|
+| P1 행은 열로 이동한다 | `221` | 117.4 → 62.3 s |
+| P3 execution table을 시장 시계를 따라 미리 읽는다 | `222` | → 45.7 s |
+| P4 프레임워크의 view는 두 번 증명하지 않는다 | `223` | → 32.7 s |
+| P5 evidence는 요약을 든다 | `224` | Mark 1,167,000 → 3,000 |
+| L1 `sequence`는 run의 한 순서 | `225` | record 열 하나 변경, digest 재기록 |
+| L2 시장 시계 한 점은 fold | `226` | 다섯 단계 한 모양 |
+| L3 루프 하나 | `227` | `RunLoop` · `Part` · `MarketClock` |
+| L4 조립 하나 | `228` | `_run_member` · `_window_factory` |
+| L5 역할은 Call 하나를 받는다 | `229` | `Compliance.observe(call)` — breaking |
+
+### 설계가 틀린 곳, 게이트가 잡은 곳
+
+- **P3 첫 판은 더 느렸다** (62 → 80 s). 쿼리를 390 → 4개로 줄였지만 Arrow에서 Python으로 건너오는
+  셀이 쿼리의 행보다 비쌌다. 열 셋만 변환하고 `trade_at`은 변환하지 않는 둘째 판이 45.7 s.
+- **P5는 evidence를 요약으로 바꾼 뒤에도 `Mark`가 그대로였다.** 진짜 보유처는 trace가 든 그 점의
+  root였고, 그것을 읽는 곳은 없었다. 가드 테스트가 잡았다.
+- **L4 첫 커밋은 테스트 하나를 깨뜨린 채였다.** 게이트 요약 한 줄만 읽었다. `record_ref`를 store 없이
+  평가한 것이고, 되돌아가 amend했다. 이후 게이트는 실패 목록까지 읽는다.
+- **digest 기준선은 checkout 상대적이었다.** run identity가 소스 경로를 접어 넣으므로 worktree에서는
+  `run_id` 열만 다른 record가 나온다. 스크립트가 64자리 hex를 마스킹하게 했다(`221`).
+- **머신의 실행 간 잡음이 ±25%다.** 같은 코드로 34 s와 46 s가 나온다. 이후 벤치마크는 두 번 돌려
+  작은 값을 적고, 필요하면 임시 worktree로 A/B를 붙였다(`224`).
+
+ExecPlan: `.agent/plans/completed/one-loop-campaign.md`.

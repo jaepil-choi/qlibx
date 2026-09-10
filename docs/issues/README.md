@@ -43,9 +43,9 @@
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
-### enhanced-index testbed가 낸 둘 (2026-09-10, `0.11.0` wheel) — 하나 닫힘, 하나 미분류
+### 2026-09-10의 번호 없는 보고 다섯 — testbed(`0.11.0` wheel) 넷, 0.12.0 시나리오 트레이스 하나 — 하나 닫힘, 넷 미분류
 
-0.11.0 wheel로 마이그레이션하며 낸 두 보고. 번호는 아직 없다 — 같은 날 오너가 `095`–`097`을 썼고,
+0.11.0 wheel로 마이그레이션하며 낸 보고들과 0.12.0 stepper 트레이스가 낸 하나. 번호는 아직 없다 — 같은 날 오너가 `095`–`097`을 썼고,
 번호는 오너가 붙인다. 첫 번째는 671-run sweep에서 `--jobs 16`이 한 번에 하나씩 돌던 것으로,
 성능 이슈로 오너가 바로 고치게 했다.
 
@@ -54,6 +54,8 @@
 | ~~`report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs`~~ | `vqapr run --jobs N`이 datamodel run을 병렬로 돌리지 않는다 — 프로세스 하나, 한 번에 하나 | **닫힘 — record `230`.** 두 종류 모두 풀로; worker의 raise는 그 run의 entry; envelope에 `jobs`; 배치 안에서 남이 쓰는 것을 읽는 run은 통째로 거절(`run.batch_dependent`, 오너 결정) | 코드 + skill |
 | `report-2026-09-10-agenda-has-no-year-unit-and-the-refusal-reads-as-a-closed-set` | `agenda.every`에 `y` 단위가 없고, 거절문이 닫힌 집합처럼 읽힌다 | **미분류.** `12M`이 동작하는 spelling; 보고자는 거절문이 문법(count + unit)을 말하기를 청한다 | — |
 | `report-2026-09-10-check-derives-a-three-year-agenda-twice` | `check`가 run의 agenda를 두 번 유도한다 — 3년 run에서 check 3.6 s 중 3.5 s | **미분류.** 0.12.0 시나리오 트레이스(`exp_235`, `03_check_changed`): `derived_agenda` #362 1,782 ms(judgments) + #44533 1,673 ms(preflight). 집행표 스캔이 사라진 자리에 남은 것 | — |
+| `report-2026-09-10-a-datamodel-run-holds-memory-proportional-to-instruments-not-to-its-window` | datamodel run의 peak 메모리가 lookback·기간이 아니라 종목 수에 비례한다 — 309종목 0.55 GB, 5종목 0.23 GB; 기간 7배엔 12% | **미분류.** testbed 측정(0.11.0 wheel, 160일 CalendarLookback): 기간엔 평평, 종목 수엔 선형 | — |
+| `report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source` | `show dataset --limit 0`이 430 MB(8.7M행) 소스에서 5분 넘게 돌아오지 않고 메모리를 소진한다 | **미분류.** testbed(0.11.0 wheel): 23 MB 표는 즉시, 큰 표는 timeout 300 s에 죽음. `--limit 0`은 header 비용이어야 한다 | — |
 
 ### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
 

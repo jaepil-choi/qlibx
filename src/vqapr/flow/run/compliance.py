@@ -122,6 +122,7 @@ class ComplianceHandler:
             producer_id=str(self._context.layer.config.component.component_id),
             stage=MONITORING_STAGE,
             event_time=self._context.in_agenda_zone(instant),
+            sequencer=self._context.next_sequence,
         )
         for finding in report.findings:
             recorder.append(

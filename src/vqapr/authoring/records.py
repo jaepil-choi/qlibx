@@ -14,9 +14,10 @@ enforces it -- so they are one module.
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import count
 from types import MappingProxyType
 
 from vqapr.domain.shapes import RecordChunk, Rows, Scalar, normalize_column, normalize_scalar
@@ -98,6 +99,12 @@ class InvocationRecorder:
     comparison, and only its cells are looked at. Until `221` every row's names were re-checked
     for whitespace as if the declaration had not happened, and on a 3,000-name book that check
     was a third of a run's wall clock.
+
+    `sequence` is the run's, not the recorder's (record `225`, after the four kinds campaign's
+    `205`): the run hands every recorder it builds its own `sequencer`, so the column is a
+    position in the run rather than an index inside one table of one recorder that restarted at
+    zero on every callback. A recorder built by hand -- an author testing a component -- counts
+    for itself, which is the honest default when there is no run.
     """
 
     def __init__(
@@ -108,6 +115,7 @@ class InvocationRecorder:
         producer_id: str,
         stage: str,
         event_time: datetime,
+        sequencer: Callable[[], int] | None = None,
     ) -> None:
         if not isinstance(run_id, str) or not run_id:
             raise ValueError("run_id must be a non-empty string")
@@ -129,6 +137,10 @@ class InvocationRecorder:
         self._columns: dict[str, dict[str, list[Scalar]]] = {
             spec.table_id: {name: [] for name in spec.fields} for spec in specs
         }
+        # Injected rather than imported: this module is the authoring contract at layer 20 and
+        # cannot reach the run at 65.
+        self._next_sequence = count().__next__ if sequencer is None else sequencer
+        self._sequences: dict[str, list[int]] = {spec.table_id: [] for spec in specs}
 
     def _spec(self, table_id: str) -> TableSpec:
         try:
@@ -157,12 +169,14 @@ class InvocationRecorder:
         if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes, bytearray)):
             raise TypeError("rows must be a sequence of mappings")
         staged = self._columns[table_id]
+        sequences = self._sequences[table_id]
         for index, row in enumerate(rows):
             if not isinstance(row, Mapping):
                 raise TypeError(f"row {index} must be a mapping")
             self._require_declared_fields(table_id, row.keys(), what="row fields")
             for name in spec.fields:
                 staged[name].append(normalize_scalar(row[name]))
+            sequences.append(self._next_sequence())
 
     def append_columns(self, table_id: str, columns: Mapping[str, Sequence[object]]) -> None:
         """Stage rows given as columns: one sequence per declared field, all the same length.
@@ -183,6 +197,8 @@ class InvocationRecorder:
         staged = self._columns[table_id]
         for name, cells in normalized.items():
             staged[name].extend(cells)
+        rows = len(next(iter(normalized.values())))
+        self._sequences[table_id].extend(self._next_sequence() for _ in range(rows))
 
     def _row_count(self, table_id: str) -> int:
         # A spec has at least one field, so the first column's length is the table's.
@@ -192,8 +208,9 @@ class InvocationRecorder:
         """What this recorder staged, one chunk per declared table, envelope columns included.
 
         Detached and never re-validated: every cell here passed `append_batch` or
-        `append_columns`. `sequence` numbers the rows of one table within this recorder; the
-        other four envelope columns are the recorder's own facts, the same on every row.
+        `append_columns`. `sequence` is each row's position in the run (or in this recorder,
+        without a run); the other four envelope columns are the recorder's own facts, the same
+        on every row.
         """
         chunks: list[RecordChunk] = []
         for spec in self._specs.values():
@@ -208,7 +225,7 @@ class InvocationRecorder:
                         "producer_id": (self._producer_id,) * count,
                         "stage": (self._stage,) * count,
                         "event_time": (self._event_time,) * count,
-                        "sequence": tuple(range(count)),
+                        "sequence": tuple(self._sequences[spec.table_id]),
                     },
                 )
             )

@@ -524,6 +524,10 @@ class FlowContext:
             for component_id, component in self.stateful_components()
         }
 
+    def next_sequence(self) -> int:
+        """The run's next row position, for every recorder a handler builds (record `225`)."""
+        return self.state.next_sequence()
+
     def in_agenda_zone(self, instant: datetime) -> datetime:
         """An instant expressed in the strategy agenda's zone; the same instant.
 

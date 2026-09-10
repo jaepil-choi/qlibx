@@ -323,6 +323,7 @@ class ValuationHandler:
             producer_id=str(self._context.layer.config.component.component_id),
             stage=VALUATION_STAGE,
             event_time=self._context.in_agenda_zone(cutoff),
+            sequencer=self._context.next_sequence,
         )
         priced = {selection.instrument_id: selection for selection in selected}
         # The `_ACCOUNT` row first -- cash and NAV, the values themselves and not their text, so

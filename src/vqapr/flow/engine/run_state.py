@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import count
 from types import MappingProxyType
 
 from vqapr.account.account import (
@@ -220,6 +221,7 @@ def _fill_rows(
     version: int,
     *,
     envelope: Mapping[str, object] | None = None,
+    sequencer: Callable[[], int] | None = None,
 ) -> tuple[Mapping[str, object], ...]:
     """One row per committed fill entry, including zero-dealt ones.
 
@@ -231,8 +233,9 @@ def _fill_rows(
     why they carried none of them while `vqapr.account` -- which does go through one -- carried all
     five (`docs/issues/archive/022`).
 
-    `sequence` is per call, matching the recorder's own contract: it numbers rows within one
-    staged batch, and `account_version` is what orders batches against each other.
+    `sequence` comes from the run when the caller supplies its sequencer (record `225`), so a
+    fill takes its place in the run's one order beside every other recorded row; without one,
+    a batch counts for itself.
 
     The parameter is optional because a caller with no occurrence in hand -- the direct
     `AccountState` constructors in the test suite -- has nothing truthful to stamp, and inventing
@@ -254,7 +257,8 @@ def _fill_rows(
     """
     rows = []
     stamp = dict(envelope or {})
-    for sequence, entry in enumerate(entries):
+    position = count().__next__ if sequencer is None else sequencer
+    for entry in entries:
         if entry.origin != FILL_ORIGIN:
             continue
         detail = entry.detail
@@ -272,7 +276,7 @@ def _fill_rows(
                     "tax": detail.get("tax"),
                     "reason": detail.get("reason"),
                     **stamp,
-                    **({"sequence": sequence} if stamp else {}),
+                    **({"sequence": position()} if stamp else {}),
                 }
             )
         )
@@ -324,6 +328,9 @@ class RunStateRepository:
             component_state_refs=component_refs,
         )
         self._before_swap = before_swap
+        # The run's one order for every recorded row (record `225`). Every row a run records
+        # passes through this repository, so a counter anywhere else would be a second opinion.
+        self._sequence = count()
         # Where accepted recorder chunks go, when they go anywhere but the root. `orchestration.run`
         # passes the run record writer's `append_chunk`; a flow assembled without a store keeps
         # them in its roots as it always did, so every in-memory reader of `recorder_rows` is
@@ -333,6 +340,14 @@ class RunStateRepository:
     @property
     def current(self) -> AcceptedRunState:
         return self._root
+
+    def next_sequence(self) -> int:
+        """The next position in the run's one order of recorded rows.
+
+        Handed to every `InvocationRecorder` the run builds and to the fill rows, so `sequence`
+        means what its name says across callbacks, valuations and fills alike.
+        """
+        return next(self._sequence)
 
     @property
     def root(self) -> AcceptedRunState:
@@ -540,7 +555,10 @@ class RunStateRepository:
             # sink at publish with one (record `211`: until then fill rows reached disk only
             # when the strategy record was frozen, so a run that died left no fill table).
             rows = _fill_rows(
-                account.entries, account.next_state.snapshot.version, envelope=envelope
+                account.entries,
+                account.next_state.snapshot.version,
+                envelope=envelope,
+                sequencer=self.next_sequence,
             )
             if rows:
                 fills = RecordChunk.from_rows(FILL_TABLE, rows)

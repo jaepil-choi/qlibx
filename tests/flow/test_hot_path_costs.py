@@ -702,7 +702,9 @@ def _execution_table(tmp_path: Path):
         for name in ("A", "B"):
             if name == "A" and minute == 3:
                 continue
-            rows.append(f"(TIMESTAMPTZ '2024-03-05 09:0{minute}:00+09', '{name}', true, {100 + minute}.0)")
+            rows.append(
+                f"(TIMESTAMPTZ '2024-03-05 09:0{minute}:00+09', '{name}', true, {100 + minute}.0)"
+            )
     rows.append("(TIMESTAMPTZ '2024-03-05 09:02:00+09', 'B', false, 999.0)")
     con = duckdb.connect()
     try:
@@ -748,16 +750,24 @@ def test_a_window_answers_every_instant_of_the_clock_with_one_query(
         return original(*args, **kwargs)
 
     monkeypatch.setattr(module.scan, "execution_window_table", counting)
-    snapshots = ExecutionSnapshots(spec, instants=_minutes(), instruments=("A", "B"), trade_price="close")
+    snapshots = ExecutionSnapshots(
+        spec, instants=_minutes(), instruments=("A", "B"), trade_price="close"
+    )
     for at in _minutes():
         ahead = snapshots.at(at, target_instruments=("A",), held_instruments=("B",))
         exact = exact_execution_snapshot(
-            spec, target_at=at, target_instruments=("A",), held_instruments=("B",), trade_price="close"
+            spec,
+            target_at=at,
+            target_instruments=("A",),
+            held_instruments=("B",),
+            trade_price="close",
         )
         assert ahead == exact, at
     assert queries == 1, "six instants inside one window are one read"
-    assert snapshots.at(_minutes()[2], target_instruments=("B",), held_instruments=()).duplicate_instruments == ("B",)
-    assert snapshots.at(_minutes()[3], target_instruments=("A",), held_instruments=()).missing_target_instruments == ("A",)
+    twice = snapshots.at(_minutes()[2], target_instruments=("B",), held_instruments=())
+    assert twice.duplicate_instruments == ("B",)
+    absent = snapshots.at(_minutes()[3], target_instruments=("A",), held_instruments=())
+    assert absent.missing_target_instruments == ("A",)
 
 
 def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
@@ -787,7 +797,11 @@ def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
     minutes = _minutes()
     off_the_clock = minutes[0] + timedelta(seconds=30)
     expected_outside = exact_execution_snapshot(
-        spec, target_at=off_the_clock, target_instruments=("A",), held_instruments=(), trade_price="close"
+        spec,
+        target_at=off_the_clock,
+        target_instruments=("A",),
+        held_instruments=(),
+        trade_price="close",
     )
     monkeypatch.setattr(module.scan, "execution_window_table", counting_window)
     monkeypatch.setattr(module.scan, "exact_snapshot_rows", counting_exact)
@@ -850,7 +864,8 @@ def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> Non
     )
     assert validated == 2, "an author's constructor still proves its two cross-sections"
     assert trusted == authored
-    assert list(trusted.positions) == sorted(names) and trusted.weight("I0007") == authored.weight("I0007")
+    assert list(trusted.positions) == sorted(names)
+    assert trusted.weight("I0007") == authored.weight("I0007")
 
 
 def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
@@ -865,3 +880,74 @@ def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
             _identifier(bad, name="x")
         with pytest.raises(ValueError):
             instrument_id(bad)
+
+
+# --------------------------------------------------------------------------------------------
+# Record `225`: `sequence` is the run's one order. It was `len(staged)` inside one table of one
+# recorder, and a recorder is built per callback, so it restarted at zero every occurrence.
+# --------------------------------------------------------------------------------------------
+
+
+def test_sequence_is_one_order_across_every_recorder_and_fill_of_a_run() -> None:
+    from decimal import Decimal
+
+    from vqapr.domain.account_state import AccountSnapshot, AccountState
+    from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
+    from vqapr.flow.engine.run_state import _fill_rows
+
+    state = RunStateRepository(initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})))
+
+    first = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="STRATEGY_CALLBACK",
+        event_time=NOW,
+        sequencer=state.next_sequence,
+    )
+    first.append_batch("diagnostics", [{"message": "a"}, {"message": "b"}])
+    second = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="VALUATION",
+        event_time=NOW,
+        sequencer=state.next_sequence,
+    )
+    second.append_columns("diagnostics", {"message": ["c", "d", "e"]})
+    fills = _fill_rows(
+        (
+            LedgerEntry(
+                at=NOW,
+                cash=Decimal("-1"),
+                positions={"A": Decimal(1)},
+                origin=FILL_ORIGIN,
+                detail={
+                    "instrument": "A",
+                    "requested_quantity": Decimal(1),
+                    "dealt_quantity": Decimal(1),
+                },
+            ),
+        ),
+        1,
+        envelope={
+            "run_id": "run-1", "producer_id": "p", "stage": "EXECUTION", "event_time": NOW
+        },
+        sequencer=state.next_sequence,
+    )
+
+    assert [row["sequence"] for row in first.staged_rows()["diagnostics"]] == [0, 1]
+    assert [row["sequence"] for row in second.staged_rows()["diagnostics"]] == [2, 3, 4]
+    assert [row["sequence"] for row in fills] == [5]
+
+    alone = InvocationRecorder(
+        (TableSpec("diagnostics", ("message",)),),
+        run_id="run-1",
+        producer_id="p",
+        stage="STRATEGY_CALLBACK",
+        event_time=NOW,
+    )
+    alone.append("diagnostics", {"message": "x"})
+    assert [row["sequence"] for row in alone.staged_rows()["diagnostics"]] == [0], (
+        "a recorder built by hand, without a run, counts for itself"
+    )

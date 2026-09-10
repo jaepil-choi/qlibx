@@ -19,14 +19,6 @@
     "digest": "6e55d76d254911de",
     "kind": "facts"
   },
-  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/datamodels/showcase-model@ec7d081d/datamodel.json": {
-    "digest": "41a79a8242097230",
-    "kind": "facts"
-  },
-  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/run.json": {
-    "digest": "0e681c89af62ae5b",
-    "kind": "facts"
-  },
   "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/datamodels/momentum-model@549831eb/datamodel.json": {
     "digest": "be996ea31629100e",
     "kind": "facts"
@@ -53,7 +45,7 @@
       "signal",
       "stage"
     ],
-    "digest": "e1af56075a947cdd",
+    "digest": "ede8ef0747d4de5a",
     "kind": "table",
     "rows": 105
   },
@@ -72,7 +64,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "65686da6a9f5762c",
+    "digest": "722de11e74f763d8",
     "kind": "table",
     "rows": 126
   },
@@ -94,7 +86,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c8378ff0d7dd00a7",
+    "digest": "ba1e49ca27a22951",
     "kind": "table",
     "rows": 105
   },
@@ -108,7 +100,7 @@
       "stage",
       "weight"
     ],
-    "digest": "bd5165b0c4f24444",
+    "digest": "be5c31204dace397",
     "kind": "table",
     "rows": 105
   },
@@ -130,7 +122,7 @@
       "signal",
       "stage"
     ],
-    "digest": "e1af56075a947cdd",
+    "digest": "ede8ef0747d4de5a",
     "kind": "table",
     "rows": 105
   },
@@ -149,7 +141,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "65686da6a9f5762c",
+    "digest": "722de11e74f763d8",
     "kind": "table",
     "rows": 126
   },
@@ -171,7 +163,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c8378ff0d7dd00a7",
+    "digest": "ba1e49ca27a22951",
     "kind": "table",
     "rows": 105
   },
@@ -185,7 +177,7 @@
       "stage",
       "weight"
     ],
-    "digest": "bd5165b0c4f24444",
+    "digest": "be5c31204dace397",
     "kind": "table",
     "rows": 105
   },
@@ -212,7 +204,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "e0f7a00c732b8b03",
+    "digest": "d6bec2a80ce9a1da",
     "kind": "table",
     "rows": 65
   },
@@ -234,7 +226,7 @@
       "stage",
       "tax"
     ],
-    "digest": "cc86445c339771c2",
+    "digest": "c9907575b88dee56",
     "kind": "table",
     "rows": 44
   },
@@ -248,7 +240,7 @@
       "stage",
       "weight"
     ],
-    "digest": "c881eba0bac5a84c",
+    "digest": "5331a97d3bf42cc5",
     "kind": "table",
     "rows": 44
   },
@@ -275,7 +267,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "97bf85787046be09",
+    "digest": "9be9ec1ac9f34b7b",
     "kind": "table",
     "rows": 85
   },
@@ -297,7 +289,7 @@
       "stage",
       "tax"
     ],
-    "digest": "748f2582abe74ee3",
+    "digest": "02437c0f887eefd9",
     "kind": "table",
     "rows": 64
   },
@@ -311,7 +303,7 @@
       "stage",
       "weight"
     ],
-    "digest": "899cd041eb280cb4",
+    "digest": "96ce173d3c6a8e18",
     "kind": "table",
     "rows": 64
   },
@@ -338,7 +330,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "e0f7a00c732b8b03",
+    "digest": "d6bec2a80ce9a1da",
     "kind": "table",
     "rows": 65
   },
@@ -360,7 +352,7 @@
       "stage",
       "tax"
     ],
-    "digest": "cc86445c339771c2",
+    "digest": "c9907575b88dee56",
     "kind": "table",
     "rows": 44
   },
@@ -374,7 +366,7 @@
       "stage",
       "weight"
     ],
-    "digest": "c881eba0bac5a84c",
+    "digest": "5331a97d3bf42cc5",
     "kind": "table",
     "rows": 44
   },
@@ -401,7 +393,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "97bf85787046be09",
+    "digest": "9be9ec1ac9f34b7b",
     "kind": "table",
     "rows": 85
   },
@@ -423,7 +415,7 @@
       "stage",
       "tax"
     ],
-    "digest": "748f2582abe74ee3",
+    "digest": "02437c0f887eefd9",
     "kind": "table",
     "rows": 64
   },
@@ -437,7 +429,7 @@
       "stage",
       "weight"
     ],
-    "digest": "899cd041eb280cb4",
+    "digest": "96ce173d3c6a8e18",
     "kind": "table",
     "rows": 64
   },
@@ -460,7 +452,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "c586e854e72114a6",
+    "digest": "18a205ebbfef8c5c",
     "kind": "table",
     "rows": 64
   },
@@ -479,7 +471,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ead15ac3c13a1036",
+    "digest": "9f7d6a3f6e2ebd11",
     "kind": "table",
     "rows": 85
   },
@@ -501,7 +493,7 @@
       "stage",
       "tax"
     ],
-    "digest": "11c536e03c49524e",
+    "digest": "6a50465cc05d2a19",
     "kind": "table",
     "rows": 64
   },
@@ -515,7 +507,7 @@
       "stage",
       "weight"
     ],
-    "digest": "781ebf1bbb06d638",
+    "digest": "3808ecf33a4744f1",
     "kind": "table",
     "rows": 64
   },
@@ -538,7 +530,7 @@
       "signal_before_weighting",
       "stage"
     ],
-    "digest": "c586e854e72114a6",
+    "digest": "18a205ebbfef8c5c",
     "kind": "table",
     "rows": 64
   },
@@ -557,7 +549,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "ead15ac3c13a1036",
+    "digest": "9f7d6a3f6e2ebd11",
     "kind": "table",
     "rows": 85
   },
@@ -579,7 +571,7 @@
       "stage",
       "tax"
     ],
-    "digest": "11c536e03c49524e",
+    "digest": "6a50465cc05d2a19",
     "kind": "table",
     "rows": 64
   },
@@ -593,7 +585,7 @@
       "stage",
       "weight"
     ],
-    "digest": "781ebf1bbb06d638",
+    "digest": "3808ecf33a4744f1",
     "kind": "table",
     "rows": 64
   },
@@ -620,7 +612,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "c89dc9fc30b2abc3",
+    "digest": "afd430a52f5c7913",
     "kind": "table",
     "rows": 65
   },
@@ -642,7 +634,7 @@
       "stage",
       "tax"
     ],
-    "digest": "9b1bb39cf104fe7c",
+    "digest": "d36b5207ae1bd63f",
     "kind": "table",
     "rows": 44
   },
@@ -656,7 +648,7 @@
       "stage",
       "weight"
     ],
-    "digest": "b658d5bc6e348262",
+    "digest": "c5bf70d8c36361d0",
     "kind": "table",
     "rows": 44
   },
@@ -683,7 +675,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "90b8103702bd6dae",
+    "digest": "1da8ab4803865fdc",
     "kind": "table",
     "rows": 65
   },
@@ -705,7 +697,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c66518495feb5484",
+    "digest": "966efe45d1c2f011",
     "kind": "table",
     "rows": 44
   },
@@ -719,7 +711,7 @@
       "stage",
       "weight"
     ],
-    "digest": "0614296b7232e1d9",
+    "digest": "1f56814adf42e4f0",
     "kind": "table",
     "rows": 44
   },
@@ -746,7 +738,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "feee336e8c6a932f",
+    "digest": "125db064458cbc17",
     "kind": "table",
     "rows": 85
   },
@@ -768,7 +760,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c14b1714b2723549",
+    "digest": "5f925f963c2a2ada",
     "kind": "table",
     "rows": 64
   },
@@ -782,7 +774,7 @@
       "stage",
       "weight"
     ],
-    "digest": "7a3580d36272dfe5",
+    "digest": "06309e2b1b50f9c8",
     "kind": "table",
     "rows": 64
   },
@@ -809,7 +801,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "c89dc9fc30b2abc3",
+    "digest": "afd430a52f5c7913",
     "kind": "table",
     "rows": 65
   },
@@ -831,7 +823,7 @@
       "stage",
       "tax"
     ],
-    "digest": "9b1bb39cf104fe7c",
+    "digest": "d36b5207ae1bd63f",
     "kind": "table",
     "rows": 44
   },
@@ -845,7 +837,7 @@
       "stage",
       "weight"
     ],
-    "digest": "b658d5bc6e348262",
+    "digest": "c5bf70d8c36361d0",
     "kind": "table",
     "rows": 44
   },
@@ -872,7 +864,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "90b8103702bd6dae",
+    "digest": "1da8ab4803865fdc",
     "kind": "table",
     "rows": 65
   },
@@ -894,7 +886,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c66518495feb5484",
+    "digest": "966efe45d1c2f011",
     "kind": "table",
     "rows": 44
   },
@@ -908,7 +900,7 @@
       "stage",
       "weight"
     ],
-    "digest": "0614296b7232e1d9",
+    "digest": "1f56814adf42e4f0",
     "kind": "table",
     "rows": 44
   },
@@ -935,7 +927,7 @@
       "sequence",
       "stage"
     ],
-    "digest": "feee336e8c6a932f",
+    "digest": "125db064458cbc17",
     "kind": "table",
     "rows": 85
   },
@@ -957,7 +949,7 @@
       "stage",
       "tax"
     ],
-    "digest": "c14b1714b2723549",
+    "digest": "5f925f963c2a2ada",
     "kind": "table",
     "rows": 64
   },
@@ -971,7 +963,7 @@
       "stage",
       "weight"
     ],
-    "digest": "7a3580d36272dfe5",
+    "digest": "06309e2b1b50f9c8",
     "kind": "table",
     "rows": 64
   }

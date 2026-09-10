@@ -435,6 +435,7 @@ class CallbackHandler:
             producer_id=str(self._context.layer.config.component.component_id),
             stage=CALLBACK_STAGE,
             event_time=occurrence.evaluation_time,
+            sequencer=self._context.next_sequence,
         )
 
     def _candidate_callback_state(

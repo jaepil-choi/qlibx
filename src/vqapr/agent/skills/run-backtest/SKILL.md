@@ -25,7 +25,8 @@ always name the declaration that produced it.
 
 **The strategy is called at every instant of the run's `agenda` and decides for itself whether
 to act.** `every: 1d` with `at` is one decision a day; `every: 1M` the first trading day of each
-month; `every: 5m` with `from`/`to` every five minutes inside each day. The days come from the
+month; `every: 12M` once a year (the count is free: `3M`, `2w`, `5d`; there is no year unit);
+`every: 5m` with `from`/`to` every five minutes inside each day. The days come from the
 execution dataset, never from a list. There is no valuation or monitoring time to declare: the
 book is valued at every instant of the market clock, and the declared compliance rules observe it
 right after.

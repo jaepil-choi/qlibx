@@ -11,7 +11,7 @@ runs:
     end:   "2024-12-31T23:00:00+09:00"
     timezone: Asia/Seoul
     agenda:
-      every: 1d                      # the strategy clock (design §3.4); `1w`, `1M` also pick days
+      every: 1d                      # the strategy clock (design §3.4); <count><unit>: `1w`, `3M`, `12M` also pick days
       at: "16:00"                    # when compute() is called on each selected day
       days_from: prices              # the dataset whose days are the trading days (no venue here)
     writes: my-derived-values        # the dataset it makes; must NOT already be registered

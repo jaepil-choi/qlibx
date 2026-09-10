@@ -94,8 +94,18 @@ class AgendaRule:
 
     def __post_init__(self) -> None:
         if not isinstance(self.every, str) or not _EVERY.match(self.every):
+            # The grammar, not examples: a refusal that listed `1d, 1w, 1M, 5m or 1h` beside a
+            # refused `1y` read as the closed set of accepted values, and a reader who wanted a
+            # yearly cadence moved the schedule into the model instead of writing `12M`
+            # (`docs/issues/report-2026-09-10-agenda-has-no-year-unit-...`).
+            hint = ""
+            if isinstance(self.every, str) and self.every[-1:] in ("y", "Y"):
+                hint = "; there is no year unit, a yearly cadence is 12M"
             raise ValueError(
-                f"every must be a count and a unit such as 1d, 1w, 1M, 5m or 1h; got {self.every!r}"
+                "every is a count and a unit -- the count is any positive integer; the unit is "
+                "d, w or M to select trading days (every Nth trading day, the first trading day of "
+                "every Nth ISO week or Nth calendar month: 2d, 1w, 3M, 12M) or m, h to select "
+                f"instants inside each day (5m, 1h); got {self.every!r}{hint}"
             )
         at = tuple(self.at)
         for value in (*at, self.from_time, self.to_time):

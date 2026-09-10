@@ -108,6 +108,10 @@ def test_a_minute_grid_over_a_year_expands() -> None:
     [
         ({"every": "daily", "at": (time(9),)}, "count and a unit"),
         ({"every": "0d", "at": (time(9),)}, "count and a unit"),
+        # The refusal states the grammar (the count is free; the units are d, w, M and m, h) and
+        # a year unit points at the spelling that exists.
+        ({"every": "1y", "at": (time(9),)}, "a yearly cadence is 12M"),
+        ({"every": "1Y", "at": (time(9),)}, "any positive integer.*d, w or M.*12M"),
         ({"every": "1d"}, "needs at"),
         ({"every": "1d", "at": (time(9), time(9))}, "must not repeat"),
         ({"every": "1d", "at": (time(9),), "from_time": time(9)}, "declare at, not from/to"),

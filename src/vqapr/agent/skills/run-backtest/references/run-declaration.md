@@ -11,10 +11,10 @@ A run declares **when it fires** as one block, a trading-day filter plus a withi
 ```yaml
     timezone: Asia/Seoul
     agenda:
-      every: 1d          # 1d | 2d | 1w | 1M pick trading days and pair with `at`
+      every: 1d          # <count><unit>; d, w, M pick trading days and pair with `at`
       at: "15:29"        #   one wall time or a list
     # agenda:
-    #   every: 5m        # 1m | 5m | 1h pick instants inside each day and pair with from/to
+    #   every: 5m        # <count><unit>; m, h pick instants inside each day and pair with from/to
     #   from: "09:00"
     #   to: "15:20"
 ```
@@ -24,9 +24,12 @@ execution dataset has rows for, so a denser table adds fill instants and never a
 datamodel run has no venue and names the dataset whose days count with `agenda.days_from`. There
 is no `sessions:` list to type and no calendar to register.
 
-`1w` fires on the first trading day of each ISO week, `1M` on the first trading day of each calendar
-month; `2d` on every second trading day. A strategy called on a day it does not want to act still
-decides for itself (`Hold`).
+**`every` is a count and a unit, and the count is free.** The units are `d`, `w`, `M` for trading
+days and `m`, `h` for instants inside a day; there is no year unit. `1w` fires on the first trading
+day of each ISO week, `1M` on the first trading day of each calendar month, `2d` on every second
+trading day, `3M` quarterly and `12M` once a year, counted from the run's `start` -- a run that
+starts in June forms every June. A strategy called on a day it does not want to act still decides
+for itself (`Hold`).
 
 ## No valuation or monitoring time
 

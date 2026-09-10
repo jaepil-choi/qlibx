@@ -1,6 +1,6 @@
 # `agenda.every` has no year unit, and its refusal reads as a closed set
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED by record `244` (2026-09-10, 0.14.2) — the refusal states the grammar (the count is free; the units are d, w, M and m, h), a `y` unit is told `12M`, and the run-backtest skill says the same; no year unit is added.**
 
 | | |
 |---|---|

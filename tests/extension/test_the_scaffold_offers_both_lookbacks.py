@@ -87,7 +87,7 @@ def test_the_calendar_flavour_declares_the_other_member() -> None:
     assert "CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)" in source
     assert "RowsLookback" not in source, "the calendar scaffold must not import the other member"
     assert "LOOKBACK_DAYS = 180" in source
-    assert "len(values) >= 2" in source, (
+    assert "finite.sum(axis=0) >= 2" in source, (
         "a calendar window does not promise a row count, so the row-count guard cannot survive"
     )
     assert "cross-section" in source, "the emitted file has to say what this window is for"
@@ -99,7 +99,7 @@ def test_the_rows_flavour_still_emits_what_it_always_did() -> None:
 
     assert "RowsLookback(rows=LOOKBACK)" in source
     assert "LOOKBACK = 6" in source
-    assert "len(values) == LOOKBACK" in source
+    assert "values.shape[0] == LOOKBACK" in source
     assert "--calendar-lookback" in source, (
         "the rows scaffold is the one an author lands on by default, so it names the other member"
     )
@@ -157,10 +157,9 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
         )
     )
 
-    assert rows == [
-        {"instrument": "A", "value": 0.05},
-        {"instrument": "B", "value": 0.06},
-    ]
+    # Floats off the window's matrix (record 233): the quotient carries a binary float's last bit.
+    assert [row["instrument"] for row in rows] == ["A", "B"]
+    assert [row["value"] for row in rows] == pytest.approx([0.05, 0.06])
 
 
 def test_the_flag_reaches_the_scaffold(tmp_path: Path) -> None:

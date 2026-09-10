@@ -15,8 +15,11 @@ which a calculation over the entire period reaches a single session.
 follows the dataset's `grain`, and each refuses the other by name.
 
 **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
-`PanelWindow`: `instants` × `instruments`, `values[name]` per name, `None` where a name had no
-observation. It is a slice of a panel the run built once — arithmetic, not a query.
+`PanelWindow`: `instants` × `instruments`. **`matrix()`** is the window as one float array — rows
+are the instants (the last row is the newest), columns are `instruments`, `NaN` where a name had
+no observation — so a cross-sectional computation is one numpy expression over every name.
+`values[name]` is one name's values, `None` where absent, for a per-name question. It is a slice
+of a panel the run built once — arithmetic, not a query.
 
 **`rows(alias)` on `grain: rows`** returns a tuple of `Observation`s, one per (instant,
 instrument), each with its own `available_at`. Names interleave within an instant.

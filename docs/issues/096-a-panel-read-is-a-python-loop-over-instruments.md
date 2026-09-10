@@ -1,8 +1,10 @@
 # 096 — A panel read is a Python loop over instruments: the sample strategy loops because the API offers nothing else
 
-**Status: OPEN 2026-09-10 -- owner-filed, from the 0.11.0 spine trace
-(`experiments/exp_230_the_spine_trace/`) and `experiments/exp_231_the_panel_read_cost/bench.py`.
-Plan: `.agent/plans/active/one-door-campaign.md`, milestone P.**
+**Status: CLOSED 2026-09-10 -- records `232` (a field is one block; `PanelWindow.matrix()`;
+vectorised `counts`/`current`/`latest`; the panel built from the scan's columns) and `233` (the
+sample strategy and both scaffolds compute on the matrix).** exp_231 at 3,000 names: `counts()`
+3.1 -> 0.2 ms, the sample decision 12.3 -> 1.5 ms. Filed the same day from the 0.11.0 spine
+trace; plan `.agent/plans/active/one-door-campaign.md`, milestone P.
 
 | | |
 |---|---|

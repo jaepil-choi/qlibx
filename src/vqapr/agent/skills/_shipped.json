@@ -101,7 +101,8 @@
     "a8cc99836dc134e3f9b71de4a5e3d5e25bf56324042999e4d6bad4365e8bdd32": "0.11.0"
   },
   "make-datamodel/references/reading-inputs.md": {
-    "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0"
+    "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0",
+    "dceb6a4e53a2588c705c262d6c7ac9ea63b9ba573bdddb4d4b53f1b6d18f73c7": "0.11.0"
   },
   "make-datamodel/references/running-a-datamodel.md": {
     "06969cb4db1eb3a92e8bac607e983572d3a079b5b97864b3fb94cd76442ab39b": "0.10.0",
@@ -142,7 +143,8 @@
     "30042906d2fa185a979addcd3206865f41071efbea2bc0ecaac7e9569f14d2e4": "0.8.0"
   },
   "make-strategy/references/reading-inputs.md": {
-    "0bb1100ab8d1290f0033395426092f98844cb8ecc14fb824c47487ea7cf59754": "0.8.0"
+    "0bb1100ab8d1290f0033395426092f98844cb8ecc14fb824c47487ea7cf59754": "0.8.0",
+    "eb369ff17671e0edebba8280d800d9d6b18f632f525412eddf4e1f8254f80590": "0.11.0"
   },
   "make-strategy/references/rebalance.md": {
     "73b394fdb0b64cc75ad8902f67b8c0b5821d4ad93747b3359f1213a4b4e5f7b7": "0.8.0"

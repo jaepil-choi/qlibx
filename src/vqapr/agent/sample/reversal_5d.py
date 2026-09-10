@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import numpy as np
+
 from vqapr.authoring import (
     DatasetInput,
     Hold,
@@ -51,30 +53,34 @@ class SampleReversal5d(StrategyModel):
 
     def decide(self, call):
         # One field of the alias as a window: `instants` x `instruments`, the same six sessions
-        # for every name. A name that began trading inside the window, or stopped before it,
-        # simply has fewer values -- which is what the completeness guard below reads.
+        # for every name. `matrix()` is that window as one float array -- rows are the sessions
+        # (the last row is the newest), columns are `window.instruments`, NaN where a name had
+        # no close -- so the five-day return is one expression over every name at once, and
+        # ten names cost what three thousand do.
         window = call.read("prices", "close")
-        closes: dict[str, list[Decimal]] = {}
-        for name in window.instruments:
-            # A DOUBLE field arrives as `float`, as the dataset declared it
-            # (`docs/issues/archive/088`). The intent below is stated in Decimal, so the crossing
-            # happens here, once, and through `str`: `Decimal(0.1)` would inherit the binary
-            # expansion.
-            closes[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
+        closes = window.matrix()
 
-        eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
-        if len(eligible) < SELECTED:
+        # A name that began trading inside the window, or stopped before it, has a NaN in its
+        # column; the completeness guard reads exactly that, and nothing else about the name.
+        complete = np.isfinite(closes).all(axis=0) & (closes.shape[0] == LOOKBACK)
+        if int(complete.sum()) < SELECTED:
             return Hold(reason="incomplete-lookback")
 
-        returns = {
-            name: values[-1] / values[0] - Decimal(1) for name, values in eligible.items()
-        }
-        weakest = sorted(returns, key=lambda name: (returns[name], name))[:SELECTED]
+        returns = closes[-1] / closes[0] - 1.0
+        # The weakest names, ties broken by id so a replay picks the same three.
+        ranked = sorted(
+            (returns[column], name)
+            for column, name in enumerate(window.instruments)
+            if complete[column]
+        )
+        weakest = [name for _, name in ranked[:SELECTED]]
 
+        # Only the economics, and Decimal only here, at the intent boundary: the framework's
+        # arithmetic on weights is exact, the signal's is float. The intent id, strategy id,
+        # source references and account version are framework facts: an author who minted them
+        # could get them wrong, and this file is the one a reader copies against their own
+        # dataset.
         weight = INVESTED / Decimal(SELECTED)
-        # Only the economics. The intent id, strategy id, source references and account
-        # version are framework facts: an author who minted them could get them wrong, and
-        # this file is the one a reader copies against their own dataset.
         return Rebalance(
             target_weights={name: weight for name in sorted(weakest)},
             cash_weight=Decimal(1) - weight * Decimal(SELECTED),

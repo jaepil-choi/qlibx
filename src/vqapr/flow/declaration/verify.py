@@ -15,7 +15,8 @@ frozen run or what the freeze refused with -- kept as the exception it raised, b
 verbs render a refusal differently (`check` as a failure entry with its stage, `run` as the
 raised error with its own `retry_precondition`) and both must go on saying exactly what they said.
 
-The facts are read once (`_Facts`), and the judges and the freeze read them from there.
+The facts are read once (`preflight.RunFacts`), and the judges and the freeze read them from
+there.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from dataclasses import dataclass
 from vqapr.domain.errors import Failure, Stage, VqaprError
 from vqapr.flow.declaration.frozen import FrozenRun
 from vqapr.flow.declaration.judgments import RUN_OUTPUT_STALE, judgments
+from vqapr.flow.declaration.preflight import RunFacts
 from vqapr.flow.declaration.preflight import preflight_run as _freeze
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import Workspace
@@ -76,11 +78,12 @@ def verify_run(workspace: Workspace, definition: RunDefinition) -> RunVerdict:
     """
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
-    found, blocked = judgments(definition, workspace)
+    facts = RunFacts(workspace, definition)
+    found, blocked = judgments(definition, workspace, facts)
     frozen: FrozenRun | None = None
     refusal: BaseException | None = None
     try:
-        frozen = _freeze(workspace, definition)
+        frozen = _freeze(workspace, definition, facts)
     except Exception as error:  # rendered by the verb that asked; see the module docstring
         refusal = error
     return RunVerdict(tuple(found), tuple(blocked), frozen, refusal)

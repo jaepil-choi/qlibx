@@ -41,12 +41,8 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # Through `extension/`, not `_internal/`, matching `flow/declaration/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
-from vqapr.extension.loading import load_data_model, load_exchange, load_strategy_model
-from vqapr.flow.declaration.preflight import (
-    bound_execution_horizon,
-    bound_execution_table,
-    derived_agenda,
-)
+from vqapr.extension.loading import load_data_model, load_strategy_model
+from vqapr.flow.declaration.preflight import RunFacts
 from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import FINGERPRINT_PREFIX, RunDefinition
 
@@ -117,7 +113,7 @@ and the sample's `execute`) refuses on them beside the refusals proper.
 
 
 def judgments(
-    definition: RunDefinition, workspace: Workspace
+    definition: RunDefinition, workspace: Workspace, facts: RunFacts | None = None
 ) -> tuple[list[Failure], list[Failure]]:
     """The judgments (`JUDGMENT_CODES`), each answered independently of the others, for every
     strategy: `(found, blocked)`.
@@ -137,14 +133,15 @@ def judgments(
     blocked: list[Failure] = []
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
-    # The run's one agenda, derived at most ONCE for every judge that reads it
-    # (`docs/issues/archive/069`: it was derived per strategy inside the ordering judge and again
-    # per member inside the dataset judge, each time over the dataset's whole session list). Reached
-    # through a CALL rather than handed over as a value: a failure to derive it has to land inside
-    # the per-judge wrapper below, where it becomes a blocked entry for each judge that needed it.
-    # Flattening it to `None` here was `docs/issues/archive/077` -- the judges read `None` as
-    # "nothing to report" and the run was reported as judged.
-    agenda = _agenda_once(workspace, definition)
+    # The run's facts, each read at most ONCE for every judge that reads it -- and for the
+    # freeze that follows, when the caller hands the same `facts` to both (`verify.verify_run`).
+    # `docs/issues/archive/069` made the agenda one derivation rather than one per judge; record
+    # `241` makes every fact so. Reached through a CALL rather than handed over as a value: a
+    # failure to read it has to land inside the per-judge wrapper below, where it becomes a
+    # blocked entry for each judge that needed it. Flattening it to `None` here was
+    # `docs/issues/archive/077` -- the judges read `None` as "nothing to report" and the run was
+    # reported as judged.
+    read = facts if facts is not None else RunFacts(workspace, definition)
 
     judges: tuple[tuple[str, Callable[[], list[Failure]]], ...] = (
         ("universe", lambda: _judge_universe(definition, at)),
@@ -152,7 +149,7 @@ def judgments(
         ("period", lambda: _judge_period(definition, at)),
         (
             "execution_ordering",
-            lambda: _judge_execution_ordering(definition, workspace, at, agenda),
+            lambda: _judge_execution_ordering(definition, at, read),
         ),
         # ONE judge per member, NAMED for the member it judges. Two reasons, both from
         # `docs/issues/archive/077`. A member whose component does not load blocks its own entry and
@@ -166,12 +163,12 @@ def judgments(
             (
                 f"datasets[{member[1].component_id}]",
                 lambda member=member: _judge_member_datasets(
-                    definition, member, workspace, registered, at, agenda
+                    definition, member, workspace, registered, at, read
                 ),
             )
             for member in _members(definition)
         ),
-        ("weights", lambda: _judge_weights(definition, workspace, at)),
+        ("weights", lambda: _judge_weights(definition, at, read)),
         ("outputs", lambda: _judge_outputs(definition, registered, at, workspace)),
     )
     for name, judge in judges:
@@ -300,41 +297,10 @@ def _judge_period(definition: RunDefinition, at: FailureSource) -> list[Failure]
     return []
 
 
-def _agenda_once(workspace: Workspace, definition: RunDefinition) -> Callable[[], object]:
-    """The run's decide agenda, derived at most once and delivered to each judge that asks.
-
-    Built from the run's sessions and `at` (record `148`). Two judgments read it, and
-    `docs/issues/archive/069` made that one derivation rather than one per strategy and one per
-    member.
-
-    Returned as a CALL, and a failure to derive it is re-raised to every asker rather than flattened
-    to `None` (`docs/issues/archive/077`). A dataset that does not resolve, or a session that does
-    not exist in the zone, is still preflight's refusal to name -- but it is ALSO the reason two
-    judgments could not be answered, and the reader has to hear that from the judgments themselves.
-    Both dependent judges then block carrying the same reason, which is the point: blocking one and
-    passing the other would be a report that contradicts itself.
-    """
-    settled: list[tuple[object | None, BaseException | None]] = []
-
-    def once() -> object:
-        if not settled:
-            try:
-                settled.append((derived_agenda(workspace, definition), None))
-            except Exception as error:  # stored, then re-raised below; never swallowed
-                settled.append((None, error))
-        value, error = settled[0]
-        if error is not None:
-            raise error
-        return value
-
-    return once
-
-
 def _judge_execution_ordering(
     definition: RunDefinition,
-    workspace: Workspace,
     at: FailureSource,
-    agenda: Callable[[], object],
+    facts: RunFacts,
 ) -> list[Failure]:
     """AC-C5: every decision must have an execution instant after it that the fill rule admits.
 
@@ -360,12 +326,10 @@ def _judge_execution_ordering(
     # The agenda first: an execution table that cannot be read blocks this judge and the
     # dataset judge for the SAME reason (`docs/issues/archive/077`), rather than this one
     # naming the horizon scan and the other the agenda derivation.
-    occurrences = agenda().inclusive_slice(  # type: ignore[attr-defined]
-        definition.start, definition.end
-    )
-    table = bound_execution_table(workspace, definition)
+    occurrences = facts.agenda().inclusive_slice(definition.start, definition.end)
+    table = facts.execution_table()
     # Cut from the instants the agenda was derived from, not scanned again (record `238`).
-    horizon = bound_execution_horizon(workspace, definition)
+    horizon = facts.horizon()
     late = [
         occurrence.occurrence_id
         for occurrence in occurrences
@@ -416,7 +380,7 @@ def _judge_member_datasets(
     workspace: Workspace,
     registered: dict[str, Any],
     at: FailureSource,
-    agenda: Callable[[], object],
+    facts: RunFacts,
 ) -> list[Failure]:
     """Every dataset ONE member reads must be registered, and expose the field it names.
 
@@ -433,13 +397,13 @@ def _judge_member_datasets(
     section, entry, loader = member
     found: list[Failure] = []
     source = _key(at, section, entry.component_id)
-    ref = workspace.component(entry.component_id)
     # LOAD the component. `workspace.component()` returns a `ComponentRef` -- an identity, a path
     # and a fingerprint -- which has no `requirements` attribute at all. Only the loaded model
-    # knows what it reads. A component that does not resolve or does not load raises from here.
-    component = loader(ref, project_root=workspace.project_root)
+    # knows what it reads. A component that does not resolve or does not load raises from here;
+    # loaded once, the freeze takes the same instance (record `241`).
+    component = facts.component(entry.component_id, loader)
 
-    first_read = _first_decision(definition, agenda)
+    first_read = _first_decision(definition, facts.agenda)
     # One unregistered dataset is ONE problem however many fields the component reads from
     # it (`docs/issues/archive/056`): `requirements()` fans a `DatasetInput` out to one requirement
     # per field, and reporting per requirement printed eight identical failures for one
@@ -648,9 +612,7 @@ def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> 
     return min(inside) if inside else None
 
 
-def _judge_weights(
-    definition: RunDefinition, workspace: Workspace, at: FailureSource
-) -> list[Failure]:
+def _judge_weights(definition: RunDefinition, at: FailureSource, facts: RunFacts) -> list[Failure]:
     """The account mode and the venue must both permit the positions the run can take.
 
     Two codes for two different contradictions: a long-only account that will be asked to short,
@@ -690,9 +652,7 @@ def _judge_weights(
     # No `try`. An exchange that does not resolve or does not load is still preflight's refusal to
     # name, but it is ALSO the reason this judgment cannot be made, and swallowing it reported the
     # weights judgment as passed on a run nothing was proven about (`docs/issues/archive/077`).
-    exchange = load_exchange(
-        workspace.component(definition.exchange), project_root=workspace.project_root
-    )
+    exchange = facts.exchange()
 
     # `listings` rather than `listing(id)`: every shipped profile exposes the collection, but only
     # `Academic` exposes the single-id lookup. KrxExchange keys its rules by instrument id;

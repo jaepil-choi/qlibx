@@ -989,3 +989,67 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
     # Asked four times of one workspace object -- twice for the agenda, twice for the horizon
     # -- and the column was read once: the memo is the workspace's, not the callers'.
     assert instants == ["execution"] * 4
+
+
+def test_one_door_reads_each_fact_of_a_run_once(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `241`: the judgments and the freeze read one `RunFacts`.
+
+    `experiments/exp_238` counted, in one `vqapr run`, the agenda derived twice, the execution
+    table bound twice, the strategy imported three times before the run's own instance and the
+    venue twice. Through `verify_run` each is read once: the strategy twice in all, because its
+    initial state is still proved on a second fresh instance (`docs/issues/archive/076`).
+    """
+    from vqapr.extension import loading
+    from vqapr.flow.declaration import preflight as preflight_module
+    from vqapr.flow.declaration.verify import verify_run
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
+    )
+    signed = definition.replace(initial_account_mode=AccountMode.SIGNED)
+
+    counts: dict[str, int] = {}
+
+    def counting(name, original):
+        def wrapped(*args, **kwargs):
+            counts[name] = counts.get(name, 0) + 1
+            return original(*args, **kwargs)
+
+        return wrapped
+
+    original_load = loading._load
+
+    def counted_load(ref, *, kind, project_root=None):
+        counts[f"load:{kind.value}"] = counts.get(f"load:{kind.value}", 0) + 1
+        return original_load(ref, kind=kind, project_root=project_root)
+
+    monkeypatch.setattr(loading, "_load", counted_load)
+    for name in ("derived_agenda", "bound_execution_table", "bound_execution_horizon"):
+        monkeypatch.setattr(
+            preflight_module, name, counting(name, getattr(preflight_module, name))
+        )
+    from vqapr.project import store as store_module
+
+    monkeypatch.setattr(
+        store_module.scan, "distinct_values", counting("scan", store_module.scan.distinct_values)
+    )
+
+    verdict = verify_run(Workspace.open(tmp_path), signed)
+    assert verdict.failures == () and verdict.blocked == () and verdict.frozen is not None, (
+        verdict.failures,
+        verdict.blocked,
+        verdict.refusal,
+    )
+    assert counts == {
+        "derived_agenda": 1,
+        "bound_execution_table": 1,
+        "bound_execution_horizon": 1,
+        "scan": 1,
+        "load:strategy_model": 2,
+        "load:exchange": 1,
+        "load:compliance": 1,
+    }, counts

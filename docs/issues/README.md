@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-10.** 95개 중 **93개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
+**작성 2026-09-02 · 갱신 2026-09-10.** 98개 중 **93개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
 이 디렉터리에 평평하게 남는 것은 아직 열린 둘 — `023`(절반)과 `035`(판정만 남음) — 과, 2026-09-10에
 닫혔지만 그 record들이 인용하는 동안 한 릴리스만 여기 두는 `089`–`094`다(0.11.0 릴리스 때 archive로).
 
@@ -34,6 +34,14 @@
 | ~~`027`~~ | 아무것도 convention을 소리 내어 말하게 하지 않는다 | **닫힘 2026-09-05 — record `160`.** `register`가 `spoken`으로 PIT 개념마다 한 문장을 말한다(dataset의 `available_at`, execution input의 `trade_at`과 fill 규약, run의 `at`·`timezone`); 없으면 아무 말도 안 한다 | 닫힘 |
 | ~~`088`~~ | `DOUBLE`로 등록된 field가 모델에 `Decimal`로 도착한다 — 아무도 그것이 무엇인지 선언하지 않았다 | **닫힘 2026-09-08 — record `173`.** 오너 판정: user가 `field_types`를 선언하고 등록이 `DESCRIBE`와 1회 대조해 불일치를 이름으로 거부한다(`049`의 "author는 타입을 쓰지 않는다"와 `079`의 A안 기각을 번복). `DECIMAL`은 잴 수는 있어도 선언할 수 없어 등록에서 `field_decimal`, DataModel 출력은 첫 세션에서 `field_type`으로 거부. 샘플 panel은 float64. 열린 것: DataModel `value_fields`의 선언 타입 | 닫힘 |
 | ~~`087`~~ | 끝난 run이 occurrence마다 parquet 파일 하나를 남긴다 — 표 하나가 8 KB짜리 607개 | **닫힘 2026-09-07 — record `164`.** writer가 행을 Arrow로 메모리에 들고 run이 끝날 때(정상·예외·인터럽트) 표당 `all.parquet` 하나를 쓴다; 256 MB spill 밸브; hard kill은 spill분만 남는다(오너가 record 135의 약속 축소를 수용). 매 loop 물리 IO 0. 샘플 journey 7.8→5.4 s, 파일 1,465→3 | 닫힘 |
+
+### 오너가 0.11.0 척추 트레이스에서 연 셋 (2026-09-10, `095`–`097`) — 계획 `.agent/plans/active/one-door-campaign.md`
+
+| # | 제목 | 상태 | 어디로 가는가 |
+|---|---|---|---|
+| `095` | 물리 읽기의 검증에 문이 하나가 아니다 — 모듈 셋, 집행표는 세 번 스캔 | **열림.** `datasets.validate` · `validate_execution_table` · `read_roster_table`이 각자의 모양; 등록 1회 + preflight 1회 + run 1회 | 계획 V: `data/validation.py` 한 문, 이후 읽기는 digest 대조 |
+| `096` | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **열림.** `Panel.columns[field][instrument]`, 2D 접근자 없음; 3,000종목 decide 8.8 ms vs 블록 0.1 ms (`exp_231`) | 계획 P: 필드당 블록 하나, `PanelWindow.matrix()`, sample·scaffold 재작성 |
+| `097` | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **열림.** `RunLoop`가 유일한 구현; `StrategyEventLoop`·`DataModelEventLoop`는 `__init__`만 있는 클래스 | 계획 L: `RunLoop`로 접고 조립은 함수 둘 |
 
 ### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
 

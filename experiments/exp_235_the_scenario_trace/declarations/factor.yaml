@@ -1,0 +1,56 @@
+# Scenario ④: a long-short factor strategy on the published characteristic, on a venue that
+# lists the names SIGNED. The run's weights are published as `sample-factor-weights` (scenario ⑥
+# reads them).
+components:
+  sample-factor:
+    kind: strategy
+    path: factor.py
+    object_name: SampleFactor
+  sample-exchange-signed:
+    kind: exchange
+    path: exchange_signed.py
+    object_name: SampleSignedExchange
+    config:
+      instruments:
+      - K000001
+      - K000002
+      - K000003
+      - K000004
+      - K000005
+      - K000006
+      - K000007
+      - K000008
+      - K000009
+      - K000010
+runs:
+  sample-factor-run:
+    instruments:
+    - K000001
+    - K000002
+    - K000003
+    - K000004
+    - K000005
+    - K000006
+    - K000007
+    - K000008
+    - K000009
+    - K000010
+    start: '2022-01-12T00:00:00+09:00'
+    end: '2022-01-25T23:59:59+09:00'
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d
+      at: '08:00'
+    exchange: sample-exchange-signed
+    execution:
+      dataset: sample-execution
+      trade_price: close
+      fill:
+        at: '15:30'
+    initial_account:
+      cash: '100000000'
+      mode: SIGNED
+      positions: {}
+    writes: sample-factor-weights
+    strategy:
+      component: sample-factor

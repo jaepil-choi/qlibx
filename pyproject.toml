@@ -108,6 +108,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # A vulture whitelist is a list of bare names, which is exactly what F821 and B018 exist to
 # catch. The file is never imported and never run; it is input to vulture's own parser.
 "scripts/vulture_whitelist.py" = ["F821", "B018"]
+# The declarations a traced project was given (exp_235): the committed bytes are the bytes the
+# profiler saw and the records fingerprinted, so a line is not re-wrapped after the fact.
+"experiments/exp_235_the_scenario_trace/declarations/*.py" = ["E501"]
 
 # Cross-module dead-code pass. `ruff` is file-local by construction -- F401 and F841 see one
 # module at a time -- so nothing in the configured rule set can answer "is this method called

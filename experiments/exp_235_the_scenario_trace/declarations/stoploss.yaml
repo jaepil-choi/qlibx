@@ -1,0 +1,38 @@
+# Scenario ⑤: a stop-loss strategy whose state between sessions is `self.memory`.
+components:
+  sample-stoploss:
+    kind: strategy
+    path: stoploss.py
+    object_name: SampleStopLoss
+runs:
+  sample-stoploss-run:
+    instruments:
+    - K000001
+    - K000002
+    - K000003
+    - K000004
+    - K000005
+    - K000006
+    - K000007
+    - K000008
+    - K000009
+    - K000010
+    start: '2022-01-04T00:00:00+09:00'
+    end: '2022-02-28T23:59:59+09:00'
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d
+      at: '08:00'
+    exchange: sample-exchange
+    execution:
+      dataset: sample-execution
+      trade_price: close
+      fill:
+        at: '15:30'
+    initial_account:
+      cash: '100000000'
+      mode: LONG_ONLY
+      positions: {}
+    writes: sample-stoploss-weights
+    strategy:
+      component: sample-stoploss

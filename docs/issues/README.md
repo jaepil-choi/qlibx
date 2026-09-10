@@ -39,9 +39,9 @@
 
 | # | 제목 | 상태 | 어디로 가는가 |
 |---|---|---|---|
-| `095` | 물리 읽기의 검증에 문이 하나가 아니다 — 모듈 셋, 집행표는 세 번 스캔 | **열림.** `datasets.validate` · `validate_execution_table` · `read_roster_table`이 각자의 모양; 등록 1회 + preflight 1회 + run 1회 | 계획 V: `data/validation.py` 한 문, 이후 읽기는 digest 대조 |
-| `096` | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **열림.** `Panel.columns[field][instrument]`, 2D 접근자 없음; 3,000종목 decide 8.8 ms vs 블록 0.1 ms (`exp_231`) | 계획 P: 필드당 블록 하나, `PanelWindow.matrix()`, sample·scaffold 재작성 |
-| `097` | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **열림.** `RunLoop`가 유일한 구현; `StrategyEventLoop`·`DataModelEventLoop`는 `__init__`만 있는 클래스 | 계획 L: `RunLoop`로 접고 조립은 함수 둘 |
+| ~~`095`~~ | 물리 읽기의 검증에 문이 하나가 아니다 — 모듈 셋, 집행표는 세 번 스캔 | **닫힘 2026-09-10 — record `234`.** `data/validation.py` 한 문(`verify_source` · `require_verified` · `verify_roster`); 등록이 `source_digest`와 `execution_prices`를 두고 preflight·run·check는 digest만 대조(`dataset.source_changed` · `dataset.unverified`); `validate_execution_table`과 세 diagnosis 삭제; 같은 선언으로 다시 등록하면 측정만 갈린다; 경계 테스트가 스캔 커널을 한 모듈에 묶는다 | 닫힘 |
+| ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
+| ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
 ### enhanced-index testbed가 낸 둘 (2026-09-10, `0.11.0` wheel) — 하나 닫힘, 하나 미분류
 

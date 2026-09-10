@@ -2,7 +2,7 @@
 
 **This is where `vqapr.public.run` lives**, and record `111` is why it moved: a facade that
 executes runs is not a facade. The run layer is frozen, and its model runs in its own
-`StrategyEventLoop` with its own `Account` and its own record directory (design §4.1, §7-4).
+`strategy_loop` with its own `Account` and its own record directory (design §4.1, §7-4).
 
 **One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3).
 Record `139` had made it several so that a comparison would share one frozen layer; determinism
@@ -38,7 +38,6 @@ from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.values import normalize_memory
-from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
@@ -65,10 +64,10 @@ from vqapr.flow.roster import (
 )
 from vqapr.flow.run.context import DEFAULT_TABLE_PREFIX
 from vqapr.flow.run.loop import (
-    DataModelEventLoop,
     DataModelResult,
     SimulationResult,
-    StrategyEventLoop,
+    datamodel_loop,
+    strategy_loop,
 )
 from vqapr.flow.run.output import RunOutput
 from vqapr.project.run import RunDefinition
@@ -267,7 +266,6 @@ def run(
         raise ValueError("public run requires a frozen Exchange authority")
     if frozen.execution is None:
         raise ValueError("public run requires a frozen execution dataset")
-    validate_execution_table(frozen.execution).raise_if_failed()
 
     # ONE read of the roster, through the caller's workspace when it has one
     # (`docs/issues/archive/070`); the record is written from this read and so is the report.
@@ -644,7 +642,7 @@ def _run_datamodel(
             allowed_requirements=layer.requirements,
             consumer_id=layer.component_id,
         )
-        flow = DataModelEventLoop(
+        flow = datamodel_loop(
             frozen,
             layer,
             model,
@@ -719,8 +717,16 @@ def run_registered_strategy(
 
 
 def _source_digests(frozen: FrozenRun) -> dict[str, str]:
-    """The physical digest of every source the run reads, keyed by source id (A7)."""
-    return {str(source.source_id): physical_digest(source.path) for source in frozen.sources}
+    """The physical digest of every source the run reads, keyed by source id (A7).
+
+    Preflight verified each source against the digest registration measured and carried it on
+    the frozen run (record `234`); a run frozen in memory without them hashes here.
+    """
+    return {
+        str(source.source_id): frozen.source_digests.get(str(source.source_id))
+        or physical_digest(source.path)
+        for source in frozen.sources
+    }
 
 
 def _run_strategy(
@@ -818,7 +824,7 @@ def _run_strategy(
             allowed_requirements=layer.compliance_requirements,
             consumer_id=None,
         )
-        flow = StrategyEventLoop(
+        flow = strategy_loop(
             frozen,
             strategy,
             state,

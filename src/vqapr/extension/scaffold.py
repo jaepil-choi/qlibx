@@ -16,11 +16,11 @@ from vqapr.extension.component import ComponentKind
 
 _STRATEGY_TEMPLATE = '''"""A long-only cross-sectional Strategy. Edit the marked signal line."""
 
-from decimal import Decimal
+import numpy as np
 
 from vqapr import authoring as va
 
-LOOKBACK = {lookback}  # rows per name: a five-day return needs six observations, not five
+LOOKBACK = {lookback}  # rows of the window: a five-day return needs six observations, not five
 
 
 class {class_name}(va.StrategyModel):
@@ -35,18 +35,17 @@ class {class_name}(va.StrategyModel):
     def decide(self, call):
         # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
         window = call.read("{alias}", "{field}")
-        history: dict[str, list[Decimal]] = {{}}
-        for name in window.instruments:
-            # A DOUBLE field is a `float`; cross into Decimal once, via `str` (0.1 stays 0.1).
-            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]
-
-        scores = {{}}
-        for instrument, values in history.items():
-            if len(values) >= LOOKBACK and values[0] > 0:
-                # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
-                scores[instrument] = values[-1] / values[0] - 1
-
-        chosen = {{name: score for name, score in scores.items() if score > 0}}
+        # The window as one float array (rows: instants, newest last; columns: `window.instruments`;
+        # NaN where a name had no value), so the signal is one expression over every name at once.
+        closes = window.matrix()
+        if closes.shape[0] < LOOKBACK:
+            return va.Hold(reason="fewer than LOOKBACK sessions in the window")
+        full = np.isfinite(closes).all(axis=0) & (closes[0] > 0)  # a complete window, per name
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
+            scores = closes[-1] / closes[0] - 1.0
+        names = window.instruments
+        chosen = {{name: scores[j] for j, name in enumerate(names) if full[j] and scores[j] > 0}}
         if not chosen:
             return va.Hold(reason="no name scored above zero")  # prose; spaces are fine
         # Relative conviction: the package normalises, rounds and balances against cash.
@@ -60,7 +59,7 @@ _DATA_MODEL_TEMPLATE = '''"""A DataModel that derives one column from declared o
 
 from __future__ import annotations
 
-from decimal import Decimal
+{imports}
 
 from vqapr import authoring as va
 
@@ -84,16 +83,7 @@ class {class_name}(va.DataModel):
 
     def compute(self, context):
 {lookback_note}
-{history_block}
-
-        # ---- the one line to change -------------------------------------------------------
-        # Trailing return over the declared lookback.
-        derived = {{
-            name: values[-1] / values[0] - Decimal(1)
-            for name, values in history.items()
-            if {completeness_guard}
-        }}
-        # -----------------------------------------------------------------------------------
+{body_block}
 
         # One dict per instrument. The fields are the ones the materialization spec declares;
         # `available_at` is the package's to stamp and a row that carries one is refused.
@@ -105,23 +95,42 @@ class {class_name}(va.DataModel):
         ]
 '''
 
-_PANEL_HISTORY_BLOCK = """\
+_PANEL_BODY_BLOCK = """\
         # One field of the alias as a window: `instants` x `instruments`, the same instants for
-        # every name. `window.values[name]` is that name's values over them, `None` where it had
-        # none; `window.current()` is the cross-section at the last instant (a name with no row
-        # there is absent), `window.latest()` the newest value per name anywhere in the window.
+        # every name. `window.matrix()` is that window as one float array -- rows are instants
+        # (the last row is the newest), columns are `window.instruments`, NaN where a name had no
+        # value -- so the computation below is one expression over every name at once.
+        # `window.current()` is the cross-section at the last instant (a name with no row there
+        # is absent), `window.latest()` the newest value per name anywhere in the window.
         window = context.read("{alias}", FIELD)
-        history: dict[str, list[Decimal]] = {{}}
-        for name in window.instruments:
-            # A DOUBLE field arrives as `float`, as the dataset declared it. The intent below is
-            # stated in Decimal, so cross once here and through `str`: `Decimal(0.1)` inherits
-            # the binary float's expansion, `Decimal("0.1")` is one tenth.
-            history[name] = [Decimal(str(v)) for v in window.values[name] if v is not None]"""
+        values = window.matrix()
+        if values.shape[0] == 0:
+            return []  # nothing observed yet: this session contributes no row
+        finite = np.isfinite(values)
+        columns = np.arange(values.shape[1])
+        # Each name's first and newest observed value inside the window.
+        first = values[finite.argmax(axis=0), columns]
+        newest = values[values.shape[0] - 1 - finite[::-1].argmax(axis=0), columns]
+        # A name is eligible only where the window is complete: {completeness_guard}.
+        eligible = ({eligibility}) & (first > 0)
 
-_ROWS_HISTORY_BLOCK = """\
+        # ---- the one line to change -------------------------------------------------------
+        # Trailing return over the declared lookback, for every name at once.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            signal = newest / first - 1.0
+        # -----------------------------------------------------------------------------------
+
+        derived = {{
+            name: float(signal[column])
+            for column, name in enumerate(window.instruments)
+            if eligible[column]
+        }}"""
+
+_ROWS_BODY_BLOCK = """\
         # A rows-grain (vendor, long) dataset streams observations: one per (instant, instrument),
         # ordered by `available_at`, each carrying its own `available_at` and `instrument_id`
-        # alongside the fields declared above. Instruments INTERLEAVE within an instant.
+        # alongside the fields declared above. Instruments INTERLEAVE within an instant, and
+        # there is no shared instant axis, so the reduction is per name.
         history: dict[str, list[Decimal]] = {{}}
         for row in context.rows("{alias}"):
             value = row.values[FIELD]
@@ -130,7 +139,16 @@ _ROWS_HISTORY_BLOCK = """\
                 # below is stated in Decimal, so cross once here and through `str`:
                 # `Decimal(0.1)` inherits the binary float's expansion, `Decimal("0.1")` is one
                 # tenth.
-                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))"""
+                history.setdefault(row.instrument_id, []).append(Decimal(str(value)))
+
+        # ---- the one line to change -------------------------------------------------------
+        # Trailing return over the declared lookback.
+        derived = {{
+            name: values[-1] / values[0] - Decimal(1)
+            for name, values in history.items()
+            if {completeness_guard}
+        }}
+        # -----------------------------------------------------------------------------------"""
 
 _ROWS_LOOKBACK_NOTE = """\
         #
@@ -164,38 +182,48 @@ _CALENDAR_LOOKBACK_NOTE = """\
 
 _LOOKBACK_FLAVOURS = {
     "rows": {
-        "history_block": _PANEL_HISTORY_BLOCK,
+        "body_block": _PANEL_BODY_BLOCK,
+        "imports": "import numpy as np",
         "lookback_class": "RowsLookback",
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
         ),
         "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
-        "completeness_guard": "len(values) == LOOKBACK",
+        "completeness_guard": "LOOKBACK rows, every one a number",
+        "eligibility": "finite.all(axis=0) & (values.shape[0] == LOOKBACK)",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
     },
     "instants": {
-        "history_block": _ROWS_HISTORY_BLOCK,
+        "body_block": _ROWS_BODY_BLOCK,
+        "imports": "from decimal import Decimal",
         "lookback_class": "InstantsLookback",
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
         ),
         "lookback_expression": "va.InstantsLookback(instants=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
+        "eligibility": "",
         "lookback_note": _INSTANTS_LOOKBACK_NOTE,
     },
     "calendar": {
-        "history_block": _PANEL_HISTORY_BLOCK,
+        "body_block": _PANEL_BODY_BLOCK,
+        "imports": "import numpy as np",
         "lookback_class": "CalendarLookback",
         "lookback_declaration": (
-            'LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n'
+            "LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n"
             'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
         ),
         "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
-        "completeness_guard": "len(values) >= 2",
+        "completeness_guard": "at least two observed values",
+        "eligibility": "finite.sum(axis=0) >= 2",
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
     },
 }
-"""The three lookback members, and the four places in the template that differ between them.
+"""The three lookback members, and the places in the template that differ between them.
+
+A panel grain reads its window as a matrix (record `233`) and the two panel flavours differ only
+in what makes a name eligible; the rows grain has no shared instant axis and keeps the per-name
+reduction over `Decimal`s.
 
 One template rather than two files, because everything else about the two scaffolds is identical and
 a second copy would drift. What differs is exactly what an author has to understand: which class,
@@ -335,6 +363,9 @@ def render(
     is the wrong member for every cross-sectional model and there was no way to ask for the other
     one (`docs/issues/archive/033`). The StrategyModel template takes `rows` only: its body counts
     observations per name, so a calendar window would leave the emitted guard meaningless.
+
+    A panel-grain body computes on `window.matrix()` -- one float array over every name -- and a
+    rows-grain body reduces per name (record `233`, `docs/issues/096`).
     """
     if kind not in _TEMPLATES:
         raise ValueError(
@@ -373,7 +404,12 @@ def render(
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(
-        history_block=flavour["history_block"].format(alias=dataset_id),
+        body_block=flavour["body_block"].format(
+            alias=dataset_id,
+            completeness_guard=flavour["completeness_guard"],
+            eligibility=flavour["eligibility"],
+        ),
+        imports=flavour["imports"],
         component_id=component_id,
         class_name=_class_name(component_id),
         dataset_id=dataset_id,
@@ -384,6 +420,5 @@ def render(
         lookback_class=flavour["lookback_class"],
         lookback_declaration=flavour["lookback_declaration"].format(lookback=lookback),
         lookback_expression=flavour["lookback_expression"],
-        completeness_guard=flavour["completeness_guard"],
         lookback_note=flavour["lookback_note"],
     )

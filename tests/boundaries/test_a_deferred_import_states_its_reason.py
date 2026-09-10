@@ -23,8 +23,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 10  # record `191`: `exchange/execution_table.py`'s two guards, hoisted
-"""Was 12 after record `186` (the lazy roster import in `exchange/listings.py` moved to the top).
+CEILING = 9  # record `234`: `cli/list_.py` reads the roster through the one door, at the top
+"""Was 10 after record `191`. Record `234` (one validation door) replaced `cli/list_.py`'s deferred
+`build_roster`/`read_roster_table` pair with module-level imports of `data/validation.verify_roster`
+and `domain/instruments.build_roster`: `project/store.py` already imports the door at the top, so
+there was no cycle to hide.
+
+Was 12 after record `186` (the lazy roster import in `exchange/listings.py` moved to the top).
 Record `191` (layering campaign M2) hoisted the two `accepted_requests` guards in
 `exchange/execution_table.py`: they deferred `account.snapshot` and `orders.batches` because
 `exchange` importing either at module level was a cycle, and both types are now

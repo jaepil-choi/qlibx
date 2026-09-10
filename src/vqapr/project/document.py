@@ -69,8 +69,8 @@ class DatasetCodec(Document):
     of an entry written before a key existed -- things a registration cannot carry as rules.
 
     Declared: `source`, `instrument_field`, `available_at`, `key_fields`, `fields`, `grain`,
-    `field_types`. Measured: `aggregated`, `span`; `produced_by` and `produced_by_record` are
-    stamped by the run that wrote it.
+    `field_types`. Measured: `aggregated`, `span`, `source_digest`, `execution_prices` (record
+    `234`); `produced_by` and `produced_by_record` are stamped by the run that wrote it.
     `field_types` was a measurement from `docs/issues/archive/049` until 2026-09-08 and is a
     declaration since (`docs/issues/archive/088`); an entry written under the old shape carries the
     value duckdb measured, which is what the author would have declared, so it decodes as declared.
@@ -96,6 +96,8 @@ class DatasetCodec(Document):
     produced_by: str | None = None
     produced_by_record: str | None = None
     execution: ExecutionRoleCodec | None = None
+    source_digest: str | None = None
+    execution_prices: list[str] | None = None
 
     @model_validator(mode="after")
     def _types_cover_fields(self) -> DatasetCodec:
@@ -116,6 +118,8 @@ class DatasetCodec(Document):
             "produced_by",
             "produced_by_record",
             "execution",
+            "source_digest",
+            "execution_prices",
         ):
             if body.get(measured) is None:
                 del body[measured]
@@ -155,6 +159,11 @@ class DatasetCodec(Document):
             registration = registration.with_span(*self.span)
         if self.produced_by is not None:
             registration = registration.with_producer(self.produced_by, self.produced_by_record)
+        if self.source_digest is not None:
+            registration = registration.with_verification(
+                self.source_digest,
+                None if self.execution_prices is None else tuple(self.execution_prices),
+            )
         return registration
 
     @classmethod
@@ -178,6 +187,12 @@ class DatasetCodec(Document):
                 if registration.execution is None
                 else ExecutionRoleCodec(is_tradable=registration.execution.is_tradable)
             ),
+            source_digest=registration.source_digest,
+            execution_prices=(
+                None
+                if registration.execution_prices is None
+                else list(registration.execution_prices)
+            ),
         )
 
 
@@ -192,8 +207,6 @@ class DatasetCodec(Document):
 # `Literal` here so a wrong one is refused with the permitted set, and the domain enum is looked
 # up by name in `to_domain`.
 # ---------------------------------------------------------------------------------------------
-
-
 
 
 class DatasetDeclaration(Document):
@@ -443,7 +456,6 @@ def write_workspace(
     if not body["runs"]:
         del body["runs"]
     return yaml.dump(body, Dumper=_YAML_DUMPER, allow_unicode=True, sort_keys=False)
-
 
 
 __all__ = [

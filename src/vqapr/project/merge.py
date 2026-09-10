@@ -99,6 +99,8 @@ def _merge_dataset(
             span=registration.span,
             field_types=registration.field_types,
             aggregated=registration.aggregated,
+            source_digest=registration.source_digest,
+            execution_prices=registration.execution_prices,
         )
         if repaired != registration:
             raise _workspace_error(
@@ -125,6 +127,23 @@ def _merge_dataset(
     if existing is not None:
         if existing == registration and existing_source == source:
             return state, False
+        # The measured half -- span, the grouping verdict, the digest and the price facts -- is
+        # what the one door (record `234`) measured on the bytes as they were. A file that
+        # changed is refused on read (`dataset.source_changed`) with "register again" as the
+        # fix, and registering again under the SAME declaration is that repair: the measurement
+        # is replaced, the declaration must match. A document written before the digest existed
+        # takes the same path.
+        remeasured = replace(
+            existing,
+            span=registration.span,
+            aggregated=registration.aggregated,
+            source_digest=registration.source_digest,
+            execution_prices=registration.execution_prices,
+        )
+        if remeasured == registration and existing_source == source:
+            existing = None
+
+    if existing is not None:
         raise _workspace_error(
             stage=Stage.REGISTER,
             code="dataset.registered",

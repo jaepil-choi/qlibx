@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +11,6 @@ import pytest
 
 import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
-from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.project.store import Workspace
 from vqapr.public import (
     QUANTUM,
@@ -41,10 +39,7 @@ from vqapr.public import (
     EconomicPortfolioIntent,
     EtfInstrument,
     ExecutionRole,
-    ExecutionTable,
-    ExecutionTableSpec,
     FactorInstrument,
-    FillRule,
     FrozenAgenda,
     FrozenRun,
     Hold,
@@ -309,7 +304,7 @@ def test_public_exports_are_fixed() -> None:
         "validate_allocation",
     )
     assert "Workspace" not in public.__all__
-    assert "StrategyEventLoop" not in public.__all__
+    assert "strategy_loop" not in public.__all__
     assert "DuckDbObservationStore" not in public.__all__
     assert "RunStateRepository" not in public.__all__
     assert "AccountState" not in public.__all__
@@ -492,13 +487,8 @@ def test_public_run_uses_frozen_initial_model_memory(
     # patched there. `vqapr.public.run` is the same function object, re-exported.
     monkeypatch.setattr(orchestration, "load_strategy_model", lambda *_a, **_k: strategy)
     monkeypatch.setattr(orchestration, "load_exchange", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(
-        orchestration,
-        "validate_execution_table",
-        lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
-    )
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
-    monkeypatch.setattr(orchestration, "StrategyEventLoop", Flow)
+    monkeypatch.setattr(orchestration, "strategy_loop", Flow)
 
     outcome = public.run(tmp_path, frozen)
     assert outcome.result() is finished
@@ -517,7 +507,9 @@ def test_public_run_rejects_anything_other_than_a_frozen_run(tmp_path: Path) -> 
 
 
 @pytest.mark.uc("UC-FILL-001")
-def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> None:
+def test_a_non_positive_execution_price_is_measured_without_creating_a_workspace(
+    tmp_path: Path,
+) -> None:
     target = tmp_path / "bad-execution.parquet"
     con = duckdb.connect()
     try:
@@ -525,27 +517,31 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
             f"""COPY (
                 SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
                        'A' AS instrument, true AS is_tradable,
-                       99.0::DOUBLE AS open, CAST('NaN' AS DOUBLE) AS close
+                       99.0::DOUBLE AS open, 0.0::DOUBLE AS close
             ) TO '{target.as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()
-    registration = ExecutionTable.of(
+    from vqapr.data.datasets import DatasetRegistration
+    from vqapr.data.validation import verify_source
+
+    registration = DatasetRegistration.of(
         "krx-daily",
-        ExecutionTableSpec(
-            source=SourceSpec.of("execution", target),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"open": "open", "close": "close"},
-        ),
-        FillRule("close", "Asia/Seoul", at=time(15, 30)),
+        "execution",
+        instrument_field="instrument",
+        available_at="trade_at",
+        key_fields=("trade_at", "instrument"),
+        fields={"open": "open", "close": "close", "is_tradable": "is_tradable"},
+        field_types={"open": "DOUBLE", "close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        grain="instrument_instant",
+        execution={"is_tradable": "is_tradable"},
     )
 
-    # The bound table is what preflight checks (record `185`): the price the RUN chose must be
-    # finite and positive wherever the row is tradable. Nothing here touches a workspace.
-    diagnosis = validate_execution_table(registration)
+    # The one door measures which prices are finite and positive wherever a row is tradable
+    # (record `234`); a run that chooses `close` is refused at preflight by that fact. Nothing
+    # here touches a workspace.
+    diagnosis, _, measured = verify_source(registration, SourceSpec.of("execution", target))
 
-    assert not diagnosis.ok
-    assert diagnosis.failures[0].code == "execution_table.price_invalid"
+    assert diagnosis.ok
+    assert measured.execution_prices == ("open",)
     assert not (tmp_path / ".vqapr").exists()

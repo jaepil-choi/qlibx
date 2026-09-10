@@ -1,7 +1,17 @@
 # 095 — Validation of a physical read has no single door: three modules, one file scanned three times
 
-**Status: OPEN 2026-09-10 -- owner-filed, from the 0.11.0 spine trace
-(`experiments/exp_230_the_spine_trace/`). Plan: `.agent/plans/active/one-door-campaign.md`, milestone V.**
+**Status: CLOSED 2026-09-10 -- record `234` (`docs/implementations/234-…`), branch
+`redesign/one-door`. Filed by the owner from the 0.11.0 spine trace
+(`experiments/exp_230_the_spine_trace/`); plan `.agent/plans/active/one-door-campaign.md`, milestone V.**
+
+> **Closed as proposed, with one addition.** `data/validation.py` is the door: `verify_source`
+> measures schema, key, span, values, execution prices and the digest once; registration stores
+> `source_digest` and `execution_prices`; `require_verified` compares the digest and scans nothing
+> (`dataset.unverified`, `dataset.source_changed`); `verify_roster` returns a `Diagnosis`;
+> `validate_execution_table` and its three diagnoses are deleted; the boundary test holds the
+> kernels to one module and `check` is measured to read no file content. The addition: registering
+> the same declaration again after the file changed replaces the measured half (`project/merge.py`),
+> so the fix `dataset.source_changed` names is a command that works.
 
 | | |
 |---|---|

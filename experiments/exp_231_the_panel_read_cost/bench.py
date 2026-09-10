@@ -1,10 +1,19 @@
-"""How much a 3,000-name panel read costs through today's per-name API, versus one 2D block."""
+"""How much a 3,000-name panel read costs through the per-name API, versus the field's block.
+
+Issue `docs/issues/096`; record `232` is the fix. Before the record the panel held one Arrow
+array per name and every accessor walked the names in Python; after it a field is one block
+and `PanelWindow.matrix()` is a view of it. The sample decision is written both ways below so
+the two answers can be compared as well as timed.
+
+    uv run python experiments/exp_231_the_panel_read_cost/bench.py
+"""
 
 import time
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
+import pyarrow as pa
 
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.panel import Panel
@@ -18,27 +27,19 @@ rows = [
     for i, t in enumerate(instants)
     for j, name in enumerate(names)
 ]
-panel = Panel.from_rows(
+table = pa.Table.from_pylist(
     rows,
-    dataset_id="p",
-    fields=("close",),
-    instruments=names,
-    keyed_by_instrument=True,
-    identity="x",
-    source_digest="d",
+    schema=pa.schema(
+        [
+            ("available_at", pa.timestamp("us", tz="UTC")),
+            ("instrument", pa.string()),
+            ("close", pa.float64()),
+        ]
+    ),
 )
-w = panel.window("close", evaluation_time=instants[-1], lookback=RowsLookback(rows=T))
 
 
 def timeit(label, fn, reps=3):
-    best = (
-        min(
-            ((lambda: (time.perf_counter(), fn(), time.perf_counter()))()[::2] and 0) or 0
-            for _ in range(0)
-        )
-        if False
-        else None
-    )
     ts = []
     for _ in range(reps):
         t0 = time.perf_counter()
@@ -47,7 +48,23 @@ def timeit(label, fn, reps=3):
     print(f"{label:58} {min(ts) * 1000:9.1f} ms")
 
 
-def sample_decide():  # what reversal_5d.py does today
+def build():
+    return Panel.from_table(
+        table,
+        dataset_id="p",
+        fields=("close",),
+        instruments=names,
+        keyed_by_instrument=True,
+        identity="x",
+        source_digest="d",
+    )
+
+
+panel = build()
+w = panel.window("close", evaluation_time=instants[-1], lookback=RowsLookback(rows=T))
+
+
+def sample_decide_per_name():  # the sample strategy before record 233: a loop and Decimals
     closes = {}
     for name in w.instruments:
         closes[name] = [Decimal(str(v)) for v in w.values[name] if v is not None]
@@ -56,36 +73,19 @@ def sample_decide():  # what reversal_5d.py does today
     return sorted(returns, key=lambda n: (returns[n], n))[:3]
 
 
-def framework_counts():
-    return w.counts()
+def sample_decide_matrix():  # the sample strategy after record 233: the block
+    closes = w.matrix()
+    full = ~np.isnan(closes).any(axis=0)
+    returns = closes[-1] / closes[0] - 1.0
+    order = sorted((returns[j], w.instruments[j]) for j in np.flatnonzero(full))
+    return [name for _, name in order[:3]]
 
 
-def framework_current():
-    return w.current()
-
-
-# a 2D block, built once per panel (what a matrix accessor would hold)
-block = np.full((T, N), np.nan)
-for j, name in enumerate(names):
-    block[:, j] = panel.columns["close"][name].to_numpy(zero_copy_only=False)
-
-
-def matrix_decide():
-    m = block[-T:]
-    full = ~np.isnan(m).any(axis=0)
-    ret = m[-1] / m[0] - 1.0
-    ret[~full] = np.inf
-    return [names[i] for i in np.argsort(ret, kind="stable")[:3]]
-
-
-timeit("sample decide (per-name loop + Decimal)", sample_decide)
-timeit("PanelWindow.counts() (framework, every read)", framework_counts)
-timeit("PanelWindow.current() (framework)", framework_current)
-timeit("2D block decide (numpy)", matrix_decide)
-timeit(
-    "build 2D block from panel (once per panel)",
-    lambda: np.column_stack(
-        [panel.columns["close"][n].to_numpy(zero_copy_only=False) for n in names]
-    ),
-)
-print("same answer:", sample_decide() == matrix_decide())
+timeit("build the panel from the scan's columns (once per run)", build)
+timeit("sample decide, per-name loop + Decimal (before 233)", sample_decide_per_name)
+timeit("sample decide on matrix() (after 233)", sample_decide_matrix)
+timeit("PanelWindow.counts() (framework, every read)", w.counts)
+timeit("PanelWindow.current()", w.current)
+timeit("PanelWindow.latest()", w.latest)
+timeit("PanelWindow.matrix() (a view)", w.matrix)
+print("same answer:", sample_decide_per_name() == sample_decide_matrix())

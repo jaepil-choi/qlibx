@@ -650,8 +650,10 @@ def head(
         cursor = con.execute(sql)
         names = [column[0] for column in cursor.description]
         return [
-            {name: (str(value) if isinstance(value, Decimal) else value)
-             for name, value in zip(names, row, strict=True)}
+            {
+                name: (str(value) if isinstance(value, Decimal) else value)
+                for name, value in zip(names, row, strict=True)
+            }
             for row in cursor.fetchall()
         ]
     finally:
@@ -1306,7 +1308,20 @@ def _rows_bound(
     return proved
 
 
-def observation_rows(
+@dataclass(frozen=True, slots=True)
+class _ObservationQuery:
+    """One PIT observation statement, built and not yet run; what the two readers share."""
+
+    sql: str
+    parameters: tuple[object, ...]
+    proofs: int
+    aimed: tuple[object, int] | None
+    bound_key: tuple[object, ...]
+    rows: int | None
+    instruments: tuple[str, ...]
+
+
+def _observation_query(
     spec: SourceSpec,
     *,
     instrument_field: str | None,
@@ -1319,8 +1334,8 @@ def observation_rows(
     rows: int | None = None,
     lower_bound: object | None = None,
     session: ScanSession | None = None,
-) -> tuple[dict[str, object], ...]:
-    """Execute one PIT observation query with its lookback pushed into SQL.
+) -> _ObservationQuery:
+    """Build one PIT observation query with its lookback pushed into SQL.
 
     **The window predicates are written here and only here.** `available_at <= evaluation_time`,
     the lookback bound, and the instrument list are the framework's, whatever the registration
@@ -1499,48 +1514,139 @@ def observation_rows(
             f"ORDER BY {ascending}"
         )
 
+    return _ObservationQuery(
+        sql=sql,
+        parameters=(*proof_parameters, *parameters),
+        proofs=len(proofs),
+        aimed=aimed,
+        bound_key=bound_key,
+        rows=rows,
+        instruments=tuple(instruments),
+    )
+
+
+def _observations_unreadable(spec: SourceSpec, exc: duckdb.Error) -> VqaprError:
+    return VqaprError(
+        stage=Stage.READ,
+        failures=[
+            Failure.bounded(
+                code="source.observations_unreadable",
+                status=Status.UNAVAILABLE,
+                requirement="the registered source and its field expressions must be queryable",
+                observed=str(exc).splitlines()[0],
+                source=FailureSource(file=str(spec.path)),
+                fix=(
+                    f"confirm every registered field expression still evaluates against "
+                    f"'{spec.path}', then re-register or fix the source"
+                ),
+                cause=exc,
+            )
+        ],
+        mutation=False,
+        retry_precondition="fix the registered source or fields, then retry",
+    )
+
+
+def observation_rows(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    key_fields: Sequence[str],
+    fields: Mapping[str, str],
+    aggregated: bool,
+    instruments: Sequence[str],
+    evaluation_time: object,
+    rows: int | None = None,
+    lower_bound: object | None = None,
+    session: ScanSession | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Execute one PIT observation query and hand back its rows, one dict each.
+
+    The statement is `_observation_query`'s, and so are the window predicates. This is the
+    row-grain reader (`rows(alias)`); the panel reads the same statement as columns through
+    `observation_table` (record `232`).
+    """
+    query = _observation_query(
+        spec,
+        instrument_field=instrument_field,
+        available_at_field=available_at_field,
+        key_fields=key_fields,
+        fields=fields,
+        aggregated=aggregated,
+        instruments=instruments,
+        evaluation_time=evaluation_time,
+        rows=rows,
+        lower_bound=lower_bound,
+        session=session,
+    )
     borrowed = _Borrowed(spec, session)
     try:
-        cursor = borrowed.connection.execute(sql, [*proof_parameters, *parameters])
+        cursor = borrowed.connection.execute(query.sql, list(query.parameters))
         names = tuple(description[0] for description in cursor.description)
         fetched = cursor.fetchall()
     except duckdb.Error as exc:
-        raise VqaprError(
-            stage=Stage.READ,
-            failures=[
-                Failure.bounded(
-                    code="source.observations_unreadable",
-                    status=Status.UNAVAILABLE,
-                    requirement=(
-                        "the registered source and its field expressions must be queryable"
-                    ),
-                    observed=str(exc).splitlines()[0],
-                    source=FailureSource(file=str(spec.path)),
-                    fix=(
-                        f"confirm every registered field expression still evaluates against "
-                        f"'{spec.path}', then re-register or fix the source"
-                    ),
-                    cause=exc,
-                )
-            ],
-            mutation=False,
-            retry_precondition="fix the registered source or fields, then retry",
-        ) from exc
+        raise _observations_unreadable(spec, exc) from exc
     finally:
         borrowed.close()
 
+    aimed = query.aimed
     if aimed is None or session is None:
         return tuple(dict(zip(names, row, strict=True)) for row in fetched)
 
     # A bound was aimed for, so the answer carries its proof: one count per counting argument,
     # appended after the declared ones. Read it, keep it for the next callback, drop it here.
-    carried = names[: len(names) - len(proofs)]
+    carried = names[: len(names) - query.proofs]
     counts = range(len(carried), len(names))
     column = names.index("instrument")
-    proved = {row[column] for row in fetched if all(row[index] >= rows for index in counts)}
+    proved = {row[column] for row in fetched if all(row[index] >= query.rows for index in counts)}
     session.remember_rows_bound(
-        bound_key,
-        _RowsBound(aimed[0], tuple(name for name in instruments if name not in proved), aimed[1]),
+        query.bound_key,
+        _RowsBound(
+            aimed[0], tuple(name for name in query.instruments if name not in proved), aimed[1]
+        ),
     )
     # Not strict: the proof columns ride past the end of `carried` and are dropped here.
     return tuple(dict(zip(carried, row, strict=False)) for row in fetched)
+
+
+def observation_table(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    key_fields: Sequence[str],
+    fields: Mapping[str, str],
+    aggregated: bool,
+    instruments: Sequence[str],
+    evaluation_time: object,
+    lower_bound: object,
+    session: ScanSession | None = None,
+) -> pa.Table:
+    """Execute one PIT observation query and hand back its columns, as Arrow (record `232`).
+
+    The panel's reader: the same statement `observation_rows` runs, over a calendar bound
+    (the registered span, for a panel), fetched as one Arrow table instead of one dict per row.
+    Columns are `available_at`, `instrument` (when the dataset has an instrument axis) and one
+    per declared field; `Panel.from_table` pivots them without walking a row in Python.
+    """
+    query = _observation_query(
+        spec,
+        instrument_field=instrument_field,
+        available_at_field=available_at_field,
+        key_fields=key_fields,
+        fields=fields,
+        aggregated=aggregated,
+        instruments=instruments,
+        evaluation_time=evaluation_time,
+        lower_bound=lower_bound,
+        session=session,
+    )
+    borrowed = _Borrowed(spec, session)
+    try:
+        cursor = borrowed.connection.execute(query.sql, list(query.parameters))
+        return cursor.fetch_arrow_table()
+    except duckdb.Error as exc:
+        raise _observations_unreadable(spec, exc) from exc
+    finally:
+        borrowed.close()

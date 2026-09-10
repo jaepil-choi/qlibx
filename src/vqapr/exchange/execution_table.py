@@ -27,22 +27,11 @@ import pyarrow.compute as pc
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.errors import (
-    Diagnosis,
-    Failure,
-    FailureSource,
-    Stage,
-    Status,
-    collector,
-)
 from vqapr.domain.identifiers import DatasetId, dataset_id
 from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import side_of
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillRule
 from vqapr.exchange.listings import ExchangeRulesView
-
-_RETRY = "fix the prepared execution parquet or binding, then retry"
-
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 
@@ -156,162 +145,6 @@ class ExecutionTable:
         fill: FillRule,
     ) -> ExecutionTable:
         return cls(dataset_id(raw_dataset_id), table, fill)
-
-
-def _schema_failures(spec: ExecutionTableSpec) -> tuple[Failure, ...]:
-    columns = scan.describe(spec.source)
-    expected = {
-        spec.trade_at_field: scan.ColumnType.TIMESTAMP_TZ,
-        spec.instrument_field: scan.ColumnType.VARCHAR,
-        spec.is_tradable_field: scan.ColumnType.BOOLEAN,
-    }
-    failures: list[Failure] = []
-    for field, wanted in expected.items():
-        observed = columns.get(field)
-        if observed is not wanted:
-            failures.append(
-                Failure.bounded(
-                    code="execution_table.field_type",
-                    status=Status.INVALID,
-                    requirement=f"execution field {field!r} must be {wanted}",
-                    observed="missing" if observed is None else str(observed),
-                    fix=(
-                        f"add column {field!r} to the execution source with type {wanted}, or "
-                        "point the field at a column that already has it"
-                    ),
-                    source=FailureSource(file=str(spec.source.path), key_path=field),
-                )
-            )
-    # DECIMAL is admitted here and refused on a dataset (`docs/issues/archive/088`): an execution
-    # price never reaches a model, it is read once at the boundary and converted explicitly
-    # (`Decimal(str(row["price"]))` below), so the money side keeps whichever exact type the venue
-    # table carries.
-    numeric = {scan.ColumnType.INTEGER, scan.ColumnType.DOUBLE, scan.ColumnType.DECIMAL}
-    # A price may be an expression (`CAST(close AS DOUBLE)` over a DECIMAL column, as the
-    # observation side declares it); its type is the composed projection's, read off
-    # DESCRIBE the way `datasets.check_schema` reads every field (record `185`).
-    expressions = {
-        semantic: field
-        for semantic, field in spec.price_fields.items()
-        if not _BARE_COLUMN.fullmatch(field.strip())
-    }
-    projected = (
-        scan.describe_projection(
-            spec.source,
-            instrument_field=spec.instrument_field,
-            available_at_field=spec.trade_at_field,
-            fields=expressions,
-        ).field_types
-        if expressions
-        else {}
-    )
-    for semantic, field in spec.price_fields.items():
-        observed = projected.get(semantic) if semantic in expressions else columns.get(field)
-        if observed not in numeric:
-            failures.append(
-                Failure.bounded(
-                    code="execution_table.price_type",
-                    status=Status.INVALID,
-                    requirement=f"execution price {semantic!r} field {field!r} must be numeric",
-                    observed="missing" if observed is None else str(observed),
-                    fix=(
-                        f"add numeric column {field!r} to the execution source, or point price "
-                        f"{semantic!r} at a column that already carries a numeric price"
-                    ),
-                    source=FailureSource(file=str(spec.source.path), key_path=field),
-                )
-            )
-    return tuple(failures)
-
-
-def _schema_diagnosis(registration: ExecutionTable) -> Diagnosis:
-    return Diagnosis(
-        stage=Stage.REGISTER,
-        failures=_schema_failures(registration.table),
-        retry_precondition=_RETRY,
-    )
-
-
-def _key_diagnosis(registration: ExecutionTable) -> Diagnosis:
-    table = registration.table
-    result = scan.key_check(table.source, (table.trade_at_field, table.instrument_field))
-    found = collector(Stage.REGISTER)
-    identity = f"({table.trade_at_field}, {table.instrument_field})"
-    if result.null_groups:
-        found.add(
-            Failure.bounded(
-                code="execution_table.key_null",
-                status=Status.INVALID,
-                requirement=f"execution identity {identity} must not contain nulls",
-                observed=f"{result.null_groups} key group(s) with a null",
-                examples=result.null_examples,
-                example_total=result.null_groups,
-                source=FailureSource(file=str(table.source.path), key_path=identity),
-                fix=(
-                    f"drop or repair the rows whose {identity} is null, or declare an identity "
-                    "whose columns are always present"
-                ),
-            )
-        )
-    if result.duplicate_groups:
-        found.add(
-            Failure.bounded(
-                code="execution_table.key_duplicate",
-                status=Status.INVALID,
-                requirement=f"execution identity {identity} must be unique",
-                observed=f"{result.duplicate_groups} duplicated key group(s)",
-                examples=result.duplicate_examples,
-                example_total=result.duplicate_groups,
-                source=FailureSource(file=str(table.source.path), key_path=identity),
-                fix=(
-                    f"deduplicate the source on {identity}, or widen the identity until it "
-                    "identifies one row"
-                ),
-            )
-        )
-    return found.done(retry=_RETRY)
-
-
-def _price_diagnosis(registration: ExecutionTable) -> Diagnosis:
-    table = registration.table
-    semantic = registration.fill.trade_price
-    physical = table.price_fields[semantic]
-    result = scan.positive_finite_when_true(
-        table.source,
-        value_field=physical,
-        condition_field=table.is_tradable_field,
-        identity_fields=(table.trade_at_field, table.instrument_field),
-    )
-    found = collector(Stage.REGISTER)
-    if result.invalid_rows:
-        found.add(
-            Failure.bounded(
-                code="execution_table.price_invalid",
-                status=Status.INVALID,
-                requirement=(
-                    f"selected execution price {semantic!r} field {physical!r} must be finite and "
-                    "positive whenever is_tradable is true"
-                ),
-                observed=f"{result.invalid_rows} invalid tradable row(s)",
-                examples=result.examples,
-                example_total=result.invalid_rows,
-                source=FailureSource(file=str(table.source.path), key_path=physical),
-                fix=(
-                    f"repair {physical!r} to be finite and positive on every row where "
-                    f"{table.is_tradable_field!r} is true, or exclude those rows from the source"
-                ),
-            )
-        )
-    return found.done(retry=_RETRY)
-
-
-def validate_execution_table(registration: ExecutionTable) -> Diagnosis:
-    """Validate the bound execution table before a run freezes it: schema, key, chosen price."""
-    for check in (_schema_diagnosis, _key_diagnosis, _price_diagnosis):
-        diagnosis = check(registration)
-        if not diagnosis.ok:
-            return diagnosis
-    return Diagnosis(stage=Stage.REGISTER)
 
 
 @dataclass(frozen=True, slots=True)

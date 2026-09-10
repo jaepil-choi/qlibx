@@ -72,7 +72,7 @@ def test_pre_loop_failure_closes_session_and_releases_only_owned_writer(
         monkeypatch.setattr(RunRecordWriter, "open", fail)
     else:
         monkeypatch.setattr(
-            runtime, "StrategyEventLoop" if kind == "strategy" else "DataModelEventLoop", fail
+            runtime, "strategy_loop" if kind == "strategy" else "datamodel_loop", fail
         )
     with pytest.raises(ValueError) as caught:
         execute()

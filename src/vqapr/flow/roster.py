@@ -17,15 +17,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from vqapr.domain.errors import Failure, Stage, Status, VqaprError
-
 # Hoisted from four function-local imports by record `115`. They were deferred inside
 # `vqapr.public`, where the facade sits above everything and importing eagerly would have been
 # a cycle. That justification did not travel with the code: this module is in `flow/`, and
 # `flow/orchestration.py` already imports `vqapr.project.store` at module scope. An architecture
 # review of VB002 found them being carried at full weight against a ratchet whose stated point
 # is that lowering it is the goal.
-from vqapr.domain.instruments import InstrumentRoster, build_roster, read_roster_table
+from vqapr.data.validation import verify_roster
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
+from vqapr.domain.instruments import InstrumentRoster, build_roster
 from vqapr.project.store import Workspace
 
 WORKSPACE_ABSENT = "workspace.missing"
@@ -110,11 +110,12 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     #
     # Bare exceptions were reaching the envelope as `stage: "unhandled"` here.
     try:
-        tables = {
-            str(kind): read_roster_table(Path(str(path))) for kind, path in declared_tables.items()
-        }
+        diagnosis, tables = verify_roster(
+            {str(kind): Path(str(path)) for kind, path in declared_tables.items()}
+        )
+        diagnosis.raise_if_failed()
         registry = build_roster(tables)
-    except (OSError, ValueError, KeyError, TypeError) as unreadable:
+    except (VqaprError, OSError, ValueError, KeyError, TypeError) as unreadable:
         declared = ", ".join(f"{kind}={path}" for kind, path in sorted(declared_tables.items()))
         raise VqaprError(
             stage=Stage.READ,

@@ -23,7 +23,9 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
+from vqapr.data.validation import verify_roster
 from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.domain.instruments import build_roster
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_compliance, load_data_model, load_strategy_model
 from vqapr.project.registration import AUTHORED_KINDS
@@ -395,12 +397,12 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
         "digest": str(pointer["digest"]),
         "tables": {str(kind): str(path) for kind, path in sorted(tables.items())},
     }
-    from vqapr.domain.instruments import build_roster, read_roster_table
-
     try:
-        roster = build_roster(
-            {str(kind): read_roster_table(Path(str(path))) for kind, path in tables.items()}
+        diagnosis, rows_by_kind = verify_roster(
+            {str(kind): Path(str(path)) for kind, path in tables.items()}
         )
+        diagnosis.raise_if_failed()
+        roster = build_roster(rows_by_kind)
     except Exception as unreadable:
         row["unreadable"] = str(unreadable)
         return [row]

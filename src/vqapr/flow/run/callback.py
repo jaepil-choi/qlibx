@@ -597,7 +597,7 @@ class CallbackHandler:
     def execution_horizon(self, execution_table: ExecutionTable) -> ExecutionHorizon:
         """Read the run's candidate execution instants once, not once per callback.
 
-        Built lazily so constructing a StrategyEventLoop still opens no physical source. The lower
+        Built lazily so assembling a run loop still opens no physical source. The lower
         bound is the frozen run start, which no decision can precede.
         """
         horizon = self._context.horizon

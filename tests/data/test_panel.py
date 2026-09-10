@@ -56,13 +56,13 @@ def _workspace(root: Path, parquet: Path, grain: str = "instrument_instant") -> 
 @pytest.fixture
 def scans(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     issued: list[dict[str, str]] = []
-    original = store_module.scan.observation_rows
+    original = store_module.scan.observation_table
 
     def counting(spec, **kwargs):
         issued.append(dict(kwargs["fields"]))
         return original(spec, **kwargs)
 
-    monkeypatch.setattr(store_module.scan, "observation_rows", counting)
+    monkeypatch.setattr(store_module.scan, "observation_table", counting)
     return issued
 
 
@@ -146,7 +146,7 @@ def test_a_window_shares_the_panels_buffers(tmp_path: Path, model_price_parquet:
     store = DuckDbObservationStore(_workspace(tmp_path, model_price_parquet))
     window = _context(store, 7).read("prices", "close")
 
-    column = window.panel.columns["close"]["A"]
+    column = window.panel.column("close", "A")
     sliced = column.slice(window.start, window.stop - window.start)
     assert sliced.buffers()[1] is not None
     assert sliced.buffers()[1].address == column.buffers()[1].address, "a slice, not a copy"

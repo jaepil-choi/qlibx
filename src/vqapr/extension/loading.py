@@ -353,7 +353,7 @@ def load_compliance(ref: ComponentRef, *, project_root: str | Path | None = None
 def _compliance_identity(ref: ComponentRef, rule: Compliance) -> None:
     """Refuse a Compliance rule registered under an id it does not answer to.
 
-    `StrategyEventLoop` requires the loaded rules to carry exactly the ids the FrozenRun declared,
+    `strategy_loop` requires the loaded rules to carry exactly the ids the FrozenRun declared,
     and it enforced that with a bare `ValueError` at assembly. Nothing before it looked, so `check`
     returned `ok:true` on all five phases and `run` then died with `stage: unhandled` and an empty
     `failures` list -- the framework reporting itself broken when the registration was wrong.

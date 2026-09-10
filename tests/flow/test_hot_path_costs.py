@@ -87,7 +87,7 @@ def test_one_store_hashes_each_source_once_no_matter_how_many_queries(
     """Re-hashed bytes used to equal query count times full source size.
 
     A run's sources are frozen for its whole duration, so the digest cannot change between two
-    queries of the same run. `StrategyEventLoop._actual_source_refs` already refuses a callback that
+    queries of the same run. `CallbackHandler._actual_source_refs` already refuses a callback that
     observes two digests for one source; computing it once per store makes that unrepresentable
     rather than merely detected.
     """
@@ -951,3 +951,68 @@ def test_sequence_is_one_order_across_every_recorder_and_fill_of_a_run() -> None
     assert [row["sequence"] for row in alone.staged_rows()["diagnostics"]] == [0], (
         "a recorder built by hand, without a run, counts for itself"
     )
+
+
+# --------------------------------------------------------------------------------------
+# 096: a panel read makes no Python step per name
+# --------------------------------------------------------------------------------------
+
+
+def _wide_panel(names: int, instants: int):
+    from vqapr.data.lookback import RowsLookback
+    from vqapr.data.panel import Panel
+
+    base = datetime(2024, 1, 1, 6, 30, tzinfo=UTC)
+    stamps = [base + timedelta(days=day) for day in range(instants)]
+    labels = [f"N{index:05d}" for index in range(names)]
+    table = pa.Table.from_pylist(
+        [
+            {"available_at": stamp, "instrument": label, "close": float(index + day)}
+            for day, stamp in enumerate(stamps)
+            for index, label in enumerate(labels)
+        ],
+        schema=pa.schema(
+            [
+                ("available_at", pa.timestamp("us", tz="UTC")),
+                ("instrument", pa.string()),
+                ("close", pa.float64()),
+            ]
+        ),
+    )
+    panel = Panel.from_table(
+        table,
+        dataset_id="wide",
+        fields=("close",),
+        instruments=labels,
+        keyed_by_instrument=True,
+        identity="wide",
+        source_digest="wide",
+    )
+    return panel.window("close", evaluation_time=stamps[-1], lookback=RowsLookback(rows=instants))
+
+
+def test_a_panel_read_makes_no_python_step_per_name(monkeypatch) -> None:
+    """`docs/issues/096`: `counts`, `current`, `latest` and `matrix` are vectorised over the
+    field's block. Counted, not timed: the number of per-name column calls a read makes is the
+    fact, and it must not grow with the number of names.
+    """
+    from vqapr.data import panel as panel_module
+
+    window = _wide_panel(names=3_000, instants=6)
+    per_name: list[str] = []
+    original = panel_module.Panel.column
+
+    def counting(self, field, instrument):
+        per_name.append(instrument)
+        return original(self, field, instrument)
+
+    monkeypatch.setattr(panel_module.Panel, "column", counting)
+
+    assert len(window.counts()) == 3_000
+    assert len(window.current()) == 3_000
+    assert len(window.latest()) == 3_000
+    assert window.matrix().shape == (6, 3_000)
+    assert per_name == [], "a vectorised read asks for no name's column"
+
+    assert window.values["N00007"] == (7.0, 8.0, 9.0, 10.0, 11.0, 12.0)
+    assert per_name == ["N00007"], "values[name] converts that one column and no other"

@@ -14,9 +14,12 @@
 `grain`, and each verb refuses the other grain by name.
 
 **`call.read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a
-`PanelWindow`: `instants` (the same for every name) × `instruments`. `values[name]` is that name's
-values over the instants, `None` where it had none. It is a slice of a panel the run built once —
-arithmetic, not a query.
+`PanelWindow`: `instants` (the same for every name) × `instruments`. **`matrix()`** is the window as
+one float array — rows are the instants (the last row is the newest), columns are `instruments`,
+`NaN` where a name had no value — so a cross-sectional signal is one numpy expression over every
+name, and 3,000 names cost what ten do. `values[name]` is one name's values over the instants,
+`None` where it had none, for a question about a single name. It is a slice of a panel the run
+built once — arithmetic, not a query.
 
 **`call.rows(alias)` on `grain: rows`** returns a tuple of `Observation`s, one per (instant,
 instrument), each carrying `instrument_id`, its own `available_at` and `values`. Names interleave

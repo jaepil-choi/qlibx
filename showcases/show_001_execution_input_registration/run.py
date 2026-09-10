@@ -305,11 +305,16 @@ def main() -> None:
 
     # --- Density invariance -------------------------------------------------------------
     # Same registered declaration, only the physical execution parquet's non-selected 10:00
-    # rows differ from the canonical trim. Nothing is re-registered: the registration names a
-    # path, and this rewrites what is at that path.
+    # rows differ from the canonical trim. The registration names a path; this rewrites what
+    # is at that path and registers THE SAME DECLARATION again (record 234): a run reads only
+    # the bytes registration measured, so the rewritten file is measured once more and the
+    # declaration is unchanged.
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
+        register_dataset(
+            PROJECT, _venue_dataset("krx-daily"), SourceSpec.of("krx-daily-source", execution_path)
+        )
         # The same run again, deliberately: its first pass published `show001-weights`, and a
         # run replaces its own output the way it replaces its own record (design §2).
         canonical_summary = _signature(
@@ -317,6 +322,9 @@ def main() -> None:
         )
     finally:
         execution_path.write_bytes(dense_bytes)
+        register_dataset(
+            PROJECT, _venue_dataset("krx-daily"), SourceSpec.of("krx-daily-source", execution_path)
+        )
 
     dense_signature = _json_value(dense_summary)
     canonical_signature = _json_value(canonical_summary)
@@ -379,7 +387,8 @@ def main() -> None:
             "canonical_signature": canonical_signature,
             "claim": (
                 "Two runs over the same registered declaration differ only by three "
-                "non-selected 10:00 physical execution rows. Their economic signatures "
+                "non-selected 10:00 physical execution rows; the declaration was registered "
+                "again over the rewritten file (record 234). Their economic signatures "
                 "are equal."
             ),
         },

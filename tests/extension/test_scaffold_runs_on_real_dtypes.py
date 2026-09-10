@@ -153,11 +153,11 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
     )
 
     # A: 105/100 - 1 = 0.05.  B: 53/50 - 1 = 0.06. Floats, because the scaffold returns the
-    # `double` it declares (record 174); the crossing to Decimal, if an author wants one, is theirs.
-    assert rows == [
-        {"instrument": "A", "value": 0.05},
-        {"instrument": "B", "value": 0.06},
-    ]
+    # `double` it declares (record 174) and computes on the window's matrix (record 233), so the
+    # quotient carries a binary float's last bit; the crossing to Decimal, if an author wants one,
+    # is theirs.
+    assert [row["instrument"] for row in rows] == ["A", "B"]
+    assert [row["value"] for row in rows] == pytest.approx([0.05, 0.06])
     assert all(type(row["value"]) is float for row in rows)
 
 
@@ -209,8 +209,15 @@ def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:
     """
     source = render(kind, "pinned", dataset_id="price_daily")
 
-    # Since record `137` a panel window is read column by column, so the conversion sits in a
-    # comprehension over the window's values rather than an `.append` per row; the property is
-    # the same: every cell goes through `Decimal(str(...))`, never `Decimal(...)` on the raw cell.
-    assert "Decimal(str(v))" in source
-    assert "[Decimal(v)" not in source and ".append(value)" not in source
+    # Since record `233` a panel-grain body computes on `window.matrix()` -- one float array
+    # over every name -- so no cell is collected or converted one at a time at all.
+    assert "window.matrix()" in source
+    assert "Decimal(" not in source and ".append(value)" not in source
+    assert "for name in window.instruments" not in source, "no per-name loop over the window"
+
+    # The rows grain has no shared instant axis and keeps the per-name reduction; there the
+    # property is the old one: every cell goes through `Decimal(str(...))`, never `Decimal(...)`
+    # on the raw cell.
+    rows = render(ComponentKind.DATA_MODEL, "pinned", dataset_id="vendor", lookback_kind="instants")
+    assert "Decimal(str(value))" in rows
+    assert "[Decimal(v)" not in rows and ".append(value)" not in rows

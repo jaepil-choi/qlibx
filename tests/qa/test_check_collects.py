@@ -34,6 +34,7 @@ from vqapr.account.account import AccountMode
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
+from vqapr.data.validation import verify_source
 from vqapr.domain.account_state import AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
@@ -98,21 +99,26 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         )
     finally:
         con.close()
+    # Measured through the one door (record `234`): the ordering judgment reads the table by
+    # the digest registration kept, and a hand-registered table is `dataset.unverified`.
+    exec_source = SourceSpec.of("exec-src", exec_dir)
+    diagnosis, _, measured = verify_source(
+        DatasetRegistration.of(
+            'my-exec',
+            'exec-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        exec_source,
+    )
+    diagnosis.raise_if_failed()
     with Workspace.transaction(root) as t:
-        t.register_dataset(
-            DatasetRegistration.of(
-                'my-exec',
-                'exec-src',
-                instrument_field="instrument",
-                available_at="trade_at",
-                grain="instrument_instant",
-                key_fields=("trade_at", "instrument"),
-                fields={"close": "close", "is_tradable": "is_tradable"},
-                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
-                execution={"is_tradable": "is_tradable"},
-            ).with_span(*_SPAN),
-            SourceSpec.of("exec-src", exec_dir),
-        )
+        t.register_dataset(measured, exec_source)
     source = root / "strategy.py"
     source.write_text(
         "from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold\n\n"

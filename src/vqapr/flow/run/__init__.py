@@ -5,7 +5,7 @@ kind of run. The two-clocks campaign (design §3-4) made the kinds the same thin
 one part on its own clock, tools on the market clock -- so the split by kind became a split of
 the same walk, and the modules here are arranged by clock instead:
 
-    loop.py          StrategyEventLoop (two clocks) · DataModelEventLoop (one clock)
+    loop.py          RunLoop, the one walk · strategy_loop (two clocks) · datamodel_loop (one clock)
     callback.py      strategy clock: StrategyModel.decide
     compute.py       strategy clock: DataModel.compute
     accrual.py       market clock, 1st: a place (design §7.3)

@@ -17,12 +17,8 @@ import pytest
 import yaml
 
 from vqapr.data import scan
-from vqapr.data.datasets import (
-    DatasetRegistration,
-    Grain,
-    check_key,
-    require_declared,
-)
+from vqapr.data.datasets import DatasetRegistration, Grain, require_declared
+from vqapr.data.validation import check_key
 from vqapr.data.sources import SourceSpec
 from vqapr.project.registration import apply
 from vqapr.domain.errors import VqaprError

@@ -902,7 +902,7 @@ def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_cras
     """The reported crash, driven through the two verbs a user actually types.
 
     `check` used to return `ok:true` on all five phases and `run` then died inside
-    `StrategyEventLoop.__init__` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
+    `strategy_loop` with `stage:"unhandled"`, `failures:[]` and a raw traceback.
 
     `vqapr register` now refuses the mismatch outright, so the workspace is populated through the
     Python API here on purpose — that is precisely the route the acceptance criterion anticipates

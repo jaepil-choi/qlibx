@@ -26,7 +26,9 @@ Evidence includes:
 - a density-invariance comparison across two runs of one registered declaration: the dense
   execution table carries three extra non-selected 10:00 rows the canonical trim does not,
   and the two runs' economic signatures — account version, cash, positions, lifecycle
-  counts — are equal;
+  counts — are equal. The declaration is registered again over the rewritten file (record
+  234: a run reads only the bytes registration measured, and registering the same
+  declaration again re-measures them);
 - the venue table registered as a dataset with an `execution` role (record 185), the fill
   declared on the run; and an invalid venue table (a non-finite close) refused by
   `register_dataset` like any other dataset, without any change to the project's persisted

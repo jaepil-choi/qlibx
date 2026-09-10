@@ -13,9 +13,11 @@ hands each event to one of two things:
                                                 COMPLIANCE -> close, the fold of record `226`
 
 A part owns its receiver and its opening and closing (`start`, `finish`); a datamodel run simply
-has no market clock. `StrategyEventLoop` and `DataModelEventLoop` remain as the two assemblies --
-their constructors are where a run's authorities are checked and its handlers built -- and are
-`RunLoop`s otherwise. The walk itself is `flow/engine/loop.py`'s `EventLoop` (record `182`).
+has no market clock. The walk -- start, the events sorted, one `handle` each, finish -- is
+`RunLoop.run`, written once; until record `231` it sat in an abstract `EventLoop` whose only
+subclass was this class (`docs/issues/097`). The two kinds are assembled by two functions,
+`strategy_loop` and `datamodel_loop`: that is where a run's authorities are checked against each
+other and its handlers built, and what they return is a `RunLoop` and nothing more specific.
 
 The handlers are the other modules of this package, one per wiring-table row (design §4,
 `domain/wiring.py`): on the strategy clock `callback.py` (decide) and `compute.py` (compute); on
@@ -27,7 +29,7 @@ framework's own step) and `compliance.py`. `context.py` is what a strategy run's
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -41,13 +43,14 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.instruments import InstrumentRoster
+from vqapr.domain.values import require_tz_aware
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     FinalizationEvidence,
     SimulationStage,
 )
-from vqapr.flow.engine.loop import EventLoop, MarketEvent, OccurrenceEvent
+from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
 from vqapr.flow.engine.run_state import (
     RunFinalization,
     RunStateRepository,
@@ -80,7 +83,6 @@ __all__ = [
     "DEFAULT_TABLES",
     "DEFAULT_TABLE_PREFIX",
     "AcceptedIntent",
-    "DataModelEventLoop",
     "DataModelPart",
     "DataModelResult",
     "DueExecutionResult",
@@ -92,10 +94,11 @@ __all__ = [
     "Part",
     "RunLoop",
     "SimulationResult",
-    "StrategyEventLoop",
     "StrategyPart",
     "ValuationResult",
     "callback_evidence",
+    "datamodel_loop",
+    "strategy_loop",
 ]
 
 
@@ -197,30 +200,59 @@ class MarketClock:
             return DueExecutionTrace(event, at.result, self._context.state.current.version)
 
 
-class RunLoop[TraceT, ResultT](
-    EventLoop[OccurrenceEvent | MarketEvent, TraceT | DueExecutionTrace, ResultT]
-):
+class RunLoop[TraceT, ResultT]:
     """The one loop: a part on the strategy clock, and a market clock when the run has one.
 
-    Knows nothing of accounts, venues, warehouses or records: the part opens, is dispatched and
-    finishes; the market clock, when present, contributes its instants to the walk and handles
-    each of them. Whether the run is a strategy or a datamodel is decided by what was assembled
-    here, and nowhere below.
+    Three sentences say all of it. The walk is `run`: start, the events sorted by clock, one
+    `handle` each, finish -- written once and not overridable, because the merge order is what
+    makes two runs of the same frozen inputs produce the same traces (architecture 3.2). A
+    scheduled event is the part's (`StrategyModel.decide` or `DataModel.compute`); a market event
+    is the market clock's fold. Whether the run is a strategy or a datamodel is decided by what
+    `strategy_loop`/`datamodel_loop` assembled here, and nowhere below: the loop knows nothing of
+    accounts, venues, warehouses or records.
     """
 
     def __init__(
         self,
         *,
-        schedule: tuple[OperationOccurrence, ...],
+        schedule: Sequence[OperationOccurrence],
         start_cutoff: datetime,
         part: Part[TraceT, ResultT],
         market: MarketClock | None = None,
         on_progress: Callable[[], None] | None = None,
     ) -> None:
-        super().__init__(schedule=schedule, start_cutoff=start_cutoff, on_progress=on_progress)
+        require_tz_aware(start_cutoff, name="start_cutoff")
+        if on_progress is not None and not callable(on_progress):
+            raise TypeError("on_progress must be callable or None")
+        self._schedule = tuple(schedule)
+        self._start_cutoff = start_cutoff
+        self._on_progress = on_progress
         self._part = part
         self._market = market
         self._started = 0.0
+
+    @property
+    def schedule(self) -> tuple[OperationOccurrence, ...]:
+        """The strategy-clock events, in dispatch order."""
+        return self._schedule
+
+    @property
+    def part(self) -> Part[TraceT, ResultT]:
+        """The part this loop dispatches to; a test that injects a fault into it reaches it here."""
+        return self._part
+
+    def run(self) -> ResultT:
+        """Synchronously process every event of the walk."""
+        self.start(self._start_cutoff)
+        traces: list[TraceT | DueExecutionTrace] = []
+        for event in sorted(self.events(), key=lambda item: item.sort_key()):
+            # One call per event, for a caller that needs to prove it is still alive while the
+            # run is executing. A run's only other outward sign is its result, which arrives
+            # minutes later -- long after anything watching would have concluded it had died.
+            if self._on_progress is not None:
+                self._on_progress()
+            traces.append(self.handle(event))
+        return self.finish(tuple(traces))
 
     def start(self, cutoff: datetime) -> None:
         self._started = time.perf_counter()
@@ -229,7 +261,7 @@ class RunLoop[TraceT, ResultT](
     def events(self) -> tuple[OccurrenceEvent | MarketEvent, ...]:
         """The strategy clock, merged with the market clock when the run has one (design §3)."""
         occurrences: tuple[OccurrenceEvent | MarketEvent, ...] = tuple(
-            OccurrenceEvent(item) for item in self.schedule
+            OccurrenceEvent(item) for item in self._schedule
         )
         if self._market is None:
             return occurrences
@@ -255,7 +287,8 @@ class StrategyPart:
 
     def __init__(self, context: FlowContext, callback: CallbackHandler) -> None:
         self._context = context
-        self._callback = callback
+        # Public by name: a test that injects a fault into the callback reaches it here.
+        self.callback = callback
 
     def start(self, cutoff: datetime) -> None:
         with self._context.guard(
@@ -263,14 +296,14 @@ class StrategyPart:
             cutoff,
             owner=self._context.layer.config,
         ):
-            self._callback.load_visible_state()
+            self.callback.load_visible_state()
 
     def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         # `callback` is the whole scheduled side: the window built for the model and the model's
         # own `decide` (`docs/issues/archive/068`: a user learns their strategy is 5% of the wall
         # clock from the record, not from cProfile).
         with self._context.timed("callback"):
-            return self._callback.dispatch(occurrence)
+            return self.callback.dispatch(occurrence)
 
     def finish(
         self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...], *, elapsed: float
@@ -298,112 +331,109 @@ class StrategyPart:
         return SimulationResult(tuple(traces), root, timing)
 
 
-class StrategyEventLoop(RunLoop[OccurrenceTrace, SimulationResult]):
+def strategy_loop(
+    frozen_run: FrozenRun,
+    strategy: StrategyModel,
+    state: RunStateRepository,
+    *,
+    layer: FrozenStrategy | None = None,
+    strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+    account: Account,
+    compliance_window_at: Callable[[datetime], ModelWindow] | None = None,
+    exchange: Exchange,
+    compliance: tuple[Compliance, ...] = (),
+    valuation_service: ValuationService | None = None,
+    scan_session: ScanSession | None = None,
+    on_progress: Callable[[], None] | None = None,
+    registry: InstrumentRoster | None = None,
+    record_account_positions: bool = True,
+) -> RunLoop[OccurrenceTrace, SimulationResult]:
     """A strategy run, assembled: two clocks -- the strategy's agenda and the market's instants.
 
-    The Flow owns timestamp stamping, exact execution, account mutation, and marking. This
-    constructor is where a strategy run's authorities are checked against each other and its
-    handlers built; the walk is `RunLoop`'s.
+    The Flow owns timestamp stamping, exact execution, account mutation, and marking. This is
+    where a strategy run's authorities are checked against each other and its handlers built;
+    the walk is `RunLoop`'s. A function, not a subclass: what it returns differs from a datamodel
+    run only in what was assembled (`docs/issues/097`).
     """
-
-    def __init__(
-        self,
-        frozen_run: FrozenRun,
-        strategy: StrategyModel,
-        state: RunStateRepository,
-        *,
-        layer: FrozenStrategy | None = None,
-        strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
-        account: Account,
-        compliance_window_at: Callable[[datetime], ModelWindow] | None = None,
-        exchange: Exchange,
-        compliance: tuple[Compliance, ...] = (),
-        valuation_service: ValuationService | None = None,
-        scan_session: ScanSession | None = None,
-        on_progress: Callable[[], None] | None = None,
-        registry: InstrumentRoster | None = None,
-        record_account_positions: bool = True,
-    ) -> None:
-        # A run runs ONE strategy (2026-09-09,
-        # `docs/design/two-clocks-and-the-wiring-table.md` §2.3), so `layer` is a courtesy the
-        # caller may pass and never a choice: the run holds the answer.
-        if layer is None:
-            layer = frozen_run.strategy
-        if layer is None or layer is not frozen_run.strategy:
-            raise ValueError("layer must be the frozen run's strategy")
-        if not callable(strategy_window_for_occurrence):
-            raise TypeError("strategy_window_for_occurrence must be callable")
-        if compliance and not callable(compliance_window_at):
-            raise TypeError("compliance_window_at must be callable when rules are loaded")
-        if not callable(getattr(exchange, "execute", None)):
-            raise TypeError("exchange must provide execute")
-        _require_compliance_identity(compliance, layer.compliance.rules)
-        cutoff = frozen_run.start or frozen_run.end
-        if cutoff is None:
-            raise RuntimeError("simulation start requires a frozen boundary")
-        requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
-        prices = {requirement.price for requirement in requirements}
-        if len(prices) > 1:
-            raise ValueError("an Exchange may require at most one reference execution price")
-        declared_history = strategy.account_history()
-        if declared_history is not None and not isinstance(declared_history, AccountHistoryInput):
-            raise TypeError("account_history must return an AccountHistoryInput or None")
-        initial = state.current.account
-        if initial is None:
-            raise ValueError("state must begin with the frozen AccountState root")
-        if frozen_run.initial_account_snapshot != initial.snapshot:
-            raise ValueError("state AccountState must match FrozenRun initial account snapshot")
-        if frozen_run.initial_account_mode != account.mode:
-            raise ValueError("Account mode must match FrozenRun initial account mode")
-        carried = set(state.current.component_state_refs)
-        stateful = {rule.compliance_id for rule in compliance}
-        if isinstance(exchange, Component):
-            stateful.add(exchange.exchange_id)
-        if carried != stateful:
-            raise ValueError(
-                "state must carry the initial memory of exactly the loaded components -- every "
-                "compliance rule, and the venue when it is a Component (RunStateRepository "
-                f"initial_component_memory): carrying {sorted(carried)!r}, loaded "
-                f"{sorted(stateful)!r}"
-            )
-
-        # All handler dependencies exist before the first handler is constructed. The context
-        # owns this strategy's runtime and bookkeeping; the loop owns the walk.
-        self._context = FlowContext(
-            frozen_run=frozen_run,
-            layer=layer,
-            state=state,
-            account=account,
-            exchange=exchange,
-            strategy=strategy,
-            compliance=compliance,
-            valuation_service=valuation_service or ValuationService(),
-            strategy_window_for_occurrence=strategy_window_for_occurrence,
-            compliance_window_at=compliance_window_at or _no_compliance_window,
-            scan_session=scan_session,
-            registry=registry,
-            reference_price=next(iter(prices), None),
-            record_account_positions=record_account_positions,
-            account_history_declaration=declared_history,
+    # A run runs ONE strategy (2026-09-09,
+    # `docs/design/two-clocks-and-the-wiring-table.md` §2.3), so `layer` is a courtesy the
+    # caller may pass and never a choice: the run holds the answer.
+    if layer is None:
+        layer = frozen_run.strategy
+    if layer is None or layer is not frozen_run.strategy:
+        raise ValueError("layer must be the frozen run's strategy")
+    if not callable(strategy_window_for_occurrence):
+        raise TypeError("strategy_window_for_occurrence must be callable")
+    if compliance and not callable(compliance_window_at):
+        raise TypeError("compliance_window_at must be callable when rules are loaded")
+    if not callable(getattr(exchange, "execute", None)):
+        raise TypeError("exchange must provide execute")
+    _require_compliance_identity(compliance, layer.compliance.rules)
+    cutoff = frozen_run.start or frozen_run.end
+    if cutoff is None:
+        raise RuntimeError("simulation start requires a frozen boundary")
+    requirements = tuple(getattr(exchange, "execution_requirements", tuple)())
+    prices = {requirement.price for requirement in requirements}
+    if len(prices) > 1:
+        raise ValueError("an Exchange may require at most one reference execution price")
+    declared_history = strategy.account_history()
+    if declared_history is not None and not isinstance(declared_history, AccountHistoryInput):
+        raise TypeError("account_history must return an AccountHistoryInput or None")
+    initial = state.current.account
+    if initial is None:
+        raise ValueError("state must begin with the frozen AccountState root")
+    if frozen_run.initial_account_snapshot != initial.snapshot:
+        raise ValueError("state AccountState must match FrozenRun initial account snapshot")
+    if frozen_run.initial_account_mode != account.mode:
+        raise ValueError("Account mode must match FrozenRun initial account mode")
+    carried = set(state.current.component_state_refs)
+    stateful = {rule.compliance_id for rule in compliance}
+    if isinstance(exchange, Component):
+        stateful.add(exchange.exchange_id)
+    if carried != stateful:
+        raise ValueError(
+            "state must carry the initial memory of exactly the loaded components -- every "
+            "compliance rule, and the venue when it is a Component (RunStateRepository "
+            f"initial_component_memory): carrying {sorted(carried)!r}, loaded "
+            f"{sorted(stateful)!r}"
         )
-        callback = CallbackHandler(self._context)
-        # Kept by name: a test that injects a fault into the callback reaches it here.
-        self._callback = callback
-        super().__init__(
-            schedule=frozen_run.dispatch_order(layer),
-            start_cutoff=cutoff,
-            part=StrategyPart(self._context, callback),
-            market=MarketClock(
-                self._context,
-                accrual=AccrualHandler(self._context),
-                execution=ExecutionHandler(self._context),
-                valuation=ValuationHandler(self._context),
-                compliance=ComplianceHandler(self._context),
-                callback=callback,
-            ),
-            on_progress=on_progress,
-        )
-        account.bind(initial)
+
+    # All handler dependencies exist before the first handler is constructed. The context
+    # owns this strategy's runtime and bookkeeping; the loop owns the walk.
+    context = FlowContext(
+        frozen_run=frozen_run,
+        layer=layer,
+        state=state,
+        account=account,
+        exchange=exchange,
+        strategy=strategy,
+        compliance=compliance,
+        valuation_service=valuation_service or ValuationService(),
+        strategy_window_for_occurrence=strategy_window_for_occurrence,
+        compliance_window_at=compliance_window_at or _no_compliance_window,
+        scan_session=scan_session,
+        registry=registry,
+        reference_price=next(iter(prices), None),
+        record_account_positions=record_account_positions,
+        account_history_declaration=declared_history,
+    )
+    callback = CallbackHandler(context)
+    loop = RunLoop(
+        schedule=frozen_run.dispatch_order(layer),
+        start_cutoff=cutoff,
+        part=StrategyPart(context, callback),
+        market=MarketClock(
+            context,
+            accrual=AccrualHandler(context),
+            execution=ExecutionHandler(context),
+            valuation=ValuationHandler(context),
+            compliance=ComplianceHandler(context),
+            callback=callback,
+        ),
+        on_progress=on_progress,
+    )
+    account.bind(initial)
+    return loop
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,41 +470,38 @@ class DataModelPart:
         )
 
 
-class DataModelEventLoop(RunLoop[DataModelTrace, DataModelResult]):
+def datamodel_loop(
+    frozen_run: FrozenRun,
+    layer: FrozenDataModel,
+    model: DataModel,
+    *,
+    window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+    output: RunOutput,
+    on_progress: Callable[[], None] | None = None,
+) -> RunLoop[DataModelTrace, DataModelResult]:
     """A datamodel run, assembled: one clock, the agenda where its `DataModel` computes.
 
     No market clock: a datamodel sees no account and passes through no venue (architecture
     4.4), so nothing happens between two sessions and the walk is the plain sequence of
     occurrences. What it shares with a strategy run is everything else -- the same `RunLoop`.
     """
-
-    def __init__(
-        self,
-        frozen_run: FrozenRun,
-        layer: FrozenDataModel,
-        model: DataModel,
-        *,
-        window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
-        output: RunOutput,
-        on_progress: Callable[[], None] | None = None,
-    ) -> None:
-        if layer is not frozen_run.datamodel:
-            raise ValueError("layer must be the frozen run's datamodel")
-        if not callable(window_for_occurrence):
-            raise TypeError("window_for_occurrence must be callable")
-        cutoff = frozen_run.start or frozen_run.end
-        if cutoff is None:
-            raise RuntimeError("a datamodel run requires a frozen boundary")
-        compute = ComputeHandler(
-            frozen_run=frozen_run,
-            layer=layer,
-            model=model,
-            window_for_occurrence=window_for_occurrence,
-            output=output,
-        )
-        super().__init__(
-            schedule=frozen_run.dispatch_order(layer),
-            start_cutoff=cutoff,
-            part=DataModelPart(compute, output),
-            on_progress=on_progress,
-        )
+    if layer is not frozen_run.datamodel:
+        raise ValueError("layer must be the frozen run's datamodel")
+    if not callable(window_for_occurrence):
+        raise TypeError("window_for_occurrence must be callable")
+    cutoff = frozen_run.start or frozen_run.end
+    if cutoff is None:
+        raise RuntimeError("a datamodel run requires a frozen boundary")
+    compute = ComputeHandler(
+        frozen_run=frozen_run,
+        layer=layer,
+        model=model,
+        window_for_occurrence=window_for_occurrence,
+        output=output,
+    )
+    return RunLoop(
+        schedule=frozen_run.dispatch_order(layer),
+        start_cutoff=cutoff,
+        part=DataModelPart(compute, output),
+        on_progress=on_progress,
+    )

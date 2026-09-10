@@ -20,7 +20,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
+import vqapr.cli.run as run_command
 from vqapr.cli.main import main
+from vqapr.flow.orchestration import in_workers
 
 _MODELS = """from vqapr import authoring as va
 
@@ -381,3 +383,129 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     code, again = _cli(capsys, *project, "rm", "datamodel", "factors-reversal/reversal")
     assert code == 1, "a record already removed is refused, not removed twice"
     assert again["failures"][0]["code"] == "argument.value_invalid"
+
+
+_ECHO = """from vqapr import authoring as va
+
+class EchoModel(va.DataModel):
+    def inputs(self):
+        return {"scores": va.DatasetInput(
+            dataset_id='reversal_2d', fields=('score',), lookback=va.RowsLookback(rows=1)
+        )}
+
+    def compute(self, context):
+        window = context.read("scores", "score")
+        return [
+            {"instrument": name, "echo": float(window.values[name][-1])}
+            for name in sorted(window.instruments)
+            if window.values[name] and window.values[name][-1] is not None
+        ]
+"""
+
+
+def _echo_declaration(root: Path) -> Path:
+    """A third datamodel that reads what the reversal run wrote, declared once it exists."""
+    models = root / "echo.py"
+    models.write_text(_ECHO, encoding="utf-8")
+    path = root / "echo.yaml"
+    path.write_text(
+        f"""components:
+  echo:
+    kind: datamodel
+    path: {models.as_posix()}
+    object_name: EchoModel
+runs:
+  factors-echo:
+    instruments: [A, B]
+    start: "2024-03-06T00:00:00+09:00"
+    end: "2024-03-08T00:00:00+09:00"
+    timezone: Asia/Seoul
+    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    datamodels:
+      echo:
+        dataset_id: echo_2d
+        value_fields: [echo]
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`vqapr run a b --jobs 2` puts datamodel runs in the pool, and says so.
+
+    `docs/issues/report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs.md`: from record
+    `201` the CLI put only strategy runs in the pool and ran datamodel runs one at a time in this
+    process, whatever `--jobs` said; a 671-run sweep on 32 cores took eight hours instead of
+    forty minutes, and nothing in the envelope said the pool was not there. Three things are
+    pinned here: the datamodel runs reach `in_workers` in one call and the envelope's `jobs`
+    says how many processes ran them; a refusal raised inside a worker (a standing record) is
+    that run's own 409 entry, rendered exactly as the sequential path renders it, beside the
+    other run's; and a batch in which one run reads what another writes is refused whole
+    before anything is spawned (owner decision 2026-09-10).
+    """
+    project = ("--project-root", str(tmp_path))
+    code, registered = _cli(capsys, *project, "register", str(_declaration(tmp_path)))
+    assert code == 0, registered
+
+    pooled: list[list[str]] = []
+
+    def spy(run_ids, *args, **kwargs):
+        pooled.append(list(run_ids))
+        return in_workers(run_ids, *args, **kwargs)
+
+    monkeypatch.setattr(run_command, "in_workers", spy)
+
+    code, ran = _cli(capsys, *project, "run", "factors-reversal", "factors-momentum", "--jobs", "2")
+    assert code == 0, ran
+    assert ran["ok"] is True and ran["jobs"] == 2
+    assert pooled == [["factors-reversal", "factors-momentum"]], "both went to one pool"
+    for run_id, dataset_id in (("factors-reversal", "reversal_2d"), ("factors-momentum", "momentum_2d")):
+        entry = ran["runs"][run_id]
+        assert entry["ok"] is True and entry["stage"] == "run.complete"
+        assert entry["writes"] == dataset_id
+        (block,) = entry["datamodels"].values()
+        assert block["dataset_id"] == dataset_id and block["rows"] == 4
+        assert "strategies" not in entry
+    assert sorted(_scores(tmp_path, "reversal_2d")) == sorted(
+        (day, name, -score) for day, name, score in _scores(tmp_path, "momentum_2d")
+    )
+
+    # The same batch again, no --force: each worker raises `RunRecordExists`, and each run's
+    # entry is the 409 the sequential path gives -- not one exception for the batch, and not
+    # a bare `error` string.
+    code, standing = _cli(capsys, *project, "run", "factors-reversal", "factors-momentum", "--jobs", "2")
+    assert code == 1 and standing["ok"] is False and standing["jobs"] == 2
+    assert len(pooled) == 2
+    for run_id in ("factors-reversal", "factors-momentum"):
+        entry = standing["runs"][run_id]
+        assert entry["ok"] is False and entry["stage"] == "record"
+        (failure,) = entry["failures"]
+        assert failure["code"] == "record.exists" and failure["status"] == 409
+        assert failure["requirement"] == "a datamodel record is written once per run and fingerprint"
+        assert f"vqapr run {run_id} --force" in failure["fix"]
+
+    # A reader of `reversal_2d` can be registered now that the dataset exists. Named in one
+    # batch with its writer, the batch is refused before a process is spawned.
+    code, registered = _cli(capsys, *project, "register", str(_echo_declaration(tmp_path)))
+    assert code == 0, registered
+    code, refused = _cli(
+        capsys, *project, "run", "factors-reversal", "factors-echo", "--jobs", "2", "--force"
+    )
+    assert code == 1 and refused["ok"] is False
+    assert refused["stage"] == "check" and "runs" not in refused
+    (failure,) = refused["failures"]
+    assert failure["code"] == "run.batch_dependent" and failure["status"] == 400
+    assert "'factors-echo' reads 'reversal_2d', which 'factors-reversal' writes" in failure["observed"]
+    assert failure["fix"].startswith("vqapr run factors-reversal first")
+    assert len(pooled) == 2, "nothing was spawned"
+    code, datasets = _cli(capsys, *project, "list", "datasets")
+    assert code == 0 and "echo_2d" not in {row["dataset_id"] for row in datasets["items"]}
+
+    # Run in the graph's order, the same two runs are fine: the writer alone, then its reader.
+    code, echoed = _cli(capsys, *project, "run", "factors-echo", "--jobs", "2")
+    assert code == 0, echoed
+    assert echoed["ok"] is True and "jobs" not in echoed, "one run keeps its own envelope"
+

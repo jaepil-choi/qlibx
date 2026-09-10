@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import multiprocessing
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -36,7 +36,7 @@ from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
-from vqapr.domain.errors import Failure, Stage, Status, VqaprError
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.values import normalize_memory
 from vqapr.exchange.execution_table import validate_execution_table
 from vqapr.extension.component import ComponentRef
@@ -367,8 +367,8 @@ def in_workers[Returned](
     jobs: int,
     store: Path | None,
     root_path: Path,
-) -> dict[str, Returned]:
-    """One RUN per worker, in `jobs` spawned processes; what each returns, by run id.
+) -> dict[str, Returned | Exception]:
+    """One RUN per worker, in `jobs` spawned processes; what each returned OR raised, by run id.
 
     The one pool behind `--jobs`. It spread the members of a single run until 2026-09-09; a run
     holds one model now, so the unit is the run (`docs/design/two-clocks-and-the-wiring-table.md`
@@ -379,6 +379,15 @@ def in_workers[Returned](
     strings and bools, because it crosses a `spawn` boundary. The
     `docs/issues/archive/073` rule still holds: a worker's failure has to be something
     `concurrent.futures` can pickle, which is why the strategy worker returns its outcome.
+
+    **A worker's exception is that run's entry, not the batch's end.** Until
+    `docs/issues/report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs.md` this
+    re-raised the first worker's exception out of the comprehension, which dropped every other
+    worker's result on the floor -- and was the reason the CLI kept datamodel runs OUT of the pool
+    (their worker raises its refusal, which is right: a `VqaprError` pickles and is the same
+    exception the sequential path raises). Now each run comes back as what its worker returned
+    or what it raised, and the caller renders each. Only a broken pool still propagates: it is
+    not any one run's news.
     """
     if store is None:
         raise ValueError(
@@ -390,7 +399,111 @@ def in_workers[Returned](
             run_id: pool.submit(worker, str(root_path), run_id, str(store), *arguments)
             for run_id in run_ids
         }
-        return {run_id: future.result() for run_id, future in futures.items()}
+        outcomes: dict[str, Returned | Exception] = {}
+        for run_id, future in futures.items():
+            try:
+                outcomes[run_id] = future.result()
+            except BrokenExecutor:
+                raise
+            except Exception as raised:
+                outcomes[run_id] = raised
+        return outcomes
+
+
+RUN_BATCH_DEPENDENT = "run.batch_dependent"
+RUN_BATCH_WRITES_COLLIDE = "run.batch_writes_collide"
+
+
+def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> None:
+    """Refuse a batch that one pool cannot hold: a run reading what another in it writes.
+
+    The pool starts every run at once and promises nothing about order, so a strategy whose
+    dataset a datamodel in the same batch writes would read the dataset as it stood before --
+    stale under `--force`, absent otherwise -- or race the writer. Owner decision (2026-09-10):
+    such a batch is refused whole before anything is spawned, rather than ordered; the graph's
+    order is `vqapr run <producer>` first, then the batch without it, which is what the fix says.
+    Two runs naming one `writes` are the other thing a pool cannot hold, and are refused by the
+    same door with their own code.
+
+    What a run reads is what preflight would freeze as its `requirements` (the model's and its
+    Compliance rules'), plus the two datasets the run layer itself names -- `agenda.days_from`
+    and `execution.dataset`. A component that does not load contributes nothing here: its own
+    worker refuses it by name, and a run that cannot start cannot race anything.
+    """
+    definitions = {run_id: workspace.run_definition(run_id) for run_id in run_ids}
+    writers: dict[str, list[str]] = {}
+    for run_id, definition in definitions.items():
+        writers.setdefault(definition.writes, []).append(run_id)
+    failures: list[Failure] = []
+    for dataset_id, writing in sorted(writers.items()):
+        if len(writing) < 2:
+            continue
+        named = ", ".join(writing)
+        failures.append(
+            Failure.bounded(
+                RUN_BATCH_WRITES_COLLIDE,
+                "runs in one --jobs batch write different datasets",
+                observed=f"{dataset_id!r} is the `writes` of {len(writing)} runs: {named}",
+                fix=(
+                    f"register a different `writes` for all but one of {named}, or run them "
+                    "one at a time"
+                ),
+                status=Status.INVALID,
+                source=FailureSource(key_path=f"runs.{writing[0]}.writes"),
+            )
+        )
+    for run_id, definition in definitions.items():
+        for dataset_id in sorted(_datasets_read(workspace, definition)):
+            producers = [other for other in writers.get(dataset_id, ()) if other != run_id]
+            if not producers:
+                continue
+            producer = producers[0]
+            failures.append(
+                Failure.bounded(
+                    RUN_BATCH_DEPENDENT,
+                    "a run in a --jobs batch does not read what another run in it writes",
+                    observed=(
+                        f"{run_id!r} reads {dataset_id!r}, which {producer!r} writes; a pool "
+                        "starts both at once and promises no order between them"
+                    ),
+                    fix=(
+                        f"vqapr run {producer} first, then this batch without it -- or run "
+                        f"{run_id} after the batch"
+                    ),
+                    status=Status.INVALID,
+                    source=FailureSource(key_path=f"runs.{run_id}"),
+                )
+            )
+    if failures:
+        raise VqaprError(stage=Stage.CHECK, failures=failures)
+
+
+def _datasets_read(workspace: Workspace, definition: RunDefinition) -> set[str]:
+    """Every dataset id a run would read, from the components it names and its own layer."""
+    read: set[str] = set()
+    if definition.agenda.days_from is not None:
+        read.add(definition.agenda.days_from)
+    if definition.execution is not None:
+        read.add(definition.execution.dataset)
+    loaders: list[tuple[str, Callable[..., Component]]] = []
+    if definition.strategy is not None:
+        loaders.append((definition.strategy.component_id, load_strategy_model))
+    if definition.datamodel is not None:
+        loaders.append((definition.datamodel.component_id, load_data_model))
+    loaders.extend((rule_id, load_compliance) for rule_id in definition.compliance)
+    for component_id, loader in loaders:
+        try:
+            component = loader(
+                workspace.component(component_id), project_root=workspace.project_root
+            )
+        except Exception:
+            # Its own worker refuses it by name; a component that cannot load reads nothing.
+            continue
+        for requirement in component.requirements() or ():
+            dataset_id = str(getattr(requirement, "dataset_id", ""))
+            if dataset_id:
+                read.add(dataset_id)
+    return read
 
 
 def run_registered_datamodel(

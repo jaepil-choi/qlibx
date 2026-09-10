@@ -123,6 +123,11 @@ class RunRecordExists(FileExistsError):
         self.directory = directory
         super().__init__(f"run record {run_id!r} already exists at {directory}")
 
+    def __reduce__(self) -> tuple[object, ...]:
+        """Rebuild through this constructor: a `--jobs` worker's standing record comes back as
+        this exception, not as the pickling `TypeError` the default `cls(*args)` raised."""
+        return (type(self), (self.run_id, self.directory))
+
 
 @dataclass(slots=True)
 class _Buffer:
@@ -608,6 +613,10 @@ class RunRecordConflict(ValueError):
             f"and this run freezes to {declared!r}; remove the old records with "
             f"`vqapr rm run {run_id}`, or register the changed run under a new id"
         )
+
+    def __reduce__(self) -> tuple[object, ...]:
+        """Rebuild through this constructor, so the conflict crosses a `--jobs` process boundary."""
+        return (type(self), (self.run_id, self.path, self.existing, self.declared))
 
 
 def write_run_record(root: Path, run_id: str, record: RunRecord | Mapping[str, object]) -> Path:

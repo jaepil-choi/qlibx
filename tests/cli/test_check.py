@@ -564,6 +564,49 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     )
 
 
+def _order(root: Path, definition: RunDefinition) -> list[str]:
+    """Every code the ordering judgment produces, the way `judgments` dispatches it."""
+    from vqapr.flow.declaration.judgments import _agenda_once, _judge_execution_ordering
+
+    space = Workspace.open(root)
+    return [
+        failure.code
+        for failure in _judge_execution_ordering(
+            definition, space, FailureSource(key_path="runs.x"), _agenda_once(space, definition)
+        )
+    ]
+
+
+def test_an_end_between_the_last_fill_and_the_last_decision_is_answered(tmp_path: Path) -> None:
+    """The ordering judgment asks about the occurrences inside `[start, end]`, not the superset.
+
+    A decide-after-close, fill-next-close run (`at: 16:30`, `fill.at: 15:30`) has exactly one
+    correct kind of `end`: between the last day's fill and that day's decision. `derived_agenda`
+    cuts on dates and keeps that day's 16:30 (`docs/issues/archive/069`); handed to
+    `select_target` it broke the "decision not after end" contract, and `check` reported a 500
+    `judgment.blocked` where a reader looks for problems -- for the one `end` that was right
+    (`docs/issues/099`). Sliced the way preflight freezes it, the judgment answers.
+    """
+    Workspace.create(tmp_path)
+    first, last = date(2023, 12, 1), date(2023, 12, 4)
+    _venue_dataset(tmp_path, days=(first, last))
+    after_close = {"every": "1d", "at": time(16, 30)}
+    start = datetime.combine(first, time(0), tzinfo=UTC)
+
+    def judged(end: datetime) -> list[str]:
+        return _order(tmp_path, _definition(start=start, end=end, agenda=after_close))
+
+    # `end` between the last fill and the last decision: the 12-01 decision fills at 12-04
+    # 15:30, inside the run; the 12-04 decision lies after `end` and is not the run's.
+    assert judged(datetime.combine(last, time(16, 0), tzinfo=UTC)) == []
+    # `end` AT the last fill is the same run.
+    assert judged(datetime.combine(last, time(15, 30), tzinfo=UTC)) == []
+    # `end` after the last decision: that decision has no fill, and it is NAMED, as a 412.
+    assert judged(datetime.combine(last, time(23, 59), tzinfo=UTC)) == [
+        "execution.not_after_decision"
+    ]
+
+
 def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> None:
     """No trading days, no agenda, no answer -- and it SAYS so. No guess either.
 

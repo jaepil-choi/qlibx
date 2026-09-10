@@ -373,13 +373,22 @@ def _judge_execution_ordering(
 
     An execution dataset that does not resolve, and an agenda that cannot be derived, both raise
     out of here on purpose (`docs/issues/archive/077`).
+
+    Asked of the occurrences INSIDE `[start, end]`, the same slice preflight freezes and the run
+    walks. `derived_agenda` cuts on venue-local dates and keeps a superset
+    (`docs/issues/archive/069`), so an `end` between a day's fill and that day's decision -- the one
+    for a decide-after-close, fill-next-close run -- leaves that day's decision in the derived
+    agenda and after `end`. Handed to `select_target`, that occurrence broke its contract and
+    the judgment blocked as a 500 instead of answering (`docs/issues/099`).
     """
     if definition.execution is None or definition.start is None or definition.end is None:
         return []
     # The agenda first: an execution table that cannot be read blocks this judge and the
     # dataset judge for the SAME reason (`docs/issues/archive/077`), rather than this one
     # naming the horizon scan and the other the agenda derivation.
-    occurrences = agenda().occurrences  # type: ignore[attr-defined]
+    occurrences = agenda().inclusive_slice(  # type: ignore[attr-defined]
+        definition.start, definition.end
+    )
     table = bound_execution_table(workspace, definition)
     horizon = table.build_horizon(start_time=definition.start, end_time=definition.end)
     late = [

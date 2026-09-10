@@ -43,7 +43,7 @@
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
-### 2026-09-10의 번호 없는 보고 다섯 — testbed(`0.11.0` wheel) 넷, 0.12.0 시나리오 트레이스 하나 — 하나 닫힘, 넷 미분류
+### 2026-09-10의 번호 없는 보고 여섯 — testbed(`0.11.0` wheel) 다섯, 0.12.0 시나리오 트레이스 하나 — 셋 닫힘, 셋 미분류
 
 0.11.0 wheel로 마이그레이션하며 낸 보고들과 0.12.0 stepper 트레이스가 낸 하나. 번호는 아직 없다 — 같은 날 오너가 `095`–`097`을 썼고,
 번호는 오너가 붙인다. 첫 번째는 671-run sweep에서 `--jobs 16`이 한 번에 하나씩 돌던 것으로,
@@ -56,6 +56,7 @@
 | `report-2026-09-10-check-derives-a-three-year-agenda-twice` | `check`가 run의 agenda를 두 번 유도한다 — 3년 run에서 check 3.6 s 중 3.5 s | **미분류.** 0.12.0 시나리오 트레이스(`exp_235`, `03_check_changed`): `derived_agenda` #362 1,782 ms(judgments) + #44533 1,673 ms(preflight). 집행표 스캔이 사라진 자리에 남은 것 | — |
 | ~~`098`~~ (`report-2026-09-10-a-datamodel-run-holds-memory-...`) | datamodel run의 peak 메모리가 lookback·기간이 아니라 종목 수에 비례한다 — 309종목 0.55 GB, 5종목 0.23 GB; 기간 7배엔 12% | **닫힘 2026-09-10 — records `235`·`236`.** 0.32 GB는 0.11.0 `Panel.from_rows`의 dict 행 877k(record 232가 이미 제거); 남은 절반은 등록 span 전체 스캔 + 필드당 두 벌. 235: panel은 run horizon, 숫자 필드 한 벌, bounds 밖 거절. 236: `--jobs` 배치가 dataset마다 cube를 한 번 굽고 worker가 mmap, 끝나면 삭제. 전 종목 worker peak 0.76 → 0.17 GB | 코드 + skill |
 | `report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source` | `show dataset --limit 0`이 430 MB(8.7M행) 소스에서 5분 넘게 돌아오지 않고 메모리를 소진한다 | **미분류.** testbed(0.11.0 wheel): 23 MB 표는 즉시, 큰 표는 timeout 300 s에 죽음. `--limit 0`은 header 비용이어야 한다 | — |
+| ~~`099`~~ (`report-2026-09-10-check-500s-when-end-falls-between-a-fill-and-a-decision`) | `check`가 run의 `end`가 그 날의 체결과 결정 사이에 떨어질 때 500으로 죽는다 — decide-after-close·fill-next-close 전략의 유일하게 옳은 `end` | **닫힘 2026-09-10 — record `237`.** ordering 판단만 `derived_agenda`의 날짜 상위집합(`069`)을 그대로 읽어 `end` 뒤 occurrence를 `select_target`에 넘겼다; 이제 preflight가 얼리는 것과 같은 `inclusive_slice(start, end)`를 묻는다. envelope의 `blocked`/`failures` 모양은 그대로(별도 판정) | 코드 |
 
 ### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
 

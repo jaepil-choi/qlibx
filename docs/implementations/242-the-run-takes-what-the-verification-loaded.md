@@ -44,4 +44,4 @@
 | `tests/characterization` · `tests/cli/test_check.py` · `tests/flow/declaration` · `tests/cli/test_a_datamodel_run_through_the_cli.py` · `tests/cli/test_run_makes_the_judgments_check_makes.py` · `tests/flow/test_run_freezes_its_record.py` | 163 passed, 1 skipped |
 | `uv run python -m pytest tests/ -q` (fast) | 1,710 passed, 1 skipped |
 | `uv run ruff check src/` · `uv run python -m pyright` | clean · 0 errors |
-| stamped 트리(0.14.1): `test_all` · showcase digest · `release_check` | VALIDATION_ALL |
+| stamped 트리(0.14.1): `test_all` · showcase digest · `release_check` | 1,739 passed, 1 skipped · 83/83 entries match · every shipped skill file recorded |

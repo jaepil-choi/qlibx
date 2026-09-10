@@ -62,6 +62,10 @@ class CallbackHandler:
 
     def __init__(self, context: FlowContext) -> None:
         self._context = context
+        # Resolved once for the whole run, as `ComputeHandler` does: `inputs()` is a declaration,
+        # not a per-callback decision, and asking again each time let it differ between callbacks
+        # (record `246`: fifteen askings per ten-decision run, ten of them here).
+        self._reads = context.strategy.inputs()
 
     def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
         with self._context.guard(
@@ -116,7 +120,7 @@ class CallbackHandler:
                         occurrence=occurrence,
                         window=window,
                         account=self._callback_account_view(state_account),
-                        reads=self._context.strategy.inputs(),
+                        reads=self._reads,
                         account_history=self._account_history(),
                     )
                 )
@@ -126,9 +130,13 @@ class CallbackHandler:
             if not isinstance(result, (Hold, Rebalance)):
                 with self._callback_intent_boundary(occurrence, self._context.layer.config):
                     _raise_callback_return_type(result)
+            # What the callback read, framed once (record `246`): the intent's source refs and
+            # the evidence's are the same accesses of the same window, and each derived them
+            # for itself. Read after `decide`, which is when the window has been read.
+            source_refs = self._callback_actual_source_refs(occurrence, window)
             if isinstance(result, Rebalance):
                 with self._callback_intent_boundary(occurrence, self._context.layer.config):
-                    result = self._stamp_intent(result, occurrence, account, window)
+                    result = self._stamp_intent(result, occurrence, account, source_refs)
 
             if isinstance(result, Hold):
                 # A Hold reserves nothing (design §3.1): the book is valued at every market-
@@ -162,7 +170,7 @@ class CallbackHandler:
                 candidate = self._candidate_callback_state(before, payload_before)
             with self._callback_intent_boundary(occurrence, accepted):
                 evidence, lifecycle = self._callback_evidence(
-                    occurrence, account, current_ref, candidate.ref, window, accepted
+                    occurrence, account, current_ref, candidate.ref, window, accepted, source_refs
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -461,6 +469,7 @@ class CallbackHandler:
         committed_ref: ModelStateRef,
         window: ModelWindow,
         accepted: Hold | AcceptedIntent,
+        source_refs: tuple[IntentSourceRef, ...],
     ) -> tuple[CallbackEvidence, LifecycleTrace]:
         evidence = CallbackEvidence(
             run_identity=self._context.frozen_run.identity,
@@ -473,7 +482,7 @@ class CallbackHandler:
             current_model_state_ref=current_ref,
             committed_model_state_ref=committed_ref,
             strategy_accesses=window.accesses,
-            actual_source_refs=self._callback_actual_source_refs(occurrence, window),
+            actual_source_refs=source_refs,
             decision=accepted,
             pending=None if isinstance(accepted, Hold) else accepted,
         )
@@ -523,7 +532,7 @@ class CallbackHandler:
         decision: Rebalance,
         occurrence: OperationOccurrence,
         account: AccountSnapshot,
-        window: ModelWindow,
+        source_refs: tuple[IntentSourceRef, ...],
     ) -> EconomicPortfolioIntent:
         """Turn one economic decision into the intent the Flow accepts.
 
@@ -548,7 +557,7 @@ class CallbackHandler:
             targets,
             Decimal(decision.cash_weight),
             decision.budget,
-            self._actual_source_refs(window),
+            source_refs,
             account.version,
             self._context.state.current.current_model_state_ref,
         )

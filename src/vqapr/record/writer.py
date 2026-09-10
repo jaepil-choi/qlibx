@@ -35,6 +35,7 @@ from vqapr.record.reader import (
 )
 from vqapr.record.schema import (
     COMPACT_FILENAME,
+    LOCK_TOUCH_EVERY,
     MEMBER_KINDS,
     PART_SUFFIX,
     PROGRESS_EVERY,
@@ -137,6 +138,7 @@ class _Buffer:
     nbytes: int = 0
     last_event_time: datetime | None = None
     progress_written_at: float | None = None
+    lock_touched_at: float | None = None
     occurrences: set[str] = field(default_factory=set)
 
 
@@ -388,10 +390,14 @@ class RunRecordWriter:
         with coarse timestamps -- must not fail a run that is otherwise fine. The next occurrence
         tries again, and occurrences arrive far more often than the stale window.
         """
-        with suppress(OSError):
-            os.utime(self.directory / LOCK_FILENAME, None)
+        now = _time.monotonic()
+        touched = self._buffer.lock_touched_at
+        if touched is None or now - touched >= LOCK_TOUCH_EVERY:
+            with suppress(OSError):
+                os.utime(self.directory / LOCK_FILENAME, None)
+            self._buffer.lock_touched_at = now
         written = self._buffer.progress_written_at
-        if written is None or _time.monotonic() - written >= PROGRESS_EVERY:
+        if written is None or now - written >= PROGRESS_EVERY:
             self.checkpoint()
 
     def checkpoint(self) -> None:

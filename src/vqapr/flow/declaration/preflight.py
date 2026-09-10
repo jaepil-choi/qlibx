@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from vqapr.account.account import AccountMode
@@ -252,6 +253,75 @@ def bound_execution_horizon(workspace: Workspace, definition: RunDefinition) -> 
         start_time=definition.start,
         end_time=definition.end,
     )
+
+
+class RunFacts:
+    """What one run declaration resolves to, each fact read at most once per command.
+
+    The judgments and the freeze both need the run's agenda, its execution table and horizon,
+    its loaded components and its venue, and each used to derive them for itself (record `238`
+    counted five reads of the execution table's instant column and four imports of the strategy
+    in one `vqapr run`). Every fact here is read the first time any asker asks and handed to
+    every later one -- **including a failure to read it**: the exception is stored and raised
+    again to each asker, so a dataset that does not resolve blocks every judgment that needed it
+    with the same cause (`docs/issues/archive/077`) and refuses the freeze with the same error,
+    exactly as it did when each read for itself. `_agenda_once` was this shape for one fact.
+    """
+
+    __slots__ = ("_definition", "_settled", "_workspace")
+
+    def __init__(self, workspace: Workspace, definition: RunDefinition) -> None:
+        self._workspace = workspace
+        self._definition = definition
+        self._settled: dict[str, tuple[object, BaseException | None]] = {}
+
+    def _once(self, key: str, read: Callable[[], object]) -> object:
+        if key not in self._settled:
+            try:
+                self._settled[key] = (read(), None)
+            except Exception as error:  # stored, then raised to every asker; never swallowed
+                self._settled[key] = (None, error)
+        value, error = self._settled[key]
+        if error is not None:
+            raise error
+        return value
+
+    def agenda(self) -> OperationAgenda:
+        """The run's one decide agenda (`derived_agenda`)."""
+        return self._once("agenda", lambda: derived_agenda(self._workspace, self._definition))  # type: ignore[return-value]
+
+    def execution_table(self) -> ExecutionTable:
+        """The execution dataset bound to the run's fill (`bound_execution_table`)."""
+        return self._once(  # type: ignore[return-value]
+            "execution_table", lambda: bound_execution_table(self._workspace, self._definition)
+        )
+
+    def horizon(self) -> ExecutionHorizon:
+        """The candidate execution instants inside the run (`bound_execution_horizon`)."""
+        return self._once(  # type: ignore[return-value]
+            "horizon", lambda: bound_execution_horizon(self._workspace, self._definition)
+        )
+
+    def component(self, component_id: str, loader: Callable[..., Any]) -> Any:
+        """One registered component, loaded once by `loader` (a strategy, a datamodel)."""
+        return self._once(
+            f"component:{component_id}",
+            lambda: loader(
+                self._workspace.component(component_id), project_root=self._workspace.project_root
+            ),
+        )
+
+    def exchange(self) -> Exchange:
+        """The run's venue, loaded once."""
+        exchange_id = self._definition.exchange
+        if exchange_id is None:
+            raise ValueError("the run declares no exchange")
+        return self._once(  # type: ignore[return-value]
+            "exchange",
+            lambda: load_exchange(
+                self._workspace.component(exchange_id), project_root=self._workspace.project_root
+            ),
+        )
 
 
 def _freeze_sources(
@@ -651,13 +721,16 @@ def _freeze_strategy(
     decide: OperationAgenda,
     execution_table: ExecutionTable,
     horizon: ExecutionHorizon,
+    facts: RunFacts,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
     """One strategy's layer: its component, the run's Compliance rules, and the decide agenda.
 
     Every strategy of a run is called on the run's sessions at `at` (record `148`); the
-    binding that used to be registered per strategy is derived here.
+    binding that used to be registered per strategy is derived here. The strategy is the
+    instance the judgments already loaded (`facts`); its initial state is still proved on a
+    second fresh instance (`_validate_initial_model_state`, `docs/issues/archive/076`).
     """
     registered = workspace.component(entry.component_id)
     if registered.kind is not ComponentKind.STRATEGY_MODEL:
@@ -666,7 +739,7 @@ def _freeze_strategy(
             "a strategy"
         )
     config = StrategyConfig(registered, decide.agenda_id)
-    loaded_strategy = load_strategy_model(config.component, project_root=workspace.project_root)
+    loaded_strategy = facts.component(entry.component_id, load_strategy_model)
     initial_payload = _validate_initial_model_state(
         workspace, config.component, loaded_strategy, entry.initial_model_memory
     )
@@ -729,6 +802,7 @@ def _freeze_datamodel(
     entry: DataModelEntry,
     *,
     decide: OperationAgenda,
+    facts: RunFacts,
     start: datetime,
     end: datetime,
 ) -> FrozenDataModel:
@@ -744,7 +818,7 @@ def _freeze_datamodel(
             f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a datamodel"
         )
-    model = load_data_model(registered, project_root=workspace.project_root)
+    model = facts.component(entry.component_id, load_data_model)
     agenda = _freeze_agenda(decide, start=start, end=end)
     return FrozenDataModel(
         component=registered,
@@ -774,7 +848,11 @@ def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRe
     return ref
 
 
-def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition) -> FrozenRun:
+def preflight_run(
+    workspace_or_root: Workspace | str,
+    definition: RunDefinition,
+    facts: RunFacts | None = None,
+) -> FrozenRun:
     """Freeze one workspace snapshot into a run-ready declaration.
 
     The run layer is resolved once -- venue, execution dataset, sessions, universe, account --
@@ -793,8 +871,11 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
+    # The facts the judgments read, when they were asked first (`verify.verify_run`); otherwise
+    # this freeze reads them for itself, once.
+    facts = facts if facts is not None else RunFacts(workspace, definition)
     if definition.datamodel is not None:
-        return _preflight_datamodel_run(workspace, definition)
+        return _preflight_datamodel_run(workspace, definition, facts)
     _require_execution_authority(definition)
     if definition.start is None or definition.end is None:
         raise ValueError("preflight requires aware start and end bounds")
@@ -804,7 +885,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
         raise ValueError("start must not be after end")
 
     # The one agenda the run declares by its sessions and wall time (record `148`).
-    decide = derived_agenda(workspace, definition)
+    decide = facts.agenda()
 
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.
@@ -812,9 +893,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     # The venue needs to know what every ordered id IS (design §6.2). Which ids get ordered is
     # the strategy's to decide at run time; that NOTHING is declared is knowable now.
     require_declared_roster(workspace, run_id=definition.run_id)
-    loaded_exchange = load_exchange(exchange, project_root=workspace.project_root)
-    execution_table = bound_execution_table(workspace, definition)
-    horizon = bound_execution_horizon(workspace, definition)
+    loaded_exchange = facts.exchange()
+    execution_table = facts.execution_table()
+    horizon = facts.horizon()
     _validate_execution_requirements(loaded_exchange, execution_table)
     _validate_instrument_universe(definition.instruments, loaded_exchange)
     _validate_initial_account(
@@ -832,6 +913,7 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
             decide=decide,
             execution_table=execution_table,
             horizon=horizon,
+            facts=facts,
             start=start,
             end=end,
         ),
@@ -871,7 +953,9 @@ def preflight_run(workspace_or_root: Workspace | str, definition: RunDefinition)
     )
 
 
-def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) -> FrozenRun:
+def _preflight_datamodel_run(
+    workspace: Workspace, definition: RunDefinition, facts: RunFacts
+) -> FrozenRun:
     """Freeze a datamodel run: the same sessions, no venue, no execution dataset, no account.
 
     What a strategy run proves about its venue and its account does not apply -- a datamodel
@@ -884,12 +968,14 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     end = require_tz_aware(definition.end, name="end")
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
-    decide = derived_agenda(workspace, definition)
+    decide = facts.agenda()
     if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
         raise ValueError("a datamodel run declares no datamodel")
     _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
     datamodels = (
-        _freeze_datamodel(workspace, definition.datamodel, decide=decide, start=start, end=end),
+        _freeze_datamodel(
+            workspace, definition.datamodel, decide=decide, facts=facts, start=start, end=end
+        ),
     )
     requirements: list[DataRequirement] = []
     for layer in datamodels:
@@ -918,4 +1004,4 @@ def _preflight_datamodel_run(workspace: Workspace, definition: RunDefinition) ->
     )
 
 
-__all__ = ["preflight_run"]
+__all__ = ["RunFacts", "preflight_run"]

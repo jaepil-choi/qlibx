@@ -22,7 +22,8 @@ is missing. Do not report a shortfall.
 ## `run` makes the same judgments
 
 `vqapr run` re-makes every judgment `check` makes before it freezes anything. A run that would fail
-`check` is refused rather than executed.
+`check` is refused rather than executed. The same is true of every run in a `--jobs` batch: each
+worker passes the one door `check` and `run` pass, so a batch entry can carry `check`'s codes.
 
 So `check` is not a required step — it is the cheap one. Its value is that it costs no execution
 and reports everything at once.

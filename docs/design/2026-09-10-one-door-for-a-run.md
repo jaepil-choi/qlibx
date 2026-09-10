@@ -1,7 +1,16 @@
 # 한 문으로 run을 잰다 — 검사관과 공증인을 `verify_source`의 모양으로 합친다
 
-**Status: DRAFT — 오너 결정 대기 (2026-09-10).** 근거는 `experiments/exp_238_the_scenario_trace_0_13_0/`의
-트레이스와 기록 `238`·`239`. 착수 순서는 `.agent/plans/active/one-door-for-a-run.md`.
+**Status: DONE (2026-09-10, 기록 `240`·`241`, 브랜치 `redesign/one-door-run`).** 근거는
+`experiments/exp_238_the_scenario_trace_0_13_0/`의 트레이스와 기록 `238`·`239`. 오너 결정: 합친다.
+
+**구현이 §2와 다른 두 곳.** (1) 문은 `(Diagnosis, FrozenRun)`이 아니라 `RunVerdict(failures, blocked, frozen,
+refusal)`를 돌려준다 — freeze의 거절은 예외 객체 그대로 실린다. 두 동사가 같은 거절을 다르게 그리고(`check`는
+failure 항목, `run`은 자기 stage와 `retry_precondition`을 든 raise) 봉투가 바이트 단위로 같아야 했기 때문이다.
+(2) §2의 "의존은 건너뛰기로 말한다"(사실이 풀리지 않으면 판정을 blocked가 아니라 skipped로)는 하지 않았다.
+오너 결정 2026-09-04(`tests/cli/test_a_judgment_that_could_not_look_is_not_passed.py`)가 "판정이 답하지 못하고
+preflight가 같은 결함을 거절하면 봉투는 둘 다 싣는다 — 다른 두 진술"이라고 이미 정해 두었고, 이 캠페인은 그
+결정을 뒤집지 않는다. 사실을 한 번 읽는 것(`RunFacts`)은 그 결정과 무관하게 이뤄졌다: 같은 예외가 판정 쪽엔
+blocked의 cause로, freeze 쪽엔 거절로 두 번 전달된다.
 
 ## 1. 문제
 

@@ -198,6 +198,7 @@
     "ca4f7e74d2d36c049e9b614d36b5cac7f783e944efc0f6cb9a7a7975fd62601c": "0.13.0"
   },
   "run-backtest/references/check-before-run.md": {
+    "05885ffca204a102fa232ca552c8509803833c71776a7a7f9b6d9d6b9e90d9d7": "0.14.0",
     "bedc547dce75939d1545936bb80ed01598df051bd79a951f8bfa335970562a1d": "0.8.0"
   },
   "run-backtest/references/feeding-the-next-run.md": {

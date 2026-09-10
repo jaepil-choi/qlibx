@@ -34,6 +34,9 @@ canonical_documents:
   # 끝나면 삭제(236). 측정 experiments/exp_236_the_panel_memory/. 0.13.0 (깨지는 변화 없음; docs/releases/0.13.0.md). 현행 캠페인 없음.
   # 2026-09-10: 0.13.0 stamped 뒤 testbed 보고 099 닫음(record 237): ordering 판단이 derived agenda의 날짜 상위집합 대신
   # inclusive_slice(start, end)를 묻는다 — 체결과 결정 사이의 end가 500 대신 통과. 0.13.1 (깨지는 변화 없음; docs/releases/0.13.1.md). 현행 캠페인 없음.
+  # 2026-09-10: 한 문(run) 캠페인 완료(records 240-241, branch redesign/one-door-run; 그 앞에 238-239). verify_run 문 하나를
+  # check · run · execute · --jobs worker가 지나고(worker가 판정을 받게 됨), RunFacts가 사실을 명령당 한 번 읽는다. 0.14.0
+  # (깨지는 변화 없음; docs/releases/0.14.0.md). 남긴 것: RunResources(설계 §5). 현행 캠페인 없음.
   active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.

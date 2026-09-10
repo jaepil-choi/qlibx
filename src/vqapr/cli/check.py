@@ -36,8 +36,8 @@ from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import Stage, VqaprError
 from vqapr.domain.inputs import InputError
-from vqapr.flow.declaration.judgments import JUDGMENT_CODES, judgments
-from vqapr.flow.declaration.preflight import preflight_run as freeze_run
+from vqapr.flow.declaration.judgments import JUDGMENT_CODES
+from vqapr.flow.declaration.verify import RunVerdict, verify_run
 from vqapr.public import Workspace
 
 STAGE = Stage.CHECK
@@ -63,9 +63,9 @@ framework invariant, which has no structured body of its own and would otherwise
 `unhandled` failure.
 
 `judgment.blocked` (`flow/declaration/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
-the entry for a judgment that could not answer; on the run path `require_judged` raises it, while
-this verb
-asks the judgments itself and reports such an entry under `blocked`, never under `failures`.
+the entry for a judgment that could not answer; on the run path `RunVerdict.require_frozen` raises
+it, while this verb reads the same verdict and reports such an entry under `blocked`, never under
+`failures`.
 """
 
 
@@ -106,6 +106,10 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
 
     workspace: Workspace | None = None
     definition: object | None = None
+    # One reading of the declaration serves both the judgments phase and the preflight phase
+    # (`flow/declaration/verify.py`): the judgments' answers and the freeze's refusal come out
+    # of one call, made when the first of the two phases asks.
+    verdict: RunVerdict | None = None
     phases = _PHASES
 
     for phase in phases:
@@ -131,22 +135,25 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 # against `blocked_before` further down to decide whether this phase may be
                 # reported as passed.
                 assert definition is not None
-                judged, could_not_answer = judgments(definition, workspace)  # type: ignore[arg-type]
+                if verdict is None:
+                    verdict = verify_run(workspace, definition)  # type: ignore[arg-type]
                 # A blocked judgment is a `Failure` (`judgment.blocked`, status 500/502 by its
                 # cause, `observed` naming the judge, the exception whole in `cause`), rendered
                 # through the one shape -- under `blocked`, not `failures`, because nothing was
                 # proven either way.
-                blocked.extend(entry.as_dict() for entry in could_not_answer)
-                failures.extend(failure.as_dict() for failure in judged)
-                if judged:
+                blocked.extend(entry.as_dict() for entry in verdict.blocked)
+                failures.extend(failure.as_dict() for failure in verdict.failures)
+                if verdict.failures:
                     continue
             elif phase.name == "preflight":
-                # The freeze alone. The public `preflight_run` asks the judgments first (record
-                # `168`), and this verb has just asked them itself, collecting rather than raising;
-                # asking again would render a blocked judgment a second time as a failure. Same
-                # workspace snapshot as the judgments read (`docs/issues/archive/070`).
-                assert workspace is not None
-                freeze_run(workspace, definition)  # type: ignore[arg-type]
+                # The freeze's half of the same verdict: what it refused with is raised here so
+                # the handlers below render it as they always have. Same workspace snapshot as
+                # the judgments read (`docs/issues/archive/070`).
+                assert workspace is not None and definition is not None
+                if verdict is None:
+                    verdict = verify_run(workspace, definition)  # type: ignore[arg-type]
+                if verdict.refusal is not None:
+                    raise verdict.refusal
         except VqaprError as error:
             # The framework already judged this and said why, in codes a reader may already have
             # handling for. Re-wrapping would replace an actionable refusal with a vaguer one.

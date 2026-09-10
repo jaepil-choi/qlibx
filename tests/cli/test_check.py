@@ -412,21 +412,22 @@ def _judge(root: Path, definition: RunDefinition) -> list[str]:
     """Every dataset code the run's members produce, the way `judgments` dispatches them.
 
     One judge per member since `docs/issues/archive/077`, so this loops where it used to make one call.
-    `_agenda_once` is a CALL, not a value: an agenda that cannot be derived raises to the judge
-    that asked, which is what makes the judgment block instead of reading as passed.
+    A fact of `RunFacts` is a CALL, not a value: an agenda that cannot be derived raises to the
+    judge that asked, which is what makes the judgment block instead of reading as passed.
     """
-    from vqapr.flow.declaration.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.flow.declaration.judgments import _judge_member_datasets, _members
+    from vqapr.flow.declaration.preflight import RunFacts
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    # Derived at most once per `check` and reached by every judge that needs it
-    # (`docs/issues/archive/069`).
-    agenda = _agenda_once(space, definition)
+    # Read at most once per `check` and reached by every judge that needs it
+    # (`docs/issues/archive/069`, record `241`).
+    facts = RunFacts(space, definition)
     return [
         failure.code
         for member in _members(definition)
         for failure in _judge_member_datasets(
-            definition, member, space, registered, FailureSource(key_path="runs.x"), agenda
+            definition, member, space, registered, FailureSource(key_path="runs.x"), facts
         )
     ]
 
@@ -457,7 +458,8 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     registration is one problem: the fields it wanted ride along as examples.
     """
     from vqapr.extension.scaffold import render
-    from vqapr.flow.declaration.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.flow.declaration.judgments import _judge_member_datasets, _members
+    from vqapr.flow.declaration.preflight import RunFacts
 
     Workspace.create(tmp_path)
     _venue_dataset(tmp_path)
@@ -483,7 +485,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
         space,
         registered,
         FailureSource(key_path="runs.x"),
-        _agenda_once(space, definition),
+        RunFacts(space, definition),
     )
 
     assert [failure.code for failure in failures] == ["dataset.unregistered"]
@@ -566,13 +568,14 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
 
 def _order(root: Path, definition: RunDefinition) -> list[str]:
     """Every code the ordering judgment produces, the way `judgments` dispatches it."""
-    from vqapr.flow.declaration.judgments import _agenda_once, _judge_execution_ordering
+    from vqapr.flow.declaration.judgments import _judge_execution_ordering
+    from vqapr.flow.declaration.preflight import RunFacts
 
     space = Workspace.open(root)
     return [
         failure.code
         for failure in _judge_execution_ordering(
-            definition, space, FailureSource(key_path="runs.x"), _agenda_once(space, definition)
+            definition, FailureSource(key_path="runs.x"), RunFacts(space, definition)
         )
     ]
 
@@ -667,6 +670,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
     is Academic's shape; Krx keys a Mapping by instrument id, so it silently found nothing again.
     """
     from vqapr.flow.declaration.judgments import _judge_weights
+    from vqapr.flow.declaration.preflight import RunFacts
 
     Workspace.create(tmp_path)
     source = tmp_path / "limited.py"
@@ -680,15 +684,14 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
     )
     _register_component(tmp_path, "limited", ComponentKind.EXCHANGE, source)
 
+    signed = _definition(
+        instruments=("ABC",),
+        exchange="limited",
+        initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+        initial_account_mode=AccountMode.SIGNED,
+    )
     judged = _judge_weights(
-        _definition(
-            instruments=("ABC",),
-            exchange="limited",
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.SIGNED,
-        ),
-        Workspace.open(tmp_path),
-        FailureSource(key_path="runs.x"),
+        signed, FailureSource(key_path="runs.x"), RunFacts(Workspace.open(tmp_path), signed)
     )
 
     assert [failure.code for failure in judged] == ["weights.venue_conflict"], (

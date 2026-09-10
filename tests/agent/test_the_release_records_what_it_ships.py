@@ -89,6 +89,9 @@ def test_the_check_fails_while_content_is_unrecorded(repo_copy: Path) -> None:
     command that fixes it, and that command must be the real one.
     """
     skills = _skills_of(repo_copy)
+    # Recorded here rather than assumed: the real tree is unrecorded between a skill edit and the
+    # release that stamps it, and this test must not turn red for where the cycle stands.
+    assert _script(repo=repo_copy).returncode == 0
     assert _script("--check", repo=repo_copy).returncode == 0, (
         "the copied tree must start fully recorded, or this test proves nothing"
     )

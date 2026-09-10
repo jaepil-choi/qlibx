@@ -29,7 +29,10 @@ canonical_documents:
   # 2026-09-10: 한 문 캠페인 완료(records 231-234, branch redesign/one-door; 0.11.0 척추 트레이스에서 오너가
   # 연 095-097). EventLoop 삭제, PanelWindow.matrix(), data/validation.py 한 문(등록이 digest를 두고 이후는
   # identity 대조). 0.12.0 (등록 문서 모양이 바뀜; docs/releases/0.12.0.md). 현행 캠페인 없음.
-  active_campaign: docs/refactoring/2026-09-10-the-one-door-campaign.md
+  # 2026-09-10: 한 cube 캠페인 완료(records 235-236, branch redesign/one-cube; testbed 보고 098 — datamodel run 메모리가
+  # 종목 수에 비례). panel은 run horizon + 숫자 필드 한 벌(235); --jobs 배치가 dataset마다 cube를 굽고 worker가 mmap,
+  # 끝나면 삭제(236). 측정 experiments/exp_236_the_panel_memory/. 현행 캠페인 없음.
+  active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.
   wiring_design: docs/design/two-clocks-and-the-wiring-table.md

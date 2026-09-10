@@ -14,8 +14,14 @@ independent runs, which is both more general and the unit the graph will schedul
 from __future__ import annotations
 
 import multiprocessing
-from collections.abc import Callable, Iterable, Mapping, Sequence
+import os
+import secrets
+import shutil
+import threading
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -29,6 +35,7 @@ from vqapr.authoring.history import retained_marks
 from vqapr.compliance.evaluation import (
     compliance_requirements as declared_compliance_requirements,
 )
+from vqapr.data import cube as cube_module
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.scan import ScanSession
@@ -37,6 +44,8 @@ from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
+from vqapr.domain.inputs import InputError
+from vqapr.domain.shapes import Grain
 from vqapr.domain.values import normalize_memory
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
@@ -71,7 +80,7 @@ from vqapr.flow.run.loop import (
 )
 from vqapr.flow.run.output import RunOutput
 from vqapr.project.run import RunDefinition
-from vqapr.project.store import Workspace
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
     STRATEGY_KIND,
@@ -478,11 +487,20 @@ def require_independent_batch(workspace: Workspace, run_ids: Sequence[str]) -> N
 
 def _datasets_read(workspace: Workspace, definition: RunDefinition) -> set[str]:
     """Every dataset id a run would read, from the components it names and its own layer."""
-    read: set[str] = set()
+    return set(_reads(workspace, definition))
+
+
+def _reads(workspace: Workspace, definition: RunDefinition) -> dict[str, set[str]]:
+    """What a run would read: each dataset id with the field ids its components declare on it.
+
+    The two datasets the run layer itself names -- `agenda.days_from`, `execution.dataset` --
+    are read whole by the framework and carry no field set here.
+    """
+    read: dict[str, set[str]] = {}
     if definition.agenda.days_from is not None:
-        read.add(definition.agenda.days_from)
+        read.setdefault(definition.agenda.days_from, set())
     if definition.execution is not None:
-        read.add(definition.execution.dataset)
+        read.setdefault(definition.execution.dataset, set())
     loaders: list[tuple[str, Callable[..., Component]]] = []
     if definition.strategy is not None:
         loaders.append((definition.strategy.component_id, load_strategy_model))
@@ -500,8 +518,102 @@ def _datasets_read(workspace: Workspace, definition: RunDefinition) -> set[str]:
         for requirement in component.requirements() or ():
             dataset_id = str(getattr(requirement, "dataset_id", ""))
             if dataset_id:
-                read.add(dataset_id)
+                field_id = str(getattr(requirement, "field_id", ""))
+                fields = read.setdefault(dataset_id, set())
+                if field_id:
+                    fields.add(field_id)
     return read
+
+
+CUBES_DIRECTORY = "cubes"
+CUBE_LOCK = "batch.lock"
+CUBE_STALE_AFTER = 600.0
+CUBE_HEARTBEAT = 30.0
+
+
+@contextmanager
+def batch_cubes(workspace: Workspace, run_ids: Sequence[str]) -> Iterator[Path | None]:
+    """Bake what a `--jobs` batch reads once, hand the directory to its workers, remove it after.
+
+    Record `236` (`docs/issues/098`). Every panel-grain dataset any run in the batch reads is
+    scanned once here, in the driver, into `<project>/.vqapr/cubes/<batch>/<dataset_id>/` --
+    one memory-mappable matrix per numeric field over every instrument -- and each worker takes
+    its panel as a slice of those files (`data/cube.py`). The OS page cache holds the bytes once
+    per machine; the 671 scans a 671-run sweep used to make are one.
+
+    **Nothing accumulates** (owner decision 2026-09-10). The directory goes when the batch
+    returns, on success, refusal or interrupt; a directory a hard-killed driver left behind is
+    swept by the next batch once its lock is stale. A heartbeat thread keeps this batch's lock
+    fresh for as long as the batch runs, so a batch of long runs is never mistaken for a dead
+    one. What cannot be baked -- an unverified registration, a non-numeric field, a `rows`
+    grain, a source that will not scan -- is simply not there, and the worker scans and refuses
+    exactly as it does outside a batch.
+    """
+    root = workspace.project_root / WORKSPACE_DIRECTORY / CUBES_DIRECTORY
+    root.mkdir(parents=True, exist_ok=True)
+    _sweep_stale_cubes(root)
+    directory = root / f"{os.getpid()}-{secrets.token_hex(4)}"
+    directory.mkdir()
+    lock = directory / CUBE_LOCK
+    lock.write_text(str(os.getpid()), encoding="ascii")
+    stop = threading.Event()
+    beat = threading.Thread(target=_keep_alive, args=(lock, stop), daemon=True)
+    beat.start()
+    try:
+        _bake_for_batch(workspace, run_ids, directory)
+        yield directory
+    finally:
+        stop.set()
+        beat.join(timeout=CUBE_HEARTBEAT)
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def _keep_alive(lock: Path, stop: threading.Event) -> None:
+    while not stop.wait(CUBE_HEARTBEAT):
+        with suppress(OSError):
+            os.utime(lock, None)
+
+
+def _sweep_stale_cubes(root: Path) -> None:
+    """Remove batch directories whose lock nobody has refreshed inside the stale window."""
+    now = time.time()
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            age = now - (child / CUBE_LOCK).stat().st_mtime
+        except OSError:
+            age = CUBE_STALE_AFTER + 1.0
+        if age > CUBE_STALE_AFTER:
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _bake_for_batch(workspace: Workspace, run_ids: Sequence[str], directory: Path) -> None:
+    """One cube per panel-grain dataset the batch reads, over the union of the fields it names."""
+    wanted: dict[str, set[str]] = {}
+    for run_id in run_ids:
+        for dataset_id, fields in _reads(workspace, workspace.run_definition(run_id)).items():
+            wanted.setdefault(dataset_id, set()).update(fields)
+    with ScanSession() as session:
+        for dataset_id, fields in sorted(wanted.items()):
+            if not fields:
+                continue
+            try:
+                registration = workspace.dataset(dataset_id)
+                if registration.grain is None or registration.grain is Grain.ROWS:
+                    continue
+                source = workspace.source(str(registration.source))
+                cube_module.bake(
+                    directory,
+                    registration=registration,
+                    source=source,
+                    source_digest=workspace.source_digest(source),
+                    fields=sorted(fields),
+                    session=session,
+                )
+            except (VqaprError, InputError, KeyError, OSError):
+                # Its worker scans and refuses it by name; a cube is a shortcut, not a door.
+                continue
 
 
 def run_registered_datamodel(
@@ -509,8 +621,12 @@ def run_registered_datamodel(
     run_id: str,
     store_root: str,
     replace_record: bool,
+    cubes: str = "",
 ) -> Mapping[str, object]:
     """Run one REGISTERED datamodel run, in this process; the worker under `--jobs`.
+
+    `cubes` is the directory the batch baked its cubes into (record `236`), or empty: a string,
+    because it crosses the `spawn` boundary with the other arguments.
 
     A refusal is raised, not returned: a datamodel's `VqaprError` pickles (`__reduce__`), so the
     parent's `future.result()` re-raises it as itself, the same exception the sequential path
@@ -528,6 +644,7 @@ def run_registered_datamodel(
         layer,
         store=Path(store_root),
         replace_record=replace_record,
+        cubes=Path(cubes) if cubes else None,
     )
     assert record is not None
     return record
@@ -567,6 +684,7 @@ def _run_member[ResultT](
     replace_record: bool,
     body: Callable[[DuckDbObservationStore, ScanSession, RunRecordWriter | None], ResultT],
     read_record: Callable[[Path, str, str], Mapping[str, object]],
+    cubes: Path | None = None,
 ) -> tuple[ResultT, Mapping[str, object] | None]:
     """Run one member of a run inside the resources every member needs, and read its record back.
 
@@ -585,7 +703,17 @@ def _run_member[ResultT](
     session = ScanSession()
     writer = None
     try:
-        observation_store = DuckDbObservationStore(catalog, session=session)
+        observation_store = DuckDbObservationStore(
+            catalog,
+            session=session,
+            # The run's horizon bounds every panel scan (record `235`): a run holds its period
+            # plus its lookbacks, not the registered span. A stand-in frozen run (a boundary
+            # test's) may carry neither, and then the store scans the registered span.
+            horizon=_horizon(frozen),
+            requirements=tuple(getattr(frozen, "requirements", ())),
+            # The batch's cubes, when this member runs under `--jobs` (record `236`).
+            cubes=cubes,
+        )
         if store is not None:
             opened_writer = RunRecordWriter(
                 store, frozen.run_id, record_ref(), member_kind=member_kind
@@ -603,6 +731,15 @@ def _run_member[ResultT](
     return result, record
 
 
+def _horizon(frozen: FrozenRun) -> tuple[datetime, datetime] | None:
+    """The run's period as the store's scan horizon, or `None` when the run has none frozen."""
+    start = getattr(frozen, "start", None)
+    end = getattr(frozen, "end", None)
+    if isinstance(start, datetime) and isinstance(end, datetime):
+        return (start, end)
+    return None
+
+
 def _run_datamodel(
     root_path: Path,
     frozen: FrozenRun,
@@ -610,6 +747,7 @@ def _run_datamodel(
     *,
     store: Path | None,
     replace_record: bool,
+    cubes: Path | None = None,
 ) -> tuple[DataModelResult, Mapping[str, object] | None]:
     """Execute exactly one datamodel of a frozen run: its sessions, its dataset, its record.
 
@@ -670,6 +808,7 @@ def _run_datamodel(
         replace_record=replace_record,
         body=body,
         read_record=read_datamodel_record,
+        cubes=cubes,
     )
 
 
@@ -679,6 +818,7 @@ def run_registered_strategy(
     store_root: str,
     replace_record: bool,
     record_account_positions: bool,
+    cubes: str = "",
 ) -> StrategyOutcome:
     """One registered strategy run, in this process, returning its outcome.
 
@@ -709,6 +849,7 @@ def run_registered_strategy(
             replace_record=replace_record,
             record_account_positions=record_account_positions,
             roster=registered_roster(workspace),
+            cubes=Path(cubes) if cubes else None,
         )
     except SimulationFailure as failed:
         return _failed_outcome(layer.component_id, failed)
@@ -739,6 +880,7 @@ def _run_strategy(
     record_account_positions: bool,
     roster: RegisteredRoster | None,
     workspace: Workspace | None = None,
+    cubes: Path | None = None,
 ) -> tuple[SimulationResult, Mapping[str, object] | None]:
     """Execute exactly one strategy of a frozen run, with its own Account and its own record.
 
@@ -895,6 +1037,7 @@ def _run_strategy(
         replace_record=replace_record,
         body=body,
         read_record=read_strategy_record,
+        cubes=cubes,
     )
 
 

@@ -1329,7 +1329,7 @@ def _observation_query(
     key_fields: Sequence[str],
     fields: Mapping[str, str],
     aggregated: bool,
-    instruments: Sequence[str],
+    instruments: Sequence[str] | None,
     evaluation_time: object,
     rows: int | None = None,
     lower_bound: object | None = None,
@@ -1361,8 +1361,12 @@ def _observation_query(
     if not fields:
         raise ValueError("observation query requires at least one field")
     keyed_by_instrument = instrument_field is not None
-    if keyed_by_instrument and not instruments:
+    if keyed_by_instrument and instruments is not None and not instruments:
         raise ValueError("observation query requires at least one instrument")
+    if instruments is None and rows is not None:
+        # `None` is every instrument the source holds (a cube bake, record `236`); a rows bound
+        # is proved per declared instrument, and there are none declared.
+        raise ValueError("a read over every instrument takes a calendar bound, not a rows lookback")
 
     available = _quote(available_at_field)
     identity = identity_projections(instrument_field, available_at_field)
@@ -1371,8 +1375,9 @@ def _observation_query(
     predicates = [f"{available} <= ?"]
     if keyed_by_instrument:
         instrument = _quote(instrument_field)  # type: ignore[arg-type]
-        predicates.append(f"{instrument} IN ({', '.join('?' for _ in instruments)})")
-        parameters.extend(instruments)
+        if instruments is not None:
+            predicates.append(f"{instrument} IN ({', '.join('?' for _ in instruments)})")
+            parameters.extend(instruments)
 
     counted: _Counted | None = None
     aimed: tuple[object, int] | None = None
@@ -1380,7 +1385,9 @@ def _observation_query(
     if lower_bound is not None:
         predicates.append(f"{available} >= ?")
         parameters.append(lower_bound)
-    elif rows is not None and session is not None and keyed_by_instrument:
+    elif (
+        rows is not None and session is not None and keyed_by_instrument and instruments is not None
+    ):
         # A RowsLookback carries no bound of its own, so without this the window below is
         # evaluated over the source's entire history on every callback. `_rows_bound` returns a
         # bound together with the instruments it would have changed the answer for; those are
@@ -1521,7 +1528,7 @@ def _observation_query(
         aimed=aimed,
         bound_key=bound_key,
         rows=rows,
-        instruments=tuple(instruments),
+        instruments=() if instruments is None else tuple(instruments),
     )
 
 
@@ -1618,7 +1625,7 @@ def observation_table(
     key_fields: Sequence[str],
     fields: Mapping[str, str],
     aggregated: bool,
-    instruments: Sequence[str],
+    instruments: Sequence[str] | None,
     evaluation_time: object,
     lower_bound: object,
     session: ScanSession | None = None,
@@ -1626,9 +1633,10 @@ def observation_table(
     """Execute one PIT observation query and hand back its columns, as Arrow (record `232`).
 
     The panel's reader: the same statement `observation_rows` runs, over a calendar bound
-    (the registered span, for a panel), fetched as one Arrow table instead of one dict per row.
+    (the run's horizon, for a panel), fetched as one Arrow table instead of one dict per row.
     Columns are `available_at`, `instrument` (when the dataset has an instrument axis) and one
     per declared field; `Panel.from_table` pivots them without walking a row in Python.
+    `instruments=None` reads every instrument the source holds: the cube bake (record `236`).
     """
     query = _observation_query(
         spec,

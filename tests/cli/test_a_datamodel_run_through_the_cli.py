@@ -15,6 +15,8 @@ already read.
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 import duckdb
@@ -22,7 +24,10 @@ import pytest
 
 import vqapr.cli.run as run_command
 from vqapr.cli.main import main
-from vqapr.flow.orchestration import in_workers
+from vqapr.data import store as store_module
+from vqapr.flow import orchestration
+from vqapr.flow.orchestration import batch_cubes, in_workers, run_registered_datamodel
+from vqapr.project.store import Workspace
 
 _MODELS = """from vqapr import authoring as va
 
@@ -249,6 +254,7 @@ def test_a_datamodel_run_is_registered_checked_run_listed_and_shown(
     assert code == 0, again
     assert _scores(tmp_path, "reversal_2d") == reversal
 
+
 def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -280,9 +286,9 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     code, momentum_listed = _cli(
         capsys, *project, "list", "datamodels", "--run", "factors-momentum"
     )
-    assert code == 0 and {
-        row["datamodel_ref"] for row in momentum_listed["items"]
-    } == {momentum_ref}, "each run's record is listed under its own run id"
+    assert code == 0 and {row["datamodel_ref"] for row in momentum_listed["items"]} == {
+        momentum_ref
+    }, "each run's record is listed under its own run id"
     row = rows[reversal_ref]
     assert row["run_id"] == "factors-reversal"
     assert row["datamodel_id"] == "reversal"
@@ -293,7 +299,14 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
 
     # The filters are the strategy list's: by model id, by fingerprint prefix, by period end.
     code, by_id = _cli(
-        capsys, *project, "list", "datamodels", "--run", "factors-reversal", "--strategy", "reversal"
+        capsys,
+        *project,
+        "list",
+        "datamodels",
+        "--run",
+        "factors-reversal",
+        "--strategy",
+        "reversal",
     )
     assert [row["datamodel_ref"] for row in by_id["items"]] == [reversal_ref]
     code, by_fp = _cli(
@@ -301,8 +314,14 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     )
     assert [row["datamodel_ref"] for row in by_fp["items"]] == [reversal_ref]
     code, later = _cli(
-        capsys, *project, "list", "datamodels", "--run", "factors-reversal",
-        "--since", "2030-01-01T00:00:00+09:00",
+        capsys,
+        *project,
+        "list",
+        "datamodels",
+        "--run",
+        "factors-reversal",
+        "--since",
+        "2030-01-01T00:00:00+09:00",
     )
     assert code == 0 and later["count"] == 0, later
     code, no_run = _cli(capsys, *project, "list", "datamodels")
@@ -337,7 +356,13 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     # A datamodel has no tables of its own: its rows ARE the dataset, and `--table` is refused
     # pointing at the verb that reads a dataset rather than answering with an empty table list.
     code, refused = _cli(
-        capsys, *project, "show", "datamodel", "factors-reversal/reversal", "--table", "vqapr.account"
+        capsys,
+        *project,
+        "show",
+        "datamodel",
+        "factors-reversal/reversal",
+        "--table",
+        "vqapr.account",
     )
     assert code == 1, refused
     detail = refused["failures"][0]
@@ -462,7 +487,10 @@ def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
     assert code == 0, ran
     assert ran["ok"] is True and ran["jobs"] == 2
     assert pooled == [["factors-reversal", "factors-momentum"]], "both went to one pool"
-    for run_id, dataset_id in (("factors-reversal", "reversal_2d"), ("factors-momentum", "momentum_2d")):
+    for run_id, dataset_id in (
+        ("factors-reversal", "reversal_2d"),
+        ("factors-momentum", "momentum_2d"),
+    ):
         entry = ran["runs"][run_id]
         assert entry["ok"] is True and entry["stage"] == "run.complete"
         assert entry["writes"] == dataset_id
@@ -472,11 +500,15 @@ def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
     assert sorted(_scores(tmp_path, "reversal_2d")) == sorted(
         (day, name, -score) for day, name, score in _scores(tmp_path, "momentum_2d")
     )
+    cubes = tmp_path / ".vqapr" / "cubes"
+    assert cubes.is_dir() and not any(cubes.iterdir()), "the batch's cubes are gone with it"
 
     # The same batch again, no --force: each worker raises `RunRecordExists`, and each run's
     # entry is the 409 the sequential path gives -- not one exception for the batch, and not
     # a bare `error` string.
-    code, standing = _cli(capsys, *project, "run", "factors-reversal", "factors-momentum", "--jobs", "2")
+    code, standing = _cli(
+        capsys, *project, "run", "factors-reversal", "factors-momentum", "--jobs", "2"
+    )
     assert code == 1 and standing["ok"] is False and standing["jobs"] == 2
     assert len(pooled) == 2
     for run_id in ("factors-reversal", "factors-momentum"):
@@ -484,7 +516,9 @@ def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
         assert entry["ok"] is False and entry["stage"] == "record"
         (failure,) = entry["failures"]
         assert failure["code"] == "record.exists" and failure["status"] == 409
-        assert failure["requirement"] == "a datamodel record is written once per run and fingerprint"
+        assert (
+            failure["requirement"] == "a datamodel record is written once per run and fingerprint"
+        )
         assert f"vqapr run {run_id} --force" in failure["fix"]
 
     # A reader of `reversal_2d` can be registered now that the dataset exists. Named in one
@@ -498,7 +532,9 @@ def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
     assert refused["stage"] == "check" and "runs" not in refused
     (failure,) = refused["failures"]
     assert failure["code"] == "run.batch_dependent" and failure["status"] == 400
-    assert "'factors-echo' reads 'reversal_2d', which 'factors-reversal' writes" in failure["observed"]
+    assert (
+        "'factors-echo' reads 'reversal_2d', which 'factors-reversal' writes" in failure["observed"]
+    )
     assert failure["fix"].startswith("vqapr run factors-reversal first")
     assert len(pooled) == 2, "nothing was spawned"
     code, datasets = _cli(capsys, *project, "list", "datasets")
@@ -509,3 +545,70 @@ def test_jobs_spreads_datamodel_runs_and_refuses_a_batch_that_depends_on_itself(
     assert code == 0, echoed
     assert echoed["ok"] is True and "jobs" not in echoed, "one run keeps its own envelope"
 
+
+def test_a_jobs_batch_bakes_once_maps_in_every_worker_and_leaves_nothing_behind(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs/issues/098`, record `236`: the driver bakes what the batch reads, a worker maps it.
+
+    Before, every worker scanned the same parquet into a panel of its own -- 671 scans of one
+    430 MB file for a 671-run sweep, and twelve private copies beside twelve interpreters. Now
+    `batch_cubes` scans each panel-grain dataset once into `.vqapr/cubes/<batch>/`, the worker
+    takes its panel from the memory-mapped files without a scan, and the directory is removed
+    when the batch returns -- on success, on an exception, and (by the next batch) after a hard
+    kill left one behind. Nothing accumulates (owner decision 2026-09-10).
+    """
+    project = ("--project-root", str(tmp_path))
+    code, registered = _cli(capsys, *project, "register", str(_declaration(tmp_path)))
+    assert code == 0, registered
+    workspace = Workspace.open(tmp_path)
+    root = tmp_path / ".vqapr" / "cubes"
+
+    scanned: list[dict[str, object]] = []
+    original = store_module.scan.observation_table
+
+    def counting(spec, **kwargs):
+        scanned.append(dict(kwargs))
+        return original(spec, **kwargs)
+
+    monkeypatch.setattr(store_module.scan, "observation_table", counting)
+
+    with batch_cubes(workspace, ["factors-reversal", "factors-momentum"]) as cubes:
+        assert cubes is not None and cubes.parent == root
+        assert (cubes / "batch.lock").is_file()
+        assert (cubes / "price_daily" / "close.npy").is_file(), "the one dataset both runs read"
+        assert scanned[-1]["instruments"] is None, "baked over every instrument"
+        baked = len(scanned)
+        assert baked == 1
+        # The worker, in this process: its panel comes from the cube, so it scans nothing.
+        record = run_registered_datamodel(
+            str(tmp_path), "factors-reversal", str(tmp_path / ".vqapr"), True, str(cubes)
+        )
+        assert record["dataset_id"] == "reversal_2d" and record["rows"] == 4
+        assert len(scanned) == baked, "the worker built its panel from the cube"
+    assert not cubes.exists(), "removed when the batch returned"
+    assert sorted(_scores(tmp_path, "reversal_2d"))[0][1] == "A"
+
+    # A batch that dies still removes its directory.
+    with (
+        pytest.raises(RuntimeError, match="the pool died"),
+        batch_cubes(workspace, ["factors-reversal"]) as failing,
+    ):
+        raise RuntimeError("the pool died")
+    assert not failing.exists()
+
+    # A directory a hard-killed driver left behind is swept once its lock is stale; a live
+    # batch's directory (a fresh lock) is not.
+    stale = root / "1-dead"
+    stale.mkdir()
+    (stale / "batch.lock").write_text("1", encoding="ascii")
+    old = time.time() - orchestration.CUBE_STALE_AFTER - 60
+    os.utime(stale / "batch.lock", (old, old))
+    live = root / "2-alive"
+    live.mkdir()
+    (live / "batch.lock").write_text("2", encoding="ascii")
+    with batch_cubes(workspace, ["factors-momentum"]):
+        assert not stale.exists() and live.exists()
+    live_lock = live / "batch.lock"
+    live_lock.unlink()
+    live.rmdir()

@@ -2941,8 +2941,9 @@ src/vqapr/
 │   │   └── run_state.py 632  RunStateRepository — accepted state의 루트, `_advance` 하나로 전이
 │   ├── declaration/          run이 무엇을 선언하고 무엇이 얼려지는가 (층 63)
 │   │   ├── frozen.py   411   FrozenRun · FrozenStrategy · FrozenDataModel · FrozenAgenda + identity
-│   │   ├── preflight.py 872  §12 검사 전부. agenda 전개 · 시장 시계 · roster · writes
-│   │   ├── judgments.py 695  check가 내리는 판정
+│   │   ├── verify.py    ~90  문 하나: verify_run → RunVerdict (판정의 답 + 얼린 run 또는 freeze의 거절) — 기록 `240`
+│   │   ├── preflight.py ~1000 §12 freeze 전부 + RunFacts(agenda · 집행표 · horizon · 컴포넌트 · venue, 명령당 한 번) — 기록 `241`
+│   │   ├── judgments.py ~700 check가 내리는 판정 — RunFacts를 읽는다
 │   │   └── roster.py    57
 │   ├── run/                  run 하나를 돈다 — 시계로 배열 (층 65, 기록 `214`)
 │   │   ├── loop.py     ~480  RunLoop(루프 하나, 걷기 포함) · Part · MarketClock · strategy_loop/datamodel_loop(조립 함수) — 기록 `227` · `231`
@@ -4034,6 +4035,16 @@ class RunDefinition(BaseModel):           # project/run.py
 위 field 이름은 저장 spelling이며 public signature를 고정하지 않는다. normative contract는 **run이 부품 하나와
 그 시계, 시장 시계의 출처, 붙는 도구들, 그리고 만들 것의 이름을 명시**하고 preflight가 그것을
 non-overridable하게 freeze하는 것이다.
+
+**문은 하나다** (기록 `240`·`241`, `docs/design/2026-09-10-one-door-for-a-run.md`). `RunDefinition`에서
+`FrozenRun`으로 가는 길은 `flow/declaration/verify.py::verify_run` 하나이고, `check` · `run` · Python의
+`execute` · `--jobs` worker가 전부 그것을 지난다. 돌아오는 `RunVerdict`는 판정들의 답(거절 · blocked)과, 얼린
+run 또는 freeze가 거절한 예외를 든다 — `check`는 그것을 봉투로 그리고 `run`은 `require_frozen()`으로 거절한다.
+판정(모아서 답한다)과 freeze(값을 만들고 첫 거절에서 멈춘다)는 보고 방식이 달라 둘로 남지만, 읽는 사실은
+`RunFacts` 하나다: agenda · 집행표 binding · horizon · load된 컴포넌트 · venue를 명령당 한 번 읽고, 읽지 못했으면 그
+예외를 묻는 모두에게 다시 준다(한 dataset이 풀리지 않으면 그것을 필요로 한 판정 전부가 같은 이유로 blocked,
+`docs/issues/archive/077`). 한 판정이 답하지 못하고 freeze가 같은 결함을 거절하면 봉투는 둘 다 싣는다 — 다른 두
+진술이다(오너 결정 2026-09-04).
 
 - **run은 모델 하나다**(기록 `201`, 설계 §2.3). `strategies:` 배열은 없다. 얼린 층 공유가 비교를 보장한다는 옛
   근거는 결정성이 이미 보장한다 — 같은 `reads`·`agenda`·시장 시계를 선언한 두 run은 같은 얼림을 만든다.

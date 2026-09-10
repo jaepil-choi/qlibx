@@ -96,6 +96,7 @@ def scene_js(scene: dict, traces: dict[str, dict]) -> str:
         "key": scene["key"],
         "title": scene["title"],
         "sub": scene["sub"],
+        "story": scene.get("story", ""),
         "frames": frames,
         "remember": scene.get("remember", []),
     }
@@ -137,16 +138,36 @@ def map_js(map_spec: list) -> str:
     return "\n".join(out) + "\n"
 
 
+EXTRA_CSS = """
+/* the 0.11.0 page: a story line per frame and per scene, the trace folded beneath it */
+.intro{margin:14px 0 6px;padding:12px 16px;border-left:4px solid var(--accent);background:var(--accent-bg);font-size:15px;line-height:1.6}
+.intro b{color:var(--accent)}
+.what .story{margin:0 0 8px;font-size:15px;line-height:1.65}
+.what details.tr{margin:6px 0 4px;font-size:13px;line-height:1.55;color:var(--ink-2)}
+.what details.tr summary{cursor:pointer;color:var(--accent);font-weight:600}
+.what details.tr p{margin:6px 0 0}
+.gloss{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px 18px;margin:12px 0 18px;padding:12px 16px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:13px;line-height:1.5}
+.gloss div b{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;color:var(--accent)}
+"""
+
+
 def header_html(header: dict) -> str:
     facts = "".join(
         f'<div class="fact"><div class="k">{f["k"]}</div><div class="v">{f["v"]}</div><div class="s">{f["s"]}</div></div>'
         for f in header["facts"]
     )
+    glossary = ""
+    if header.get("glossary"):
+        items = "".join(
+            f"<div><b>{term}</b> — {meaning}</div>" for term, meaning in header["glossary"]
+        )
+        glossary = f'<h2>{header.get("glossary_title", "이 페이지의 낱말")}</h2>\n<div class="gloss">{items}</div>\n'
     return (
         f'<main>\n<div class="eyebrow">{header["eyebrow"]}</div>\n'
         f'<h1>{header["h1"]}</h1>\n<p class="lede">{header["lede"]}</p>\n\n'
         f'<div class="facts">{facts}</div>\n'
         f'<div class="fix">{header["fix"]}</div>\n\n'
+        f"{glossary}\n"
     )
 
 
@@ -173,11 +194,23 @@ def render(scenes_path: Path, traces_dir: Path, out: Path) -> None:
     head = head.replace(
         "<title>vqapr 0.6.0 척추 디버거</title>", f"<title>{spec['HEADER']['title']}</title>"
     )
+    head = head.replace("</style>", EXTRA_CSS + "</style>", 1)
     map_start = template.index("<h2>척추 지도")
     table_start = template.index("<h2>트레이스가 확인한 것")
     script_start = template.index("<script>")
     middle = template[map_start:table_start]
+    # A scene's story line sits between the tabs and the three panes; the JS fills it.
+    middle = middle.replace(
+        '<div class="tabs" id="tabs" role="tablist"></div>',
+        '<div class="tabs" id="tabs" role="tablist"></div>\n<div class="intro" id="intro"></div>',
+        1,
+    )
     script = template[script_start:]
+    script = script.replace(
+        "$('remember').innerHTML=",
+        "$('intro').innerHTML=sc.story||''; $('remember').innerHTML=",
+        1,
+    )
     data_start = script.index("const S = [];\n") + len("const S = [];\n")
     data_end = script.index("const $ = id =>")
     map_fn_start = script.index("function buildMap(){")

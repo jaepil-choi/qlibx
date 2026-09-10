@@ -85,11 +85,15 @@ expecting eight is the obvious mistake.
 ### 5. Run it
 
 ```bash
-vqapr run <run-id> [--strategy <id>]... [--jobs N]
+vqapr run <run-id> [<run-id> ...] [--jobs N] [--force]
 ```
 
-Preflight once, freeze, execute. `--jobs N` runs strategies in N processes; the envelope has the
-same shape either way.
+Preflight once, freeze, execute. Several ids run several runs; `--jobs N` runs them in N
+processes, one run per process, strategy and datamodel runs alike, and the batch envelope's
+`jobs` says how many processes actually ran it. A batch in which one run reads the dataset
+another run in it writes is refused whole before anything starts (`run.batch_dependent`, 400):
+run the producer first, then the batch. Each run's entry under `runs` has the same shape a
+single run's envelope has.
 
 A YAML path handed to `run` or `check` is refused by name — both take a registered id.
 

@@ -43,6 +43,17 @@
 | `096` | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **열림.** `Panel.columns[field][instrument]`, 2D 접근자 없음; 3,000종목 decide 8.8 ms vs 블록 0.1 ms (`exp_231`) | 계획 P: 필드당 블록 하나, `PanelWindow.matrix()`, sample·scaffold 재작성 |
 | `097` | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **열림.** `RunLoop`가 유일한 구현; `StrategyEventLoop`·`DataModelEventLoop`는 `__init__`만 있는 클래스 | 계획 L: `RunLoop`로 접고 조립은 함수 둘 |
 
+### enhanced-index testbed가 낸 둘 (2026-09-10, `0.11.0` wheel) — 하나 닫힘, 하나 미분류
+
+0.11.0 wheel로 마이그레이션하며 낸 두 보고. 번호는 아직 없다 — 같은 날 오너가 `095`–`097`을 썼고,
+번호는 오너가 붙인다. 첫 번째는 671-run sweep에서 `--jobs 16`이 한 번에 하나씩 돌던 것으로,
+성능 이슈로 오너가 바로 고치게 했다.
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| ~~`report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs`~~ | `vqapr run --jobs N`이 datamodel run을 병렬로 돌리지 않는다 — 프로세스 하나, 한 번에 하나 | **닫힘 — record `230`.** 두 종류 모두 풀로; worker의 raise는 그 run의 entry; envelope에 `jobs`; 배치 안에서 남이 쓰는 것을 읽는 run은 통째로 거절(`run.batch_dependent`, 오너 결정) | 코드 + skill |
+| `report-2026-09-10-agenda-has-no-year-unit-and-the-refusal-reads-as-a-closed-set` | `agenda.every`에 `y` 단위가 없고, 거절문이 닫힌 집합처럼 읽힌다 | **미분류.** `12M`이 동작하는 spelling; 보고자는 거절문이 문법(count + unit)을 말하기를 청한다 | — |
+
 ### enhanced-index testbed가 낸 일곱 (2026-09-09, `0.9.0.dev1` wheel) — 2026-09-10 전부 닫혔다
 
 `report-issue-dev` skill이 쓴 첫 보고 묶음이다. `report-2026-09-09-<slug>.md`로 도착해 소유자가

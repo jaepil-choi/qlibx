@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
@@ -45,6 +45,21 @@ from vqapr.project.run import (
 from vqapr.project.store import Workspace
 
 
+def _session_bounds(definition: RunDefinition) -> tuple[datetime, datetime] | None:
+    """The instants a run's agenda and horizon can need: its period, widened by a day each side.
+
+    The agenda keeps a session by its venue-local DATE inside `[start, end]` and the horizon by
+    the instant inside `(start, end]`, so both are cut from the same read (record `238`) -- and
+    that read used to be the table's whole column, ten years of instants to keep one (record
+    `247`). A day's width on either side covers every zone the local date can fall in, and the
+    two cuts below stay exactly what they were. `None` when the run declares no period: the
+    agenda then spans the table, as before.
+    """
+    if definition.start is None or definition.end is None:
+        return None
+    return (definition.start - timedelta(days=1), definition.end + timedelta(days=1))
+
+
 def derived_agenda(workspace: Workspace, definition: RunDefinition) -> OperationAgenda:
     """The run's one agenda: its `agenda:` rule expanded over its trading days (design §3.4).
 
@@ -63,7 +78,9 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
     )
     if source is None:  # pragma: no cover -- `RunDefinition` refuses both shapes
         raise ValueError("a run's trading days come from its execution table or agenda.days_from")
-    sessions: Iterable[datetime | date] = workspace.evaluation_times(source)
+    sessions: Iterable[datetime | date] = workspace.evaluation_times(
+        source, between=_session_bounds(definition)
+    )
     if definition.start is not None and definition.end is not None:
         # Cut on DATES before an occurrence is built, not on occurrences after
         # (`docs/issues/archive/069`: a run of 15 sessions built 735 occurrences, with their fold
@@ -249,7 +266,7 @@ def bound_execution_horizon(workspace: Workspace, definition: RunDefinition) -> 
     if binding is None or definition.start is None or definition.end is None:
         raise ValueError("an execution horizon requires an execution dataset, a start and an end")
     return ExecutionHorizon.between(
-        workspace.evaluation_times(binding.dataset),
+        workspace.evaluation_times(binding.dataset, between=_session_bounds(definition)),
         start_time=definition.start,
         end_time=definition.end,
     )

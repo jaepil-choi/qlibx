@@ -213,3 +213,17 @@ def test_both_connection_factories_route_through_configure(flat_parquet: Path) -
         assert _progress_bar(session.connection(spec)) is False
     finally:
         session.close()
+
+
+def test_distinct_values_reads_only_the_bounded_values(flat_parquet: Path) -> None:
+    """Record `247`: a caller that wants one period's values names it, and the scan keeps to it
+    (inclusive on both ends); with no bound the whole column is read as before."""
+    from datetime import UTC, datetime
+
+    spec = SourceSpec.of("s", flat_parquet)
+    lower, upper = datetime(2024, 1, 3, tzinfo=UTC), datetime(2024, 12, 31, tzinfo=UTC)
+    within = scan.distinct_values(spec, "available_at", not_before=lower, not_after=upper)
+    everything = scan.distinct_values(spec, "available_at")
+    assert len(everything) == 3
+    assert within == tuple(value for value in everything if lower <= value <= upper)
+    assert 0 < len(within) < len(everything), (within, everything)

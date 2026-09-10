@@ -163,7 +163,9 @@ class Workspace:
         # one scan per dataset per command, however many judgments and freezes ask (record
         # `238`). The judgments derived the run's agenda from them and preflight derived it
         # again, each with its own scan of the execution table.
-        self._evaluation_times: dict[str, tuple[datetime, ...]] = {}
+        self._evaluation_times: dict[
+            tuple[str, tuple[datetime, datetime] | None], tuple[datetime, ...]
+        ] = {}
 
     @classmethod
     def _from_state(
@@ -333,20 +335,30 @@ class Workspace:
             if value is not None
         )
 
-    def evaluation_times(self, raw_dataset_id: str) -> tuple[datetime, ...]:
+    def evaluation_times(
+        self, raw_dataset_id: str, *, between: tuple[datetime, datetime] | None = None
+    ) -> tuple[datetime, ...]:
         """Every distinct ``available_at`` the registered dataset carries, sorted.
 
         This is what a caller needs to build an agenda from the sessions a dataset actually has,
-        rather than assuming a calendar the data may not match. Read once per dataset for the
-        life of this object (record `238`): a command's judgments and its freeze both derive the
-        run's agenda from these, and the execution horizon is cut from them too.
+        rather than assuming a calendar the data may not match. Read once per dataset and bound
+        for the life of this object (record `238`): a command's judgments and its freeze both
+        derive the run's agenda from these, and the execution horizon is cut from them too.
+
+        `between` reads only the instants inside its inclusive bounds (record `247`): a run over
+        one year of a ten-year table asks for that year, and the column is scanned for it rather
+        than whole and cut in Python afterwards.
         """
-        memo = self._evaluation_times.get(raw_dataset_id)
+        key = (raw_dataset_id, between)
+        memo = self._evaluation_times.get(key)
         if memo is not None:
             return memo
         registration = self.dataset(raw_dataset_id)
         spec = self.source(str(registration.source))
-        values = scan.distinct_values(spec, registration.available_at)
+        not_before, not_after = between if between is not None else (None, None)
+        values = scan.distinct_values(
+            spec, registration.available_at, not_before=not_before, not_after=not_after
+        )
         instants: list[datetime] = []
         for value in values:
             if value is None:
@@ -362,8 +374,8 @@ class Workspace:
                     retry="register the dataset with a timestamp available_at, then retry",
                 )
             instants.append(require_tz_aware(value, name="available_at"))
-        self._evaluation_times[raw_dataset_id] = tuple(sorted(instants))
-        return self._evaluation_times[raw_dataset_id]
+        self._evaluation_times[key] = tuple(sorted(instants))
+        return self._evaluation_times[key]
 
     def require_verified(self, raw_dataset_id: str) -> DatasetRegistration:
         """A registered dataset a run may read: measured at registration, and unchanged since.

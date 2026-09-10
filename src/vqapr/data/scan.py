@@ -13,7 +13,7 @@ import re
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
@@ -663,17 +663,44 @@ def head(
         con.close()
 
 
-def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
+def _instant_literal(bound: datetime, *, name: str) -> str:
+    """One aware instant as a `TIMESTAMPTZ` literal: digits, `T`, `:`, `+`/`-` and nothing else."""
+    if bound.tzinfo is None or bound.utcoffset() is None:
+        raise ValueError(f"{name} must be a timezone-aware datetime")
+    return f"TIMESTAMPTZ '{bound.astimezone(UTC).isoformat()}'"
+
+
+def distinct_values(
+    spec: SourceSpec,
+    field: str,
+    *,
+    not_before: datetime | None = None,
+    not_after: datetime | None = None,
+) -> tuple[object, ...]:
     """Read one physical column as sorted distinct values for a non-Model consumer.
 
     This is a scan primitive, not an observation query. It does not apply PIT, lookback, or
     dataset semantics; callers such as the execution-table boundary own those meanings.
+
+    `not_before` / `not_after` bound the values read, inclusive, so a caller that wants the
+    sessions of one run's period does not read a ten-year table's whole column to keep one
+    year of it (record `247`); duckdb prunes row groups on the bound. The bounds go into the
+    statement as `TIMESTAMPTZ` literals, not as parameters: binding a tz-aware datetime costs
+    a process its first ~450 ms (measured, 1.25M rows: bound-by-parameter 590 ms on the first
+    call against 107 ms for the whole column and 80 ms bound-by-literal; warm, 5 against 15).
     """
     quoted = _quote(field)
+    bounds = ((">=", not_before, "not_before"), ("<=", not_after, "not_after"))
+    clauses = [
+        f"{quoted} {operator} {_instant_literal(bound, name=name)}"
+        for operator, bound, name in bounds
+        if bound is not None
+    ]
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     con = _open(spec)
     try:
         rows = con.execute(
-            f"SELECT DISTINCT {quoted} FROM {_relation(spec)} ORDER BY {quoted}"
+            f"SELECT DISTINCT {quoted} FROM {_relation(spec)}{where} ORDER BY {quoted}"
         ).fetchall()
     except duckdb.Error as exc:
         raise VqaprError(

@@ -973,9 +973,9 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
         candidates.append(args)
         return original_candidates(*args, **kwargs)
 
-    def counting_instants(self: Workspace, dataset_id: str):
+    def counting_instants(self: Workspace, dataset_id: str, **kwargs):
         instants.append(dataset_id)
-        return original_instants(self, dataset_id)
+        return original_instants(self, dataset_id, **kwargs)
 
     monkeypatch.setattr(conventions.scan, "candidate_instants", counting_candidates)
     monkeypatch.setattr(Workspace, "evaluation_times", counting_instants)
@@ -1113,3 +1113,49 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     stranger = verify_run(Workspace.open(tmp_path), other).require_ready()[0]
     with pytest.raises(ValueError, match="another frozen run"):
         execute_run(tmp_path, stranger, workspace=workspace, resources=resources)
+
+
+def test_the_sessions_are_read_for_the_run_period_not_the_table(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `247`. Record `238` made the instant column one read per command, and that read was
+    still the table's whole column: a ten-session run over a three-year table read 735 instants
+    to keep ten (`experiments/exp_246`, `08_run_factor` #752). The workspace now reads the
+    instants inside the run's period widened by a day each side -- enough for every venue-local
+    date the agenda keeps and every instant the horizon keeps -- and both cuts are unchanged."""
+    from datetime import timedelta
+
+    from vqapr.flow.declaration.judgments import judgments
+    from vqapr.flow.declaration.preflight import bound_execution_horizon, bound_execution_table
+    from vqapr.project import store as store_module
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
+    )
+    assert definition.start is not None and definition.end is not None
+    table = bound_execution_table(workspace, definition)
+    scanned = table.build_horizon(start_time=definition.start, end_time=definition.end)
+
+    bounds: list[tuple[object, object]] = []
+    original = store_module.scan.distinct_values
+
+    def counted(spec, field, **kwargs):
+        bounds.append((kwargs.get("not_before"), kwargs.get("not_after")))
+        return original(spec, field, **kwargs)
+
+    monkeypatch.setattr(store_module.scan, "distinct_values", counted)
+    fresh = Workspace.open(tmp_path)
+    failures, blocked = judgments(definition, fresh)
+    assert failures == [] and blocked == [], (failures, blocked)
+    frozen = preflight_run(fresh, definition)
+    assert bounds == [
+        (definition.start - timedelta(days=1), definition.end + timedelta(days=1))
+    ], f"the sessions were read {len(bounds)} times, bounded {bounds}"
+    assert [
+        occurrence.local_instant.local_date for occurrence in frozen.strategy.agenda.occurrences
+    ] == [date(2024, 3, 5)], "the agenda is the run's period, as before"
+    assert bound_execution_horizon(fresh, definition).instants == scanned.instants, (
+        "the horizon is what the unbounded scan answered"
+    )

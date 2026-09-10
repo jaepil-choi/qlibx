@@ -16,7 +16,7 @@ from vqapr.authoring.records import InvocationRecorder
 from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
-from vqapr.domain.model_state import prepare_model_state
+from vqapr.domain.model_state import PreparedModelState, prepare_model_state
 from vqapr.domain.shapes import RecordChunk
 from vqapr.domain.values import ModelMemory, normalize_memory, opening_memory
 
@@ -450,11 +450,16 @@ class RunStateRepository:
         pending_accepted_intent: object = _UNSET,
         expected_version: int | None = None,
         component_memory: Mapping[str, object] | None = None,
+        prepared: PreparedModelState | None = None,
     ) -> PreparedRunState:
         """Validate and serialize all callback effects without changing visibility.
 
         `component_memory` is what each stateful component left, by id, committed in the same
-        root as the Strategy's memory; `None` carries the refs over unchanged.
+        root as the Strategy's memory; `None` carries the refs over unchanged. `prepared` is the
+        candidate the caller already framed with `prepare_model_state` (the callback did, to take
+        its ref and to prove the live Strategy reproduces it); handed in, it is not normalized
+        and hashed a second time (record `239`). It must be `prepare_model_state`'s own: its ref
+        enters the root as proved.
         """
         root = self._root
         if root.finalization is not None:
@@ -462,7 +467,7 @@ class RunStateRepository:
         expected = root.version if expected_version is None else expected_version
         if expected != root.version:
             raise RuntimeError("run state optimistic conflict")
-        candidate = prepare_model_state(memory, payload)
+        candidate = prepared if prepared is not None else prepare_model_state(memory, payload)
         states = dict(root._model_states)
         states[candidate.ref] = candidate.memory
         payloads = dict(root._payloads)

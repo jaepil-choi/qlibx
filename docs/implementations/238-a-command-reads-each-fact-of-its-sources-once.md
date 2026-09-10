@@ -69,4 +69,4 @@ fresh 인스턴스"(`docs/issues/archive/076`) · run) — 각각 자기 이유�
 | `uv run python -m pytest tests/ -q` (fast) | 1,704 passed, 29 deselected (140 s) |
 | `uv run ruff check src/` · `uv run python -m pyright` | clean · 0 errors |
 | 시간 (in-process, best of 3, HEAD의 `src`를 `git archive`로 꺼내 같은 sample 프로젝트에서 A/B) | `check sample-run` 181.8 → 97.4 ms · `check sample-factor-run` 153.0 → 71.1 ms · `run sample-factor-run --force` 969 → 875 ms · `run sample-stoploss-run --force` 1,434 → 1,369 ms |
-| `uv run python -m pytest tests/ -q -m ""` (test_all) · `scripts/showcase_record_digest.py --check` | VALIDATION_ALL |
+| `uv run python -m pytest tests/ -q -m ""` (test_all) · `scripts/showcase_record_digest.py --check` | 1,734 passed (172 s, 기록 239와 함께) · 83/83 entries match |

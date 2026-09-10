@@ -1,6 +1,6 @@
 # `check` derives the run's agenda twice, and on a three-year run that is the whole of its cost
 
-**Status: UNTRIAGED — found in the 0.12.0 scenario traces (`experiments/exp_235_the_scenario_trace/`), not yet judged by the owner.**
+**Status: CLOSED by record `238` (2026-09-10) — the workspace reads a dataset's instants once per command, so the second derivation (preflight's) costs no scan; the horizon is cut from the same instants. Found in the 0.12.0 scenario traces (`experiments/exp_235_the_scenario_trace/`), re-measured in `exp_238`.**
 
 | | |
 |---|---|

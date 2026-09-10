@@ -23,7 +23,7 @@ from vqapr.domain.account_state import AccountSnapshot, AccountState
 from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import ModelStateRef
-from vqapr.domain.model_state import prepare_model_state
+from vqapr.domain.model_state import PreparedModelState, prepare_model_state
 from vqapr.domain.values import ModelMemory, normalize_memory
 from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.execution_table import ExecutionTable
@@ -159,12 +159,10 @@ class CallbackHandler:
                 occurrence.evaluation_time,
                 owner=self._context.layer.config,
             ):
-                candidate, payload_candidate, committed_ref = self._candidate_callback_state(
-                    before, payload_before
-                )
+                candidate = self._candidate_callback_state(before, payload_before)
             with self._callback_intent_boundary(occurrence, accepted):
                 evidence, lifecycle = self._callback_evidence(
-                    occurrence, account, current_ref, committed_ref, window, accepted
+                    occurrence, account, current_ref, candidate.ref, window, accepted
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
@@ -173,7 +171,6 @@ class CallbackHandler:
             ):
                 prepared = self._prepare_callback_publication(
                     candidate,
-                    payload_candidate,
                     lifecycle,
                     recorder,
                     accepted,
@@ -256,30 +253,32 @@ class CallbackHandler:
 
     def _prepare_callback_publication(
         self,
-        memory: ModelMemory,
-        payload: bytes,
+        candidate: PreparedModelState,
         lifecycle: LifecycleTrace,
         recorder: InvocationRecorder,
         accepted: Hold | AcceptedIntent,
         *,
         component_memory: Mapping[str, ModelMemory] | None = None,
     ) -> PreparedRunState:
+        """Hand the root the candidate `_candidate_callback_state` already framed (record `239`)."""
         if isinstance(accepted, Hold):
             # Nothing to take: leave whatever the root already had pending untouched.
             return self._context.state.prepare_callback(
-                memory,
-                payload,
+                candidate.memory,
+                candidate.payload,
                 lifecycle=lifecycle,
                 recorder=recorder,
                 component_memory=component_memory,
+                prepared=candidate,
             )
         return self._context.state.prepare_callback(
-            memory,
-            payload,
+            candidate.memory,
+            candidate.payload,
             lifecycle=lifecycle,
             recorder=recorder,
             pending_accepted_intent=accepted,
             component_memory=component_memory,
+            prepared=candidate,
         )
 
     def _restore_callback_state(self, memory: ModelMemory, payload: bytes) -> None:
@@ -440,14 +439,19 @@ class CallbackHandler:
 
     def _candidate_callback_state(
         self, before: ModelMemory, payload_before: bytes
-    ) -> tuple[ModelMemory, bytes, ModelStateRef]:
-        candidate = normalize_memory(self._context.strategy.memory)
-        payload_candidate = BytesIO()
-        self._context.strategy.save_payload(payload_candidate)
-        payload = payload_candidate.getvalue()
-        committed_ref = prepare_model_state(candidate, payload).ref
-        self._validate_candidate_payload(candidate, payload, before, payload_before)
-        return candidate, payload, committed_ref
+    ) -> PreparedModelState:
+        """What the callback left, framed once: a detached memory, its payload, their ref.
+
+        `prepare_model_state` normalizes the memory (a detached strict-JSON copy) and hashes the
+        envelope, and that is the one framing of the callback's state: the ref goes into the
+        evidence, the state into the root, unframed again by neither (record `239`: it was
+        normalized here, again inside the framing, and once more when the root took it).
+        """
+        buffer = BytesIO()
+        self._context.strategy.save_payload(buffer)
+        framed = prepare_model_state(self._context.strategy.memory, buffer.getvalue())
+        self._validate_candidate_payload(framed.memory, framed.payload, before, payload_before)
+        return framed
 
     def _callback_evidence(
         self,

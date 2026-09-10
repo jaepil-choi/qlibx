@@ -229,3 +229,57 @@ def test_callback_failure_rolls_back_live_memory_and_state() -> None:
 
     assert state.load_model_state(state.current.current_model_state_ref) == {"occurrence_count": 1}
     assert strategy.memory == {"occurrence_count": 1}
+
+
+def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Record `239`. The 0.13.0 stop-loss trace (`experiments/exp_238`, `10_run_stoploss`,
+    #14667 .. #14971) showed one callback normalizing its memory five times and hashing the
+    envelope twice: once to take the ref, once inside that framing, twice to hand the live
+    Strategy detached copies, and once more when the root took the same memory and payload.
+    The callback frames the candidate once and hands the root what it framed; the two copies
+    the live Strategy is given stay -- they are what keeps it from aliasing the root's memory.
+    """
+    from vqapr.domain import model_state as model_state_module
+    from vqapr.flow.engine import run_state as run_state_module
+    from vqapr.flow.run import callback as callback_module
+
+    # Built before the counting starts: the repository frames its seed state once per run.
+    state = _state()
+    framed: list[str] = []
+    normalized: list[str] = []
+    for module, name in (
+        (callback_module, "prepare_model_state"),
+        (run_state_module, "prepare_model_state"),
+    ):
+        original = getattr(module, name)
+
+        def counting(*args, _module=module.__name__, _original=original, **kwargs):
+            framed.append(_module)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, counting)
+    for module in (callback_module, run_state_module, model_state_module):
+        original = module.normalize_memory
+
+        def counting_normalize(value, _module=module.__name__, _original=original):
+            normalized.append(_module)
+            return _original(value)
+
+        monkeypatch.setattr(module, "normalize_memory", counting_normalize)
+
+    occurrences = (_occurrence(1), _occurrence(2))
+    result = _flow(EveryThreeOccurrences(), state, occurrences).run()
+
+    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
+    assert state.load_model_state(result.final_state.current_model_state_ref) == {
+        "occurrence_count": 2
+    }
+    callbacks = len(occurrences)
+    assert framed == ["vqapr.flow.run.callback"] * callbacks, (
+        f"{len(framed)} framings for {callbacks} callbacks: {framed}"
+    )
+    # Per callback: the framing's own copy, the two the live Strategy is handed, and the two
+    # detached copies the restore before `decide` makes (the Strategy's and the components').
+    # Before record `239` two more sat between them: the framing's input normalized on its own,
+    # and the root framing the same memory and payload again.
+    assert len(normalized) <= 5 * callbacks + 1, f"{len(normalized)} for {callbacks} callbacks"

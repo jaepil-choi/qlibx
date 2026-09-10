@@ -120,3 +120,13 @@ Identical to the 0.12.0 page: the horizon-bounded panel changed no computed numb
 Two figures on the 0.12.0 page were wrong and are corrected here: the datamodel's warm-up is four
 sessions, not five (rows=[] at #8764 · #8867 · #8970 · #9073, then rows at #9420), and a session
 contributes 9 rows, not 10 (K000010 has no six-close window in the period; 108 = 12 × 9).
+
+## What the traces led to
+
+Read for duplicate work rather than for the story, the same traces showed one `vqapr run`
+reading the execution table's instant column five times (`distinct_values` x2 for the agenda,
+`candidate_instants` x3 for the horizon), `check` hashing a changed file twice, a `--jobs` driver
+loading every component twice to ask what it reads (`_reads` x4 for two runs), and one callback
+normalizing its memory five times and hashing its envelope twice (`10_run_stoploss` #14668 ..
+#14971). Records `238` and `239` close those; the page above still shows the traces as they were
+taken, and a re-render on the fixed tree would show different call indices.

@@ -122,7 +122,7 @@ Shorter than the ten returns the lookback yields, so the direct trailing slice d
 the whole history.
 """
 
-VERIFIED_AGAINST = "vqapr-0.14.2"
+VERIFIED_AGAINST = "vqapr-0.14.3"
 LAST_VERIFIED_AT = "2026-09-10"
 
 

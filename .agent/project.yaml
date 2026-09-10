@@ -42,6 +42,9 @@ canonical_documents:
   # 2026-09-10: 0.14.2 hotfix (records 243-245, develop 위): 2026-09-10 testbed 보고 셋을 닫음 — dataset.unverified가
   # run이 publish한 dataset에 vqapr run <id> --force를 말함(243); every 거절문이 문법을 말함, y는 12M(244); --limit 0은 0행,
   # show dataset·--table 둘 다(245, 깨지는 변화; docs/releases/0.14.2.md). 현행 캠페인 없음.
+  # 2026-09-11: 한 콜백 캠페인 완료(records 246-248, branch redesign/one-callback; 0.14.2 stepper 트레이스를 중복으로 읽은 결과).
+  # 콜백이 읽은 것(source refs · inputs)을 한 번 만들고, 세션은 run 기간 ± 1일만 읽고(TIMESTAMPTZ 리터럴), heartbeat는 초당 한 번.
+  # 0.14.3 (깨지는 변화 없음; docs/releases/0.14.3.md). 현행 캠페인 없음.
   active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.

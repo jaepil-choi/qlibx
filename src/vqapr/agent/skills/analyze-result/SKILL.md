@@ -29,7 +29,7 @@ from vqapr.public import run_report, strategy_report
 
 store = Path(".vqapr")                       # the `store_root` `vqapr run` printed
 one = strategy_report(store, "reversal")     # the run's only strategy, or "<id>" / "<id>@<fp8>"
-every = run_report(store, "ff-arm", benchmark="bm-book", risk_free_annual=Decimal("0.03"))
+versions = run_report(store, "reversal", risk_free_annual=Decimal("0.03"))  # every finished record of the run
 one.as_record()                              # JSON-ready: Decimal as text, instants with offset
 ```
 
@@ -49,9 +49,11 @@ cannot give it. What each holds, and the traps in reading them, is in
 | `intent` | each decision's weights against the book that followed |
 | `compliance` | per compliance rule: held / within tolerance / breached / unmeasured |
 
-A `RunReport` adds `headline` (one row per strategy), `correlation` of period returns over the
-instants every strategy shares, and `relative` against a `benchmark` **strategy of the same run** —
-an index level is not in the record and is not invented.
+A run holds one strategy, so a `RunReport` lines up **that strategy's records — its tweaks —
+side by side**: `headline` (one row per record), `correlation` of period returns over the instants
+they share, and `relative` against the record you name as `benchmark`. Two different strategies
+live in two runs: compare them with a `strategy_report` each. An index level is not in the record
+and is not invented.
 
 ## Two numbers that are asked for by the same word
 

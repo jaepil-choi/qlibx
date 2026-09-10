@@ -33,28 +33,27 @@ exception, or through Ctrl+C, all three of which keep every row recorded up to t
 Only a **hard kill** (`taskkill /F`, an OOM kill) loses rows, and then only what came after the
 last spill: a part is written whenever the buffer passes 256 MB.
 
-## When one strategy fails
+## When one run in a batch fails
 
-Each strategy is its own flow with its own account. A refusal inside one — `decide()` raised, or
-the `Rebalance` it returned was outside its budget — is that strategy's outcome, not the run's.
+A run is one model with its own account. A refusal inside one — `decide()` raised, or the
+`Rebalance` it returned was outside its budget — is that run's outcome, not the batch's.
 
-The envelope is `ok: false`, `stage: run.strategy_failed`, with the **same** `strategies` map:
-`status: completed` lines beside `status: failed` lines carrying that strategy's `stage`,
-`component_id`, `failures` and `at`.
+The envelope is `ok: false`, `stage: run.strategy_failed`, with every run of the batch listed:
+`status: completed` lines beside the failed run's block carrying its `stage`, `component_id`,
+`failures` and `at`.
 
-The top-level `failures` gathers every failed strategy's entries, each stamped `strategy: <id>`.
-Read `fix` first. `source` names the strategy (`key_path: strategies.<id>`) and, for a raise from
-the user's own file, the file and the line.
+The top-level `failures` gathers the failed run's entries. Read `fix` first. `source` names the
+strategy and, for a raise from the user's own file, the file and the line.
 
 **The completed records stand.** Fix the failed strategy, register the file again, and:
 
 ```bash
-vqapr run <run-id> --strategy <id>
+vqapr run <run-id>
 ```
 
-runs it alone into a new record beside the others. The shape is the same under `--jobs N`.
+runs that one alone into a new record. The shape is the same under `--jobs N`.
 
 ## Reporting this to the user
 
-An `ok: false` run is not "the run failed" when four of five strategies completed. Say which
+An `ok: false` batch is not "the backtest failed" when four of five runs completed. Say which
 completed and which did not, and that the completed records are readable now.

@@ -92,10 +92,14 @@ Never report any of them as "hit ratio" without saying which.
 
 ## What a `RunReport` adds
 
-- `headline` — one row per strategy
-- `correlation` — of period returns, on the instants **all** strategies share
-- `relative` — active return, tracking error, information ratio against the `benchmark` strategy
-  you name
+A run holds one strategy, so its finished records are that strategy's versions — one per
+fingerprint, one per tweak. A `RunReport` lines them up:
 
-The benchmark must be a book of the same run. An index level is not in the record, and
-`run_report` will not invent one.
+- `headline` — one row per record
+- `correlation` — of period returns, on the instants **all** records share
+- `relative` — active return, tracking error, information ratio against the record you name as
+  `benchmark`
+
+The benchmark must be a record of the same run. Two different strategies are two runs; read a
+`strategy_report` for each. An index level is not in the record, and `run_report` will not invent
+one.

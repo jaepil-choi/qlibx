@@ -20,7 +20,7 @@ is simply not activated. Apply the same prefix to every command below.
 
 Not a script and not a set of arguments. A run declares the universe, the period, the sessions it
 fires on, the venue-local wall time it fires at, the venue, the execution dataset and the price it fills at, the initial
-account, and the strategies it tries — and it is registered like everything else, so a result can
+account, and the one model it runs — and it is registered like everything else, so a result can
 always name the declaration that produced it.
 
 **The strategy is called at every instant of the run's `agenda` and decides for itself whether
@@ -31,8 +31,10 @@ execution dataset, never from a list. There is no valuation or monitoring time t
 book is valued at every instant of the market clock, and the declared compliance rules observe it
 right after.
 
-**Three factor models on one cadence are one run with three strategies, not three runs.** Each
-strategy runs with its own account and writes its own record.
+**A run is one model.** Three factor models on one cadence are three runs with the same period,
+venue and account; `vqapr run a b c --jobs 3` executes them side by side, and each writes its own
+record. Two runs declaring the same inputs freeze identically, so the comparison is as sound as
+one run would have made it.
 
 ## Workflow
 
@@ -110,15 +112,15 @@ A YAML path handed to `run` or `check` is refused by name — both take a regist
 count, an `account_version` and a `record` (`<strategy-id>@<fp8>`). For a datamodel run, a
 `datamodels` map with `dataset_id`, `rows`, `sessions` and its record.
 
-## When one strategy fails, the others still run
+## When one run in a batch fails, the others still run
 
-Each strategy is its own flow with its own account, so a refusal inside one is **that strategy's
-outcome, not the run's**. The envelope is `ok: false` with `stage: run.strategy_failed` and the
-same `strategies` map — completed lines beside failed ones, each failure carrying its `stage`,
+Each run is its own flow with its own account, so a refusal inside one is **that run's outcome,
+not the batch's**. The envelope is `ok: false` with `stage: run.strategy_failed`, every run listed
+with its status, and the failed run's refusal in its own block carrying its `stage`,
 `component_id`, `failures` and `at`.
 
 The completed records stand. Fix the failed strategy, register the file again, and
-`vqapr run <run-id> --strategy <id>` runs it alone into a new record beside them.
+`vqapr run <run-id>` runs that one alone into a new record.
 
 ## While it is running
 

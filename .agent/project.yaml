@@ -39,6 +39,9 @@ canonical_documents:
   # (깨지는 변화 없음; docs/releases/0.14.0.md). 남긴 것: RunResources(설계 §5). 현행 캠페인 없음.
   # 2026-09-10: RunResources (record 242, branch redesign/run-resources): 검증이 load한 전략·거래소·규칙과 자른 horizon을
   # run이 그대로 쓴다 — run 시작 때의 재import·재스캔 없음. 0.14.1 (깨지는 변화 없음; docs/releases/0.14.1.md). 현행 캠페인 없음.
+  # 2026-09-10: 0.14.2 hotfix (records 243-245, develop 위): 2026-09-10 testbed 보고 셋을 닫음 — dataset.unverified가
+  # run이 publish한 dataset에 vqapr run <id> --force를 말함(243); every 거절문이 문법을 말함, y는 12M(244); --limit 0은 0행,
+  # show dataset·--table 둘 다(245, 깨지는 변화; docs/releases/0.14.2.md). 현행 캠페인 없음.
   active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.

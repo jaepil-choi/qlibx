@@ -13,6 +13,7 @@
   },
   "analyze-result/references/reading-a-record.md": {
     "cd85d428341b89bcea89af192100afd59ffacedaed90f1773c73396168f775b4": "0.10.0",
+    "ce7a89d13df86bb48c6fcc50bd13a74ffc907301a2e4408754efd86815198a4e": "0.14.2",
     "d7202466b6a2993c5d501e410b82632be8e419b97090cfa0b58adb47b26997de": "0.8.0"
   },
   "analyze-result/references/report-sections.md": {
@@ -27,6 +28,7 @@
     "9b437bc625e9d852efe1565ca69630d1d3792a252a05f6f66344ae977ff739bb": "0.8.0"
   },
   "inspect-workspace/SKILL.md": {
+    "1cabac6e207f6761ed154941acd9eabca7e7f79e1d101f797b05870ba9534a55": "0.14.2",
     "36e73b5e6f64a24ca3d92d07fa751c487c5ebd65d1075fe35ef067bb22c093a8": "0.11.0",
     "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0",
     "be17bfaf2b79f31dbe364f45082c404015eb6655f8aa88bf81a13e3a59eb6d42": "0.10.0"
@@ -56,7 +58,8 @@
     "4e8630444ec4a3e704876597d951fc4befb3823365dca4ab65ce9e6af6478c8e": "0.11.0"
   },
   "introduce-vqapr/references/sample-journey.md": {
-    "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0"
+    "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0",
+    "8110a7f58635e2d16a7ae9407e376390b35f98a0234175916e855c0e7b29a74f": "0.14.2"
   },
   "make-compliance/SKILL.md": {
     "330e4c02877ad61831e49820ac379af543bcaffe978240c0cb162f5ea191065d": "0.10.0",
@@ -107,6 +110,7 @@
   },
   "make-datamodel/references/running-a-datamodel.md": {
     "06969cb4db1eb3a92e8bac607e983572d3a079b5b97864b3fb94cd76442ab39b": "0.10.0",
+    "57d579591deac96917cd3a29547960cc3135c92cc04be8e95e00d30594de212e": "0.14.2",
     "7ed5fd5e9ee31ee243b2f80e974188cc3fb509af278cda9eb21d1816a2be3ea7": "0.11.0",
     "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0"
   },
@@ -192,6 +196,7 @@
   },
   "run-backtest/SKILL.md": {
     "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0",
+    "335a4c80015d491d8473fe12443607af539874fa6684361d3112afe5ead88a3d": "0.14.2",
     "8bef17630a9c2a59c81df5de64dc4266e3fb1e8febd069face957643e151698f": "0.11.0",
     "8f49db5b695a877643ce092d7a1f4c86c7ae168722c7e29f820a724a2b718100": "0.10.0",
     "ada0b9e28135eb27f677c944019707b3dec57f7038f04384206d786739249585": "0.12.0",
@@ -211,6 +216,7 @@
   },
   "run-backtest/references/run-declaration.md": {
     "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "cc9fa55dff37106f895229b3ac23eb5e97fdd4ff92aefbfed1055a5948395186": "0.14.2",
     "ec3fea404ee4694c5b5b365eaa17ad1b36f41fc59a3b2317fb60421fd71101df": "0.10.0"
   },
   "run-backtest/references/watching-and-failures.md": {

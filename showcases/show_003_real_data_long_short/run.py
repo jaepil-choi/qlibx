@@ -61,7 +61,7 @@ INPUTS = OUTPUTS / "inputs"
 PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
-VERIFIED_AGAINST = "vqapr-0.14.1"
+VERIFIED_AGAINST = "vqapr-0.14.2"
 LAST_VERIFIED_AT = "2026-09-10"
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)

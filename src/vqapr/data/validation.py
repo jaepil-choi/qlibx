@@ -672,6 +672,8 @@ def require_verified(
     Returns the digest verified.
     """
     stored = registration.source_digest
+    dataset_id = str(registration.dataset_id)
+    again, command = _measured_again(registration)
     if stored is None:
         raise VqaprError(
             stage=Stage.FREEZE,
@@ -685,17 +687,20 @@ def require_verified(
                         "carries no such measurement"
                     ),
                     observed=(
-                        f"dataset {str(registration.dataset_id)!r} was registered before the "
-                        "measurement existed"
+                        f"dataset {dataset_id!r} was "
+                        + (
+                            f"published by run {registration.produced_by!r}"
+                            if registration.produced_by is not None
+                            else "registered"
+                        )
+                        + " before the measurement existed"
                     ),
-                    source=FailureSource(
-                        file=str(spec.path), key_path=f"datasets.{registration.dataset_id}"
-                    ),
-                    fix=f"register dataset {str(registration.dataset_id)!r} again",
+                    source=FailureSource(file=str(spec.path), key_path=f"datasets.{dataset_id}"),
+                    fix=f"{again} -- the command is {command}",
                 )
             ],
             mutation=False,
-            retry_precondition="register the dataset again, then retry",
+            retry_precondition=f"{again} ({command}), then retry",
         )
     actual = physical_digest(spec.path) if digest is None else digest
     if actual != stored:
@@ -710,22 +715,39 @@ def require_verified(
                         "fact the registration carries (span, key, prices) was measured on them"
                     ),
                     observed=(
-                        f"dataset {str(registration.dataset_id)!r}: registered digest "
+                        f"dataset {dataset_id!r}: registered digest "
                         f"{stored[:12]}…, file now {actual[:12]}…"
                     ),
-                    source=FailureSource(
-                        file=str(spec.path), key_path=f"datasets.{registration.dataset_id}"
-                    ),
+                    source=FailureSource(file=str(spec.path), key_path=f"datasets.{dataset_id}"),
                     fix=(
-                        f"register dataset {str(registration.dataset_id)!r} again so its facts "
-                        "are measured on the file as it is now"
+                        f"{again} so its facts are measured on the file as it is now -- "
+                        f"the command is {command}"
                     ),
                 )
             ],
             mutation=False,
-            retry_precondition="register the dataset again, then retry",
+            retry_precondition=f"{again} ({command}), then retry",
         )
     return actual
+
+
+def _measured_again(registration: DatasetRegistration) -> tuple[str, str]:
+    """What to do and the one command that does it: measure this registration again.
+
+    A declared dataset is registered by `vqapr register <declaration>`. A dataset a run published
+    through its `writes` has no declaration file: the run is what registered it, and the only
+    command that registers it again is the run, told to replace what it published. Telling the
+    reader of a run-published dataset to "register it again" named a command that does not exist
+    for it, and the reader spent half an hour establishing that before trying the run
+    (`docs/issues/report-2026-09-10-unverified-fix-names-no-command-for-a-run-published-dataset`).
+    """
+    dataset_id = str(registration.dataset_id)
+    if registration.produced_by is not None:
+        return (
+            f"publish dataset {dataset_id!r} again",
+            f"`vqapr run {registration.produced_by} --force`",
+        )
+    return f"register dataset {dataset_id!r} again", "`vqapr register <its declaration file>`"
 
 
 def verify_roster(tables: Mapping[str, Path]) -> tuple[Diagnosis, dict[str, dict[str, str]]]:

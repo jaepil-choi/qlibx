@@ -196,6 +196,39 @@ def test_a_registration_without_a_measurement_is_refused_by_name(tmp_path: Path)
         validation.require_verified(registration, SourceSpec.of("prices", parquet))
 
     assert refused.value.failures[0].code == "dataset.unverified"
+    assert "`vqapr register <its declaration file>`" in str(refused.value.failures[0].fix)
+
+
+def test_a_run_published_registration_is_told_to_publish_again(tmp_path: Path) -> None:
+    """A dataset a run published has no declaration file to hand `register`; the one command that
+    measures it again is the run, told to replace what it published. The refusal names that
+    command and the run, for both the missing measurement and a file changed since
+    (`docs/issues/report-2026-09-10-unverified-fix-names-no-command-for-a-run-published-dataset`)."""
+    parquet = _prices(tmp_path)
+    spec = SourceSpec.of("prices", parquet)
+    published = (
+        _registration()
+        .with_span(
+            datetime(2024, 3, 5, 15, 30, tzinfo=KST), datetime(2024, 3, 6, 15, 30, tzinfo=KST)
+        )
+        .with_producer("alpha-001", "alpha@deadbeef")
+    )
+
+    with pytest.raises(VqaprError) as unverified:
+        validation.require_verified(published, spec)
+    failure = unverified.value.failures[0]
+    assert failure.code == "dataset.unverified"
+    assert "published by run 'alpha-001'" in str(failure.observed)
+    assert "`vqapr run alpha-001 --force`" in str(failure.fix)
+    assert "register" not in str(failure.fix)
+    assert "`vqapr run alpha-001 --force`" in str(unverified.value.retry_precondition)
+
+    with pytest.raises(VqaprError) as changed:
+        validation.require_verified(
+            published.with_verification("0" * 64, None), spec, digest="1" * 64
+        )
+    assert changed.value.failures[0].code == "dataset.source_changed"
+    assert "`vqapr run alpha-001 --force`" in str(changed.value.failures[0].fix)
 
 
 def test_verify_roster_names_the_table_it_cannot_read(tmp_path: Path) -> None:

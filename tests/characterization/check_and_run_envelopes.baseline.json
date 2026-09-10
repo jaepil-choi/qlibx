@@ -263,7 +263,7 @@
      "code": "dataset.source_changed",
      "example_total": 0,
      "examples": [],
-     "fix": "register dataset 'sample-execution' again so its facts are measured on the file as it is now",
+     "fix": "register dataset 'sample-execution' again so its facts are measured on the file as it is now -- the command is `vqapr register <its declaration file>`",
      "observed": "dataset 'sample-execution': registered digest 49e4b4abef4f…, file now 34c1d63c3ab4…",
      "requirement": "the bytes a run reads must be the bytes registration measured; every fact the registration carries (span, key, prices) was measured on them",
      "source": {

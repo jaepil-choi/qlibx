@@ -48,6 +48,11 @@ canonical_documents:
   # 2026-09-11: 0.14.2 testbed 보고 아홉 중 일곱을 records 249-257로 닫음(develop 위, 오너 지시): --jobs run.json · usage 거절 ·
   # strategy calendar scaffold · register kind/옆 모듈 · agenda `on: last` · 메모리 넷(envelope streaming · seal · record 있는 run의
   # 증거 · 워커 BLAS 1스레드). 0.14.4 (선언 문서에 `agenda.on` 추가, 깨지는 변화 없음; docs/releases/0.14.4.md). 현행 캠페인 없음.
+  # 2026-09-11: records 258-263(develop 위, 다른 세션: skill 설치 루트 · 체결 없는 결정은 원인별 한 번 · of()가 0을 받음 ·
+  # fill.sized_quantity · 선언 YAML 1.2 불리언 · win32 tzdata)과 한 읽기 캠페인(records 264-267, branch redesign/one-reading:
+  # record의 숫자는 Decimal · 주소 하나 · `vqapr export` · strategy scaffold가 부품을 보임; --recipe는 오너가 거절). 0.15.0
+  # (깨지는 변화: reader가 fill/weight 숫자를 Decimal로, skill 설치 루트, 선언의 yes/no/on/off는 말; docs/releases/0.15.0.md,
+  # tag v0.15.0). 현행 캠페인 없음.
   active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.

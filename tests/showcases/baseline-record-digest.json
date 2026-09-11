@@ -91,10 +91,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "ba1e49ca27a22951",
+    "digest": "5a87158a01785ff5",
     "kind": "table",
     "rows": 105
   },
@@ -168,10 +169,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "ba1e49ca27a22951",
+    "digest": "5a87158a01785ff5",
     "kind": "table",
     "rows": 105
   },
@@ -231,10 +233,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "c9907575b88dee56",
+    "digest": "52a6b9fb36e531ff",
     "kind": "table",
     "rows": 44
   },
@@ -294,10 +297,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "02437c0f887eefd9",
+    "digest": "e77b19b0b3756fa6",
     "kind": "table",
     "rows": 64
   },
@@ -357,10 +361,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "c9907575b88dee56",
+    "digest": "52a6b9fb36e531ff",
     "kind": "table",
     "rows": 44
   },
@@ -420,10 +425,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "02437c0f887eefd9",
+    "digest": "e77b19b0b3756fa6",
     "kind": "table",
     "rows": 64
   },
@@ -498,10 +504,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "6a50465cc05d2a19",
+    "digest": "5a5faa1698cc2eb4",
     "kind": "table",
     "rows": 64
   },
@@ -576,10 +583,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "6a50465cc05d2a19",
+    "digest": "5a5faa1698cc2eb4",
     "kind": "table",
     "rows": 64
   },
@@ -639,10 +647,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "d36b5207ae1bd63f",
+    "digest": "abedbd0eed0264d0",
     "kind": "table",
     "rows": 44
   },
@@ -702,10 +711,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "966efe45d1c2f011",
+    "digest": "72fe0695d5ffe055",
     "kind": "table",
     "rows": 44
   },
@@ -765,10 +775,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "5f925f963c2a2ada",
+    "digest": "0117eb99323b217a",
     "kind": "table",
     "rows": 64
   },
@@ -828,10 +839,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "d36b5207ae1bd63f",
+    "digest": "abedbd0eed0264d0",
     "kind": "table",
     "rows": 44
   },
@@ -891,10 +903,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "966efe45d1c2f011",
+    "digest": "72fe0695d5ffe055",
     "kind": "table",
     "rows": 44
   },
@@ -954,10 +967,11 @@
       "requested_quantity",
       "run_id",
       "sequence",
+      "sized_quantity",
       "stage",
       "tax"
     ],
-    "digest": "5f925f963c2a2ada",
+    "digest": "0117eb99323b217a",
     "kind": "table",
     "rows": 64
   },

@@ -76,7 +76,7 @@ CAP = "0.10"
 """Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
 the shipped compliance rule of the same name observes the book against its own copy of it."""
 
-VERIFIED_AGAINST = "vqapr-0.14.4"
+VERIFIED_AGAINST = "vqapr-0.15.0"
 LAST_VERIFIED_AT = "2026-09-10"
 
 

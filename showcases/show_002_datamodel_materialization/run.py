@@ -29,7 +29,7 @@ MODELS = ROOT / "show002_models.py"
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
 LAST_VERIFIED_AT = "2026-09-10"
-VERIFIED_AGAINST = "vqapr-0.14.4"
+VERIFIED_AGAINST = "vqapr-0.15.0"
 KST = ZoneInfo("Asia/Seoul")
 
 

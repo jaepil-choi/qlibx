@@ -25,19 +25,26 @@ from pathlib import Path
 WANTED = {
     "pandas": "bridges a report's `instants` beside `values` into a frame or series",
     "matplotlib": "the usual renderer for a paper figure; PDF and 300dpi PNG out of the box",
+    "seaborn": "heat maps of a name-by-instant panel: weights, gaps, correlation",
     "numpy": "arrives with pandas; named here so a partial install is visible",
 }
-"""The pair a paper figure normally needs, and nothing more.
+"""What the skill's figures normally need, and nothing more.
 
 Offering four alternatives per job is how a skill turns a decision into a survey. `pandas` +
-`matplotlib` is the default with an escape hatch, not the only possibility -- if the project
-already renders with something else, use that instead and do not install these.
+`matplotlib` + `seaborn` is the default with an escape hatch, not the only possibility -- if the
+project already renders with something else, use that instead and do not install these.
 """
 
+EXTRAS = {
+    "quantstats": "a returns-only tearsheet; it recomputes its own statistics from the returns",
+}
+"""Asked for by name (`--with quantstats`), never by default: only when the user wants that
+tearsheet. It pulls a network client and a scraper with it, which a figure does not need."""
 
-def _installed() -> dict[str, str | None]:
+
+def _installed(names: dict[str, str]) -> dict[str, str | None]:
     found: dict[str, str | None] = {}
-    for name in WANTED:
+    for name in names:
         try:
             found[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
@@ -85,11 +92,20 @@ def main(argv: list[str] | None = None) -> int:
         default=Path.cwd(),
         help="where to look for a lockfile (default: the current directory)",
     )
+    parser.add_argument(
+        "--with",
+        dest="extras",
+        action="append",
+        default=[],
+        choices=sorted(EXTRAS),
+        help="also check a library only some figures need",
+    )
     args = parser.parse_args(argv)
 
-    found = _installed()
+    wanted = {**WANTED, **{name: EXTRAS[name] for name in args.extras}}
+    found = _installed(wanted)
     missing = [name for name, version in found.items() if version is None]
-    manager, command = _installer(args.project_root, missing or list(WANTED))
+    manager, command = _installer(args.project_root, missing or list(wanted))
 
     report = {
         "python": sys.executable,
@@ -109,7 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         text = "\n".join(
             [
                 f"missing: {', '.join(missing)}",
-                *(f"  {name} -- {WANTED[name]}" for name in missing),
+                *(f"  {name} -- {wanted[name]}" for name in missing),
                 "",
                 (
                     f"this project uses {manager}. To add them, with the user's agreement:"

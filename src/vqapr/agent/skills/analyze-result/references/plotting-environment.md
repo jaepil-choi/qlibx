@@ -23,9 +23,32 @@ Then:
 
 1. **If the project already renders charts with something else** — plotly, altair, an in-house
    wrapper — use that. Do not add a second renderer because this reference names matplotlib.
-2. **If something is missing**, tell the user what, why it is needed for the figure they asked for,
-   and show the exact command. Then ask.
-3. **Install only after they agree**, with the command the script printed for their manager.
+2. **If something is missing**, ask once: which libraries, why the figure needs them, and the exact
+   command the script printed — in a uv project, `uv add --group dev matplotlib seaborn`.
+3. **Install only after they agree**, with that command, then draw.
+
+## Which library for which figure
+
+| figure | needs |
+|---|---|
+| lines, bars, areas — NAV, drawdown, exposure, costs, contribution | `matplotlib` |
+| heat maps — weights or gaps by name and time, correlation, month-by-year returns | `seaborn` |
+| a returns-only tearsheet, when the user asks for that by name | `quantstats` (`--with quantstats`) |
+
+`pandas` and `numpy` carry the frames under all three.
+
+**quantstats recomputes every statistic from the return series it is handed**, with its own
+defaults for the year length and the risk-free rate. Pass the report's:
+
+```python
+qs.reports.html(returns, rf=0.0, periods_per_year=report.performance.periods_per_year,
+                output="tearsheet.html")
+```
+
+with `returns` built by the bridge in `paper-figures.md` and its index moved to the run's local
+dates (`.tz_convert(zone).tz_localize(None).normalize()`). Given those, its Sharpe, max drawdown
+and CAGR equal the report's to six digits on a 1,600-day record. Its numbers are still a second
+computation: quote the report's.
 
 ## Why the manager matters
 
@@ -41,9 +64,12 @@ project that installs the package.
 
 ## If the user declines
 
-Give them the numbers. `headline`, `by_year` and the compliance counts are tables, and a markdown
-table in the terminal answers most questions a chart would. Say what the figure would have shown
-and leave the offer open.
+Say that the data is ready, but this project has no tool to visualize it, so the figure cannot be
+shown — and stop. Do not draw it some other way: no ASCII chart, no hand-written SVG or HTML, no
+install into a different environment. The refusal is the user's decision about their lockfile, and
+a workaround overrides it.
+
+A question the user asked in numbers is still answered in numbers; it is the figure that stops.
 
 ## What "ready" does not mean
 

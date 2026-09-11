@@ -21,8 +21,11 @@ Every series in the document is `instants` beside `values`:
 import pandas as pd
 
 def series(s) -> pd.Series:
-    return pd.Series(s.values, index=pd.DatetimeIndex(s.instants)).astype(float)
+    return pd.Series(s.values, index=pd.to_datetime(s.instants, utc=True)).astype(float)
 ```
+
+`utc=True` is not optional: a report's opening instant carries a fixed offset while the rest carry
+the run's zone, and `pd.DatetimeIndex` refuses the mix.
 
 `.astype(float)` is deliberate and belongs only here, at the rendering edge. The document's exact
 `Decimal` text is what goes into the replication package; a figure needs a float.

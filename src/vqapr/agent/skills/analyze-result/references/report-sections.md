@@ -16,7 +16,7 @@ cannot give it — read `omitted` before concluding a strategy did nothing.
 Every series is `instants` beside `values`, which is the whole bridge to a frame:
 
 ```python
-pd.Series(s.values, index=pd.DatetimeIndex(s.instants)).astype(float)
+pd.Series(s.values, index=pd.to_datetime(s.instants, utc=True)).astype(float)
 ```
 
 ## `performance`

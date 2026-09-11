@@ -1,6 +1,6 @@
 ---
 name: analyze-result
-description: Reads a finished vqapr run's records and turns them into answers, tables, and publication-quality figures — returns, costs, turnover, exposures, intended-versus-realized diagnostics, and attribution. Installs plotting libraries into the user's environment, with confirmation, when they are missing. Use when the user asks how a backtest performed, wants a chart, plot, table, tearsheet, or paper figure, wants to compare runs or strategies, or asks where a number in a result came from.
+description: Reads a finished vqapr run's records and turns them into answers, tables, and publication-quality figures — returns, costs, turnover, exposures, intended-versus-realized diagnostics, and attribution. Asks before adding plotting libraries (matplotlib, seaborn) to the user's project with uv add, and stops the figure if they decline. Use when the user asks how a backtest performed, wants a chart, plot, table, tearsheet, or paper figure, wants to compare runs or strategies, or asks where a number in a result came from.
 ---
 
 # Read a finished vqapr run
@@ -16,11 +16,11 @@ Use one launcher consistently:
 If bare `vqapr` is not found but `uv run vqapr` works, the package is installed; the environment
 is simply not activated. Apply the same prefix to every command below.
 
-## Start from the report, not from the tables
+## Numbers from the report, panels from the tables
 
 `strategy_report` and `run_report` read a finished record back and compute, once, what a paper's
-tables need. Reaching into the raw tables first means recomputing — differently — something the
-package already computed.
+tables need. Quote those numbers; recomputing one from the raw tables means computing it
+differently.
 
 ```python
 from decimal import Decimal
@@ -49,6 +49,14 @@ cannot give it. What each holds, and the traps in reading them, is in
 | `intent` | each decision's weights against the book that followed |
 | `compliance` | per compliance rule: held / within tolerance / breached / unmeasured |
 
+The sections are totals: `book` sums the weights at each instant, `attribution.by_instrument` sums
+each name's P&L over the run. **The panels under them — each name's weight at each instant, each
+name's P&L in each period, each fill's cost and price — are already rows in the tables.** A weight
+heat map, per-name contribution lines, costs per rebalance, refusals by reason and fill price
+against the price at the decision are built from them in
+[references/panels-from-tables.md](references/panels-from-tables.md), and each is reconciled with
+the report before it is drawn.
+
 A run holds one strategy, so a `RunReport` lines up **that strategy's records — its tweaks —
 side by side**: `headline` (one row per record), `correlation` of period returns over the instants
 they share, and `relative` against the record you name as `benchmark`. Two different strategies
@@ -70,27 +78,30 @@ Pass it to override, and state it beside any annualised number.
 ## Rendering a figure
 
 vqapr computes the values and stops. **It ships no plotting library and no renderer**, on purpose
-(PRD §9.4): the same values must be readable by any renderer, so the picture belongs to the
-project.
-
-That means the libraries a figure needs are usually **not installed**. Before writing plotting
-code:
+(PRD §9.4): the picture belongs to the project, and so do the libraries that draw it — which on a
+fresh project are not installed. Check before writing any plotting code:
 
 ```bash
 uv run python <skill>/scripts/check_plotting_env.py --project-root <project>
 ```
 
 `<skill>` is the directory this `SKILL.md` is in. The script reports what is missing and prints the
-command this project would use to add it — and **installs nothing**.
+command that adds exactly that — `uv add ...` in a uv project — and **installs nothing**.
 
 Then:
 
 1. If the project already renders charts with something else, use that. Do not add a second one.
-2. If something is missing, tell the user what and why, show the command, and **ask**. Adding a
-   dependency changes their lockfile and their reproducibility.
-3. Install only after they agree. Never add anything to vqapr itself.
+2. If something is missing, **ask once**, naming the libraries, what they are for, and the command:
+   *"To draw this I need to add matplotlib and seaborn to this project with
+   `uv add --group dev matplotlib seaborn`. Shall I?"* Adding a dependency changes their lockfile.
+3. **Yes:** run that command, then draw.
+4. **No:** say that the data is ready but this project has no tool to visualize it, so the figure
+   cannot be shown — and stop there. Do not substitute ASCII charts, hand-written SVG or HTML, or an
+   install somewhere the user did not agree to.
 
-Why this is a conversation rather than a step, and what to do when the user declines, is in
+Never add a plotting library to vqapr itself.
+
+Which library each kind of figure needs, and the traps in them, are in
 [references/plotting-environment.md](references/plotting-environment.md). Recipes for the usual
 paper tables and figures, and the house style for them, are in
 [references/paper-figures.md](references/paper-figures.md).
@@ -119,9 +130,10 @@ marked name explains. Say so rather than rounding past it.
 
 ## Stop condition
 
-The user has the answer they asked for, every annualised or risk-adjusted number is stated with
-the `periods_per_year` and `risk_free_annual` behind it, and any figure was rendered with a library
-they agreed to install.
+The user has the answer they asked for, and every annualised or risk-adjusted number is stated
+with the `periods_per_year` and `risk_free_annual` behind it. A figure was either rendered with
+libraries the user agreed to add, or — when they declined — they were told the data is ready and
+there is no tool to show it, and the figure stopped there.
 
 ---
 

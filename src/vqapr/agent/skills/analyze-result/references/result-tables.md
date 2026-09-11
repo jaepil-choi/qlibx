@@ -4,7 +4,9 @@ Every run records three tables, plus any the strategy **declared and then formed
 come back from `StrategyModel.tables()` as a `TableSpec` before `decide()` may write to it through
 `self.recorder`, and writing to an undeclared one refuses mid-run.
 
-Prefer the report over these. Reach for a table when the question is about one row.
+Prefer the report over these for a number. Reach for a table when the question is about one row,
+or when a figure needs a panel under the report's totals — name by name, instant by instant
+([panels-from-tables.md](panels-from-tables.md)).
 
 ## `vqapr.account` — the book over time
 

@@ -26,6 +26,14 @@ writes a `.py` that **runs as written**, plus the `.yaml` that registers it. Sta
 than from a blank file: the scaffold is generated from the contracts the package enforces, so it
 cannot drift from them, and this skill deliberately does not repeat its structure.
 
+**Read the emitted file before reaching for `help()`.** It shows, where each one goes, the pieces
+an author otherwise looks up: a second dataset and the `.current()` read of one value per name (in
+`inputs`), state across callbacks (`self.memory`), and a table of your own (`tables()` and
+`self.recorder.append` — on `self`, not on `call`). Its log records what was **decided**. A fill's
+price, quantity and cost are read from `vqapr.fill` afterwards (`vqapr export` writes
+`fills.csv`): a fill comes after its callback, and no callback follows the run's last fill, so a
+strategy that logs fills from its callbacks loses the last day's.
+
 Register it either way — the YAML with `vqapr register <file.yaml>`, or the source directly:
 
 ```bash

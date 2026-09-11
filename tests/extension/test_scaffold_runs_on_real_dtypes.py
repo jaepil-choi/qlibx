@@ -37,6 +37,7 @@ import pytest
 
 from vqapr.authoring import EconomicAccountView
 from vqapr.authoring.context import DataModelContext, StrategyModelContext
+from vqapr.authoring.records import InvocationRecorder
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
@@ -169,6 +170,20 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
     assert all(type(row["value"]) is float for row in rows)
 
 
+def _prime_like_the_run(strategy) -> None:
+    """What the Flow does before every callback: memory restored (`{}` on the first one, record
+    `215`) and a recorder for the callback's declared tables. The scaffold uses both since record
+    `267`, so a `decide()` called by hand is handed them the way a run hands them."""
+    strategy.memory = {}
+    strategy.recorder = InvocationRecorder(
+        strategy.tables(),
+        run_id="by-hand",
+        producer_id="scaffold",
+        stage="callback",
+        event_time=EVALUATION_TIME,
+    )
+
+
 def test_the_strategy_scaffold_decides_against_a_float64_column(
     tmp_path: Path, float_price_parquet: Path
 ) -> None:
@@ -199,6 +214,7 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
         ),
     )
 
+    _prime_like_the_run(strategy)
     decision = strategy.decide(context)
 
     # Both names rose over the window, so the five-day *reversal* scores both negative and the
@@ -239,9 +255,11 @@ def test_the_calendar_strategy_scaffold_decides_against_a_float64_column(
         ),
     )
 
+    _prime_like_the_run(strategy)
     decision = strategy.decide(context)
 
     assert type(decision).__name__ == "Rebalance", decision
+    assert strategy.memory == {"held": ["A", "B"]}, "what the next callback's log compares with"
 
 @pytest.mark.parametrize("kind", [ComponentKind.DATA_MODEL, ComponentKind.STRATEGY_MODEL])
 def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:

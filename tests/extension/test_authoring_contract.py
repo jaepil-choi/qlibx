@@ -5,8 +5,9 @@ emitted strategy was 111 lines and made the author hand-mint a `uuid5`, assemble
 the window's accesses, and read `context.account.version` -- three pieces of framework bookkeeping
 that have exactly one correct value and no bearing on the signal being expressed.
 
-The point is not brevity for its own sake. A 40-line ceiling is enforceable evidence that the
-ceremony is gone, because ceremony is what made the file long.
+The point is not brevity for its own sake. A 40-line ceiling on CODE is enforceable evidence that
+the ceremony is gone, because ceremony is what made the file long. Comments are not ceremony: since
+record `267` they label every piece an author reaches for, and are bounded separately.
 """
 
 from __future__ import annotations
@@ -40,14 +41,39 @@ def _strategy(**overrides: object) -> str:
     return render(ComponentKind.STRATEGY_MODEL, "demo", **settings)  # type: ignore[arg-type]
 
 
-def test_the_emitted_strategy_fits_in_forty_lines() -> None:
-    """AC-A1. Was 111 lines; the ceremony is what made it long."""
-    body = _strategy()
+def test_the_emitted_strategy_fits_in_forty_lines_of_code() -> None:
+    """AC-A1. Was 111 lines; the ceremony is what made it long.
 
-    assert len(body.splitlines()) <= 40, (
-        f"the scaffold grew back to {len(body.splitlines())} lines, which usually means framework "
+    Since record `267` the file also shows, beside the code, every piece an author reaches for: the
+    incremental testbed's agents read 46-82 KB of pydoc for a second read, `self.memory` and a
+    table of their own, and the owner ruled for a commented scaffold over shipped recipes
+    (2026-09-11). Ceremony is code, so the ceiling counts code; the whole file is bounded too, so
+    the labels stay labels and do not become a manual.
+    """
+    body = _strategy()
+    code = [
+        line for line in body.splitlines() if line.strip() and not line.strip().startswith("#")
+    ]
+
+    assert len(code) <= 40, (
+        f"the scaffold grew back to {len(code)} lines of code, which usually means framework "
         "bookkeeping returned to authored code"
     )
+    assert len(body.splitlines()) <= 80, "the labels grew into a manual"
+
+
+def test_the_call_says_the_models_own_things_are_on_self() -> None:
+    """Record `267`. `call.recorder.append(...)` failed on a sentence naming what was missing and
+    not where it was; the call now says `self.recorder`, and any other name fails as before."""
+    from vqapr.authoring.context import StrategyModelContext
+
+    call = object.__new__(StrategyModelContext)
+    with pytest.raises(AttributeError, match=r"write `self\.recorder` inside decide\(\)"):
+        _ = call.recorder  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError, match=r"write `self\.memory`"):
+        _ = call.memory  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError, match="has no attribute 'nonsense'"):
+        _ = call.nonsense  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("token", BANNED)

@@ -14,13 +14,18 @@ from __future__ import annotations
 
 from vqapr.extension.component import ComponentKind
 
-_STRATEGY_TEMPLATE = '''"""A long-only cross-sectional Strategy. Edit the marked signal line."""
+_STRATEGY_TEMPLATE = '''"""A long-only cross-sectional Strategy. Edit the marked signal line.
+
+Every other piece a strategy reaches for is shown where it goes: a second dataset (in `inputs`),
+state across callbacks (`self.memory`), and a table of your own (`tables` and `self.recorder`).
+"""
 
 import numpy as np
 
 from vqapr import authoring as va
 
 {lookback_declaration}
+DECISIONS = "decisions"  # a table of your own; `vqapr export` writes it as tables/decisions.csv
 
 
 class {class_name}(va.StrategyModel):
@@ -30,7 +35,15 @@ class {class_name}(va.StrategyModel):
         read = va.DatasetInput(
             dataset_id="{dataset_id}", fields=("{field}",), lookback={lookback_expression}
         )
+        # A second dataset is a second entry under an alias of its own, read the same way. For one
+        # value per name at the decision -- an index weight, a bool flag -- use
+        # `call.read(alias, field).current()` (name -> value); `matrix()` is for numeric windows.
+        #   "bench": va.DatasetInput(dataset_id="<id>", fields=("weight",), lookback=<as above>),
         return {{"{alias}": read}}  # the alias is YOUR name for this read; `call.read` takes it
+
+    def tables(self):
+        # Every table decide() writes, with its exact fields; each row's time is stamped for you.
+        return (va.TableSpec(DECISIONS, ("instrument", "action", "score")),)
 
     def decide(self, call):
         # One field as a window: instants x instruments, {window_comment}.
@@ -43,11 +56,21 @@ class {class_name}(va.StrategyModel):
         chosen = {{name: scores[j] for j, name in enumerate(names) if full[j] and scores[j] > 0}}
         if not chosen:
             return va.Hold(reason="no name scored above zero")  # prose; spaces are fine
-        # Relative conviction: the package normalises, rounds and balances against cash.
+        # State across callbacks: `self.memory` is strict JSON, restored before every call and kept
+        # after it. One instance serves the whole run, so never keep state anywhere else.
+        held = set(self.memory.get("held", []))
+        self.memory["held"] = sorted(chosen)
+        # Log what was DECIDED. What a fill did -- its price, quantity and cost -- is in
+        # `vqapr.fill` (`vqapr export` writes fills.csv): a fill comes after its callback, and no
+        # callback follows the run's last fill, so a fill logged from here is lost at the end.
+        for name in sorted(held ^ set(chosen)):
+            action = "enter" if name in chosen else "exit"
+            self.recorder.append(
+                DECISIONS, {{"instrument": name, "action": action, "score": chosen.get(name)}}
+            )
+        # Relative conviction: the package normalises, rounds and balances against cash. A name
+        # left out of `long` is sold.
         return va.Rebalance.of(long=chosen, invested="{invested}")
-
-    # State across callbacks lives in `self.memory` (strict JSON, restored before every call).
-    # A table of your own is DECLARED in `tables()` as a `va.TableSpec` before decide() writes it.
 '''
 
 _STRATEGY_ROWS_SIGNAL = """\

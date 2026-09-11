@@ -346,7 +346,8 @@ def test_show_strategy_reads_back_the_tables_a_run_recorded(
     assert code == 0, record
     assert record["stage"] == "strategy.show"
     recorded = sorted(record["tables"])
-    assert recorded == ["vqapr.account", "vqapr.fill", "vqapr.weight"]
+    # `decisions` is the scaffold's own table (record `267`), read back the same way.
+    assert recorded == ["decisions", "vqapr.account", "vqapr.fill", "vqapr.weight"]
 
     for table in recorded:
         code, page = _cli(

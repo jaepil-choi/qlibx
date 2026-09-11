@@ -46,7 +46,16 @@ def test_export_writes_the_reports_nav_and_the_tables_as_exact_numbers(
     assert code == 0, exported
     assert exported["stage"] == "strategy.export" and exported["omitted"] == {}
     written = sorted(Path(entry["path"]).relative_to(out).as_posix() for entry in exported["files"])
-    assert written == ["fills.csv", "holdings.csv", "nav.csv", "report.json", "weights.csv"]
+    assert written == [
+        "fills.csv",
+        "holdings.csv",
+        "nav.csv",
+        "report.json",
+        "tables/decisions.csv",  # the scaffold's own table (record 267)
+        "weights.csv",
+    ]
+    (entered,) = _rows(out / "tables" / "decisions.csv")
+    assert entered["instrument"] == "A" and entered["action"] == "enter"
 
     # nav.csv is the report's series, point for point -- the opening point included.
     nav = _rows(out / "nav.csv")

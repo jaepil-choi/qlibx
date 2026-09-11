@@ -236,3 +236,22 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     def evaluation_time(self):
         """The single frozen point-in-time cutoff this callback decides at."""
         return self.window.evaluation_time
+
+    def __getattr__(self, name: str) -> object:
+        """Only for a name the call does not have: say so, and where the model's own things are.
+
+        Record `267`. The incremental testbed's sonnet agent wrote `call.recorder.append(...)`, and
+        the run failed on `'StrategyModelContext' object has no attribute 'recorder'` -- a sentence
+        that names what is missing and not where it is. The half-written record it left then made
+        the agent's exporter refuse "two strategy records" four turns later.
+        """
+        if name in _THE_MODELS_OWN:
+            raise AttributeError(
+                f"the call has no {name!r}: `{name}` belongs to the model -- write `self.{name}` "
+                "inside decide()"
+            )
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+
+
+_THE_MODELS_OWN = frozenset({"recorder", "memory", "tables"})
+"""What an author reaches for on the call that lives on the StrategyModel instead."""

@@ -62,7 +62,10 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
     )
     assert code == 0, created
     body = source.read_text(encoding="utf-8")
-    assert len(body.splitlines()) <= 40
+    code_lines = [
+        line for line in body.splitlines() if line.strip() and not line.strip().startswith("#")
+    ]
+    assert len(code_lines) <= 40, "ceremony is code; the comments are the labels (record 267)"
 
     # Registered by naming a KIND, an ID and a .py -- no YAML wrapper around the component.
     code, registered = _cli(tmp_path, "register", "strategy", "alpha", str(source))
@@ -134,6 +137,15 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "
         "path is unexercised"
     )
+
+    # Record `267`: unedited, it also writes a table of its own through `self.recorder`, logging
+    # the entries and exits its `self.memory` tells apart -- the pieces agents looked up by hand.
+    code, decisions = _cli(
+        tmp_path, "show", "strategy", "scaffold/alpha", "--table", "decisions", "--limit", "5"
+    )
+    assert code == 0, decisions
+    assert decisions["rows_total"] > 0, "the scaffold's own table was never written"
+    assert {row["action"] for row in decisions["items"]} <= {"enter", "exit"}
 
 
 def test_the_datamodel_scaffold_registers_its_run_without_a_single_edit(tmp_path: Path) -> None:

@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from vqapr.agent.scaffold import render
 from vqapr.authoring import Rebalance
-from vqapr.component.scaffold import render
 from vqapr.domain.wiring import Role
 
 BANNED = ("uuid5", "source_refs", "account_version", "strategy_id")

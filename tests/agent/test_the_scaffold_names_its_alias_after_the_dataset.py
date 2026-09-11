@@ -12,7 +12,7 @@ import ast
 
 import pytest
 
-from vqapr.component.scaffold import render
+from vqapr.agent.scaffold import render
 from vqapr.domain.wiring import Role
 
 

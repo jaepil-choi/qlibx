@@ -14,6 +14,7 @@ when the record is written. See `registered_roster` for all of it.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +52,21 @@ class RegisteredRoster:
     registry: InstrumentRoster
     digest: str
     tables: tuple[str, ...]
+
+
+def read_roster_tables(tables: Mapping[str, object]) -> InstrumentRoster:
+    """The roster a registered pointer's tables hold: verified, then built.
+
+    One door for the roster's two readers (record `277`). A run refuses what this raises, as
+    `roster.unreadable` (`registered_roster`); `vqapr list instruments` reports it as `unreadable`
+    and carries on, because it is an orientation command and a moved table should not remove the
+    answer it can still give.
+    """
+    diagnosis, rows_by_kind = verify_roster(
+        {str(kind): Path(str(path)) for kind, path in tables.items()}
+    )
+    diagnosis.raise_if_failed()
+    return build_roster(rows_by_kind)
 
 
 def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | None:
@@ -110,11 +126,7 @@ def registered_roster(root_path: Workspace | Path | None) -> RegisteredRoster | 
     #
     # Bare exceptions were reaching the envelope as `stage: "unhandled"` here.
     try:
-        diagnosis, tables = verify_roster(
-            {str(kind): Path(str(path)) for kind, path in declared_tables.items()}
-        )
-        diagnosis.raise_if_failed()
-        registry = build_roster(tables)
+        registry = read_roster_tables(declared_tables)
     except (VqaprError, OSError, ValueError, KeyError, TypeError) as unreadable:
         declared = ", ".join(f"{kind}={path}" for kind, path in sorted(declared_tables.items()))
         raise VqaprError(

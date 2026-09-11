@@ -18,8 +18,8 @@ import pytest
 
 import vqapr.authoring as authoring
 import vqapr.public as public
+from vqapr.agent.scaffold import render
 from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
-from vqapr.component.scaffold import render
 from vqapr.domain.wiring import Role
 from vqapr.public import register_compliance, register_data_model, register_strategy_model
 

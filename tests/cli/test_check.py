@@ -89,7 +89,7 @@ def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str
     load is a different refusal, and a fixture that fails to load would make these judgments look
     dead again for a new reason.
     """
-    from vqapr.component.scaffold import render
+    from vqapr.agent.scaffold import render
 
     source = root / f"{component_id}.py"
     source.write_text(
@@ -457,7 +457,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     to emit per requirement. The skill promises every INDEPENDENT problem at once, and one
     registration is one problem: the fields it wanted ride along as examples.
     """
-    from vqapr.component.scaffold import render
+    from vqapr.agent.scaffold import render
     from vqapr.run.preflight.checks import _judge_member_datasets, _members
     from vqapr.run.preflight.facts import RunFacts
 

@@ -62,6 +62,13 @@ PERMANENT: frozenset[str] = frozenset(
         # `vqapr/declarations.py`, which imports the owning modules directly rather than the
         # facade. That is the count moving for the reason the trajectory predicted.
         "src/vqapr/cli/run.py",
+        # Three more verbs, by owner ruling AC4 (2026-09-11, record `277`): the CLI imports
+        # `vqapr.public` and the application layer and nothing else, so the names these verbs had
+        # taken from `domain` and `component` -- `Role`, `AccountMode`, `InstrumentKind`,
+        # `StrategyModel`, `Compliance` -- now come from the surface an author is handed.
+        "src/vqapr/cli/list_.py",
+        "src/vqapr/cli/new.py",
+        "src/vqapr/cli/show.py",
     }
 )
 
@@ -74,7 +81,7 @@ PERMITTED: frozenset[str] = PERMANENT
 def _importers() -> set[str]:
     """Every module under `src/` with a real `vqapr.public` import.
 
-    An AST walk rather than a text search, because `cli/new.py` and `component/scaffold.py` both
+    An AST walk rather than a text search, because `cli/new.py` and `agent/scaffold.py` both
     contain `vqapr.public` inside the templates they emit. Those are `Constant` nodes and are
     structurally invisible here, which is exactly why the ruling specifies an AST walk: a string
     count moves when a template is edited, for reasons that have nothing to do with the boundary.
@@ -130,8 +137,9 @@ def test_the_count_still_matches_the_ruling() -> None:
     after record `112` moved `cli/register.py`'s declaration parsing into `vqapr/declarations.py`,
     **5** after record `124` deleted `project.py` and the five bridges reachable only from it,
     **4** after record `125` took the facade import out of `strategy_bridge.py`, **2** after
-    record `170` moved the two sample modules out of `src/` into `tests/sample/`, and **3** after
-    record `172` shipped the sample venue again behind `vqapr new sample`.
+    record `170` moved the two sample modules out of `src/` into `tests/sample/`, **3** after
+    record `172` shipped the sample venue again behind `vqapr new sample`, and **6** after record
+    `277`, when owner ruling AC4 sent three more CLI verbs through the facade.
 
     Three is `len(PERMANENT)`, which the ruling called the floor: the two CLI verbs and the one
     shipped sample calling the product's own supported surface. Record `105` wrote that floor as **6** and it is left here
@@ -144,19 +152,20 @@ def test_the_count_still_matches_the_ruling() -> None:
     (`docs/design/agent-first-surface.md`, "For completeness and to stop the earlier error being
     inherited silently"). A facade with no consumers would be a facade with no reason to exist.
     """
-    assert len(_importers()) == 3
+    assert len(_importers()) == 6
 
 
 @pytest.mark.parametrize(
     "path",
-    ["src/vqapr/cli/new.py", "src/vqapr/component/scaffold.py"],
+    ["src/vqapr/agent/scaffold.py"],
 )
 def test_template_text_is_not_counted_as_an_import(path: str) -> None:
     """The exclusion the AST walk exists for, pinned so it cannot silently start counting.
 
-    Both files contain `vqapr.public` inside scaffold templates. If either ever appears in the
-    importer set, the measurement has regressed to a string count -- the failure mode the ruling
-    devotes a paragraph to.
+    The scaffold contains `vqapr` imports inside its templates. If it ever appears in the importer
+    set, the measurement has regressed to a string count -- the failure mode the ruling devotes a
+    paragraph to. `cli/new.py` was pinned here too until record `277`: it imports the facade for
+    real now (AC4), so it can no longer show that template text is not counted.
     """
     assert path not in _importers()
     text = pathlib.Path(path).read_text(encoding="utf-8")

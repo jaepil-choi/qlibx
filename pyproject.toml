@@ -107,7 +107,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "A005"]
 
 [tool.ruff.lint.per-file-ignores]
 # A vulture whitelist is a list of bare names, which is exactly what F821 and B018 exist to

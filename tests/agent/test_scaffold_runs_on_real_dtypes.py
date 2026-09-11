@@ -35,9 +35,9 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
+from vqapr.agent.scaffold import render
 from vqapr.authoring import EconomicAccountView
 from vqapr.component.loading import load_data_model, load_strategy_model
-from vqapr.component.scaffold import render
 from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import RowsLookback

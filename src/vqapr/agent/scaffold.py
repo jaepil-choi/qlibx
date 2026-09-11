@@ -493,7 +493,7 @@ _TEMPLATES = {
 }
 
 
-def _class_name(component_id: str) -> str:
+def class_name_for(component_id: str) -> str:
     """The class a scaffold declares, or a refusal naming what an id may contain.
 
     Title-casing the hyphen-separated parts is not enough on its own: it accepted ids that cannot
@@ -564,7 +564,7 @@ def render(
     if kind is Role.COMPLIANCE:
         return _TEMPLATES[kind].format(
             component_id=component_id,
-            class_name=_class_name(component_id),
+            class_name=class_name_for(component_id),
             cap=cap,
         )
     if dataset_id is None:
@@ -578,7 +578,7 @@ def render(
         window = _STRATEGY_FLAVOURS[lookback_kind]
         return _TEMPLATES[kind].format(
             component_id=component_id,
-            class_name=_class_name(component_id),
+            class_name=class_name_for(component_id),
             dataset_id=dataset_id,
             # The alias is the dataset id (`docs/issues/archive/063`): a fixed `prices` read as a
             # required name to a first-time user, and described a read the flags did not ask for.
@@ -601,7 +601,7 @@ def render(
         ),
         imports=flavour["imports"],
         component_id=component_id,
-        class_name=_class_name(component_id),
+        class_name=class_name_for(component_id),
         dataset_id=dataset_id,
         alias=dataset_id,
         field=field,

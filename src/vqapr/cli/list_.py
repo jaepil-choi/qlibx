@@ -23,11 +23,8 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
-from vqapr.data.verification import verify_roster
 from vqapr.domain.errors import VALUE_INVALID, InputError
-from vqapr.domain.instrument import build_roster
-from vqapr.domain.wiring import Role
+from vqapr.public import Role
 from vqapr.record import (
     STATUS_COMPLETED,
     datamodel_progress,
@@ -40,8 +37,14 @@ from vqapr.record import (
     unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
+from vqapr.run.roster import read_roster_tables
 from vqapr.workspace.registration import AUTHORED_KINDS
-from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.workspace.registry import (
+    WORKSPACE_DIRECTORY,
+    WORKSPACE_FILENAME,
+    Workspace,
+    load_registered,
+)
 from vqapr.workspace.run_definition import RunDefinition
 
 KINDS = (
@@ -327,19 +330,14 @@ def _reading(
     component in this one process, the way `show model` asks one. An exchange declares no reads and
     is not asked.
     """
-    loaders = {
-        Role.STRATEGY_MODEL: load_strategy_model,
-        Role.DATA_MODEL: load_data_model,
-        Role.COMPLIANCE: load_compliance,
-    }
+    readers = (Role.STRATEGY_MODEL, Role.DATA_MODEL, Role.COMPLIANCE)
     by_id = {str(ref.component_id): ref for ref in workspace.components}
     kept: list[dict[str, Any]] = []
     for row in rows:
         ref = by_id.get(str(row.get("component_id")))
-        loader = None if ref is None else loaders.get(ref.kind)
-        if loader is None:
+        if ref is None or ref.kind not in readers:
             continue
-        declared = loader(ref, project_root=project_root).inputs()
+        declared = load_registered(ref, project_root=project_root).inputs()
         fields = sorted(
             {
                 field
@@ -398,11 +396,7 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
         "tables": {str(kind): str(path) for kind, path in sorted(tables.items())},
     }
     try:
-        diagnosis, rows_by_kind = verify_roster(
-            {str(kind): Path(str(path)) for kind, path in tables.items()}
-        )
-        diagnosis.raise_if_failed()
-        roster = build_roster(rows_by_kind)
+        roster = read_roster_tables(tables)
     except Exception as unreadable:
         row["unreadable"] = str(unreadable)
         return [row]

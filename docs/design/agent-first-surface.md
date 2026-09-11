@@ -517,3 +517,18 @@ relocated into `docs/`, and it is not committed. This ruling and
 `docs/issues/archive/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
 intended durability: the conclusions are carried by tracked documents, and the raw journey stays
 where a later run can regenerate or replace it without a repository decision.
+
+## Addendum (2026-09-12): the CLI reads through the surfaces
+
+Owner ruling AC4 (concept-tree campaign, 2026-09-11) states the CLI's side of this boundary: `cli/`
+imports `vqapr.public`, the application layer (`workspace`, `run`, `record`, `report`, `agent`) and
+`domain.errors`, and nothing else. It changes nothing above or below the facade -- the facade is still
+the CLI's supported surface, and no module below the CLI may import it. What it changes is the
+tripwire's floor: three more verbs, `cli/list_.py`, `cli/new.py` and `cli/show.py`, now take `Role`,
+`AccountMode`, `InstrumentKind`, `StrategyModel` and `Compliance` from the facade rather than from
+`domain` and `component`, so the importer count is **6** (record `277`).
+
+The services those verbs had assembled from internals got application-layer doors rather than facade
+entries: `workspace.registry.load_registered`, `run.roster.read_roster_tables`,
+`workspace.preview.preview_dataset`, and the scaffold `vqapr new` renders moved to
+`agent/scaffold.py`. `tests/boundaries/test_the_cli_reads_through_the_surfaces.py` holds the rule.

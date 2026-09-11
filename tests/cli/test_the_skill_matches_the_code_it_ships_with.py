@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from vqapr import authoring as va
+from vqapr.agent.scaffold import render
 from vqapr.agent.skillset import shipped_skills
 from vqapr.cli.main import main
-from vqapr.component.scaffold import render
 from vqapr.domain.wiring import Role
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.scaffold import render
+from vqapr.agent.scaffold import render
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
 from vqapr.workspace.registration import register_strategy_model

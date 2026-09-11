@@ -60,19 +60,19 @@ LAYERS: dict[str, int] = {
     "signals": 10,
     "record": 10,
     # 20 -- the extension point: every role's contract, its shipped implementations, and the door a
-    # component enters by (reference, fingerprint, conformance, loading, scaffold).
+    # component enters by (reference, fingerprint, conformance, loading).
     "component": 20,
     # 21 -- transitional: `vqapr.authoring` re-exports `component` until the breaking release.
     "authoring": 21,
-    # 50 -- the workspace: what a project keeps between commands, and how a document enters it.
-    "workspace": 50,
-    # 60-70 -- running one: before it starts (preflight), the loop that reads what preflight froze
+    # 30 -- the workspace: what a project keeps between commands, and how a document enters it.
+    "workspace": 30,
+    # 40-50 -- running one: before it starts (preflight), the loop that reads what preflight froze
     # (engine), then assembly -- one run, a batch, the record, the roster.
-    "run.preflight": 60,
-    "run.engine": 65,
-    "run": 70,
-    # 80 -- reading a finished record. Computes nothing a run did not store.
-    "report": 80,
+    "run.preflight": 40,
+    "run.engine": 45,
+    "run": 50,
+    # 60 -- reading a finished record. Computes nothing a run did not store.
+    "report": 60,
     # 90+ -- the surfaces.
     "public": 90,
     "agent": 95,

@@ -25,9 +25,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from vqapr.agent.scaffold import render
 from vqapr.cli.new import run as new_command
 from vqapr.component.loading import load_data_model
-from vqapr.component.scaffold import render
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.source import SourceSpec

@@ -467,7 +467,7 @@ component/reference.py     ComponentRef — 경로 · 객체 이름 · 역할 ·
 component/fingerprint.py   소스 파일의 지문
 component/conformance.py   실제로 import 해서 약속한 메서드가 맞는 시그니처로 있는가.  쓰지 않는다
 component/loading.py       등록된 코드를 import 해 엔진이 부를 인스턴스로.  id 대조
-component/scaffold.py      `vqapr new` 가 내는 템플릿 — 쓴 그대로 돈다
+agent/scaffold.py          `vqapr new` 가 내는 템플릿 — 쓴 그대로 돈다 (저작 보조라 `agent/`에, §15)
 ```
 
 **규격은 등록 때 검사한다**: 메서드 이름이나 파라미터가 틀린 컴포넌트는 등록에서 이름을 대며 거절된다.
@@ -1315,7 +1315,7 @@ src/vqapr/
 │   ├── strategy/            base.py · decision.py · history.py · recorder.py
 │   ├── exchange/            base.py · academic.py · krx.py
 │   ├── compliance/          base.py · report.py · shipped.py (출하 규칙 찾기) · no_short.py · single_name_cap.py
-│   └── reference.py · fingerprint.py · conformance.py · loading.py · scaffold.py
+│   └── reference.py · fingerprint.py · conformance.py · loading.py
 ├── workspace/         [30]  명령과 명령 사이에 남는 선언 — .vqapr/workspace.yaml
 │   ├── registry.py          Workspace · Transaction — 열기 · 조회 · 한 번에 쓰기 · 잠금
 │   ├── declarations.py      선언 문서의 모양 (dataset · instruments · component · workspace.yaml)
@@ -1324,7 +1324,8 @@ src/vqapr/
 │   ├── merge.py             새 선언이 새것 · 충돌 · 같음 중 무엇인가
 │   ├── references.py        누가 이 선언을 가리키나 (철회를 막는다)
 │   ├── state.py             workspace.yaml 전체를 한 값으로
-│   └── refusals.py          이 층의 거절 한 모양
+│   ├── refusals.py          이 층의 거절 한 모양
+│   └── preview.py           `vqapr show dataset` 이 읽는 것 — 등록된 dataset의 첫 행들과 개수
 ├── run/                     run 하나의 일생
 │   ├── preflight/     [40]  출발 전 — 판정(check)과 얼리기(freeze)
 │   │   ├── facts.py         RunFacts — schedule · 체결표 · horizon · 컴포넌트를 명령당 한 번 읽는다
@@ -1352,8 +1353,8 @@ src/vqapr/
 │   ├── metrics.py           NAV · 수익률 · 낙폭 (평가 기록만 받는다) · 체결 요약
 │   └── compose.py           기록을 열어 보고서를 만든다 (strategy_report · run_report · valuation_grid)
 ├── public.py          [90]
-├── agent/             [95]
-└── cli/               [100]
+├── agent/             [95]  저작 보조 — 스킬 · sample 전략 · `vqapr new` 템플릿(scaffold.py)
+└── cli/               [100] public과 application layer(workspace · run · record · report · agent)만 읽는다
 ```
 
 ### 13.2 층
@@ -1715,7 +1716,7 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `compliance/evaluation.py` | 값(`StampedFinding` · `ComplianceReport` · 판정 · 기본 허용오차)은 `component/compliance/report.py`, 평가 함수는 `run/engine/stages/observe.py` (실행 문맥이 `ComplianceReport`를 들고 단계가 문맥을 import하므로 값을 단계에 둘 수 없다) |
 | `extension/component.py` · `fingerprint.py` · `loading.py` | `component/reference.py` · `fingerprint.py` · `loading.py` |
 | `extension/conformance.py`, `extension/prepare.py` | `component/conformance.py` |
-| `extension/scaffold.py`, `extension/lookback.py` | `component/scaffold.py` |
+| `extension/scaffold.py`, `extension/lookback.py` | `agent/scaffold.py` (`vqapr new`만 읽는 저작 보조 — CLI가 표면만 읽는다는 AC4 때문에 `component/` 밖으로, record `277`) |
 | `project/store.py` · `document.py` · `run.py` | `workspace/registry.py` · `declarations.py` · `run_definition.py` |
 | `project/registration.py` · `merge.py` · `references.py` · `state.py` · `refusals.py` | `workspace/`의 같은 이름 |
 | `flow/declaration/verify.py` | `run/preflight/verdict.py` (`verify_run` → `preflight`) |

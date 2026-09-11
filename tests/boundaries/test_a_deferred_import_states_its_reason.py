@@ -23,8 +23,13 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 9  # record `234`: `cli/list_.py` reads the roster through the one door, at the top
-"""Was 10 after record `191`. Record `234` (one validation door) replaced `cli/list_.py`'s deferred
+CEILING = 7  # record `277`: `cli/show.py` loads a component through the workspace's one door
+"""Was 9 after record `234`. Record `277` (the CLI reads through the surfaces) replaced
+`cli/show.py`'s function-local component loaders -- one per kind, two in `_model` and one in the
+compliance branch -- with one `workspace.registry.load_registered` imported beside the names it
+now takes from `vqapr.public`.
+
+Was 10 after record `191`. Record `234` (one validation door) replaced `cli/list_.py`'s deferred
 `build_roster`/`read_roster_table` pair with module-level imports of `data/validation.verify_roster`
 and `domain/instruments.build_roster`: `workspace/registry.py` already imports the door at the top, so
 there was no cycle to hide.

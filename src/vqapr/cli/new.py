@@ -32,11 +32,10 @@ import yaml
 
 from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
 from vqapr.agent.sample.materialize import materialize as materialize_sample
+from vqapr.agent.scaffold import class_name_for, lookback_declaration, render
 from vqapr.cli.envelope import success
-from vqapr.component.scaffold import _class_name, lookback_declaration, render
-from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
-from vqapr.domain.wiring import Role
+from vqapr.public import AccountMode, Role
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
@@ -372,7 +371,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     # it did: `vqapr new compliance '123-bad!'` emitted an unparseable file and then failed on
     # re-reading it, reporting a SyntaxError about the framework's own output.
     try:
-        _class_name(args.component_id)
+        class_name_for(args.component_id)
     except ValueError as unusable:
         raise InputError(
             VALUE_INVALID,
@@ -796,7 +795,7 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     # appear in the refusal text derived from the enum, and would be silently missing from the
     # emitted declaration -- landing an author in exactly the undeclared-table case this same
     # command's receipt reports after the fact.
-    from vqapr.domain.instrument import InstrumentKind
+    from vqapr.public import InstrumentKind
 
     for member in InstrumentKind:
         kind = str(member)

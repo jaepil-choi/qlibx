@@ -11,10 +11,18 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from datetime import datetime
 from pathlib import Path
+from types import MappingProxyType
 
 import yaml
 
 from vqapr._internal import atomic, filelock
+from vqapr.component.base import Component
+from vqapr.component.loading import (
+    load_compliance,
+    load_data_model,
+    load_exchange,
+    load_strategy_model,
+)
 from vqapr.component.reference import ComponentRef
 from vqapr.data import scan
 from vqapr.data.dataset import DatasetRegistration
@@ -981,3 +989,26 @@ def _require_span(dataset_id: str, registration: DatasetRegistration) -> None:
             "document declares this dataset and the source it reads"
         ),
     )
+
+
+_LOADERS: Mapping[Role, Callable[..., Component]] = MappingProxyType(
+    {
+        Role.DATA_MODEL: load_data_model,
+        Role.STRATEGY_MODEL: load_strategy_model,
+        Role.COMPLIANCE: load_compliance,
+        Role.EXCHANGE: load_exchange,
+    }
+)
+
+
+def load_registered(ref: ComponentRef, *, project_root: str | Path | None = None) -> Component:
+    """The component a registration names, loaded as the role it registered as.
+
+    The workspace holds what was registered; this loads it back through the loader a run's
+    preflight uses for that role, so what `vqapr list` and `vqapr show model` report is what a run
+    would act on (record `277`).
+    """
+    loader = _LOADERS.get(ref.kind)
+    if loader is None:
+        raise TypeError(f"no loader for a component registered as {ref.kind}")
+    return loader(ref, project_root=project_root)

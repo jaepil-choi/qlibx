@@ -135,9 +135,8 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
-    from vqapr.component.loading import load_data_model, load_strategy_model
-    from vqapr.component.strategy.base import StrategyModel
-    from vqapr.domain.wiring import Role
+    from vqapr.public import Compliance, DataModel, Role, StrategyModel
+    from vqapr.workspace.registry import load_registered
 
     space = Workspace.open(project_root)
     try:
@@ -155,9 +154,12 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     if kind is Role.COMPLIANCE:
         # A rule declares what it reads and answers to an id, so it is describable in the same
         # terms -- it simply forms nothing and produces no weights.
-        from vqapr.component.loading import load_compliance
-
-        rule = load_compliance(ref, project_root=project_root)
+        rule = load_registered(ref, project_root=project_root)
+        if not isinstance(rule, Compliance):
+            raise RuntimeError(
+                f"{component_id!r} is registered as compliance and loaded as "
+                f"{type(rule).__name__}"
+            )
         return {
             "component_id": component_id,
             "kind": cli_kind(kind),
@@ -171,10 +173,13 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             "weights": "none; a compliance rule observes the book and never proposes weights",
             "records": ["vqapr.monitoring"],
         }
-    if kind is Role.DATA_MODEL:
-        model = load_data_model(ref, project_root=project_root)
-    elif kind is Role.STRATEGY_MODEL:
-        model = load_strategy_model(ref, project_root=project_root)
+    if kind in (Role.DATA_MODEL, Role.STRATEGY_MODEL):
+        model = load_registered(ref, project_root=project_root)
+        if not isinstance(model, DataModel | StrategyModel):
+            raise RuntimeError(
+                f"{component_id!r} is registered as {cli_kind(kind)} and loaded as "
+                f"{type(model).__name__}"
+            )
     else:
         # A registered id of a kind this verb does not describe. It used to fall through to the
         # strategy loader, whose `TypeError: ref must identify a strategy_model component` then left
@@ -241,7 +246,7 @@ def _dataset(
     described the projection (`docs/issues/093`). `--source` asks for the file's rows instead, and
     `items_are` says which was answered so a reader never has to infer it.
     """
-    from vqapr.data import scan
+    from vqapr.workspace.preview import preview_dataset
 
     space = Workspace.open(project_root)
     registered = {str(item.dataset_id): item for item in space.datasets}
@@ -255,18 +260,8 @@ def _dataset(
         )
 
     source = space.source(str(item.source))
-    relation = (
-        None
-        if source_rows or item.aggregated is None
-        else scan.projection_relation(
-            source,
-            instrument_field=item.instrument_field,
-            available_at_field=item.available_at,
-            fields=item.fields,
-            aggregated=item.aggregated,
-        )
-    )
-    rows = scan.head(source, limit=limit, relation=relation)
+    preview = preview_dataset(source, item, limit=limit, source_rows=source_rows)
+    rows = preview.rows
     return {
         "dataset_id": dataset_id,
         "source_id": str(source.source_id),
@@ -274,7 +269,7 @@ def _dataset(
         # Which rows `items` holds: the declared projection, or the source file's own. A
         # registration that was never measured (`aggregated` unknown) has no projection shape to
         # read through and answers with source rows, saying so.
-        "items_are": "source" if relation is None else "projection",
+        "items_are": preview.items_are,
         "fields": dict(item.fields),
         "field_types": (
             None
@@ -289,8 +284,8 @@ def _dataset(
         "produced_by": item.produced_by,
         "produced_by_record": item.produced_by_record,
         # `rows_total` counts what `items` pages over; `source_rows_total` is always the file's.
-        "rows_total": scan.row_count(source, relation=relation),
-        "source_rows_total": scan.row_count(source),
+        "rows_total": preview.rows_total,
+        "source_rows_total": preview.source_rows_total,
         "returned": len(rows),
         "items": rows,
     }

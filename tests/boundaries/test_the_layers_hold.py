@@ -59,7 +59,6 @@ LAYERS: dict[str, int] = {
     "portfolio": 10,
     "signals": 10,
     "record": 10,
-    "analysis": 10,
     # 20 -- the extension point: every role's contract, its shipped implementations, and the door a
     # component enters by (reference, fingerprint, conformance, loading, scaffold).
     "component": 20,

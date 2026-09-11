@@ -28,7 +28,7 @@ import pytest
 # (already listed), so one name covers what two did.
 FORBIDDEN = (
     # `vqapr.account` was listed until record `268` folded the package into `domain/account.py`,
-    # where the mark values `analysis.performance` reads live beside the Account authority, so the
+    # where the mark values `report.metrics` reads live beside the Account authority, so the
     # module can no longer separate them; the leaves still take no account as an argument.
     "vqapr.data",
     "vqapr.component.strategy.recorder",
@@ -46,7 +46,7 @@ FORBIDDEN = (
 LEAF_MODULES = (
     "vqapr.signals.transform",
     "vqapr.signals.evaluation",
-    "vqapr.analysis.performance",
+    "vqapr.report.metrics",
 )
 
 

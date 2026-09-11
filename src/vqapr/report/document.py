@@ -2,7 +2,7 @@
 
 Every number here is a `Decimal`, because every number in the record is one (or text that was
 one), and a report that re-derived them in floating point would be the second, unreconciled
-performance number `analysis/performance.py` exists to keep out. `as_record()` serialises a
+performance number `report/metrics.py` exists to keep out. `as_record()` serialises a
 `Decimal` as text and an instant as ISO 8601 with its offset, so a reader in any language gets
 the exact value and the right zone.
 
@@ -28,6 +28,7 @@ __all__ = [
     "ComplianceSummary",
     "Correlation",
     "Costs",
+    "Curve",
     "HeadlineRow",
     "Holding",
     "InstrumentPnl",
@@ -36,7 +37,6 @@ __all__ = [
     "Performance",
     "Relative",
     "RunReport",
-    "Series",
     "StrategyReport",
     "Trading",
 ]
@@ -50,7 +50,7 @@ class _Document(BaseModel):
         return self.model_dump(mode="json")
 
 
-class Series(_Document):
+class Curve(_Document):
     """Instants beside values, same length. A `None` value is a point the record could not
     value (a held name with no mark), never a zero."""
 
@@ -87,9 +87,9 @@ class Performance(_Document):
     periods_per_year_source: Literal["given", "inferred"]
     risk_free_annual: Decimal
     initial_nav: Decimal | None
-    nav: Series
-    returns: Series
-    drawdown: Series
+    nav: Curve
+    returns: Curve
+    drawdown: Curve
     periods: int
     total_return: Decimal
     annualized_return: Decimal
@@ -193,14 +193,14 @@ class Trading(_Document):
     period's start; `intended_turnover` is `sum |w - w_previous| / 2` per decision, from
     `vqapr.weight`. Both are one-way, so they compare.
     The two annualised numbers beside each other are the size of what did not execute. `fills`
-    is `vqapr.analysis.execution.fill_summary` over the fill table, unchanged.
+    is `vqapr.report.metrics.fill_summary` over the fill table, unchanged.
     `fills_outside_periods` counts fills committed before the first valuation or after the last,
     which the per-period series cannot place.
     """
 
-    realized_turnover: Series
+    realized_turnover: Curve
     annualized_realized_turnover: Decimal | None
-    intended_turnover: Series
+    intended_turnover: Curve
     annualized_intended_turnover: Decimal | None
     rebalances: int
     orders_per_rebalance: Decimal | None
@@ -297,7 +297,7 @@ class Relative(_Document):
     strategy_ref: str
     benchmark_ref: str
     periods: int
-    active_return: Series
+    active_return: Curve
     tracking_error: Decimal | None
     information_ratio: Decimal | None
 

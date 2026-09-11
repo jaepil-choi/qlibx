@@ -16,7 +16,6 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from vqapr.analysis.execution import fill_summary
 from vqapr.cli.envelope import failure, success
 
 # `register` owns the CLI spelling of a component kind and imports nothing from this module, so
@@ -41,6 +40,7 @@ from vqapr.record import (
     read_typed_table,
 )
 from vqapr.record.schema import FILL_TABLE
+from vqapr.report.metrics import fill_summary
 from vqapr.run.assemble import COMPLETED, FAILED, run_registered_datamodel, run_registered_strategy
 from vqapr.run.batch import batch_cubes, batch_reads, in_workers, require_independent_batch
 from vqapr.run.preflight.verdict import verify_run

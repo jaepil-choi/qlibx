@@ -1,8 +1,8 @@
 """From the four recorded tables to the report's sections -- pure functions of rows.
 
-Takes rows rather than a store or a record, for the reason `analysis/execution.py` gives: a
+Takes rows rather than a store or a record, for the reason `report/metrics.py` gives: a
 function of data is testable with a list of dicts and cannot go looking for anything the run did
-not record. The door that opens a record and feeds these is `report/record.py`.
+not record. The door that opens a record and feeds these is `report/compose.py`.
 
 The time grid is the `_ACCOUNT` row of `vqapr.account`: one valuation per instant. A period runs
 from one valuation to the next, and a fill belongs to the period whose closing valuation's
@@ -24,9 +24,6 @@ from datetime import datetime
 from decimal import Decimal
 from itertools import pairwise
 
-from vqapr.analysis.execution import fill_summary
-from vqapr.analysis.performance import drawdown as running_drawdown
-from vqapr.analysis.performance import returns as period_returns
 from vqapr.report.document import (
     Attribution,
     Book,
@@ -35,6 +32,7 @@ from vqapr.report.document import (
     ComplianceSummary,
     Correlation,
     Costs,
+    Curve,
     HeadlineRow,
     Holding,
     InstrumentPnl,
@@ -42,10 +40,12 @@ from vqapr.report.document import (
     OffenderCount,
     Performance,
     Relative,
-    Series,
     StrategyReport,
     Trading,
 )
+from vqapr.report.metrics import drawdown as running_drawdown
+from vqapr.report.metrics import fill_summary
+from vqapr.report.metrics import returns as period_returns
 from vqapr.signals.evaluation import correlation as pearson_correlation
 
 ACCOUNT_ROW = "_ACCOUNT"
@@ -345,9 +345,9 @@ def performance(
         periods_per_year_source=periods_per_year_source,  # type: ignore[arg-type]
         risk_free_annual=risk_free_annual,
         initial_nav=initial_nav,
-        nav=Series(instants=instants, values=list(nav)),
-        returns=Series(instants=return_instants, values=list(rets)),
-        drawdown=Series(instants=instants, values=list(dd)),
+        nav=Curve(instants=instants, values=list(nav)),
+        returns=Curve(instants=return_instants, values=list(rets)),
+        drawdown=Curve(instants=instants, values=list(dd)),
         periods=count,
         total_return=total,
         annualized_return=annualized,
@@ -602,7 +602,7 @@ def trading(
         sum((fill.notional for fill in window), ZERO) / grid[index].nav / 2
         for index, window in enumerate(periods)
     ]
-    realized = Series(instants=[v.at for v in grid[1:]], values=list(turnover))
+    realized = Curve(instants=[v.at for v in grid[1:]], values=list(turnover))
     previous: dict[str, Decimal] = {}
     intended_turnover: list[Decimal] = []
     for _, weights in intended:
@@ -635,7 +635,7 @@ def trading(
     return Trading(
         realized_turnover=realized,
         annualized_realized_turnover=_ratio(sum(turnover, ZERO), years),
-        intended_turnover=Series(
+        intended_turnover=Curve(
             instants=[at for at, _ in intended], values=list(intended_turnover)
         ),
         annualized_intended_turnover=_ratio(sum(intended_turnover, ZERO), years),
@@ -829,7 +829,7 @@ def relative(report: StrategyReport, benchmark: StrategyReport) -> Relative:
         strategy_ref=report.strategy_ref,
         benchmark_ref=benchmark.strategy_ref,
         periods=len(instants),
-        active_return=Series(instants=instants, values=list(active)),
+        active_return=Curve(instants=instants, values=list(active)),
         tracking_error=tracking,
         information_ratio=_ratio(annualized, tracking),
     )

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vqapr.analysis.performance import drawdown, nav_series, returns
 from vqapr.component.base import Call, Component, Part, Tool
 from vqapr.component.compliance.base import Compliance, ComplianceCall, ComplianceFinding
 from vqapr.component.compliance.report import ComplianceReport
@@ -97,8 +96,9 @@ from vqapr.record import (
     strategy_refs,
 )
 from vqapr.record import read_typed_table as read_strategy_table
+from vqapr.report.compose import run_report, strategy_report
 from vqapr.report.document import RunReport, StrategyReport
-from vqapr.report.record import run_report, strategy_report
+from vqapr.report.metrics import drawdown, nav_series, returns
 from vqapr.run.assemble import RunResult, StrategyOutcome, preflight_run, run
 from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
 from vqapr.run.engine.failure import SimulationFailure

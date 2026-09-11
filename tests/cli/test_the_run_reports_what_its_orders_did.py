@@ -22,8 +22,8 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
-from vqapr.analysis.execution import fill_summary
 from vqapr.record.schema import FRAMEWORK_TABLES
+from vqapr.report.metrics import fill_summary
 from vqapr.run.engine.loop import SimulationResult
 from vqapr.run.engine.run_state import AcceptedRunState
 

@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.analysis.performance import drawdown, nav_series, returns
 from vqapr.public import Mark, MarkBatch
+from vqapr.report.metrics import drawdown, nav_series, returns
 
 
 def _batch(**pairs: str) -> MarkBatch:
@@ -95,14 +95,15 @@ def test_a_monotonic_series_never_draws_down() -> None:
     )
 
 
-def test_analysis_manufactures_no_return_of_its_own() -> None:
+def test_the_metrics_manufacture_no_return_of_their_own() -> None:
     """Canon's line: everything reported comes from the marking and Account spine.
 
-    The module surface is the check. Nothing here accepts a price series, and the only entry point
-    for position value is the type the valuation layer produces.
+    The module surface is the check. Nothing here accepts a price series: position value enters
+    only as the type the valuation produces, and the fill summary reads the fill rows the run
+    stored (record `275` folded the execution summary in beside the NAV series).
     """
-    import vqapr.analysis.performance as module
+    import vqapr.report.metrics as module
 
-    assert set(module.__all__) == {"drawdown", "nav_series", "returns"}
+    assert set(module.__all__) == {"drawdown", "fill_summary", "nav_series", "returns"}
     for forbidden in ("from_prices", "compute_returns_from_prices", "price_return"):
         assert not hasattr(module, forbidden)

@@ -19,7 +19,7 @@ are identity and configuration rather than an invocation. The check below counts
 members that are functions.
 
 **What this does not check.** Whether the annotation is honest -- an annotation can lie, and
-`extension/conformance.py` is what checks the real object at registration, by arity, against the
+`component/conformance.py` is what checks the real object at registration, by arity, against the
 call the run will actually make. This file checks the declared contract; that one checks the
 component.
 """
@@ -39,8 +39,8 @@ from vqapr.authoring import (
     StrategyCall,
     StrategyModel,
 )
+from vqapr.component.exchange.base import Exchange, ExecutionCall
 from vqapr.domain.wiring import WIRING, Role
-from vqapr.exchange.venue import Exchange, ExecutionCall
 
 ROLES: dict[type, tuple[str, type]] = {
     DataModel: ("compute", DataCall),

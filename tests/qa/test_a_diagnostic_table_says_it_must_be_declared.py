@@ -17,8 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vqapr.authoring.records import InvocationRecorder
-from vqapr.authoring.records import TableSpec
+from vqapr.component.strategy.recorder import InvocationRecorder, TableSpec
 
 _NOW = datetime(2026, 1, 5, tzinfo=UTC)
 

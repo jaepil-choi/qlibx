@@ -18,8 +18,8 @@ import pytest
 from vqapr import authoring as va
 from vqapr.agent.skillset import shipped_skills
 from vqapr.cli.main import main
-from vqapr.extension.component import ComponentKind
-from vqapr.extension.scaffold import render
+from vqapr.component.reference import ComponentKind
+from vqapr.component.scaffold import render
 
 
 def _shipped_prose() -> str:

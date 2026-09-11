@@ -13,7 +13,7 @@ Everything here is a pure function of its arguments. A rule that needs data -- t
 benchmark's weight per name -- is handed it by the strategy, which subscribes to that dataset
 itself, so the dependency is visible on the strategy where it belongs rather than hidden inside a
 component's own `inputs()`. Observing whether the committed book actually respected a limit is a
-different question with a different clock, and `vqapr.compliance` answers it (design §7.2).
+different question with a different clock, and a Compliance rule answers it (design §7.2).
 
 Every bound returned lands on the canonical grid `optimize` enforces, rounded inward
 (`docs/issues/092`): a box built here is a box the optimiser accepts.

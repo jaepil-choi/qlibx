@@ -12,7 +12,7 @@ and were exercised only by the tests written for them. `docs/design/agent-first-
 records the measurement and the ruling; the deletion itself is `docs/implementations/124`.
 
 `vqapr.authoring` survives that deletion and is not part of it: a registered StrategyModel may be
-written against it, and `extension/loading.py` adapts it onto the engine contract at load time.
+written against it, and `component/loading.py` adapts it onto the engine contract at load time.
 
 The capability import stays lazy so that `import vqapr` stays cheap, and so that a leaf capability
 remains importable without dragging heavier layers in behind it —

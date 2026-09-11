@@ -17,7 +17,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from vqapr.authoring import DatasetInput, RowsLookback
-from vqapr.authoring.context import DataModelContext, requirements_for
 from vqapr.data import store as store_module
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback
@@ -25,6 +24,7 @@ from vqapr.data.panel import NO_INSTRUMENT, PanelWindow
 from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
+from vqapr.flow.run.calls import DataModelContext, requirements_for
 from vqapr.project.store import Workspace
 from vqapr.public import register_dataset
 

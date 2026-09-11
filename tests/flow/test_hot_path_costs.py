@@ -19,7 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from vqapr.authoring.records import InvocationRecorder, TableSpec
+from vqapr.component.strategy.recorder import InvocationRecorder, TableSpec
 from vqapr.data import scan, store
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -609,7 +609,7 @@ def test_a_framework_column_is_checked_by_type_not_by_cell(monkeypatch) -> None:
         return original(value)
 
     monkeypatch.setattr(rows, "normalize_scalar", counting)
-    monkeypatch.setattr("vqapr.authoring.records.normalize_scalar", counting)
+    monkeypatch.setattr("vqapr.component.strategy.recorder.normalize_scalar", counting)
 
     names = [f"I{index:04d}" for index in range(1000)]
     recorder = _account_recorder()
@@ -829,10 +829,10 @@ def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> Non
     from datetime import UTC
     from decimal import Decimal
 
-    from vqapr.authoring import view as view_module
-    from vqapr.authoring.view import EconomicAccountView
-    from vqapr.compliance.evaluation import build_account_view
+    from vqapr.component import account_view as view_module
+    from vqapr.component.account_view import EconomicAccountView
     from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
+    from vqapr.flow.run.compliance import build_account_view
 
     validated = 0
     original = view_module._copy_weights
@@ -868,7 +868,7 @@ def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> Non
 
 def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
     """Same verdicts as `str.isspace` per character, in C."""
-    from vqapr.authoring._validation import _identifier
+    from vqapr.component._validation import _identifier
     from vqapr.domain.identifiers import instrument_id
 
     for good in ("A", "BRK/B", "_KOSPI", "005930", "a\u00e9"):

@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.project.store import Workspace
 
 STRATEGY = '''
@@ -68,7 +68,7 @@ def _register(
 
 EXCHANGE = """
 from decimal import Decimal
-from vqapr.exchange.venue import AcademicExchange, TradeRule
+from vqapr.public import AcademicExchange, TradeRule
 from vqapr.public import ListingAccess
 
 

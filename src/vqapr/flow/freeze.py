@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.extension.component import ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import LifecycleKind
 from vqapr.flow.run.loop import DataModelResult, SimulationResult

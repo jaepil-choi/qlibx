@@ -954,10 +954,10 @@ def _runtime_execution_table(tmp_path: Path) -> list[str]:
 
 
 def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
+    from vqapr.component.conformance import conformance
+    from vqapr.component.fingerprint import fingerprint_component
+    from vqapr.component.reference import ComponentKind, ComponentRef
     from vqapr.domain.errors import VqaprError
-    from vqapr.extension.component import ComponentKind, ComponentRef
-    from vqapr.extension.conformance import conformance
-    from vqapr.extension.fingerprint import fingerprint_component
     from vqapr.public import register_compliance
 
     codes: list[str] = []
@@ -1138,8 +1138,8 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     # declares its sessions; the workspace refuses an id it cannot resolve at registration).
     from datetime import time
 
-    from vqapr.extension.component import ComponentKind, ComponentRef
-    from vqapr.extension.fingerprint import fingerprint_component
+    from vqapr.component.fingerprint import fingerprint_component
+    from vqapr.component.reference import ComponentKind, ComponentRef
     from vqapr.project.run import RunAgenda, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"

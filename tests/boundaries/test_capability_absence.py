@@ -31,10 +31,9 @@ FORBIDDEN = (
     # where the mark values `analysis.performance` reads live beside the Account authority, so the
     # module can no longer separate them; the leaves still take no account as an argument.
     "vqapr.data",
-    "vqapr.authoring.records",
-    "vqapr.exchange",
+    "vqapr.component.strategy.recorder",
+    "vqapr.component.exchange",
     "vqapr.flow",
-    "vqapr.authoring.context",
     # `vqapr.runtime` was listed here until one-shape Step 7 (record 162) moved its agendas to
     # `domain/` (which a leaf may import) and its envelopes into `flow/loop` (already listed).
     "duckdb",

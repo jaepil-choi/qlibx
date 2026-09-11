@@ -21,9 +21,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from vqapr.authoring import AccountHistoryInput, Compliance, Component, Hold, StrategyModel
-from vqapr.authoring.records import TableSpec
-from vqapr.compliance.evaluation import ComplianceReport
+from vqapr.component.base import Component
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.compliance.report import ComplianceReport
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.reference import ComponentRef
+from vqapr.component.strategy.base import StrategyModel
+from vqapr.component.strategy.decision import Hold
+from vqapr.component.strategy.history import AccountHistoryInput
+from vqapr.component.strategy.recorder import TableSpec
 from vqapr.data.execution_table import (
     ExactExecutionSnapshot,
     ExecutionSnapshots,
@@ -46,8 +52,6 @@ from vqapr.domain.intent import EconomicPortfolioIntent
 from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import SelectedMark, ValuationService
-from vqapr.exchange.venue import Exchange
-from vqapr.extension.component import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,

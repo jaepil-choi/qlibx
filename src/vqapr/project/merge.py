@@ -18,10 +18,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import Stage, Status
-from vqapr.extension.component import ComponentRef
 from vqapr.project.refusals import _workspace_error
 from vqapr.project.state import _State
 

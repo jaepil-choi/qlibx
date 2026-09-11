@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.project.run import (
     ComplianceSet,
     DataModelEntry,

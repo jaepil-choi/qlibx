@@ -11,7 +11,16 @@ from io import BytesIO
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from vqapr.authoring import Compliance, StrategyModel
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.loading import (
+    load_compliance,
+    load_data_model,
+    load_exchange,
+    load_strategy_model,
+)
+from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.strategy.base import StrategyModel
 from vqapr.data.dataset import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.requirement import DataRequirement
@@ -24,14 +33,6 @@ from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.listing import TradeRule
 from vqapr.domain.memory import ModelMemory
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
-from vqapr.exchange.venue import Exchange
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.loading import (
-    load_compliance,
-    load_data_model,
-    load_exchange,
-    load_strategy_model,
-)
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.roster import require_declared_roster
 from vqapr.project.run import (

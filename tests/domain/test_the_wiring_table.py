@@ -12,6 +12,8 @@ from __future__ import annotations
 import inspect
 
 from vqapr.authoring import Compliance, Component, DataModel, Part, StrategyModel, Tool
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.reference import ComponentKind
 from vqapr.domain.wiring import (
     MARKET_CLOCK_ORDER,
     WIRING,
@@ -23,8 +25,6 @@ from vqapr.domain.wiring import (
     roles_on,
     tools,
 )
-from vqapr.exchange.venue import Exchange
-from vqapr.extension.component import ComponentKind
 from vqapr.flow.run.loop import MarketClock
 
 

@@ -30,11 +30,16 @@ from itertools import batched
 from pathlib import Path
 from types import MappingProxyType
 
-from vqapr.authoring import Component
-from vqapr.authoring.history import retained_marks
-from vqapr.compliance.evaluation import (
-    compliance_requirements as declared_compliance_requirements,
+from vqapr.component.base import Component
+from vqapr.component.loading import (
+    as_loaded_fingerprint,
+    load_compliance,
+    load_data_model,
+    load_exchange,
+    load_strategy_model,
 )
+from vqapr.component.reference import ComponentRef
+from vqapr.component.strategy.history import retained_marks
 from vqapr.data import cube as cube_module
 from vqapr.data.dataset import DatasetRegistration, Grain
 from vqapr.data.requirement import DataRequirement
@@ -45,14 +50,6 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountState
 from vqapr.domain.errors import Failure, FailureSource, InputError, Stage, Status, VqaprError
 from vqapr.domain.memory import normalize_memory
-from vqapr.extension.component import ComponentRef
-from vqapr.extension.loading import (
-    as_loaded_fingerprint,
-    load_compliance,
-    load_data_model,
-    load_exchange,
-    load_strategy_model,
-)
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.verify import RunResources, verify_run
 from vqapr.flow.engine.artifacts import SimulationFailure
@@ -68,6 +65,7 @@ from vqapr.flow.roster import (
     registered_roster,
     roster_report,
 )
+from vqapr.flow.run.compliance import compliance_requirements as declared_compliance_requirements
 from vqapr.flow.run.loop import (
     DataModelResult,
     SimulationResult,

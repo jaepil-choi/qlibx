@@ -35,7 +35,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from vqapr.authoring import AccountHistoryInput, Compliance, Component, DataModel, StrategyModel
+from vqapr.component.base import Component
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.datamodel import DataModel
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.strategy.base import StrategyModel
+from vqapr.component.strategy.history import AccountHistoryInput
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.scan import ScanSession
 from vqapr.data.window import ModelWindow
@@ -45,7 +50,6 @@ from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import ValuationService
-from vqapr.exchange.venue import Exchange
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     FinalizationEvidence,

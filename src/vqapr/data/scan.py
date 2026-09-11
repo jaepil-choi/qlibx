@@ -69,7 +69,7 @@ DECLARABLE_FIELD_TYPES = frozenset(
 
 The data plane carries one numeric type per kind: `INTEGER` arrives as `int`, `DOUBLE` as
 `float`. `DECIMAL` is deliberately absent -- exact arithmetic lives on the money side of the
-execution boundary (`exchange/execution_table.py` converts a price once, explicitly), and a field
+execution boundary (`data/execution_table.py` converts a price once, explicitly), and a field
 that reached a model as `Decimal` would put two numeric types into one expression, which is the
 defect `docs/implementations/051` and `088` both describe.
 """

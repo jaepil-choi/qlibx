@@ -9,23 +9,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.analysis.performance import drawdown, nav_series, returns
-from vqapr.authoring import (
-    Compliance,
-    ComplianceCall,
-    ComplianceFinding,
-    Component,
-    DataModel,
-    DatasetInput,
-    Hold,
-    Part,
-    Rebalance,
-    StrategyModel,
-    Tool,
+from vqapr.component.base import Component, Part, Tool
+from vqapr.component.compliance.base import Compliance, ComplianceCall, ComplianceFinding
+from vqapr.component.compliance.report import ComplianceReport
+from vqapr.component.compliance.shipped import SHIPPED_COMPLIANCE, shipped_compliance_path
+from vqapr.component.conformance import conformance
+from vqapr.component.datamodel import DataModel
+from vqapr.component.exchange.academic import AcademicExchange
+from vqapr.component.exchange.base import ExecutionCall
+from vqapr.component.exchange.krx import (
+    KrxExchange,
+    KrxSettings,
+    KrxTradeRule,
+    krx_listings,
+    krx_rules,
 )
-from vqapr.authoring.context import DataModelContext, StrategyModelContext
-from vqapr.authoring.records import TableSpec
-from vqapr.compliance.builtin import SHIPPED_COMPLIANCE, shipped_compliance_path
-from vqapr.compliance.evaluation import ComplianceReport
+from vqapr.component.reads import DatasetInput
+from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.strategy.base import StrategyModel
+from vqapr.component.strategy.decision import Hold, Rebalance
+from vqapr.component.strategy.recorder import TableSpec
 from vqapr.data.dataset import DatasetRegistration, ExecutionRole, Grain
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
@@ -69,16 +72,6 @@ from vqapr.domain.listing import (
     trade_rules_by_kind,
 )
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.exchange.venue import AcademicExchange, ExecutionCall
-from vqapr.exchange.venues.krx import (
-    KrxExchange,
-    KrxSettings,
-    KrxTradeRule,
-    krx_listings,
-    krx_rules,
-)
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.conformance import conformance
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure
 
@@ -91,6 +84,7 @@ from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
 from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
 from vqapr.flow.roster import registered_roster as registered_roster
 from vqapr.flow.roster import roster_report as roster_report
+from vqapr.flow.run.calls import DataModelContext, StrategyModelContext
 from vqapr.flow.run.loop import DataModelResult, SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
@@ -109,7 +103,7 @@ from vqapr.portfolio.weights import (
     signal_weight,
 )
 
-# One door into the extension authorities: `vqapr.extension.*`, never `vqapr._internal.*`.
+# One door into the extension authorities: `vqapr.component.*`, never `vqapr._internal.*`.
 # (The four `register_*` below left `extension/` for `project/` at record `196` -- the write
 # half is the workspace's -- but they are still reached by one path, which is the rule here.)
 # The adapters below are transitional and scheduled for deletion, and that is the reason to use

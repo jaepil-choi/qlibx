@@ -12,7 +12,7 @@ from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 
-from vqapr.authoring.records import InvocationRecorder
+from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.domain.account import AccountMark, AccountSnapshot
 from vqapr.domain.valuation import SelectedMark
 from vqapr.flow.engine.artifacts import (

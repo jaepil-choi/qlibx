@@ -22,11 +22,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.registration import apply
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace

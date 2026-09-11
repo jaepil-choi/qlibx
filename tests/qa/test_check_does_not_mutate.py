@@ -22,12 +22,12 @@ import duckdb
 import pytest
 
 from vqapr.cli.check import check
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import InputError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.public import register_dataset as pub_register_dataset
@@ -111,7 +111,7 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     venue_source = root / "venue.py"
     venue_source.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"

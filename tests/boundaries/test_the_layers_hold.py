@@ -60,15 +60,11 @@ LAYERS: dict[str, int] = {
     "signals": 10,
     "record": 10,
     "analysis": 10,
-    # 20 -- the extension contract: everything a Component sees, and nothing above it.
-    "authoring": 20,
-    # 30 -- the venue. Reads the execution table, executes orders, and subclasses `Component`,
-    # which is why the contract must sit below it.
-    "exchange": 30,
-    # 40 -- what installs a Component, and what evaluates one. Both load user code, so both
-    # sit above every contract that code is written against.
-    "extension": 40,
-    "compliance": 40,
+    # 20 -- the extension point: every role's contract, its shipped implementations, and the door a
+    # component enters by (reference, fingerprint, conformance, loading, scaffold).
+    "component": 20,
+    # 21 -- transitional: `vqapr.authoring` re-exports `component` until the breaking release.
+    "authoring": 21,
     # 50 -- what a project accumulates between commands, and how a document enters it.
     "project": 50,
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.

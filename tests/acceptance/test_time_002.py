@@ -16,11 +16,12 @@ from vqapr.authoring import (
     Compliance,
     ComplianceCall,
     ComplianceFinding,
-    EconomicAccountView,
     Hold,
     Rebalance,
     StrategyModel,
 )
+from vqapr.component.exchange.academic import AcademicExchange
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
 from vqapr.data.lookback import RowsLookback
@@ -41,10 +42,8 @@ from vqapr.domain.intent import (
     PortfolioDirection,
     validate_economic_intent,
 )
-from vqapr.domain.listing import ListingAccess
+from vqapr.domain.listing import ListingAccess, TradeRule
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
-from vqapr.exchange.venue import AcademicExchange, TradeRule
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,

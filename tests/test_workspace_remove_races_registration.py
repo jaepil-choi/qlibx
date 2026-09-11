@@ -36,11 +36,11 @@ from pathlib import Path
 
 import pytest
 
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
 from vqapr.project.store import Workspace
+from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
 
 pytestmark = pytest.mark.concurrency
 

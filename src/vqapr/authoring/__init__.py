@@ -1,53 +1,24 @@
-"""Agent-first extension authoring/read/result contracts.
+"""Transitional: the author surface's 0.15.0 import path, re-exporting `vqapr.component`.
 
-The sole public home for what an author subclasses (``Component`` and its roles ``DataModel``,
-``StrategyModel``, ``Compliance``), receives (``DataCall``, ``StrategyCall``, ``ComplianceCall``,
-``PanelWindow``, ``Observation``, ``EconomicAccountView``, ``AccountHistory``,
-``AccountHistory``), and returns (``Rows``, ``Hold``/``Rebalance``, ``ComplianceFinding``).
-
-Every public declaration here is a frozen, keyword-only value unless shown otherwise by the
-approved algebra (``Observation`` is positional; ``DataCall``, ``StrategyCall``, ``DataModel``,
-``StrategyModel``, and ``Compliance`` are abstract call/extension contracts, not values). What an
-author constructs and hands to the engine -- ``DatasetInput``, ``AccountHistoryInput``,
-``Hold``, ``Rebalance``, ``ComplianceFinding`` -- is a strict pydantic
-model (owner ruling 2026-09-08): a wrong type is refused rather than coerced, and the refusal is
-a ``pydantic.ValidationError``, which is a ``ValueError``. Constructors reject duplicate names,
-empty identifiers, naive datetimes, non-finite ``Decimal`` values, and author-supplied
-framework-envelope fields. Incoming mappings are copied into read-only sorted views; incoming
-sequences become detached tuples.
-
-**The package invariant: everything a Component sees, and nothing above it.** This replaces the
-module's older wording, *"pure algebra: it declares contracts only; no runtime adapter, store,
-catalog, or Flow wiring lives here"*, which was true of one file and could not survive the split
-(record `192`). ``context.py`` is why: it is the engine's implementation of the three call
-contracts, it binds a `ModelWindow` to a callback, and it is what a user constructs by hand to
-test their own Component. It is not wiring the author is kept away from -- it is the object the
-author is handed, spelled concretely. What the invariant still forbids is the direction: nothing
-under `authoring/` may import `exchange/`, `extension/`, `project/`, `flow/` or the facade, and
-`tests/boundaries/test_the_layers_hold.py` is where that is enforced rather than promised.
-
-**This `__init__` re-exports; almost no other package's does.** The convention in this tree is that
-`__init__.py` carries the package's argument and nothing else -- import the module. Two packages
-are exceptions, for two different reasons. `record/` hides its module layout deliberately. This one
-is a **published import path**: ``from vqapr.authoring import StrategyModel`` is what the shipped
-skills, the emitted scaffolds and every showcase are written against, so the split below it must
-not reach them. The nine modules are an implementation detail of this door.
-
-Layered so the door has no cycle behind it: ``_validation`` at the bottom, then ``reads``,
-``history``, ``view`` and ``result``, then ``call``, then ``component`` at the top. ``records`` is
-independent of all of them and ``context`` sits above everything, being the engine's realisation of
-what the rest declares.
+``from vqapr.authoring import StrategyModel`` is what 0.15.0's skills, scaffolds and showcases are
+written against. The classes live in `vqapr.component` -- one module per role, each base apart from
+any shipped implementation -- and are published by `vqapr.public`. This module defines nothing; the
+only importers inside the package are the root's lazy attribute and the shipped sample strategy,
+both written for an author. It is removed in the release that renames the loop's vocabulary, after
+which `vqapr.public` is the only author surface.
 """
 
 from __future__ import annotations
 
-from vqapr.authoring.call import ComplianceCall, DataCall, StrategyCall
-from vqapr.authoring.component import Compliance, Component, DataModel, Part, StrategyModel, Tool
-from vqapr.authoring.history import AccountHistory, AccountHistoryInput
-from vqapr.authoring.reads import DatasetInput, requirements_for
-from vqapr.authoring.records import TableSpec
-from vqapr.authoring.result import ComplianceFinding, Hold, Rebalance
-from vqapr.authoring.view import EconomicAccountView
+from vqapr.component.account_view import EconomicAccountView
+from vqapr.component.base import Component, Part, Tool
+from vqapr.component.compliance.base import Compliance, ComplianceCall, ComplianceFinding
+from vqapr.component.datamodel import DataCall, DataModel
+from vqapr.component.reads import DatasetInput, requirements_for
+from vqapr.component.strategy.base import StrategyCall, StrategyModel
+from vqapr.component.strategy.decision import Hold, Rebalance
+from vqapr.component.strategy.history import AccountHistory, AccountHistoryInput
+from vqapr.component.strategy.recorder import TableSpec
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
 from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow

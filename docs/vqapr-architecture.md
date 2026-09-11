@@ -447,6 +447,8 @@ component/
 │                 academic.py  AcademicExchange — 마찰 없는 학술용
 │                 krx.py       KrxExchange — KRX 규칙의 선언된 부분집합
 └── compliance/   base.py      Compliance · ComplianceCall · ComplianceFinding
+                  report.py    StampedFinding · ComplianceReport — 프레임워크의 판정(허용오차)
+                  shipped.py   출하 규칙을 이름으로 찾기
                   no_short.py · single_name_cap.py  — 출하하는 규칙
 ```
 
@@ -1310,7 +1312,7 @@ src/vqapr/
 │   ├── base.py · reads.py · _validation.py · account_view.py · datamodel.py
 │   ├── strategy/            base.py · decision.py · history.py · recorder.py
 │   ├── exchange/            base.py · academic.py · krx.py
-│   ├── compliance/          __init__.py (출하 규칙 찾기) · base.py · no_short.py · single_name_cap.py
+│   ├── compliance/          base.py · report.py · shipped.py (출하 규칙 찾기) · no_short.py · single_name_cap.py
 │   └── reference.py · fingerprint.py · conformance.py · loading.py · scaffold.py
 ├── workspace/         [30]  명령과 명령 사이에 남는 선언 — .vqapr/workspace.yaml
 │   ├── registry.py          Workspace · Transaction — 열기 · 조회 · 한 번에 쓰기 · 잠금
@@ -1705,8 +1707,8 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `authoring/__init__.py` | 깨지는 릴리스에서 삭제 (`vqapr.public`이 유일한 저자 표면) |
 | `exchange/venue.py` | `component/exchange/base.py` (Exchange · ExecutionCall), `component/exchange/academic.py` (AcademicExchange) |
 | `exchange/venues/krx.py` | `component/exchange/krx.py` |
-| `compliance/builtin/*` | `component/compliance/__init__.py` · `no_short.py` · `single_name_cap.py` |
-| `compliance/evaluation.py` | `run/engine/stages/observe.py` |
+| `compliance/builtin/*` | `component/compliance/shipped.py` · `no_short.py` · `single_name_cap.py` (`__init__`에 로직을 두면 base 모듈을 import할 때마다 출하 규칙이 먼저 실린다) |
+| `compliance/evaluation.py` | 값(`StampedFinding` · `ComplianceReport` · 판정 · 기본 허용오차)은 `component/compliance/report.py`, 평가 함수는 `run/engine/stages/observe.py` (실행 문맥이 `ComplianceReport`를 들고 단계가 문맥을 import하므로 값을 단계에 둘 수 없다) |
 | `extension/component.py` · `fingerprint.py` · `loading.py` | `component/reference.py` · `fingerprint.py` · `loading.py` |
 | `extension/conformance.py`, `extension/prepare.py` | `component/conformance.py` |
 | `extension/scaffold.py`, `extension/lookback.py` | `component/scaffold.py` |

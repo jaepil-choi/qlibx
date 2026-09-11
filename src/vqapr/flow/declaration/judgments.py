@@ -35,13 +35,12 @@ from datetime import datetime
 from difflib import get_close_matches
 from typing import Any
 
-from vqapr.domain.account import AccountMode
-from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError, status_of
-
 # Through `extension/`, not `_internal/`, matching `flow/declaration/preflight.py:27-28` and
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
-from vqapr.extension.loading import load_data_model, load_strategy_model
+from vqapr.component.loading import load_data_model, load_strategy_model
+from vqapr.domain.account import AccountMode
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError, status_of
 from vqapr.flow.declaration.preflight import (
     RunFacts,
     unresolved_target_failures,

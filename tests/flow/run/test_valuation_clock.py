@@ -32,13 +32,13 @@ import duckdb
 import pytest
 
 from vqapr.authoring import Hold, StrategyModel
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import ValuationService
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import strategy_loop

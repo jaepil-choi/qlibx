@@ -23,11 +23,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vqapr.authoring import Compliance, DataModel, StrategyModel
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.datamodel import DataModel
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
+from vqapr.component.strategy.base import StrategyModel
 from vqapr.domain.errors import Failure, Stage, VqaprError
 from vqapr.domain.fill import ExecutionHorizon
-from vqapr.exchange.venue import Exchange
-from vqapr.extension.loading import load_compliance, load_data_model, load_strategy_model
 from vqapr.flow.declaration.frozen import FrozenRun
 from vqapr.flow.declaration.judgments import RUN_OUTPUT_STALE, judgments
 from vqapr.flow.declaration.preflight import RunFacts

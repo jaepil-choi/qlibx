@@ -135,9 +135,9 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
-    from vqapr.authoring import StrategyModel
-    from vqapr.extension.component import ComponentKind
-    from vqapr.extension.loading import load_data_model, load_strategy_model
+    from vqapr.component.loading import load_data_model, load_strategy_model
+    from vqapr.component.reference import ComponentKind
+    from vqapr.component.strategy.base import StrategyModel
 
     space = Workspace.open(project_root)
     try:
@@ -155,7 +155,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     if kind is ComponentKind.COMPLIANCE:
         # A rule declares what it reads and answers to an id, so it is describable in the same
         # terms -- it simply forms nothing and produces no weights.
-        from vqapr.extension.loading import load_compliance
+        from vqapr.component.loading import load_compliance
 
         rule = load_compliance(ref, project_root=project_root)
         return {

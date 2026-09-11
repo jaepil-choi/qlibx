@@ -33,11 +33,11 @@ from pydantic import (
     model_validator,
 )
 
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration, ExecutionRole, Grain
 from vqapr.data.scan import ColumnType
 from vqapr.data.source import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import RunDefinition
 
 

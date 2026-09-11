@@ -31,12 +31,12 @@ import duckdb
 import pytest
 
 from vqapr.cli.check import check
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration import judgments as judgments_module
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
@@ -132,7 +132,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     venue = root / "venue.py"
     venue.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"

@@ -78,7 +78,7 @@ def _workspace(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     venue = root / "venue.py"
     venue.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"

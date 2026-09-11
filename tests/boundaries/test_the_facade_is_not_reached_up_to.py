@@ -74,7 +74,7 @@ PERMITTED: frozenset[str] = PERMANENT
 def _importers() -> set[str]:
     """Every module under `src/` with a real `vqapr.public` import.
 
-    An AST walk rather than a text search, because `cli/new.py` and `extension/scaffold.py` both
+    An AST walk rather than a text search, because `cli/new.py` and `component/scaffold.py` both
     contain `vqapr.public` inside the templates they emit. Those are `Constant` nodes and are
     structurally invisible here, which is exactly why the ruling specifies an AST walk: a string
     count moves when a template is edited, for reasons that have nothing to do with the boundary.
@@ -149,7 +149,7 @@ def test_the_count_still_matches_the_ruling() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    ["src/vqapr/cli/new.py", "src/vqapr/extension/scaffold.py"],
+    ["src/vqapr/cli/new.py", "src/vqapr/component/scaffold.py"],
 )
 def test_template_text_is_not_counted_as_an_import(path: str) -> None:
     """The exclusion the AST walk exists for, pinned so it cannot silently start counting.

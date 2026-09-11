@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.public import Workspace
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.project.store import WORKSPACE_LOCK_FILENAME
+from vqapr.public import Workspace
 
 
 def _component(raw_id: str) -> ComponentRef:

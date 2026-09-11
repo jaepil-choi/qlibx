@@ -25,10 +25,17 @@ from pathlib import Path
 import pytest
 import yaml
 
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry, register_run
 from vqapr.project.store import Workspace
+from vqapr.public import (
+    AccountMode,
+    AccountSnapshot,
+    RunAgenda,
+    RunDefinition,
+    StrategyEntry,
+    register_run,
+)
 
 RETIRED_SECTIONS = """valuation_configs:
   daily-valuation:

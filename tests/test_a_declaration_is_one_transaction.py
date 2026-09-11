@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.domain.errors import InputError, VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project import store as workspace_module
 from vqapr.project.registration import apply
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace

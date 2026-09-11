@@ -11,14 +11,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from vqapr.authoring import DataModel
-from vqapr.authoring.context import DataModelContext
+from vqapr.component.datamodel import DataModel
 from vqapr.data.store import AccessRecord
 from vqapr.data.window import ModelWindow
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.rows import Row
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
+from vqapr.flow.run.calls import DataModelContext
 from vqapr.flow.run.output import (
     RunOutput,
     derived_available_at,

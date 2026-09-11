@@ -98,7 +98,8 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     )
     assert not modules, (
         f"`_internal/extensions/` is back: {modules}. The extension authorities live in "
-        "`vqapr/extension/` since record 110; putting an implementation back under `_internal` "
+        "`vqapr/component/` (moved out of `_internal` by record 110, into `component/` by record 271); "
+        "putting an implementation back under `_internal` "
         "recreates the two-door problem docs/issues/archive/029 records."
     )
 
@@ -111,9 +112,12 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     # to `project/registration.py` -- the workspace is the project's -- and what stayed only
     # prepares, so the old name had become false rather than merely dated. The property here is
     # unchanged: the authority is in `extension/`, not under `_internal`.
-    for name in ("component", "fingerprint", "loading", "prepare"):
-        module = pathlib.Path(f"src/vqapr/extension/{name}.py")
-        assert module.is_file(), f"{name} must live at vqapr/extension/{name}.py"
+    #
+    # Record `271` folded `extension/` into `component/`: `component` is `reference`, and `prepare`
+    # is part of `conformance`, the door a component is proved at.
+    for name in ("reference", "fingerprint", "loading", "conformance"):
+        module = pathlib.Path(f"src/vqapr/component/{name}.py")
+        assert module.is_file(), f"{name} must live at vqapr/component/{name}.py"
 
 
 def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
@@ -122,8 +126,8 @@ def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
     Deliberately a floor on substance rather than an exact size: the point is that these files hold
     the implementation, and a re-export shim cannot.
     """
-    for name in ("component", "fingerprint", "loading", "prepare"):
-        source = pathlib.Path(f"src/vqapr/extension/{name}.py").read_text(encoding="utf-8")
+    for name in ("reference", "fingerprint", "loading", "conformance"):
+        source = pathlib.Path(f"src/vqapr/component/{name}.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         defined = [
             node
@@ -131,7 +135,7 @@ def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
         ]
         assert defined, (
-            f"vqapr/extension/{name}.py defines nothing and is forwarding again; record 110 moved "
+            f"vqapr/component/{name}.py defines nothing and is forwarding again; record 110 moved "
             "the implementation here so the temporary file could stop existing"
         )
 
@@ -168,7 +172,7 @@ def test_every_internal_edge_is_a_shared_primitive_or_a_frozen_inheritance() -> 
         # Frozen; its edges predate the freeze and may not grow.
         "src/vqapr/project.py",
         # The authoring seam, pending the convergence step.
-        "src/vqapr/extension/loading.py",
+        "src/vqapr/component/loading.py",
     }
     unexplained = sorted(
         (importer, module)

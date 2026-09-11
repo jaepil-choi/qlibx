@@ -79,7 +79,7 @@ def _exchange_component(root: Path) -> Path:
     path = root / "venue.py"
     path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
@@ -915,8 +915,8 @@ def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_cras
     using `Workspace` directly does. The point of the test is that the two CLI verbs still refuse,
     and refuse in the structured shape rather than by crashing.
     """
-    from vqapr.extension.component import ComponentKind, ComponentRef
-    from vqapr.extension.fingerprint import fingerprint_component
+    from vqapr.component.fingerprint import fingerprint_component
+    from vqapr.component.reference import ComponentKind, ComponentRef
     from vqapr.project.store import Workspace
 
     _workspace_for_run(tmp_path, capsys)
@@ -982,7 +982,7 @@ def test_a_rule_registered_under_the_id_it_answers_to_still_runs(
     so this carries the accepted spelling all the way through `check` and `run` and asserts the
     counts are the ones the unconstrained run produces.
     """
-    from vqapr.compliance.builtin import shipped_compliance_path
+    from vqapr.component.compliance.shipped import shipped_compliance_path
 
     _workspace_for_run(tmp_path, capsys)
 

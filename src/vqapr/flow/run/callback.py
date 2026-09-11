@@ -13,11 +13,10 @@ from io import BytesIO
 from typing import NoReturn
 from uuid import NAMESPACE_URL, uuid5
 
-from vqapr.authoring import EconomicAccountView, Hold, Rebalance
-from vqapr.authoring.context import StrategyModelContext
-from vqapr.authoring.history import AccountHistory
-from vqapr.authoring.records import InvocationRecorder, TableSpec
-from vqapr.compliance.evaluation import build_account_view
+from vqapr.component.account_view import EconomicAccountView
+from vqapr.component.strategy.decision import Hold, Rebalance
+from vqapr.component.strategy.history import AccountHistory
+from vqapr.component.strategy.recorder import InvocationRecorder, TableSpec
 from vqapr.data.execution_table import ExecutionTable
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot, AccountState
@@ -44,6 +43,8 @@ from vqapr.flow.engine.artifacts import (
     SimulationStage,
 )
 from vqapr.flow.engine.run_state import LifecycleKind, LifecycleTrace, PreparedRunState
+from vqapr.flow.run.calls import StrategyModelContext
+from vqapr.flow.run.compliance import build_account_view
 from vqapr.flow.run.context import (
     _ACCOUNT_IDENTITY,
     CALLBACK_STAGE,

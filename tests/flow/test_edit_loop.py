@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vqapr.extension.component import ComponentKind
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.extension.component import ComponentRef
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.project.store import Workspace
 
 SOURCE = "class Model:\n    factor = {value}\n"
@@ -65,7 +64,7 @@ def test_the_as_loaded_digest_follows_the_source_not_the_registration(tmp_path: 
     refusing. A run record stamps the digest of what ACTUALLY loaded, so an edited-but-not-
     re-registered component is still recorded honestly rather than under a stale digest.
     """
-    from vqapr.extension.loading import as_loaded_fingerprint
+    from vqapr.component.loading import as_loaded_fingerprint
 
     workspace = Workspace.create(tmp_path)
     source = tmp_path / "model.py"

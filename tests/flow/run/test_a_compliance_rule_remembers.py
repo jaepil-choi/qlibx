@@ -29,10 +29,10 @@ from vqapr.authoring import (
     Compliance,
     ComplianceCall,
     ComplianceFinding,
-    EconomicAccountView,
     Hold,
     StrategyModel,
 )
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
@@ -41,7 +41,6 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository

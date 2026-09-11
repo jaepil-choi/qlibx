@@ -34,13 +34,13 @@ import duckdb
 import pytest
 
 from vqapr.cli.check import CODES, check
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import FailureSource
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
@@ -88,7 +88,7 @@ def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str
     load is a different refusal, and a fixture that fails to load would make these judgments look
     dead again for a new reason.
     """
-    from vqapr.extension.scaffold import render
+    from vqapr.component.scaffold import render
 
     source = root / f"{component_id}.py"
     source.write_text(
@@ -105,7 +105,7 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
     source = root / f"{component_id}.py"
     source.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
@@ -456,7 +456,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     to emit per requirement. The skill promises every INDEPENDENT problem at once, and one
     registration is one problem: the fields it wanted ride along as examples.
     """
-    from vqapr.extension.scaffold import render
+    from vqapr.component.scaffold import render
     from vqapr.flow.declaration.judgments import _judge_member_datasets, _members
     from vqapr.flow.declaration.preflight import RunFacts
 
@@ -674,7 +674,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
     Workspace.create(tmp_path)
     source = tmp_path / "limited.py"
     source.write_text(
-        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "from vqapr.public import KrxExchange, krx_rules\n"
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"

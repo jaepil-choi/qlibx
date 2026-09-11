@@ -422,7 +422,7 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     `no-short` ran clean, with nothing anywhere saying why. `NoShort` takes its id as a constructor
     argument defaulting to `no-short`, so config is a real third repair and the refusal says so.
     """
-    from vqapr.compliance.builtin import shipped_compliance_path
+    from vqapr.component.compliance.shipped import shipped_compliance_path
 
     source = shipped_compliance_path("no_short").as_posix()
 

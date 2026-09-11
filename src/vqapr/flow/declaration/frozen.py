@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
 
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable
 from vqapr.data.requirement import DataRequirement
@@ -23,7 +24,6 @@ from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.memory import ModelMemory, opening_memory
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (
     FINGERPRINT_PREFIX,
     ComplianceSet,

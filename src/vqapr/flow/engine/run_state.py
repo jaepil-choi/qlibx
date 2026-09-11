@@ -9,7 +9,7 @@ from enum import StrEnum
 from itertools import count
 from types import MappingProxyType
 
-from vqapr.authoring.records import InvocationRecorder
+from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.domain.account import (
     FILL_ORIGIN,
     AccountState,

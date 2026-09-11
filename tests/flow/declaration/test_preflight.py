@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
+from vqapr.component.exchange.academic import AcademicExchange
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.loading import load_exchange
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.source import SourceSpec
@@ -17,10 +21,6 @@ from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.fill import FillRule
 from vqapr.domain.memory import prepare_model_state
-from vqapr.exchange.venue import AcademicExchange
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.extension.loading import load_exchange
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
@@ -169,7 +169,7 @@ def _execution_exchange(
     path = root / f"{identifier}.py"
     path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
@@ -410,7 +410,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     no_sell_path.parent.mkdir(parents=True, exist_ok=True)
     no_sell_path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
@@ -601,7 +601,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     workspace, definition = _setup(root, model_price_parquet)
     path = root / "limited.py"
     path.write_text(
-        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "from vqapr.public import KrxExchange, krx_rules\n"
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"
@@ -629,7 +629,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     # The same venue with the regime off needs nothing extra and freezes cleanly.
     off_path = root / "unlimited.py"
     off_path.write_text(
-        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "from vqapr.public import KrxExchange, krx_rules\n"
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=False)\n"
@@ -663,7 +663,7 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
     path = root / "tracked.py"
     path.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
         "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
@@ -1048,7 +1048,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
     venue twice. Through `verify_run` each is read once: the strategy twice in all, because its
     initial state is still proved on a second fresh instance (`docs/issues/archive/076`).
     """
-    from vqapr.extension import loading
+    from vqapr.component import loading
     from vqapr.flow.declaration import preflight as preflight_module
     from vqapr.flow.declaration.verify import verify_run
 
@@ -1109,8 +1109,8 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     to import the strategy, the venue and every rule again and scan the execution horizon again
     on its first accepted intent. The verdict now carries `RunResources` -- the instances the
     verification loaded and the horizon it cut -- and `run` takes them: no import, no scan."""
+    from vqapr.component import loading
     from vqapr.data import scan
-    from vqapr.extension import loading
     from vqapr.flow.declaration.preflight import bound_execution_horizon
     from vqapr.flow.declaration.verify import verify_run
     from vqapr.public import run as execute_run

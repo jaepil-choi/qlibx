@@ -9,9 +9,7 @@ from vqapr.authoring import (
     Compliance,
     ComplianceCall,
     ComplianceFinding,
-    EconomicAccountView,
 )
-from vqapr.compliance.evaluation import evaluate_compliance
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -19,6 +17,7 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.intent import PortfolioTarget
 from vqapr.domain.valuation import ValuationService
+from vqapr.flow.run.compliance import evaluate_compliance
 
 
 class _Rule(Compliance):

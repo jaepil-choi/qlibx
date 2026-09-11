@@ -11,7 +11,7 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
-from vqapr.authoring.context import StrategyModelContext
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -20,9 +20,9 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
+from vqapr.flow.run.calls import StrategyModelContext
 from vqapr.flow.run.loop import RunLoop, strategy_loop
 from vqapr.project.run import ComplianceSet, StrategyConfig
 

@@ -26,6 +26,9 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
+from vqapr.component.conformance import prepare_component
+from vqapr.component.loading import authored_classes
+from vqapr.component.reference import ComponentKind, ComponentRef
 from vqapr.data.dataset import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
 from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
 from vqapr.data.source import SourceSpec
@@ -44,9 +47,6 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.instrument import export_roster
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.loading import authored_classes
-from vqapr.extension.prepare import prepare_component
 from vqapr.project.document import (
     ComponentDeclaration,
     DatasetDeclaration,

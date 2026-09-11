@@ -88,10 +88,10 @@ VERIFIED_AGAINST = "vqapr-0.15.0"
 LAST_VERIFIED_AT = "2026-09-10"
 
 KRX_COMMISSION_RATE = Decimal("0.0003")
-"""Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""
+"""Brokerage commission charged on both sides -- matches vqapr.component.exchange.krx."""
 
 KRX_SALE_TAX_RATE = Decimal("0.002")
-"""Securities transaction tax charged on sells only -- matches vqapr.exchange.venues.krx."""
+"""Securities transaction tax charged on sells only -- matches vqapr.component.exchange.krx."""
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)
 

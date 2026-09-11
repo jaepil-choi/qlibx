@@ -58,22 +58,40 @@ class UsageError(BoundedRefusal):
     the operation under way was parsing it. Rendered through a real `Failure` like every other
     refusal; `docs/issues/archive/030` (record `114`) ruled that the first refusal a new user ever
     sees is INSIDE the one documented shape, and now nothing spells that shape by hand.
+
+    **The fix names the form the command accepts** (record `250`). It said "run `vqapr --help`"
+    for every refusal, and an unrecognized argument is raised by the top-level parser, whose help
+    lists no subcommand's arguments; five agents reading `vqapr new instruments A B` refused drew
+    two opposite rules from it (`docs/issues/report-2026-09-11-a-usage-refusal-names-only-...`).
+    `usage` is the refusing command's own argparse usage line, and `observed` is what was
+    refused -- the unrecognized tokens, or the command line as typed -- rather than the program
+    name.
     """
 
-    def __init__(self, message: str, *, prog: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        prog: str,
+        usage: str | None = None,
+        observed: str | None = None,
+    ) -> None:
         self.message = message
         self.prog = prog
+        self.usage = usage
+        self.observed = observed
         super().__init__(message)
 
     def as_failure(self) -> Failure:
+        form = f"the form it accepts is `{self.usage}`; " if self.usage else ""
         return Failure.bounded(
             "usage.rejected",
             # argparse가 낸 문구를 그대로 싣는다. 여기서 새 문구를 만들면 package 판정과
             # 경쟁하는 두 번째 권위가 된다.
             self.message,
             status=Status.INVALID,
-            observed=self.prog,
-            fix=f"run `{self.prog} --help` to see the arguments this command accepts",
+            observed=self.observed or self.prog,
+            fix=f"{form}run `{self.prog} --help` to see what each argument means",
         )
 
     def as_dict(self) -> dict[str, Any]:

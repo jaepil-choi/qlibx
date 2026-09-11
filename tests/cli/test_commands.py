@@ -1121,6 +1121,43 @@ def test_a_rejected_command_line_still_answers_in_the_envelope(
     # argparse's wording rides verbatim; the CLI does not invent a second remedy text.
     assert "invalid choice" in payload["failures"][0]["requirement"]
     assert "datamodel" in payload["failures"][0]["requirement"]
+    # What was refused is the line as typed, not the program's name (record `250`).
+    assert "new bogus x" in payload["failures"][0]["observed"]
+
+
+def test_an_unrecognized_argument_is_refused_by_the_command_it_followed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/issues/report-2026-09-11-a-usage-refusal-names-only-vqapr-help-...` (record `250`).
+
+    argparse raises an unrecognized argument from the TOP-level parser, so the refusal said
+    "run `vqapr --help`" -- a page that lists no subcommand's arguments -- and `observed` was the
+    program name. Five agents met it; two wrote down opposite rules. The refusal now names the
+    subcommand's own form, and the tokens nobody accepted.
+    """
+    target = tmp_path / "i.yaml"
+    code, payload = _cli(
+        capsys,
+        "--project-root", str(tmp_path),
+        "new", "instruments", "A000020", "A000030", "--out", str(target),
+    )
+
+    assert code == 1
+    (failure,) = payload["failures"]
+    assert failure["code"] == "usage.rejected"
+    assert failure["observed"] == "A000030"
+    assert "`vqapr new --help`" in failure["fix"]
+    assert "--instruments" in failure["fix"], "the fix carries the form the command accepts"
+    assert not target.exists()
+
+    _, shown = _cli(
+        capsys,
+        "--project-root", str(tmp_path),
+        "show", "strategy", "sample-run", "--strategy", "sample-reversal-5d",
+    )
+    (refused,) = shown["failures"]
+    assert refused["observed"] == "--strategy sample-reversal-5d"
+    assert "`vqapr show --help`" in refused["fix"]
 
 
 def test_a_usage_refusal_is_a_400_at_the_usage_stage_with_no_dump(

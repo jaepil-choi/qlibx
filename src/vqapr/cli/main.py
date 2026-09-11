@@ -173,16 +173,35 @@ class _Parser(argparse.ArgumentParser):
 
     `--help` and `--version` leave through `exit()` rather than `error()`, so they keep argparse's
     own behaviour untouched.
+
+    A refusal names the refusing command's own usage line (record `250`). argparse raises an
+    UNRECOGNIZED argument from the top-level parser, whatever subcommand it followed, so
+    `main` parses with `parse_known_args` and hands the leftovers to `reject_unrecognized`, which
+    refuses them as the subcommand's parser -- `vqapr new`, not `vqapr`.
     """
 
+    commands: dict[str, argparse.ArgumentParser]
+
     def error(self, message: str) -> NoReturn:
+        raise self._refusal(message)
+
+    def reject_unrecognized(self, command: str | None, extras: Sequence[str]) -> NoReturn:
+        """Refuse arguments no parser consumed, as the subcommand they followed."""
+        owner = getattr(self, "commands", {}).get(command or "")
+        refusing = owner if isinstance(owner, _Parser) else self
+        refused = " ".join(extras)
+        raise refusing._refusal(f"unrecognized arguments: {refused}", observed=refused)
+
+    def _refusal(self, message: str, *, observed: str | None = None) -> UsageError:
         if "--project-root" in message and "unrecognized" in message:
             message = (
                 "--project-root must come before the subcommand: "
                 "vqapr --project-root <dir> <command>. "
                 "The current directory is the default when omitted."
             )
-        raise UsageError(message, prog=self.prog)
+        # argparse wraps a long usage over several indented lines; one line reads as one form.
+        usage = " ".join(self.format_usage().split()).removeprefix("usage: ")
+        return UsageError(message, prog=self.prog, usage=usage, observed=observed)
 
     def _print_message(self, message: str, file: Any = None) -> None:
         """Write help as UTF-8 bytes rather than through the inherited console encoding.
@@ -205,8 +224,9 @@ class _Parser(argparse.ArgumentParser):
         buffer.flush()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> _Parser:
     parser = _Parser(prog="vqapr")
+    parser.commands = {}
     parser.add_argument(
         "--project-root",
         type=Path,
@@ -229,6 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
         module.add_arguments(subparser)
         subparser.set_defaults(handler=module.run)
+        parser.commands[name] = subparser
     return parser
 
 
@@ -275,9 +296,15 @@ def _resolve_project_root(explicit: Path | None) -> Path:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
+    typed = list(sys.argv[1:] if argv is None else argv)
     try:
-        args = parser.parse_args(argv)
+        args, extras = parser.parse_known_args(typed)
+        if extras:
+            parser.reject_unrecognized(getattr(args, "command", None), extras)
     except UsageError as error:
+        if error.observed is None:
+            # What was refused, when argparse did not single out tokens: the line as typed.
+            error.observed = " ".join(["vqapr", *typed])
         # The command line never reached a handler, so there is no project root to dump beside.
         return emit(failure(error, stage=Stage.USAGE))
     try:

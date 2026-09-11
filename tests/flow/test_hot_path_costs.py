@@ -19,11 +19,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.data import scan, store
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.authoring.records import InvocationRecorder
-from vqapr.authoring.records import TableSpec
 from vqapr.flow.engine.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.public import (
     DatasetRegistration,
@@ -599,17 +598,17 @@ def test_a_framework_column_is_checked_by_type_not_by_cell(monkeypatch) -> None:
     """`append_columns` never asks a cell what it is; `append_batch` still asks every cell."""
     from decimal import Decimal
 
-    from vqapr.domain import shapes
+    from vqapr.domain import rows
 
     calls = 0
-    original = shapes.normalize_scalar
+    original = rows.normalize_scalar
 
     def counting(value):
         nonlocal calls
         calls += 1
         return original(value)
 
-    monkeypatch.setattr(shapes, "normalize_scalar", counting)
+    monkeypatch.setattr(rows, "normalize_scalar", counting)
     monkeypatch.setattr("vqapr.authoring.records.normalize_scalar", counting)
 
     names = [f"I{index:04d}" for index in range(1000)]
@@ -833,8 +832,7 @@ def test_a_framework_built_account_view_re_validates_nothing(monkeypatch) -> Non
     from vqapr.authoring import view as view_module
     from vqapr.authoring.view import EconomicAccountView
     from vqapr.compliance.evaluation import build_account_view
-    from vqapr.domain.account_state import AccountSnapshot
-    from vqapr.domain.values import Mark, MarkBatch
+    from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
 
     validated = 0
     original = view_module._copy_weights
@@ -891,8 +889,7 @@ def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
 def test_sequence_is_one_order_across_every_recorder_and_fill_of_a_run() -> None:
     from decimal import Decimal
 
-    from vqapr.domain.account_state import AccountSnapshot, AccountState
-    from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
+    from vqapr.domain.account import FILL_ORIGIN, AccountSnapshot, AccountState, LedgerEntry
     from vqapr.flow.engine.run_state import _fill_rows
 
     state = RunStateRepository(initial_account=AccountState(AccountSnapshot(0, Decimal(1), {})))

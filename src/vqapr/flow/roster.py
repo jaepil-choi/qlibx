@@ -25,7 +25,7 @@ from pathlib import Path
 # is that lowering it is the goal.
 from vqapr.data.validation import verify_roster
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
-from vqapr.domain.instruments import InstrumentRoster, build_roster
+from vqapr.domain.instrument import InstrumentRoster, build_roster
 from vqapr.project.store import Workspace
 
 WORKSPACE_ABSENT = "workspace.missing"

@@ -30,7 +30,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_member
-from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.flow.run.output import MATERIALIZED_DIRECTORY
 from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 from vqapr.record import (

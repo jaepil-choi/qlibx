@@ -14,9 +14,10 @@ from uuid import UUID
 
 import pytest
 
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.portfolio.intents import (
+from vqapr.domain.intent import (
+    Budget,
     EconomicPortfolioIntent,
+    PortfolioDirection,
     PortfolioTarget,
     validate_economic_intent,
 )

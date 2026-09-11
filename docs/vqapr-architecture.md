@@ -518,9 +518,10 @@ Compliance 규칙은 자기 id(`compliance_id`)를 한 번 선언하고, 싣기�
 | `instrument.py` | 종목의 정체 | §5.1 |
 | `schedule.py` | 판단 시각의 규칙과 얼린 사건 | §3.2 |
 | `intent.py` | 목표 포트폴리오 | §5.2 |
-| `listing.py` | 거래소가 한 종목을 거래하는 규칙 | §5.3 |
+| `cost.py` | 체결 비용 — 매수 · 매도 각각의 비율과 한 체결의 비용 | §5.3 · §8.4 |
+| `listing.py` | 거래소가 한 종목을 거래하는 규칙 · 방향(`Side`) | §5.3 |
 | `order.py` | 주문과 주문 계획 | §8.3 |
-| `fill.py` | 체결 · 체결 비용 · 언제 체결되나 · 체결 → 원장 항목 | §3.4 · §8.5 |
+| `fill.py` | 체결 · 언제 체결되나 · 체결 → 원장 항목 | §3.4 · §8.5 |
 | `account.py` | 계좌 aggregate | §9 |
 | `valuation.py` | 평가 가격 고르기 | §9.5 |
 | `rows.py` | 이식 가능한 행 (Scalar · Row · Rows) | 컴포넌트와 기록이 함께 쓴다 |
@@ -1272,9 +1273,10 @@ src/vqapr/
 │   ├── instrument.py        종목의 정체: Stock · ETF · Index · Factor · InstrumentRoster
 │   ├── schedule.py          Schedule(선언) → ScheduledEvent(얼린 사건)
 │   ├── intent.py            목표 포트폴리오: PortfolioIntent · PortfolioTarget · Budget · PortfolioDirection
-│   ├── listing.py           거래소가 종목을 거래하는 규칙: TradeRule · TradeTerms · ExchangeRulesView
-│   ├── order.py             주문: OrderRequest · OrderBatch · Side · plan_orders (목표 → 정수 주문)
-│   ├── fill.py              체결: Fill · FillBatch · FillCost · FillRule(언제 체결) · 체결 → 원장 항목
+│   ├── cost.py              체결 비용: FillCost · SideCost (매수 · 매도 각각의 비율)
+│   ├── listing.py           거래소가 종목을 거래하는 규칙: Side · TradeRule · TradeTerms · ExchangeRulesView
+│   ├── order.py             주문: OrderRequest · OrderBatch · plan_orders (목표 → 정수 주문)
+│   ├── fill.py              체결: Fill · FillBatch · FillRule(언제 체결) · 체결 → 원장 항목
 │   ├── account.py           계좌 aggregate: Account · AccountSnapshot · LedgerEntry · Mark · MarkBatch
 │   └── valuation.py         평가 가격 고르기: 새 가격 · 이어 든 가격(observed_at) · 가격 없음
 ├── data/              [10]  등록된 데이터를 그 시점까지만 읽기
@@ -1673,7 +1675,7 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `_internal/*` | 그대로 |
 | `domain/identifiers.py` | `domain/identifiers.py` |
 | `domain/errors.py`, `domain/inputs.py` | `domain/errors.py` |
-| `domain/values.py` | 나눈다: `domain/instants.py` (시간대 · 현지 시각 · 달력 이동), `domain/memory.py` (ModelMemory · 정규화), `domain/order.py` (Side), `domain/account.py` (Mark · MarkBatch · MarkSummary) |
+| `domain/values.py` | 나눈다: `domain/instants.py` (시간대 · 현지 시각 · 달력 이동), `domain/memory.py` (ModelMemory · 정규화), `domain/listing.py` (Side), `domain/account.py` (Mark · MarkBatch · MarkSummary) |
 | `domain/model_state.py` | `domain/memory.py` |
 | `domain/shapes.py` | 흩는다: `Grain` → `data/dataset.py` · `CrossSection` · `Series` → `data/panel.py` (domain의 `Panel` Protocol은 필요 없으면 삭제) · `Observation` → `data/observation.py` · `Rows` · `Row` · `Scalar` · 정규화 → `domain/rows.py` · `RecordChunk` → `record/chunk.py` |
 | `domain/wiring.py`, `extension/component.py::ComponentKind` | `domain/wiring.py` (`Role` 하나) |
@@ -1682,7 +1684,9 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `portfolio/intents.py`, `portfolio/budgets.py` | `domain/intent.py` |
 | `exchange/listings.py` | `domain/listing.py` |
 | `domain/orders.py`, `exchange/planning.py` | `domain/order.py` |
-| `domain/fills.py`, `domain/costs.py`, `exchange/conventions.py`, `domain/ledger.py::fill_entries` | `domain/fill.py` |
+| `domain/costs.py` | `domain/cost.py` — `fill.py`에 합치면 `fill → order → listing → fill` 순환이 생긴다 |
+| `domain/fills.py`, `exchange/conventions.py`의 `FillRule` · `ExactExecutionTarget`, `domain/ledger.py::fill_entries` | `domain/fill.py` (`FillRule`은 data 단계에서: 소스를 스캔하는 두 메서드가 `data/execution_table.py`로 간 뒤) |
+| `exchange/conventions.py`의 `ExecutionHorizon` | `data/execution_table.py` |
 | `domain/ledger.py`, `domain/account_state.py`, `account/account.py` | `domain/account.py` |
 | `account/marking.py`, `flow/run/valuation.py::_marks_from_execution_snapshot` | `domain/valuation.py` |
 | `data/sources.py` · `datasets.py` · `requirements.py` + `resolution.py` · `validation.py` · `windows.py` | `data/source.py` · `dataset.py` · `requirement.py` · `verification.py` · `window.py` |

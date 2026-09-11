@@ -28,9 +28,9 @@ from pathlib import Path
 import pytest
 
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.instruments import export_roster
-from vqapr.public import registered_roster, roster_report
+from vqapr.domain.instrument import export_roster
 from vqapr.project.store import Workspace
+from vqapr.public import registered_roster, roster_report
 
 
 def _project_with_a_roster(tmp_path: Path) -> Path:

@@ -24,8 +24,8 @@ from types import ModuleType
 from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.data.requirements import DataRequirement
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
-from vqapr.domain.values import normalize_memory
-from vqapr.exchange.listings import ExchangeRulesView
+from vqapr.domain.listing import ExchangeRulesView
+from vqapr.domain.memory import normalize_memory
 from vqapr.exchange.venue import AcademicExchange, Exchange
 from vqapr.exchange.venues.krx import KrxExchange
 from vqapr.extension.component import ComponentKind, ComponentRef

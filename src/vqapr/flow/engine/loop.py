@@ -20,8 +20,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.schedule import OperationOccurrence
 
 
 class Event(Protocol):

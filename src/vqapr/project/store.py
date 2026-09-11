@@ -28,7 +28,7 @@ from vqapr.domain.identifiers import (
     dataset_id,
     source_id,
 )
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.instants import require_tz_aware
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.document import read_workspace, write_workspace
 from vqapr.project.merge import (

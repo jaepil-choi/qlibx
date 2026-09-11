@@ -38,7 +38,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_strategy
-from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.record import read_table, table_ids
 from vqapr.report.record import (

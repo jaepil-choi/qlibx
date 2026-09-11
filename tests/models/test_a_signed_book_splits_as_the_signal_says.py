@@ -26,7 +26,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import PortfolioDirection
+from vqapr.domain.intent import PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
 
 

@@ -19,10 +19,15 @@ agent branches on, in this order:
   traceback when there was one, and always the file:line the refusal was raised from. An agent
   reads `status` to decide quickly and `cause` to decide correctly, including whether the
   fault is upstream's.
+
+A refusal of the user's own file -- a path that does not exist, a YAML that is not a mapping, a
+template that would overwrite a file -- is an input error in the same envelope (`InputError`), so an
+agent fixes its file instead of suspecting the framework.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 import traceback
 import uuid
@@ -31,9 +36,39 @@ from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from types import FrameType, TracebackType
+from typing import Any
+
+import yaml
+
+__all__ = [
+    "EXISTS",
+    "INCOMPLETE",
+    "INPUT_STAGE",
+    "MAX_EXAMPLES",
+    "MISSING",
+    "NOT_A_MAPPING",
+    "UNREADABLE",
+    "VALUE_INVALID",
+    "BoundedRefusal",
+    "Cause",
+    "Diagnosis",
+    "Failure",
+    "FailureSource",
+    "InputError",
+    "Stage",
+    "Status",
+    "VqaprError",
+    "collector",
+    "read_yaml_mapping",
+    "refuse_existing",
+    "status_of",
+    "unhandled",
+]
+
 
 MAX_EXAMPLES = 5
 """위반 예시 상한. 8.7M행짜리 원천에서 예시가 무한히 실려 나가면 안 된다(PRD §2.6)."""
+
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 """`src/vqapr`: a traceback frame under here is the framework's; one elsewhere that is not the
@@ -533,3 +568,209 @@ class _Collector:
 
 def collector(stage: Stage) -> _Collector:
     return _Collector(stage=stage)
+
+
+INPUT_STAGE = Stage.USAGE
+
+
+MISSING = "argument.file_missing"
+
+
+UNREADABLE = "argument.file_unreadable"
+
+
+NOT_A_MAPPING = "argument.not_a_mapping"
+
+
+EXISTS = "argument.file_exists"
+
+
+INCOMPLETE = "argument.keys_missing"
+
+
+VALUE_INVALID = "argument.value_invalid"
+
+
+_STATUS_BY_CODE: dict[str, Status] = {
+    MISSING: Status.MISSING,
+    UNREADABLE: Status.UNAVAILABLE,
+    NOT_A_MAPPING: Status.INVALID,
+    EXISTS: Status.CONFLICT,
+    INCOMPLETE: Status.INVALID,
+    VALUE_INVALID: Status.INVALID,
+}
+"""The status each shared code carries. A site raising a code of its own passes `status=`."""
+
+
+class BoundedRefusal(Exception):
+    """입력이 package 단계에 도달하기 전에 거부된 경우.
+
+    이런 실패의 본문은 이미 유계다 — 요구한 것과 관찰한 것이 전부다. 원인(`cause`)은 그 본문
+    안의 한 항목으로 실려 나가고(record `171`), 봉투는 그 밖에 아무것도 덧붙이지 않는다: 읽기만
+    하는 명령이 거부하면서 `.vqapr/`에 dump 파일을 만드는 일은 없다. 거부가 부작용을 남기는
+    것은 거부가 아니다.
+
+    `failure()`는 이 타입을 본문만 실어 내보낸다.
+    """
+
+    def as_dict(self) -> dict[str, Any]:
+        raise NotImplementedError
+
+
+class InputError(BoundedRefusal):
+    """사용자가 준 입력 자체가 거부된 경우. package 단계에는 도달하지 못했다."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        requirement: str,
+        observed: str,
+        retry: str | None = None,
+        examples: Sequence[str] = (),
+        source: FailureSource | None = None,
+        fix: str | None = None,
+        status: Status | None = None,
+    ) -> None:
+        self.code = code
+        self.requirement = requirement
+        self.observed = observed
+        self.retry = retry
+        self.source = source if source is not None else FailureSource()
+        # `retry` and `fix` answer the same question at two scales -- what to do about this
+        # refusal -- and this class had `retry` before the envelope existed. Falling back to it
+        # keeps every existing call site emitting a real `fix` instead of an empty one, rather
+        # than requiring sixteen edits to say what the site already says.
+        self.fix = fix or retry or "correct the input named above, then retry"
+        # The six shared codes know their status; a site with a code of its own says it. A code
+        # that is neither is a programming error, and it is refused here, at construction.
+        self.status = status if status is not None else _STATUS_BY_CODE[code]
+        # 상한은 `Failure.bounded`와 같은 이유로 둔다. 잘린 뒤에도 전체 개수는 남긴다.
+        self.examples = tuple(str(item) for item in examples[:MAX_EXAMPLES])
+        self.example_total = len(examples)
+        # The `raise InputError(...)` line, one frame out from this constructor.
+        self.raised_at = Cause.here(skip=1)
+        super().__init__(requirement)
+
+    def as_failure(self) -> Failure:
+        """This refusal as the package's own `Failure`, so it renders through the one shape.
+
+        The same fields a package refusal carries. A reader parses these by name, and a CLI-level
+        refusal that shipped four of them made the envelope conditional on which layer happened to
+        refuse -- which is precisely what a single documented shape exists to prevent. `check`
+        renders an `InputError` through this too, rather than through a second literal of its own.
+
+        The cause is the exception this refusal was raised `from`, when there was one -- the
+        `FileNotFoundError`, the `YAMLError` -- whole; otherwise `Failure` records the line that
+        decided to refuse.
+        """
+        # Already bounded in `__init__`, so the direct constructor rather than `bounded`: cutting
+        # the examples again would report `example_total` against a list cut twice.
+        return Failure(
+            code=self.code,
+            status=self.status,
+            requirement=self.requirement,
+            fix=self.fix,
+            source=self.source,
+            observed=self.observed,
+            cause=self.raised_at if self.__cause__ is None else Cause.of(self.__cause__),
+            examples=self.examples,
+            example_total=self.example_total,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "stage": str(INPUT_STAGE),
+            "mutation": False,
+            "retry_precondition": self.retry,
+            "correlation_id": None,
+            "failures": [self.as_failure().as_dict()],
+        }
+
+
+_BOOLEAN = "tag:yaml.org,2002:bool"
+
+
+class _DeclarationLoader(yaml.SafeLoader):
+    """PyYAML's safe loader with YAML 1.2's booleans: only `true` and `false` are booleans.
+
+    PyYAML resolves YAML 1.1, where `on`, `off`, `yes`, `no`, `y` and `n` are booleans too. So
+    `agenda.on: last` -- the key the `vqapr new run` template, the run-backtest skill and the
+    0.14.4 notes all write unquoted -- arrived as `{True: "last"}` and was refused as "Keys should
+    be strings" (report 2026-09-11, record `262`). No declaration key or value means a YAML 1.1
+    boolean, so the word is read as the word, wherever it appears.
+
+    The pure-Python loader: a declaration is a few dozen lines, so libyaml buys nothing here (the
+    workspace document, which grows with every agenda occurrence, is read through it elsewhere).
+    """
+
+
+_DeclarationLoader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != _BOOLEAN]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
+_DeclarationLoader.add_implicit_resolver(
+    _BOOLEAN, re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
+)
+
+
+def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
+    """Read one user-authored YAML document, or refuse in a way an agent can parse.
+
+    `what`은 어느 문서인지 이름 붙인다. 명령이 파일 여러 개를 받게 되어도 어느 것이 문제인지
+    envelope만 보고 알 수 있어야 한다.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise InputError(
+            MISSING,
+            requirement=f"{what} must exist at the given path",
+            observed=f"no file at {path}",
+            source=FailureSource(file=str(path)),
+            retry="create the file, then retry",
+        ) from error
+    except OSError as error:
+        raise InputError(
+            UNREADABLE,
+            requirement=f"{what} must be readable",
+            observed=f"{path}: {error.strerror or error}",
+            source=FailureSource(file=str(path)),
+        ) from error
+
+    try:
+        document = yaml.load(text, Loader=_DeclarationLoader)
+    except yaml.YAMLError as error:
+        # YAML 파서의 문구는 줄/열을 담고 있어 그 자체가 증거다. 새로 쓰지 않는다.
+        raise InputError(
+            NOT_A_MAPPING,
+            requirement=f"{what} must be valid YAML",
+            observed=str(error).replace("\n", " "),
+        ) from error
+
+    if not isinstance(document, dict):
+        raise InputError(
+            NOT_A_MAPPING,
+            requirement=f"{what} must be a YAML mapping",
+            observed=f"{path} parsed as {type(document).__name__}",
+            source=FailureSource(file=str(path)),
+        )
+    return document
+
+
+def refuse_existing(path: Path, *, what: str) -> None:
+    """Refuse to overwrite, naming the file rather than raising a bare `FileExistsError`.
+
+    재실행은 agent가 가장 흔하게 하는 일이다(Spawn Gate가 rung마다 3회를 허용한다). 그 경로가
+    `unhandled`로 나가면 재시도 자체가 framework 고장으로 보고된다.
+    """
+    if path.exists():
+        raise InputError(
+            EXISTS,
+            requirement=f"{what} must not already exist",
+            observed=f"{path} already exists",
+            source=FailureSource(file=str(path)),
+            retry="remove it or pass a different --out, then retry",
+        )

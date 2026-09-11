@@ -26,12 +26,11 @@ import pyarrow.compute as pc
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.identifiers import DatasetId, dataset_id
-from vqapr.domain.orders import OrderBatch
-from vqapr.domain.values import side_of
+from vqapr.domain.listing import ExchangeRulesView, side_of
+from vqapr.domain.order import OrderBatch
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillRule
-from vqapr.exchange.listings import ExchangeRulesView
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 

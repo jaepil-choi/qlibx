@@ -21,18 +21,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from vqapr.account.account import Account, PreparedAppend
-from vqapr.account.marking import SelectedMark, ValuationService
 from vqapr.authoring import AccountHistoryInput, Compliance, Component, Hold, StrategyModel
 from vqapr.authoring.records import TableSpec
 from vqapr.compliance.evaluation import ComplianceReport
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountMark, AccountSnapshot
-from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.account import (
+    Account,
+    AccountMark,
+    AccountSnapshot,
+    MarkBatch,
+    MarkSummary,
+    PreparedAppend,
+)
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
-from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.values import MarkBatch, MarkSummary, ModelMemory, normalize_memory
+from vqapr.domain.instrument import InstrumentRoster
+from vqapr.domain.intent import EconomicPortfolioIntent
+from vqapr.domain.memory import ModelMemory, normalize_memory
+from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.valuation import SelectedMark, ValuationService
 from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
 from vqapr.exchange.execution_table import (
     ExactExecutionSnapshot,
@@ -60,9 +67,6 @@ from vqapr.flow.engine.run_state import (
     FILL_TABLE,
     AcceptedRunState,
     RunStateRepository,
-)
-from vqapr.portfolio.intents import (
-    EconomicPortfolioIntent,
 )
 
 

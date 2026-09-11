@@ -39,7 +39,7 @@ from vqapr.authoring import (
 from vqapr.authoring.history import AccountHistory
 from vqapr.data.panel import PanelWindow
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.shapes import Grain
 
 

@@ -19,7 +19,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import Budget
+from vqapr.domain.intent import Budget
 from vqapr.public import PortfolioDirection
 
 

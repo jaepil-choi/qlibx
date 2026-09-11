@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.data.lookback import CalendarLookback
-from vqapr.domain import values
-from vqapr.domain.values import iana_zone
+from vqapr.domain import instants
+from vqapr.domain.instants import iana_zone
 from vqapr.exchange.conventions import FillRule
 
 
@@ -32,7 +32,7 @@ def test_a_misspelt_zone_is_the_names_fault() -> None:
 def test_a_machine_with_no_database_is_told_to_install_tzdata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(values, "available_timezones", set)
+    monkeypatch.setattr(instants, "available_timezones", set)
 
     with pytest.raises(ValueError, match=r"no IANA time zone database.*`uv add tzdata`"):
         iana_zone("Asia/Seol")

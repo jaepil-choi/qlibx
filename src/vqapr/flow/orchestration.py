@@ -30,7 +30,6 @@ from itertools import batched
 from pathlib import Path
 from types import MappingProxyType
 
-from vqapr.account.account import Account
 from vqapr.authoring import Component
 from vqapr.authoring.history import retained_marks
 from vqapr.compliance.evaluation import (
@@ -43,11 +42,10 @@ from vqapr.data.scan import ScanSession
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountState
-from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
-from vqapr.domain.inputs import InputError
+from vqapr.domain.account import Account, AccountState
+from vqapr.domain.errors import Failure, FailureSource, InputError, Stage, Status, VqaprError
+from vqapr.domain.memory import normalize_memory
 from vqapr.domain.shapes import Grain
-from vqapr.domain.values import normalize_memory
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,

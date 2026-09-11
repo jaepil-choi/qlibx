@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from tests.cli.test_krx_cost_journey import ETF, STOCK, _STRATEGY, _cli, _declaration, _parquets
-from vqapr.domain.instruments import export_roster
+from tests.cli.test_krx_cost_journey import _STRATEGY, ETF, STOCK, _cli, _declaration, _parquets
+from vqapr.domain.instrument import export_roster
 from vqapr.record import read_strategy_record, read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")

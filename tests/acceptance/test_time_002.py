@@ -12,7 +12,6 @@ import pytest
 
 import vqapr.flow.run.execution as execution_phase
 import vqapr.flow.run.valuation as valuation_phase
-from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
     Compliance,
     ComplianceCall,
@@ -28,21 +27,29 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
+from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.errors import VqaprError
-from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.instruments import instruments as _instruments
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.instrument import InstrumentRoster
+from vqapr.domain.instrument import instruments as _instruments
+from vqapr.domain.intent import (
+    Budget,
+    EconomicPortfolioIntent,
+    IntentSourceRef,
+    PortfolioDirection,
+    validate_economic_intent,
+)
+from vqapr.domain.listing import ListingAccess
+from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
 from vqapr.exchange.conventions import ExactExecutionTarget, FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
     exact_execution_snapshot,
 )
-from vqapr.exchange.listings import ListingAccess
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,
     CallbackEvidence,
@@ -53,18 +60,11 @@ from vqapr.flow.engine.artifacts import (
     SimulationFailureKind,
     SimulationStage,
 )
-from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.run.loop import RunLoop, AcceptedIntent, DueExecutionTrace, strategy_loop
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.portfolio.intents import (
-    EconomicPortfolioIntent,
-    IntentSourceRef,
-    validate_economic_intent,
-)
-from vqapr.public import register_dataset
+from vqapr.flow.run.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
+from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
 

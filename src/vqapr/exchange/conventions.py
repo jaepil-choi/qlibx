@@ -33,7 +33,7 @@ from zoneinfo import ZoneInfo
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
-from vqapr.domain.values import iana_zone
+from vqapr.domain.instants import iana_zone
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
 _DURATION = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")

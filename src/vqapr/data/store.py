@@ -23,8 +23,9 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.resolution import resolve_field
 from vqapr.data.sources import SourceSpec, physical_digest
 from vqapr.domain.identifiers import DatasetId
-from vqapr.domain.shapes import Grain, Rows, normalize_rows
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.rows import Rows, normalize_rows
+from vqapr.domain.shapes import Grain
 
 
 class DatasetCatalog(Protocol):

@@ -10,7 +10,7 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import AccessRecord, DuckDbObservationStore, ObservationBatch
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.instants import require_tz_aware
 
 
 class ModelWindow:

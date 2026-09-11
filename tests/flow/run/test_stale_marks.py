@@ -18,9 +18,8 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.account.marking import SelectedMark
-from vqapr.domain.account_state import AccountMark
-from vqapr.domain.values import Mark, MarkBatch
+from vqapr.domain.account import AccountMark, Mark, MarkBatch
+from vqapr.domain.valuation import SelectedMark
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.flow.run.valuation import _marks_from_execution_snapshot
 

@@ -22,8 +22,8 @@ from types import MappingProxyType
 
 from pydantic import ConfigDict
 
+from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.shapes import CrossSection
-from vqapr.domain.values import require_tz_aware
 
 _ROW_RESERVED_FIELDS = frozenset({"available_at", "instrument"})
 """Reserved because `ModelWindow`/`Observation` rows already carry them as named fields."""

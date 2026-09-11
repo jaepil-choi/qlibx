@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.domain.instruments import export_roster
+from vqapr.domain.instrument import export_roster
 
 
 def _cli(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, dict]:

@@ -55,7 +55,7 @@ class Holds(va.StrategyModel):
 
 from decimal import Decimal
 from vqapr.exchange.venue import AcademicExchange, TradeRule
-from vqapr.exchange.listings import ListingAccess
+from vqapr.public import ListingAccess
 
 
 class Venue(AcademicExchange):

@@ -28,8 +28,8 @@ from vqapr.authoring.reads import DatasetInput, requirements_for
 from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.authoring.result import ComplianceFinding, Hold, Rebalance
 from vqapr.data.requirements import DataRequirement
-from vqapr.domain.shapes import Rows
-from vqapr.domain.values import ModelMemory
+from vqapr.domain.memory import ModelMemory
+from vqapr.domain.rows import Rows
 from vqapr.domain.wiring import WIRING, Role, Wiring
 
 

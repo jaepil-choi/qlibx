@@ -26,22 +26,24 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from vqapr.account.account import AccountMode
 from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
 from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
 from vqapr.data.sources import SourceSpec
 from vqapr.data.validation import verify_roster, verify_source
 from vqapr.domain import identifiers
+from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import (
+    INCOMPLETE,
+    VALUE_INVALID,
     Diagnosis,
     Failure,
     FailureSource,
+    InputError,
     Stage,
     Status,
     collector,
 )
-from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
-from vqapr.domain.instruments import export_roster
+from vqapr.domain.instrument import export_roster
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.loading import authored_classes
 from vqapr.extension.prepare import prepare_component
@@ -444,7 +446,7 @@ def _instruments(bodies: dict[str, Any], transaction: Transaction, *, base: Path
     """
     import hashlib
 
-    from vqapr.domain.instruments import build_roster
+    from vqapr.domain.instrument import build_roster
 
     name = "instruments"
     retired = bool(bodies) and all(
@@ -561,7 +563,7 @@ def _undeclared_roster_tables(resolved: Mapping[str, Path]) -> list[str]:
     false line in a success receipt, which is the one thing a receipt read on the success path
     must not carry.
     """
-    from vqapr.domain.instruments import InstrumentKind
+    from vqapr.domain.instrument import InstrumentKind
 
     declared = {path.resolve() for path in resolved.values()}
     prefixes: set[tuple[Path, str]] = set()

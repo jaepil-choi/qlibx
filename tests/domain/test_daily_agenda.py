@@ -15,7 +15,7 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from vqapr.domain.agendas import OperationAgenda
+from vqapr.domain.schedule import OperationAgenda
 
 SEOUL = "Asia/Seoul"
 NEW_YORK = "America/New_York"

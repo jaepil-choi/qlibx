@@ -25,7 +25,6 @@ from datetime import date, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
     Hold,
     StrategyModel,
@@ -35,14 +34,14 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import RunLoop, strategy_loop
+from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 
 ROWS_PER_OCCURRENCE = 200

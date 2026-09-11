@@ -25,7 +25,6 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
     Compliance,
     ComplianceCall,
@@ -37,9 +36,9 @@ from vqapr.authoring import (
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef

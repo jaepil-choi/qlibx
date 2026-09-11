@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from vqapr import authoring
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.domain.intent import Budget, PortfolioDirection
 
 UTC_NOW = datetime(2024, 3, 5, 15, 30, tzinfo=UTC)
 NAIVE_NOW = datetime(2024, 3, 5, 15, 30)

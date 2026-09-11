@@ -28,8 +28,7 @@ from vqapr.authoring import Compliance, ComplianceFinding, EconomicAccountView
 from vqapr.authoring.context import ComplianceContext
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.values import MarkBatch
+from vqapr.domain.account import AccountSnapshot, MarkBatch
 
 DEFAULT_RELATIVE_TOLERANCE = Decimal("0.01")
 DEFAULT_ABSOLUTE_TOLERANCE = Decimal("0.001")

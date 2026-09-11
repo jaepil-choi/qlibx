@@ -20,7 +20,7 @@ from vqapr.authoring import (
     RowsLookback,
     StrategyModel,
 )
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.domain.intent import Budget, PortfolioDirection
 
 STRATEGY_ID = "sample-reversal-5d"
 DATASET_ID = "sample-prices"

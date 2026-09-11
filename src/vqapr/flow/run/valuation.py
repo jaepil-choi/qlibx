@@ -12,9 +12,9 @@ from dataclasses import replace
 from datetime import datetime
 from decimal import Decimal
 
-from vqapr.account.marking import SelectedMark
 from vqapr.authoring.records import InvocationRecorder
-from vqapr.domain.account_state import AccountMark, AccountSnapshot
+from vqapr.domain.account import AccountMark, AccountSnapshot
+from vqapr.domain.valuation import SelectedMark
 from vqapr.flow.engine.artifacts import (
     MarkEvidence,
     SimulationFailureKind,

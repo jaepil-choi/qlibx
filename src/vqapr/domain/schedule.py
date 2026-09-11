@@ -28,11 +28,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from vqapr.domain.identifiers import AgendaId, OccurrenceId, occurrence_id
-from vqapr.domain.values import (
-    LocalInstantDeclaration,
-    declare_local_instant,
-    require_tz_aware,
-)
+from vqapr.domain.instants import LocalInstantDeclaration, declare_local_instant, require_tz_aware
 
 SCHEDULED_PRIORITY = 0
 """The second term of a scheduled occurrence's sort key. A due event (`flow/loop.py`) sorts at

@@ -41,7 +41,7 @@ from vqapr.domain.errors import (
     VqaprError,
     collector,
 )
-from vqapr.domain.instruments import INSTRUMENT_ID_FIELD, KIND_FIELD
+from vqapr.domain.instrument import INSTRUMENT_ID_FIELD, KIND_FIELD
 from vqapr.domain.shapes import Grain
 
 _RETRY = "fix the prepared dataset, then register again"

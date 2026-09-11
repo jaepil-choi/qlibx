@@ -7,10 +7,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account import AccountSnapshot, MarkSummary
 from vqapr.domain.errors import Failure, FailureSource, VqaprError, status_of
 from vqapr.domain.identifiers import ModelStateRef
-from vqapr.domain.values import MarkSummary, require_tz_aware
+from vqapr.domain.instants import require_tz_aware
 
 MAX_OBSERVED_CHARS = 500
 """Upper bound for one serialized observation. The unbounded body belongs in a dump file."""

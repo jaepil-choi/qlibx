@@ -80,7 +80,7 @@ def _exchange_component(root: Path) -> Path:
     path.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"
@@ -125,7 +125,7 @@ def _register_roster(
     root: Path, capsys: pytest.CaptureFixture[str], universe: dict[str, str]
 ) -> dict:
     """Declare what each id IS, through `vqapr register` -- the way a user does."""
-    from vqapr.domain.instruments import export_roster
+    from vqapr.domain.instrument import export_roster
 
     written = export_roster(universe, root / "roster")
     declaration = root / "roster.yaml"
@@ -742,7 +742,7 @@ def test_list_instruments_answers_without_opening_the_sidecar_by_hand(
     Empty is an answer, not a failure: `list` is the command an agent runs first to orient itself,
     and a project with no roster is an ordinary state.
     """
-    from vqapr.domain.instruments import export_roster
+    from vqapr.domain.instrument import export_roster
 
     # Before a workspace exists at all, and after one exists with no roster. Both are zero.
     code, empty = _cli(capsys, "--project-root", str(tmp_path), "list", "instruments")

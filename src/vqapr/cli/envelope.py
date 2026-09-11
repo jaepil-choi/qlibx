@@ -21,8 +21,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from vqapr.domain.errors import Failure, Stage, Status, unhandled
-from vqapr.domain.inputs import BoundedRefusal
+from vqapr.domain.errors import BoundedRefusal, Failure, Stage, Status, unhandled
 from vqapr.project.store import WORKSPACE_DIRECTORY
 
 DIAGNOSTICS_DIRECTORY = "diagnostics"

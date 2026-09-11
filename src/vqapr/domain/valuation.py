@@ -1,7 +1,11 @@
-"""Closed valuation service: every held position needs an explicit selected mark.
+"""Valuation: every held position needs an explicitly selected price.
 
-Moved from `valuation/marking.py` beside `flow/run/valuation.py`, its consumer (one-shape
-Step 7, record 162); `Mark`/`MarkBatch` are values and live in `domain/values.py`."""
+`SelectedMark` is one selected price and the instant it was observed -- the same instant for a name
+that traded at the cutoff, an earlier one for a name that is halted or delisted, whose position is
+carried at that earlier price rather than written down to nothing. `ValuationService` turns the
+selected prices and a snapshot into a `MarkBatch`; a holding with no price at all leaves the
+valuation and stays in the book.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +14,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.values import Mark, MarkBatch, require_tz_aware
+from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
+from vqapr.domain.instants import require_tz_aware
+
+__all__ = [
+    "SelectedMark",
+    "ValuationError",
+    "ValuationService",
+]
 
 
 class ValuationError(ValueError):

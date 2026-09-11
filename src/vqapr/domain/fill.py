@@ -1,13 +1,32 @@
-"""Typed, account-preparable execution results."""
+"""What a venue did with an order batch, and the ledger entries it makes.
+
+A `Fill` carries the requested, sized and dealt quantity, the price, the cost and the category it
+was charged as. A name the venue did not fill carries one of four reasons -- `absent` (not on the
+venue at that instant), `nontradable`, `no_trade` (a zero delta) or `unfunded` (the cash went to
+earlier orders) -- and is never disguised as a fill.
+
+`fill_entries` is the producer's half of the ledger contract: the fill already proved its numbers
+agree with each other, and the account is handed the resulting deltas and asks nothing further.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
-from vqapr.domain.costs import FillCost
-from vqapr.domain.instruments import InstrumentKind
+from vqapr.domain.account import FILL_ORIGIN, LedgerEntry
+from vqapr.domain.cost import FillCost
+from vqapr.domain.instrument import InstrumentKind
+from vqapr.domain.order import OrderBatch
+
+__all__ = [
+    "Fill",
+    "FillBatch",
+    "ZeroDealtReason",
+    "fill_entries",
+]
 
 
 class ZeroDealtReason(StrEnum):
@@ -138,3 +157,47 @@ class FillBatch:
         instruments = tuple(fill.instrument_id for fill in self.fills)
         if len(instruments) != len(set(instruments)):
             raise ValueError("a FillBatch may contain each instrument only once")
+
+
+def fill_entries(
+    at: datetime, fills: FillBatch, orders: OrderBatch | None = None
+) -> tuple[LedgerEntry, ...]:
+    """The entries one fill batch makes, one per fill, in the batch's own order.
+
+    The producer's half of §5.2: the venue said what each fill dealt at what price and cost, and
+    `Fill` already proved those agree with each other. The ledger is handed the resulting deltas
+    and the facts a reader of `vqapr.fill` needs, and asks nothing further.
+
+    `orders` is the batch the fills answer. Each fill's `sized_quantity` -- what its weight sized
+    to before the planner cut buys to the cash -- is read from it here, once, for every venue
+    (record `261`); without it the value is `None`.
+    """
+    if not isinstance(fills, FillBatch):
+        raise TypeError("fills must be a FillBatch")
+    sized = (
+        {}
+        if orders is None
+        else {request.instrument_id: request.sized_quantity for request in orders.requests}
+    )
+    return tuple(_fill_entry(at, fill, sized.get(fill.instrument_id)) for fill in fills.fills)
+
+
+def _fill_entry(at: datetime, fill: Fill, sized: Decimal | None) -> LedgerEntry:
+    dealt = fill.dealt_quantity
+    return LedgerEntry(
+        at=at,
+        cash=fill.cash_delta,
+        positions={fill.instrument_id: dealt} if dealt != 0 else {},
+        origin=FILL_ORIGIN,
+        detail={
+            "instrument": fill.instrument_id,
+            "requested_quantity": str(fill.requested_quantity),
+            "sized_quantity": None if sized is None else str(sized),
+            "dealt_quantity": str(dealt),
+            "price": None if fill.price is None else str(fill.price),
+            "commission": str(fill.cost.commission),
+            "tax": str(fill.cost.tax),
+            "reason": None if fill.reason is None else str(fill.reason),
+            "kind": None if fill.kind is None else str(fill.kind),
+        },
+    )

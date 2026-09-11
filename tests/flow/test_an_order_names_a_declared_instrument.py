@@ -19,10 +19,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import FailureSource, Stage, Status, VqaprError
-from vqapr.domain.instruments import (
+from vqapr.domain.instrument import (
     INSTRUMENT_UNDECLARED,
     InstrumentRoster,
     instruments,
@@ -31,7 +30,14 @@ from vqapr.domain.instruments import (
 )
 from vqapr.flow.declaration import judgments
 from vqapr.flow.declaration.roster import ROSTER_ABSENT, require_declared_roster
-from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
+from vqapr.project.run import (
+    DataModelEntry,
+    RunAgenda,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 from vqapr.project.store import Workspace
 from vqapr.public import register_instruments
 

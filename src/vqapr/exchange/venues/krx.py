@@ -21,21 +21,23 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import field_validator
 
-from vqapr.domain.costs import FREE, FillCost, SideCost
-from vqapr.domain.fills import Fill, FillBatch, ZeroDealtReason
-from vqapr.domain.instruments import Instrument, InstrumentKind
-from vqapr.domain.instruments import instruments as build_instruments
-from vqapr.domain.orders import OrderRequest
-from vqapr.domain.values import ModelMemory, Side, side_of
-from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
-from vqapr.exchange.listings import (
+from vqapr.domain.cost import FREE, FillCost, SideCost
+from vqapr.domain.fill import Fill, FillBatch, ZeroDealtReason
+from vqapr.domain.instrument import Instrument, InstrumentKind
+from vqapr.domain.instrument import instruments as build_instruments
+from vqapr.domain.listing import (
     ExchangeRulesView,
     ExecutionFieldRequirement,
     ListingAccess,
+    Side,
     TradeRule,
     TradeTerms,
+    side_of,
     trade_rules_by_kind,
 )
+from vqapr.domain.memory import ModelMemory
+from vqapr.domain.order import OrderRequest
+from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.venue import Exchange, ExecutionCall
 
 COMMISSION_RATE = Decimal("0.0003")

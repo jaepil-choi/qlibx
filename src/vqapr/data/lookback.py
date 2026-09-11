@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
-from vqapr.domain.values import at_local, iana_zone, require_tz_aware, shift_calendar
+from vqapr.domain.instants import at_local, iana_zone, require_tz_aware, shift_calendar
 
 
 class _Lookback(BaseModel):

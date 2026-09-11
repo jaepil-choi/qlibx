@@ -8,7 +8,7 @@ answer yes to the time axis and belong to the execution table.
 
 This module is the reason a cost band can name a *kind* instead of an instrument id. KRX exempts
 ETFs from the sale tax stocks pay, and that exemption is a rule about a category, not about a list
-of tickers -- see ``vqapr.domain.costs``.
+of tickers -- see ``vqapr.domain.cost``.
 
 The four categories are the ones ``UC-ACADEMIC-001`` names:
 

@@ -21,8 +21,8 @@ import pytest
 from vqapr.cli.list_ import run as list_run
 from vqapr.cli.show import record_view
 from vqapr.cli.show import run as show_run
+from vqapr.domain.errors import InputError
 from vqapr.record import RunRecordWriter, read_record
-from vqapr.domain.inputs import InputError
 
 _RECORD = {
     "account": {"version": 7, "cash": "1000", "positions": {"A005930": "5"}},

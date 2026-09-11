@@ -4,9 +4,9 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
 from vqapr.domain.identifiers import agenda_id, occurrence_id
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
 from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
 
 

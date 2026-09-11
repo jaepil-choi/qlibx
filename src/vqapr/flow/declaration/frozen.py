@@ -15,14 +15,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
 
-from vqapr.account.account import AccountMode
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
-from vqapr.domain.values import ModelMemory, opening_memory
+from vqapr.domain.memory import ModelMemory, opening_memory
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (

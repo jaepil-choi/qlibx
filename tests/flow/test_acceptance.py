@@ -5,9 +5,8 @@ from datetime import UTC, datetime
 import pytest
 
 import vqapr.flow.engine.run_state as model_state
-from vqapr.domain.values import normalize_memory
-from vqapr.authoring.records import InvocationRecorder
-from vqapr.authoring.records import TableSpec
+from vqapr.authoring.records import InvocationRecorder, TableSpec
+from vqapr.domain.memory import normalize_memory
 from vqapr.flow.engine.run_state import (
     AcceptedRunState,
     LifecycleKind,

@@ -5,7 +5,6 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.account.marking import ValuationService
 from vqapr.authoring import (
     Compliance,
     ComplianceCall,
@@ -17,8 +16,9 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.portfolio.intents import PortfolioTarget
+from vqapr.domain.account import AccountSnapshot
+from vqapr.domain.intent import PortfolioTarget
+from vqapr.domain.valuation import ValuationService
 
 
 class _Rule(Compliance):

@@ -20,7 +20,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from vqapr.domain.values import normalize_memory
+from vqapr.domain.memory import normalize_memory
 from vqapr.extension.component import ComponentKind
 
 

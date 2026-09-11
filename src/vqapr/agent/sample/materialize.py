@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from vqapr.domain.instruments import export_roster
+from vqapr.domain.instrument import export_roster
 
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"

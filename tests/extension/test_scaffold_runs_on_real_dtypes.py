@@ -44,8 +44,8 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model, load_strategy_model
 from vqapr.extension.scaffold import render

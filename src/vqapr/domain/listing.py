@@ -20,6 +20,9 @@ Two declarations still meet here, and those are genuinely different (canon 2.8):
 The join is by ``instrument_id``. ``TradeTerms`` declares one rule per *category* and expands it,
 because a venue rarely has three thousand distinct rules -- but the resolved form stays
 per-instrument, because some venues genuinely do (HKEX board lots differ by instrument).
+
+`Side` lives here because a listing permits sides and charges per side; orders and fills read it
+from here.
 """
 
 from __future__ import annotations
@@ -32,8 +35,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator
 
-from vqapr.domain.costs import FREE, FillCost, SideCost
-from vqapr.domain.instruments import (
+from vqapr.domain.cost import FREE, FillCost, SideCost
+from vqapr.domain.instrument import (
     INSTRUMENT_TYPES,
     Instrument,
     InstrumentKind,
@@ -41,7 +44,33 @@ from vqapr.domain.instruments import (
     base_notional,
     base_quantity_for,
 )
-from vqapr.domain.values import Side
+
+__all__ = [
+    "ExchangeRulesView",
+    "ExecutionFieldRequirement",
+    "ListingAccess",
+    "Side",
+    "TradeRule",
+    "TradeTerms",
+    "side_of",
+    "trade_rules_by_kind",
+]
+
+
+class Side(StrEnum):
+    """The direction of one executed or requested quantity."""
+
+    BUY = "buy"
+    SELL = "sell"
+
+
+def side_of(quantity: object) -> Side | None:
+    """Return the side implied by a signed quantity, or ``None`` for an exact zero."""
+    if quantity > 0:  # type: ignore[operator]
+        return Side.BUY
+    if quantity < 0:  # type: ignore[operator]
+        return Side.SELL
+    return None
 
 
 class ListingAccess(StrEnum):
@@ -77,9 +106,7 @@ _BASE_RULE_FIELDS = frozenset(
 )
 """The fields every venue shares. Anything else on a rule belongs to one venue's own regime."""
 
-# A rule is a value a venue author constructs, so its door validates (pydantic by default, owner
-# ruling 2026-09-08). Strict: a `float` step, a `str` access or an `int` for a flag is refused,
-# not coerced -- the rounding and charging below run on exactly the numbers declared.
+
 _RULE_CONFIG = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 

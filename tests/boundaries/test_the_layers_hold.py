@@ -58,7 +58,6 @@ LAYERS: dict[str, int] = {
     "data": 10,
     "portfolio": 10,
     "transforms": 10,
-    "account": 10,
     "record": 10,
     "analysis": 10,
     # 20 -- the extension contract: everything a Component sees, and nothing above it.

@@ -22,9 +22,9 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.project.registration import _enum, apply
+from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import VqaprError
+from vqapr.project.registration import _enum, apply
 from vqapr.project.store import Workspace
 
 

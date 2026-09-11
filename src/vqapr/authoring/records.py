@@ -20,8 +20,9 @@ from datetime import datetime
 from itertools import count
 from types import MappingProxyType
 
-from vqapr.domain.shapes import RecordChunk, Rows, Scalar, normalize_column, normalize_scalar
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.rows import Rows, Scalar, normalize_column, normalize_scalar
+from vqapr.domain.shapes import RecordChunk
 
 FLOW_ENVELOPE_FIELDS = frozenset({"run_id", "producer_id", "stage", "event_time", "sequence"})
 

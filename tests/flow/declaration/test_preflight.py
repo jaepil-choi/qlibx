@@ -9,12 +9,12 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
 from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.validation import verify_source
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.data.validation import verify_source
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
+from vqapr.domain.memory import prepare_model_state
 from vqapr.exchange.conventions import FillRule
 from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
@@ -23,9 +23,8 @@ from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.extension.loading import load_exchange
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.domain.model_state import prepare_model_state
-from vqapr.public import register_dataset, register_instruments
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset, register_instruments
 
 _ZONE = ZoneInfo("Asia/Seoul")
 SESSION = date(2024, 3, 5)
@@ -171,7 +170,7 @@ def _execution_exchange(
     path.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'ABC': TradeRule('ABC', "
@@ -412,7 +411,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     no_sell_path.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({\n"
@@ -665,7 +664,7 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
     path.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Exchange(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__(\n"
@@ -1110,8 +1109,8 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     to import the strategy, the venue and every rule again and scan the execution horizon again
     on its first accepted intent. The verdict now carries `RunResources` -- the instances the
     verification loaded and the horizon it cut -- and `run` takes them: no import, no scan."""
-    from vqapr.extension import loading
     from vqapr.exchange import conventions
+    from vqapr.extension import loading
     from vqapr.flow.declaration.preflight import bound_execution_horizon
     from vqapr.flow.declaration.verify import verify_run
     from vqapr.public import run as execute_run

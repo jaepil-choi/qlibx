@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.account.account import Account, AccountMode
 from vqapr.authoring import (
     Hold,
     Rebalance,
@@ -17,15 +16,14 @@ from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import RunLoop, strategy_loop
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.portfolio.intents import EconomicPortfolioIntent, IntentSourceRef
 from vqapr.project.run import ComplianceSet, StrategyConfig
 
 _BUDGET = Budget(
@@ -239,7 +237,7 @@ def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> N
     The callback frames the candidate once and hands the root what it framed; the two copies
     the live Strategy is given stay -- they are what keeps it from aliasing the root's memory.
     """
-    from vqapr.domain import model_state as model_state_module
+    from vqapr.domain import memory as memory_module
     from vqapr.flow.engine import run_state as run_state_module
     from vqapr.flow.run import callback as callback_module
 
@@ -258,7 +256,7 @@ def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> N
             return _original(*args, **kwargs)
 
         monkeypatch.setattr(module, name, counting)
-    for module in (callback_module, run_state_module, model_state_module):
+    for module in (callback_module, run_state_module, memory_module):
         original = module.normalize_memory
 
         def counting_normalize(value, _module=module.__name__, _original=original):
@@ -281,8 +279,11 @@ def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> N
     # Per callback: the framing's own copy, the two the live Strategy is handed, and the two
     # detached copies the restore before `decide` makes (the Strategy's and the components').
     # Before record `239` two more sat between them: the framing's input normalized on its own,
-    # and the root framing the same memory and payload again.
-    assert len(normalized) <= 5 * callbacks + 1, f"{len(normalized)} for {callbacks} callbacks"
+    # and the root framing the same memory and payload again. The `+ 2` is once per run: the seed
+    # state's framing and the opening memory it is framed from, which `opening_memory` normalizes
+    # in `domain/memory.py` beside `prepare_model_state` (record `268` measured 12 calls from the
+    # same callers on both layouts; only this test's patching boundary moved).
+    assert len(normalized) <= 5 * callbacks + 2, f"{len(normalized)} for {callbacks} callbacks"
 
 
 def test_a_callback_frames_what_it_read_once(monkeypatch: pytest.MonkeyPatch) -> None:

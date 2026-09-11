@@ -32,8 +32,8 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.values import LocalInstantDeclaration, Mark, MarkBatch
+from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
+from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.portfolio.allocation import AllocationViolation
 from vqapr.portfolio.bounds import single_name_cap
 

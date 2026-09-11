@@ -31,14 +31,13 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.account.account import Account, AccountMode
-from vqapr.account.marking import ValuationService
 from vqapr.authoring import Hold, StrategyModel
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountMark, AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.values import LocalInstantDeclaration
+from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.valuation import ValuationService
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
@@ -60,7 +59,7 @@ STRATEGIES = textwrap.dedent(
     from vqapr.authoring import (
         DatasetInput, Hold, Rebalance, RowsLookback, StrategyModel,
     )
-    from vqapr.portfolio.budgets import Budget, PortfolioDirection
+    from vqapr.public import Budget, PortfolioDirection
     from vqapr.public import AcademicExchange, ListingAccess, TradeRule
 
     BUDGET = Budget(

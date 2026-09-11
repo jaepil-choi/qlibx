@@ -19,11 +19,11 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.fills import ZeroDealtReason
-from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.orders import OrderBatch, OrderRequest
-from vqapr.domain.values import Side
+from vqapr.domain.account import AccountSnapshot
+from vqapr.domain.fill import ZeroDealtReason
+from vqapr.domain.instrument import InstrumentRoster
+from vqapr.domain.listing import Side
+from vqapr.domain.order import OrderBatch, OrderRequest
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venues.krx import (
     BASE_PRICE,

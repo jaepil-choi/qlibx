@@ -1,16 +1,147 @@
-"""Deterministic execution-time conversion from complete targets to venue orders."""
+"""Orders, and the one place a weight becomes a quantity.
+
+`plan_orders` converts a complete target into the deltas that reach it at execution-time prices.
+The strategy declared its target one evaluation earlier against prices that have since moved, so
+the conversion belongs here, where the execution price and NAV are both known. It is a function,
+not a protocol: there is one implementation and the layer is closed.
+
+Sells come first. Buys are funded from cash and the rounded sale proceeds -- never from a sale the
+venue will refuse -- and when cash runs short they are clipped largest delta first, the instrument
+id breaking a tie, so the shortfall lands on the position that misses its target by least. What a
+buy can afford, costs included, is solved rather than searched.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.instruments import base_quantity_for
-from vqapr.domain.orders import OrderBatch, OrderRequest, ZeroDeltaDiagnostic
-from vqapr.domain.values import Side
-from vqapr.exchange.listings import ExchangeRulesView
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.domain.account import AccountSnapshot
+from vqapr.domain.instrument import base_quantity_for
+from vqapr.domain.intent import Budget, PortfolioDirection
+from vqapr.domain.listing import ExchangeRulesView, Side
+
+__all__ = [
+    "MAX_AFFORDABILITY_STEPS",
+    "OrderBatch",
+    "OrderRequest",
+    "ZeroDeltaDiagnostic",
+    "plan_orders",
+]
+
+
+def _check_finite(value: Decimal, *, name: str, positive: bool = False) -> None:
+    if not value.is_finite():
+        raise ValueError(f"{name} must be finite")
+    if positive and value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _instrument(value: str, *, name: str = "instrument_id") -> None:
+    if not value:
+        raise ValueError(f"{name} must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class OrderRequest:
+    """A complete desired position, or an unresolved request the venue could not price.
+
+    An unresolved request carries no execution price. That happens two ways: a target for an
+    instrument absent from the venue at this instant, and a holding whose instrument has left it
+    -- a delisting. The second keeps its quantity and asks for no trade, because a position that
+    cannot be priced also cannot be sold, and inventing a price to close it would fabricate the
+    proceeds.
+    """
+
+    instrument_id: str
+    current_quantity: Decimal
+    desired_quantity: Decimal
+    delta_quantity: Decimal
+    execution_price: Decimal | None
+    unresolved_weight_target: Decimal | None = None
+    sized_quantity: Decimal | None = None
+    """The delta the weight sized to on the venue's unit, before the planner cut buys to the cash.
+
+    Equal to `delta_quantity` unless the batch ran short of cash, when a cut buy requests less
+    than it sized to (report 2026-09-11, record `261`). `None` where nothing was sized: a request
+    built by hand, or one the venue cannot price.
+    """
+
+    def __post_init__(self) -> None:
+        _instrument(self.instrument_id)
+        _check_finite(self.current_quantity, name="current_quantity")
+        _check_finite(self.desired_quantity, name="desired_quantity")
+        _check_finite(self.delta_quantity, name="delta_quantity")
+        if self.delta_quantity != self.desired_quantity - self.current_quantity:
+            raise ValueError("delta_quantity must equal desired_quantity - current_quantity")
+        if self.sized_quantity is not None:
+            _check_finite(self.sized_quantity, name="sized_quantity")
+        if self.execution_price is None:
+            # An unpriced target may still be requested: the venue answers with typed ABSENT
+            # evidence. What it may not do is move an existing holding, because settling a
+            # position needs a price and inventing one would fabricate the proceeds.
+            if self.current_quantity != 0 and self.desired_quantity != self.current_quantity:
+                raise ValueError("an unresolved request cannot settle an existing holding")
+            if self.unresolved_weight_target is not None:
+                _check_finite(
+                    self.unresolved_weight_target,
+                    name="unresolved_weight_target",
+                )
+                if self.desired_quantity != self.current_quantity:
+                    raise ValueError(
+                        "an unresolved weight request cannot invent a desired quantity"
+                    )
+            return
+        _check_finite(self.execution_price, name="execution_price", positive=True)
+        if self.unresolved_weight_target is not None:
+            raise ValueError("a priced request cannot have an unresolved weight target")
+
+
+@dataclass(frozen=True, slots=True)
+class ZeroDeltaDiagnostic:
+    """Typed evidence that a complete target intentionally needs no trade."""
+
+    instrument_id: str
+    current_quantity: Decimal
+    desired_quantity: Decimal
+    execution_price: Decimal
+
+    def __post_init__(self) -> None:
+        _instrument(self.instrument_id)
+        _check_finite(self.current_quantity, name="current_quantity")
+        _check_finite(self.desired_quantity, name="desired_quantity")
+        _check_finite(self.execution_price, name="execution_price", positive=True)
+        if self.current_quantity != self.desired_quantity:
+            raise ValueError(
+                "a zero-delta diagnostic requires equal current and desired quantities"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderBatch:
+    """Deterministic complete-position order plan bound to an account version."""
+
+    account_version: int
+    requests: tuple[OrderRequest, ...]
+    zero_delta_diagnostics: tuple[ZeroDeltaDiagnostic, ...] = ()
+
+    def __post_init__(self) -> None:
+        if isinstance(self.account_version, bool) or not isinstance(self.account_version, int):
+            raise TypeError("account_version must be an integer")
+        if self.account_version < 0:
+            raise ValueError("account_version must be non-negative")
+        instruments = tuple(request.instrument_id for request in self.requests)
+        if len(instruments) != len(set(instruments)):
+            raise ValueError("an OrderBatch may contain each instrument only once")
+        zeros = tuple(diagnostic.instrument_id for diagnostic in self.zero_delta_diagnostics)
+        if len(zeros) != len(set(zeros)):
+            raise ValueError("zero-delta diagnostics may contain each instrument only once")
+        requests_by_instrument = {request.instrument_id: request for request in self.requests}
+        for diagnostic in self.zero_delta_diagnostics:
+            request = requests_by_instrument.get(diagnostic.instrument_id)
+            if request is None or request.delta_quantity != 0:
+                raise ValueError("zero-delta diagnostics require a matching zero-delta request")
 
 
 def _decimal(value: object, *, name: str, positive: bool = False) -> Decimal:

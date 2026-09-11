@@ -2,7 +2,7 @@
 
 A venue charges per side, and the two sides are genuinely different numbers: KRX takes a
 commission on both and a securities transaction tax only on sells. So a rate is declared as a pair
-of :class:`SideCost` on the instrument's own :class:`~vqapr.exchange.listings.TradeRule`, which is
+of :class:`SideCost` on the instrument's own :class:`~vqapr.domain.listing.TradeRule`, which is
 the same shape the research declares:
 
 ```yaml

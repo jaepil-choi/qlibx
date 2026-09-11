@@ -35,15 +35,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from vqapr.account.account import Account
-from vqapr.account.marking import ValuationService
 from vqapr.authoring import AccountHistoryInput, Compliance, Component, DataModel, StrategyModel
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.scan import ScanSession
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence
-from vqapr.domain.instruments import InstrumentRoster
-from vqapr.domain.values import require_tz_aware
+from vqapr.domain.account import Account
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.instrument import InstrumentRoster
+from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.valuation import ValuationService
 from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy

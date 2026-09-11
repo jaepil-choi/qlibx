@@ -9,17 +9,23 @@ from enum import StrEnum
 from itertools import count
 from types import MappingProxyType
 
-from vqapr.account.account import (
+from vqapr.authoring.records import InvocationRecorder
+from vqapr.domain.account import (
+    FILL_ORIGIN,
+    AccountState,
+    LedgerEntry,
     PreparedAppend,
     PreparedMark,
 )
-from vqapr.authoring.records import InvocationRecorder
-from vqapr.domain.account_state import AccountState
 from vqapr.domain.identifiers import ModelStateRef
-from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
-from vqapr.domain.model_state import PreparedModelState, prepare_model_state
+from vqapr.domain.memory import (
+    ModelMemory,
+    PreparedModelState,
+    normalize_memory,
+    opening_memory,
+    prepare_model_state,
+)
 from vqapr.domain.shapes import RecordChunk
-from vqapr.domain.values import ModelMemory, normalize_memory, opening_memory
 
 
 class LifecycleKind(StrEnum):

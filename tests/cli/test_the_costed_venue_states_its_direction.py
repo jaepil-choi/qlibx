@@ -15,9 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vqapr.cli.main import main
-
 from tests.skill_prose import installed_prose
+from vqapr.cli.main import main
 from vqapr.cli.new import _RUN_TEMPLATE
 from vqapr.public import ListingAccess, krx_listings
 
@@ -80,8 +79,8 @@ def test_the_template_still_derives_its_mode_list() -> None:
     That branch replaced a hand-written `LONG_ONLY or LONG_SHORT` with a list derived from the
     enum. Extending the comment must not quietly restore a hand-written one.
     """
-    from vqapr.account.account import AccountMode
     from vqapr.cli.new import _ACCOUNT_MODES
+    from vqapr.domain.account import AccountMode
 
     assert " or ".join(mode.name for mode in AccountMode) == _ACCOUNT_MODES
     assert _ACCOUNT_MODES in _RUN_TEMPLATE

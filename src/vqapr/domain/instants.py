@@ -1,32 +1,28 @@
-"""Portable values every layer shares and none owns.
+"""Timezone-aware instants and local wall-time declarations.
 
-Folded from five modules (one-shape Step 7, record 162): typed valuation results
-(`valuation/marks` -- `Mark`/`MarkBatch`, imported by `account/` and `compliance/` below
-`flow/`), timezone-aware instants and the local
-instant declaration (`timestamps`), row and scalar normalisation at the Model boundary (`rows`),
-the detached Model memory committed at a callback (`memory`), and `Side` (`enums`). Each section
-below keeps its former module's docstring as a comment. Nothing here imports above `domain/`.
+Time is kept as ordinary `datetime`/`date`/`time` values; this module validates and combines them
+and deliberately adds no timestamp wrapper. Every instant carries a zone. A local wall time that
+does not exist (the clock skips it) or happens twice (the clock falls back) is refused rather than
+resolved by a guess; `LocalInstantDeclaration` keeps the fold and offset that reproduce one instant.
 """
 
 from __future__ import annotations
 
 import calendar
-import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from decimal import Decimal
-from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
-# ------------------------------------------------------------------------------------------
-# timestamps.py, folded in (one-shape Step 7, record 162)
-#
-# Timezone-aware timestamp primitives.
-#
-# Time is kept as ordinary ``datetime``/``date``/``time`` values.  This module
-# validates and combines them; it deliberately does not add a timestamp wrapper.
-# ------------------------------------------------------------------------------------------
+__all__ = [
+    "LocalInstantDeclaration",
+    "at_local",
+    "declare_local_instant",
+    "iana_zone",
+    "require_tz_aware",
+    "shift_calendar",
+]
+
 
 def require_tz_aware(value: datetime, *, name: str = "timestamp") -> datetime:
     """Return *value* after rejecting naive or non-datetime values."""
@@ -253,169 +249,3 @@ def shift_calendar(
     if isinstance(value.tzinfo, ZoneInfo):
         return at_local(shifted_day, wall_time, value.tzinfo.key)
     return datetime.combine(shifted_day, wall_time).replace(tzinfo=value.tzinfo)
-
-
-# The row shapes (`Scalar`, `Row`, `Rows`, `normalize_rows`) that were folded in here as
-# `rows.py` live in `domain/shapes.py` since record `183`: a row is the long shape's unit, and
-# the shapes belong together.
-
-
-# ------------------------------------------------------------------------------------------
-# memory.py, folded in (one-shape Step 7, record 162)
-#
-# Portable, detached Model memory used at the callback commit boundary.
-# ------------------------------------------------------------------------------------------
-
-type ModelMemory = bool | int | float | str | list["ModelMemory"] | dict[str, "ModelMemory"] | None
-
-
-def normalize_memory(value: object) -> ModelMemory:
-    """Validate strict JSON memory and return a detached recursive copy."""
-
-    active: set[int] = set()
-
-    def visit(item: object) -> ModelMemory:
-        if item is None or isinstance(item, (bool, str)):
-            return item
-        if isinstance(item, int):
-            return item
-        if isinstance(item, float):
-            if not math.isfinite(item):
-                raise ValueError("Model memory floats must be finite")
-            return item
-        if isinstance(item, list):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("Model memory must not contain cycles")
-            active.add(identity)
-            try:
-                return [visit(child) for child in item]
-            finally:
-                active.remove(identity)
-        if isinstance(item, dict):
-            identity = id(item)
-            if identity in active:
-                raise ValueError("Model memory must not contain cycles")
-            if any(not isinstance(key, str) for key in item):
-                raise TypeError("Model memory object keys must be strings")
-            active.add(identity)
-            try:
-                return {key: visit(child) for key, child in item.items()}
-            finally:
-                active.remove(identity)
-        raise TypeError(f"Model memory must contain strict JSON values; got {type(item).__name__}")
-
-    return visit(value)
-
-
-def opening_memory(value: object) -> ModelMemory:
-    """The memory a model finds on its first callback: `value` normalized, and `{}` for `None`.
-
-    The authoring reference promises `self.memory` is a mapping a callback can `setdefault` on
-    from session one. An undeclared opening memory was `None`, so the documented example raised
-    on the first callback of every run (`docs/issues/089`). "Nothing declared" and "declared
-    `null`" are one opening state, and it is the empty mapping; any other strict-JSON value a
-    run declares is kept as declared.
-    """
-    normalized = normalize_memory(value)
-    return {} if normalized is None else normalized
-
-
-# ------------------------------------------------------------------------------------------
-# enums.py, folded in (one-shape Step 7, record 162)
-#
-# Vocabulary every layer may depend on and that depends on nothing.
-# ------------------------------------------------------------------------------------------
-
-class Side(StrEnum):
-    """The direction of one executed or requested quantity."""
-
-    BUY = "buy"
-    SELL = "sell"
-
-
-def side_of(quantity: object) -> Side | None:
-    """Return the side implied by a signed quantity, or ``None`` for an exact zero."""
-    if quantity > 0:  # type: ignore[operator]
-        return Side.BUY
-    if quantity < 0:  # type: ignore[operator]
-        return Side.SELL
-    return None
-
-
-# ------------------------------------------------------------------------------------------
-# marks.py, folded in (one-shape Step 7, record 162)
-#
-# Typed valuation results.
-# ------------------------------------------------------------------------------------------
-
-def _decimal(value: Decimal, *, name: str) -> None:
-    if not value.is_finite():
-        raise ValueError(f"{name} must be finite")
-
-
-@dataclass(frozen=True, slots=True)
-class Mark:
-    """The explicitly selected value of one residual holding."""
-
-    instrument_id: str
-    quantity: Decimal
-    price: Decimal
-    value: Decimal
-
-    def __post_init__(self) -> None:
-        if not self.instrument_id:
-            raise ValueError("instrument_id must be a non-empty string")
-        _decimal(self.quantity, name="quantity")
-        _decimal(self.price, name="price")
-        _decimal(self.value, name="value")
-        if self.quantity == 0:
-            raise ValueError("a Mark must represent a residual holding")
-        if self.price <= 0:
-            raise ValueError("price must be positive")
-        if self.value != self.quantity * self.price:
-            raise ValueError("value must equal quantity * price")
-
-
-@dataclass(frozen=True, slots=True)
-class MarkBatch:
-    """A complete, non-estimated valuation of all residual holdings."""
-
-    marks: tuple[Mark, ...]
-    total_value: Decimal
-
-    def __post_init__(self) -> None:
-        _decimal(self.total_value, name="total_value")
-        instruments = tuple(mark.instrument_id for mark in self.marks)
-        if len(instruments) != len(set(instruments)):
-            raise ValueError("a MarkBatch may contain each instrument only once")
-        if self.total_value != sum((mark.value for mark in self.marks), Decimal("0")):
-            raise ValueError("total_value must equal the sum of marks")
-
-    def quantities(self) -> dict[str, Decimal]:
-        """Return the complete immutable batch's explicitly marked quantities."""
-        return {mark.instrument_id: mark.quantity for mark in self.marks}
-
-    def summary(self) -> MarkSummary:
-        """What outlives the batch once its rows are on the record."""
-        return MarkSummary(total_value=self.total_value, marked=len(self.marks))
-
-
-@dataclass(frozen=True, slots=True)
-class MarkSummary:
-    """A valuation's total and its count: what the run's evidence keeps of a `MarkBatch`.
-
-    A batch is one `Mark` per held name, made at every instant of the market clock, and until
-    record `224` every batch hung off the run's evidence and traces until the run ended --
-    instants x names objects, 290 million for 3,000 names over a year of minutes. Nothing read
-    them back: by the time a batch was made, its marks were `vqapr.account` rows. The evidence
-    keeps this instead, and the batch is garbage as soon as the next instant's is committed.
-    """
-
-    total_value: Decimal
-    marked: int
-
-    def __post_init__(self) -> None:
-        _decimal(self.total_value, name="total_value")
-        if isinstance(self.marked, bool) or not isinstance(self.marked, int) or self.marked < 0:
-            raise ValueError("marked must be a non-negative count")

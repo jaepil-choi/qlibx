@@ -13,8 +13,8 @@ screen.
 
 from __future__ import annotations
 
-from vqapr.account.account import AccountMode
 from vqapr.cli.new import _ACCOUNT_MODES, _RUN_TEMPLATE
+from vqapr.domain.account import AccountMode
 
 
 def test_the_template_never_names_a_mode_that_does_not_exist() -> None:

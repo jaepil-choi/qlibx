@@ -23,7 +23,7 @@ from types import MappingProxyType
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
 from vqapr.domain.identifiers import ComponentId, component_id
-from vqapr.domain.values import ModelMemory, normalize_memory
+from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.wiring import Role
 
 

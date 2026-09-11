@@ -21,18 +21,17 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.errors import InputError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.domain.inputs import InputError
+from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.public import register_instruments
-from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 
@@ -113,7 +112,7 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     venue_source.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"

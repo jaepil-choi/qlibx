@@ -19,9 +19,10 @@ import duckdb
 import pytest
 
 from tests.exchange.support import execution_call
-from vqapr.account.account import Account, AccountMode
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.instruments import (
+from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.fill import fill_entries
+from vqapr.domain.instants import LocalInstantDeclaration
+from vqapr.domain.instrument import (
     EtfInstrument,
     Instrument,
     InstrumentKind,
@@ -30,12 +31,10 @@ from vqapr.domain.instruments import (
     instrument,
     instruments,
 )
-from vqapr.domain.ledger import fill_entries
-from vqapr.domain.orders import OrderBatch, OrderRequest
-from vqapr.domain.values import LocalInstantDeclaration, Side
+from vqapr.domain.intent import Budget, PortfolioDirection
+from vqapr.domain.listing import Side, TradeRule
+from vqapr.domain.order import OrderBatch, OrderRequest, plan_orders
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.exchange.listings import TradeRule
-from vqapr.exchange.planning import plan_orders
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import (
     COMMISSION_RATE,
@@ -44,7 +43,6 @@ from vqapr.exchange.venues.krx import (
     krx_listing,
     krx_rules,
 )
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 VENUE = "Asia/Seoul"
@@ -308,8 +306,8 @@ def test_a_listed_instrument_has_exactly_one_rate_per_side() -> None:
 
 def test_a_category_with_no_terms_is_simply_not_listed() -> None:
     """How a venue declines a whole category without naming anything in it."""
-    from vqapr.domain.instruments import instruments as build
-    from vqapr.exchange.listings import trade_rules_by_kind
+    from vqapr.domain.instrument import instruments as build
+    from vqapr.domain.listing import trade_rules_by_kind
     from vqapr.exchange.venues.krx import KRX_TERMS
 
     listings, _ = krx_rules({"A005930": "stock", "A069500": "etf"})

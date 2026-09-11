@@ -23,14 +23,15 @@ from vqapr.cli.envelope import failure, success
 # naming it here adds no cycle. The judgments take it as a callable rather than importing it
 # themselves, which is what keeps `flow/` free of `cli`.
 from vqapr.domain.errors import (
+    VALUE_INVALID,
     Failure,
     FailureSource,
+    InputError,
     Stage,
     Status,
     VqaprError,
     status_of,
 )
-from vqapr.domain.inputs import VALUE_INVALID, InputError
 from vqapr.flow.declaration.verify import verify_run
 from vqapr.flow.engine.run_state import FILL_TABLE
 from vqapr.flow.orchestration import (

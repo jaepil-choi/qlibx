@@ -13,7 +13,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import PortfolioDirection
+from vqapr.domain.intent import PortfolioDirection
 
 
 def test_a_zero_is_kept_as_a_flat_position() -> None:

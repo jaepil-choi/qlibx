@@ -21,7 +21,13 @@ from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.windows import ModelWindow
-from vqapr.record import RunRecordWriter
+from vqapr.domain.intent import (
+    Budget,
+    EconomicPortfolioIntent,
+    PortfolioDirection,
+    PortfolioTarget,
+    validate_economic_intent,
+)
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -29,15 +35,10 @@ from vqapr.portfolio.allocation import (
     validate_allocation,
 )
 from vqapr.portfolio.bounds import intersect, no_short, single_name_cap
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
-from vqapr.portfolio.intents import (
-    EconomicPortfolioIntent,
-    PortfolioTarget,
-    validate_economic_intent,
-)
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, optimize
-from vqapr.public import register_dataset
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
+from vqapr.record import RunRecordWriter
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real"
 CAP = Decimal("0.10")

@@ -16,8 +16,7 @@ from pathlib import Path
 import pytest
 
 from tests.cli.test_commands import _cli, _register_run, _workspace_for_run
-from vqapr.domain.account_state import AccountSnapshot, fold
-from vqapr.domain.ledger import FILL_ORIGIN, LedgerEntry
+from vqapr.domain.account import FILL_ORIGIN, AccountSnapshot, LedgerEntry, fold
 from vqapr.record import read_table, strategy_refs
 from vqapr.record.reader import unfinished_strategy_refs
 

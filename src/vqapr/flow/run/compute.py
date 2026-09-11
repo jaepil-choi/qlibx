@@ -15,9 +15,9 @@ from vqapr.authoring import DataModel
 from vqapr.authoring.context import DataModelContext
 from vqapr.data.store import AccessRecord
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.agendas import OperationOccurrence
 from vqapr.domain.errors import Stage, Status, VqaprError
-from vqapr.domain.shapes import Row
+from vqapr.domain.rows import Row
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun
 from vqapr.flow.run.output import (
     RunOutput,

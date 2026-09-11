@@ -30,11 +30,11 @@ from typing import Any
 
 import yaml
 
-from vqapr.account.account import AccountMode
 from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
 from vqapr.agent.sample.materialize import materialize as materialize_sample
 from vqapr.cli.envelope import success
-from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
+from vqapr.domain.account import AccountMode
+from vqapr.domain.errors import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.lookback import lookback_declaration
 from vqapr.extension.scaffold import _class_name, render
@@ -797,7 +797,7 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     # appear in the refusal text derived from the enum, and would be silently missing from the
     # emitted declaration -- landing an author in exactly the undeclared-table case this same
     # command's receipt reports after the fact.
-    from vqapr.domain.instruments import InstrumentKind
+    from vqapr.domain.instrument import InstrumentKind
 
     for member in InstrumentKind:
         kind = str(member)

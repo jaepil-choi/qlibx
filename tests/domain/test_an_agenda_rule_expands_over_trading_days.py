@@ -14,8 +14,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.domain.agendas import AgendaRule, OperationAgenda
 from vqapr.domain.identifiers import agenda_id
+from vqapr.domain.schedule import AgendaRule, OperationAgenda
 
 SEOUL = "Asia/Seoul"
 JANUARY = tuple(

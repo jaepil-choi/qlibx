@@ -30,12 +30,11 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
 from vqapr.cli.check import check
 from vqapr.data.datasets import DatasetRegistration
 from vqapr.data.sources import SourceSpec
 from vqapr.data.validation import verify_source
-from vqapr.domain.account_state import AccountSnapshot
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
 from vqapr.flow.declaration import judgments as judgments_module
@@ -134,7 +133,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     venue.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,"

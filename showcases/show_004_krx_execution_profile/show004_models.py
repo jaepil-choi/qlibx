@@ -28,7 +28,7 @@ from vqapr.authoring import (
     RowsLookback,
     StrategyModel,
 )
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.public import Budget, PortfolioDirection
 
 LOOKBACK = 6
 """Five-session momentum needs six closes."""

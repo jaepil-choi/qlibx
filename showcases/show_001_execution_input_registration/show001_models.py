@@ -26,7 +26,7 @@ from vqapr.authoring import (
     RowsLookback,
     StrategyModel,
 )
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.public import Budget, PortfolioDirection
 
 BUDGET = Budget(
     direction=PortfolioDirection.LONG_ONLY,

@@ -19,12 +19,22 @@ from vqapr.authoring.history import AccountHistory
 from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.compliance.evaluation import build_account_view
 from vqapr.data.windows import ModelWindow
-from vqapr.domain.account_state import AccountSnapshot, AccountState
-from vqapr.domain.agendas import OperationOccurrence
+from vqapr.domain.account import AccountSnapshot, AccountState
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import ModelStateRef
-from vqapr.domain.model_state import PreparedModelState, prepare_model_state
-from vqapr.domain.values import ModelMemory, normalize_memory
+from vqapr.domain.intent import (
+    EconomicPortfolioIntent,
+    IntentSourceRef,
+    PortfolioTarget,
+    validate_economic_intent,
+)
+from vqapr.domain.memory import (
+    ModelMemory,
+    PreparedModelState,
+    normalize_memory,
+    prepare_model_state,
+)
+from vqapr.domain.schedule import OperationOccurrence
 from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.flow.engine.artifacts import (
@@ -48,12 +58,6 @@ from vqapr.flow.run.context import (
     OccurrenceTrace,
     _raise_callback_return_type,
     _shadows_package_table,
-)
-from vqapr.portfolio.intents import (
-    EconomicPortfolioIntent,
-    IntentSourceRef,
-    PortfolioTarget,
-    validate_economic_intent,
 )
 
 

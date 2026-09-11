@@ -79,7 +79,7 @@ def _workspace(root: Path, capsys: pytest.CaptureFixture[str]) -> None:
     venue.write_text(
         "from decimal import Decimal\n"
         "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"

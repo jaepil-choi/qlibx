@@ -15,7 +15,7 @@ Takes the two values rather than a `Namespace`, so a caller that never saw argpa
 
 from __future__ import annotations
 
-from vqapr.domain.inputs import VALUE_INVALID, InputError
+from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.extension.component import ComponentKind
 
 LOOKBACK_DEFAULT = 6

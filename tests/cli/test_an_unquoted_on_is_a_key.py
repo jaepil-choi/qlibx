@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.domain.inputs import read_yaml_mapping
+from vqapr.domain.errors import read_yaml_mapping
 
 _MONTH_END = """\
 runs:

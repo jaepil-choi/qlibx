@@ -34,8 +34,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
-from vqapr.domain.errors import Stage, VqaprError
-from vqapr.domain.inputs import InputError
+from vqapr.domain.errors import InputError, Stage, VqaprError
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.flow.declaration.verify import RunVerdict, verify_run
 from vqapr.public import Workspace

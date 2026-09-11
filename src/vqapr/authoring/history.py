@@ -39,7 +39,7 @@ from pydantic import BaseModel, field_validator
 
 from vqapr.authoring._validation import _VALUE_CONFIG, _unique_identifiers
 from vqapr.data.lookback import RowsLookback
-from vqapr.domain.account_state import AccountMark
+from vqapr.domain.account import AccountMark
 
 ACCOUNT_FIELDS = ("nav", "cash")
 """One value per marked instant."""

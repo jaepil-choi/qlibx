@@ -7,15 +7,14 @@ from typing import ClassVar
 import pytest
 
 from tests.exchange.support import bound, execution_call
-from vqapr.account.marking import ValuationService
-from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.costs import SideCost
-from vqapr.domain.fills import ZeroDealtReason
-from vqapr.domain.instruments import InstrumentKind, InstrumentRoster, instrument
-from vqapr.domain.orders import OrderBatch, OrderRequest
-from vqapr.domain.values import Side
+from vqapr.domain.account import AccountSnapshot
+from vqapr.domain.cost import SideCost
+from vqapr.domain.fill import ZeroDealtReason
+from vqapr.domain.instrument import InstrumentKind, InstrumentRoster, instrument
+from vqapr.domain.listing import ExchangeRulesView, ListingAccess, Side, TradeTerms
+from vqapr.domain.order import OrderBatch, OrderRequest
+from vqapr.domain.valuation import ValuationService
 from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
-from vqapr.exchange.listings import ExchangeRulesView, ListingAccess, TradeTerms
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)

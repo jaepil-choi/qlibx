@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.domain.intent import Budget, PortfolioDirection
 
 SIGNED = Budget(PortfolioDirection.SIGNED, Decimal(-1), Decimal(2), Decimal(-1), Decimal(1))
 LONG_ONLY = Budget(PortfolioDirection.LONG_ONLY, Decimal(0), Decimal(1), Decimal(0), Decimal(1))

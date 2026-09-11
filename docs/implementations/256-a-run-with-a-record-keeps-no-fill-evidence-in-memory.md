@@ -51,6 +51,7 @@ record의 내용, record 없는 run의 결과 전부.
 | `tests/flow/run/test_a_stored_run_keeps_no_fill_evidence.py` (신규, 샘플 journey) | record 있는 run: fill 쪽 항목 detail 없음, `feedback == ()`, 시장 trace가 `InstantOutcome`, `gc` 후 `DueExecutionEvidence` 0개, `callback_evidence`는 `CallbackEvidence`들. record 없는 run: 전부 그대로 |
 | `tests/flow tests/acceptance tests/boundaries tests/compliance tests/cli` | 589 passed (stored sink로 monitoring을 읽는 `test_monitoring_findings_reach_the_record` 포함) |
 | 메모리, 합성 300종목(`scratchpad/mem/measure.py`, 한 프로세스, record 있는 `vqapr run` 경로) | `trade-500`(150k fill): 1.503·1.518 → 1.428(`254`) → **1.286 GB**. `trade-1000`(300k fill): 1.961·1.944·1.952 → **1.425 GB**, peak working set 1.10 → 0.66 GB. Hold 바닥(0.96 GB) 위의 증가가 fill당 3.3 → 1.6 KB. 이 run들은 spill하지 않으므로 `255`는 이 수치에 들지 않는다 |
+| 같은 머신 A/B, `trade-1000`, 교대로 두 번씩 — `efeb0f49`(record `253`, `254` 이전)를 `git archive`로 떠서 `PYTHONPATH`로 | base **1.944 · 1.938 GB** / head(`254`–`256`) **1.441 · 1.427 GB**. 루프 끝 private 1.55 → 1.31 GB; base의 peak는 envelope의 fill 전체 읽기, head의 peak는 publish/envelope 단계. wall 26–29 s로 양쪽 같음(앞선 16.5 s → 26 s는 공유 머신의 부하였다) |
 | `uv run ruff check src/` · `uv run python -m pyright` (바뀐 파일) | clean · 0 errors |
 
 남은 fill당 몫(추정, 측정의 분해에서): writer의 Arrow 버퍼 ~0.5 KB(설계상 256 MB에서 spill), 결정의

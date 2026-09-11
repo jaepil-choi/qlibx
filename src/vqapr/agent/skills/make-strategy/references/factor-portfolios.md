@@ -32,8 +32,9 @@ script decides it silently.
 3. **One more leg for the market.** Register the index level as a one-instrument price table (the
    roster kind is `index`); a strategy holding it fully invested earns exactly the index return.
 4. **Each leg is its own run** — a run is one model — on the frictionless `academic` venue,
-   filling at the decision day's close, with an account large enough that whole-share rounding is
-   noise (10 trillion KRW left 4e-8 of NAV in cash).
+   filling at the decision day's close. Either make every listing divisible, so each leg holds
+   exactly the value weights it asked for, or keep whole shares with an account large enough that
+   rounding is noise (10 trillion KRW left 4e-8 of NAV in cash).
 5. **Read each run's daily returns back and do the arithmetic.** SMB = mean(S) − mean(B),
    HML = mean(S3, B3) − mean(S1, B1), RMRF = market leg − RF.
 
@@ -93,6 +94,11 @@ class FfLeg(va.StrategyModel):
   one-instrument execution table.
 - The run: `agenda: {every: 12M, at: "15:29"}` with `start` on the first of July, the fill at the
   close (`15:30`, `trade_price: close`), the `academic` venue, and a large `initial_account`.
+- Exact weights: in the venue's `TradeRule` (the `vqapr new exchange --profile academic`
+  scaffold), `fractional_allowed=True` with a fractional `quantity_step` makes a listing divisible,
+  and quantities are then not rounded at all. A pandas rebuild that treats halts and delistings
+  the way the account does matched such legs to the last digit; one that drops delisted names and
+  re-spreads their weight will not, and that difference is the account's decision, not rounding.
 - Reading back: `strategy_report(store, "<run-id>").performance.returns` per leg. Its instants
   mix a fixed offset with zone-aware ones, so pass `utc=True` when handing them to pandas.
 - A date-only series such as a risk-free rate registers as `grain: instant`. There is no public

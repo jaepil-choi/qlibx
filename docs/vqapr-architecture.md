@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **상태** | **목표 설계(target design).** 개념 트리 캠페인(branch `redesign/concept-tree`, 2026-09-11~)이 코드를 이 문서로 옮긴다. 캠페인이 끝날 때까지 코드는 0.15.0 배치에 있고, 그 코드를 설명하는 것은 [`docs/archive/vqapr-architecture-0.15.0.md`](archive/vqapr-architecture-0.15.0.md)다. 부록 A가 0.15.0의 모든 모듈이 어디로 가는지 적는다 |
+| **상태** | **현행(current), 0.16.0.** 개념 트리 캠페인(records `268`–`279`, [`docs/refactoring/2026-09-12-the-concept-tree-campaign.md`](refactoring/2026-09-12-the-concept-tree-campaign.md))이 코드를 이 문서로 옮겼다. 목표 설계와 다르게 둔 곳은 본문과 부록 A에 이유와 함께 적었다. 0.15.0의 배치는 [`docs/archive/vqapr-architecture-0.15.0.md`](archive/vqapr-architecture-0.15.0.md)가 설명한다 |
 | **authority** | `docs/vqapr-prd.md`가 제품이 무엇을 보장하는지의 authority이고, 이 문서는 그것을 어떤 구조로 구현하는지의 authority다. 둘이 다르면 PRD가 이긴다(PRD §0.2) |
 | **옛 절 번호** | 2026-09-11 이전에 코드 docstring · 설계 문서 · implementation record가 인용한 "architecture §N"은 archive 문서의 절 번호다 |
 | **읽는 법** | 쉬운 말을 먼저, 모듈 이름은 뒤에. 결정은 `결정 → 왜 → 없으면 무엇이 깨지나` 순서로 적는다. 근거 없는 결정은 이 문서에 두지 않는다 |

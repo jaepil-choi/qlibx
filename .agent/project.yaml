@@ -53,7 +53,12 @@ canonical_documents:
   # record의 숫자는 Decimal · 주소 하나 · `vqapr export` · strategy scaffold가 부품을 보임; --recipe는 오너가 거절). 0.15.0
   # (깨지는 변화: reader가 fill/weight 숫자를 Decimal로, skill 설치 루트, 선언의 yes/no/on/off는 말; docs/releases/0.15.0.md,
   # tag v0.15.0). 현행 캠페인 없음.
-  active_campaign: docs/refactoring/2026-09-10-the-one-cube-campaign.md
+  # 2026-09-12: 개념 트리 캠페인(records 268-279, branch redesign/concept-tree): src/가 고리의 개념을 따른다 --
+  # domain · data · record · signals · portfolio · component · workspace · run(preflight · engine) · report, 저자
+  # 표면은 vqapr.public 하나(`from vqapr import public as vq`), 루프는 DES의 말(schedule · ScheduledEvent · event_id
+  # · call.at), 계좌가 자기 보유를 곱한다. 0.16.0 (깨지는 변화: run 선언 `agenda:` -> `schedule:`, vqapr.authoring
+  # 삭제, 옛 run 기록은 다시 run; docs/releases/0.16.0.md, tag v0.16.0). 현행 캠페인 없음.
+  active_campaign: docs/refactoring/2026-09-12-the-concept-tree-campaign.md
   # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
   # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.
   wiring_design: docs/design/two-clocks-and-the-wiring-table.md

@@ -38,7 +38,6 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.domain.valuation import ValuationService
 from vqapr.domain.wiring import Role
 from vqapr.run.engine.loop import strategy_loop
 from vqapr.run.engine.run_state import RunStateRepository
@@ -442,12 +441,12 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     """
     snapshot = AccountSnapshot(0, Decimal("100"), {"A": Decimal("2")})
     marked_at = datetime(2024, 3, 1, 15, 30, tzinfo=KST)
-    batch = ValuationService().mark(snapshot, {"A": Decimal("10")})
+    batch = snapshot.value({"A": Decimal("10")})
     arrived_marked = AccountState(
         snapshot,
         marks=(
             AccountMark(
-                0, batch, snapshot.cash + batch.total_value, provenance=None, marked_at=marked_at
+                0, batch, snapshot.cash + batch.total_value, marked_at=marked_at
             ),
         ),
     )

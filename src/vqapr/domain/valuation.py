@@ -1,10 +1,10 @@
-"""Valuation: every held position needs an explicitly selected price.
+"""Valuation: which price each held position is marked at, chosen explicitly.
 
-`SelectedMark` is one selected price and the instant it was observed -- the same instant for a name
-that traded at the cutoff, an earlier one for a name that is halted or delisted, whose position is
-carried at that earlier price rather than written down to nothing. `ValuationService` turns the
-selected prices and a snapshot into a `MarkBatch`; a holding with no price at all leaves the
-valuation and stays in the book.
+`select_prices` chooses from what the venue published at an instant: a fresh row marks a name, a
+name the venue published nothing for carries its previous mark forward with the instant that mark
+was observed, and a name with neither is left unpriced. `SelectedMark` is one such choice;
+`prices_of` checks the choices and hands `Account.mark` the price map it multiplies the book by.
+The multiplication is the account's own (`AccountSnapshot.value`, record `276`).
 """
 
 from __future__ import annotations
@@ -14,13 +14,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
+from vqapr.domain.account import AccountMark
 from vqapr.domain.instants import require_tz_aware
 
 __all__ = [
     "SelectedMark",
     "ValuationError",
-    "ValuationService",
+    "prices_of",
+    "select_prices",
 ]
 
 
@@ -70,86 +71,90 @@ class SelectedMark:
         return require_tz_aware(cutoff, name="cutoff") - self.observed_at
 
 
-class ValuationService:
-    """Materialize a complete mark batch from explicit marks and an account snapshot."""
+def select_prices(
+    snapshot: object,
+    target_at: datetime,
+    *,
+    previous: AccountMark | None = None,
+    held: Mapping[str, Decimal] | None = None,
+) -> tuple[SelectedMark, ...]:
+    """Value the book from the prices the venue published as executable at this instant.
 
-    def mark(
-        self,
-        account: AccountSnapshot,
-        selected_marks: Mapping[str, Decimal] | tuple[SelectedMark, ...],
-    ) -> MarkBatch:
-        prices = self._prices(selected_marks, account.version)
-        positions = account.positions
-        held = tuple(
-            sorted(
-                (instrument, quantity)
-                for instrument, quantity in positions.items()
-                if quantity != 0
-            )
-        )
-        marks: list[Mark] = []
-        for instrument, quantity in held:
-            if not isinstance(instrument, str) or not instrument:
-                raise ValuationError(
-                    "account contains an invalid instrument identity",
-                    account_version=account.version,
-                )
-            if not isinstance(quantity, Decimal) or not quantity.is_finite():
-                raise ValuationError(
-                    f"account contains an invalid quantity for {instrument!r}",
-                    account_version=account.version,
-                )
-            price = prices.get(instrument)
-            if price is None:
-                # NOT the halt case. Read this with `_marks_from_execution_snapshot`
-                # (`run/engine/stages/execute.py`), which runs FIRST and carries a held name's
-                # previous mark forward when the venue published no row for it. By the time a
-                # price is missing here, the carry has already been tried and had nothing to
-                # carry -- so this is a position the venue has *never* priced, not one that
-                # stopped trading.
-                #
-                # A halted holding therefore keeps its last price and stays in NAV, stamped with
-                # the instant that price was actually observed. Reading this branch alone invites
-                # the opposite conclusion, that a three-day halt drops a position out of the
-                # denominator and takes NAV down by its full value. It does not, and no caller
-                # should be changed on the belief that it does.
-                #
-                # What is dropped here has no honest number to contribute: the position keeps its
-                # quantity in the snapshot, so it leaves the valuation and not the book.
+    A row with a price marks the name, **including when `is_tradable` is false**: the venue
+    published a price, and refusing to trade is a different fact from refusing to quote.
+
+    A name the venue published nothing for **carries its previous mark forward, keeping the
+    instant that mark was originally observed at**. A halt is not a reason to write a holding
+    down, and it is not a reason to drop it out of NAV either; it is a reason for its price to
+    stop moving. `SelectedMark.staleness(cutoff)` is what makes the gap visible afterwards.
+
+    A name with no row and no previous mark produces nothing. That is a position the venue has
+    never priced, so there is no honest number to put in the denominator.
+    """
+    marks: dict[str, SelectedMark] = {}
+    for row in getattr(snapshot, "rows", ()):
+        price = row.price
+        if price is None or price <= 0:
+            continue
+        marks[row.instrument] = SelectedMark(row.instrument, price, target_at)
+    if previous is not None and held is not None:
+        for carried in previous.marks.marks:
+            if carried.instrument_id in marks or carried.instrument_id not in held:
                 continue
-            marks.append(Mark(instrument, quantity, price, quantity * price))
-        return MarkBatch(tuple(marks), sum((mark.value for mark in marks), Decimal("0")))
+            observed_at = _observed_at(previous, carried.instrument_id)
+            if observed_at is None:
+                continue
+            marks[carried.instrument_id] = SelectedMark(
+                carried.instrument_id, carried.price, observed_at
+            )
+    return tuple(marks[instrument] for instrument in sorted(marks))
 
-    @staticmethod
-    def _prices(
-        selected_marks: Mapping[str, Decimal] | tuple[SelectedMark, ...], account_version: int
-    ) -> dict[str, Decimal]:
-        if isinstance(selected_marks, Mapping):
-            items = tuple(selected_marks.items())
-        elif isinstance(selected_marks, tuple) and all(
-            isinstance(mark, SelectedMark) for mark in selected_marks
-        ):
-            # The observation instant rides on the input and stays in the evidence; only the
-            # price is needed to value the position.
-            items = tuple((mark.instrument_id, mark.price) for mark in selected_marks)
-        else:
-            raise TypeError("selected_marks must be a mapping or a tuple of SelectedMark")
-        prices: dict[str, Decimal] = {}
-        for instrument, price in items:
-            if not isinstance(instrument, str) or not instrument:
-                raise ValuationError(
-                    "selected marks contain an invalid instrument identity",
-                    account_version=account_version,
-                )
-            if instrument in prices:
-                raise ValuationError(
-                    f"selected marks contain duplicate identity {instrument!r}",
-                    account_version=account_version,
-                )
-            if not isinstance(price, Decimal) or not price.is_finite() or price <= 0:
-                raise ValuationError(
-                    f"selected mark for {instrument!r} must be finite and positive",
-                    account_version=account_version,
-                )
-            prices[instrument] = price
-        return prices
+
+def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
+    """When the carried price was actually observed, not when it was carried.
+
+    A mark taken before this design carries no instant; it cannot claim one retroactively.
+    """
+    selected = mark.observed_at_by_instrument
+    if selected is not None:
+        return selected.get(instrument, mark.marked_at)
+    return mark.marked_at
+
+
+def prices_of(
+    selected_marks: Mapping[str, Decimal] | tuple[SelectedMark, ...], *, account_version: int
+) -> dict[str, Decimal]:
+    """The price map `Account.mark` multiplies the book by, from explicit choices.
+
+    Refuses what no price map may hold: an empty identity, one name chosen twice, a price that
+    is not finite and positive. The failure keeps the account version it would have valued.
+    """
+    if isinstance(selected_marks, Mapping):
+        items = tuple(selected_marks.items())
+    elif isinstance(selected_marks, tuple) and all(
+        isinstance(mark, SelectedMark) for mark in selected_marks
+    ):
+        # The observation instant rides on the input and stays in the evidence; only the
+        # price is needed to value the position.
+        items = tuple((mark.instrument_id, mark.price) for mark in selected_marks)
+    else:
+        raise TypeError("selected_marks must be a mapping or a tuple of SelectedMark")
+    prices: dict[str, Decimal] = {}
+    for instrument, price in items:
+        if not isinstance(instrument, str) or not instrument:
+            raise ValuationError(
+                "selected marks contain an invalid instrument identity",
+                account_version=account_version,
+            )
+        if instrument in prices:
+            raise ValuationError(
+                f"selected marks contain duplicate identity {instrument!r}",
+                account_version=account_version,
+            )
+        if not isinstance(price, Decimal) or not price.is_finite() or price <= 0:
+            raise ValuationError(
+                f"selected mark for {instrument!r} must be finite and positive",
+                account_version=account_version,
+            )
+        prices[instrument] = price
+    return prices

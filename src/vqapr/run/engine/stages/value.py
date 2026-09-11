@@ -1,20 +1,18 @@
 """The VALUATION stage: mark -> account.
 
 Record `147`. What was `StrategyEventLoop._value_due`, `_dispatch_valuation` and their helpers,
-moved verbatim; `_marks_from_execution_snapshot` lives here because the execution phase values
-the book from the snapshot it just filled against. Record `209` moved monitoring out to
-`compliance.py`: it is the next stage of the market-clock instant, not part of this one."""
+moved verbatim. Which price marks each name is `domain/valuation.py::select_prices`, and the
+multiplication is the account's own (`Account.mark`, record `276`). Record `209` moved
+monitoring out to `observe.py`: it is the next stage of the market-clock instant, not this one."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
-from decimal import Decimal
 
 from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.domain.account import AccountMark, AccountSnapshot
-from vqapr.domain.valuation import SelectedMark
+from vqapr.domain.valuation import SelectedMark, prices_of, select_prices
 from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 from vqapr.run.engine.context import (
     _ACCOUNT_IDENTITY,
@@ -28,56 +26,6 @@ from vqapr.run.engine.context import (
 from vqapr.run.engine.evidence import MarkEvidence, ValuationEvidence
 from vqapr.run.engine.failure import SimulationFailureKind, SimulationStage
 from vqapr.run.engine.run_state import AcceptedRunState, PreparedRunState
-
-
-def _marks_from_execution_snapshot(
-    snapshot: object,
-    target_at: datetime,
-    *,
-    previous: AccountMark | None = None,
-    held: Mapping[str, Decimal] | None = None,
-) -> tuple[SelectedMark, ...]:
-    """Value the book from the prices the venue published as executable at this instant.
-
-    A row with a price marks the name, **including when `is_tradable` is false**: the venue
-    published a price, and refusing to trade is a different fact from refusing to quote.
-
-    A name the venue published nothing for **carries its previous mark forward, keeping the
-    instant that mark was originally observed at**. A halt is not a reason to write a holding
-    down, and it is not a reason to drop it out of NAV either; it is a reason for its price to
-    stop moving. `SelectedMark.staleness(cutoff)` is what makes the gap visible afterwards.
-
-    A name with no row and no previous mark produces nothing. That is a position the venue has
-    never priced, so there is no honest number to put in the denominator.
-    """
-    marks: dict[str, SelectedMark] = {}
-    for row in getattr(snapshot, "rows", ()):
-        price = row.price
-        if price is None or price <= 0:
-            continue
-        marks[row.instrument] = SelectedMark(row.instrument, price, target_at)
-    if previous is not None and held is not None:
-        for carried in previous.marks.marks:
-            if carried.instrument_id in marks or carried.instrument_id not in held:
-                continue
-            observed_at = _observed_at(previous, carried.instrument_id)
-            if observed_at is None:
-                continue
-            marks[carried.instrument_id] = SelectedMark(
-                carried.instrument_id, carried.price, observed_at
-            )
-    return tuple(marks[instrument] for instrument in sorted(marks))
-
-
-def _observed_at(mark: AccountMark, instrument: str) -> datetime | None:
-    """When the carried price was actually observed, not when it was carried.
-
-    A mark taken before this design carries no instant; it cannot claim one retroactively.
-    """
-    selected = mark.observed_at_by_instrument
-    if selected is not None:
-        return selected.get(instrument, mark.marked_at)
-    return mark.marked_at
 
 
 class ValuationHandler:
@@ -111,7 +59,7 @@ class ValuationHandler:
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            selected_marks = _marks_from_execution_snapshot(
+            selected_marks = select_prices(
                 filled.snapshot,
                 at,
                 previous=filled.previous_mark,
@@ -123,7 +71,7 @@ class ValuationHandler:
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
-            mark = self._context.valuation_service.mark(prepared_fill.next_snapshot, selected_marks)
+            prices = prices_of(selected_marks, account_version=prepared_fill.next_snapshot.version)
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=at,
@@ -135,22 +83,13 @@ class ValuationHandler:
                 raise RuntimeError("a committed root must carry the Account it appended to")
             prepared_account = self._context.account.mark(
                 committed_account,
-                mark,
+                prices,
                 marked_at=at,
                 observed_at={
                     selected.instrument_id: selected.observed_at for selected in selected_marks
                 },
-                provenance=ValuationEvidence(
-                    run_identity=self._context.frozen_run.identity,
-                    agenda=self._context.layer.agenda,
-                    occurrence=pending.occurrence,
-                    root_version=committed_root.version,
-                    cutoff=at,
-                    account=prepared_fill.next_snapshot,
-                    marks=mark.summary(),
-                    account_version=prepared_fill.next_snapshot.version,
-                ),
             )
+        mark = prepared_account.mark.marks
         mark_evidence = MarkEvidence(
             run_identity=self._context.frozen_run.identity,
             agenda=self._context.layer.agenda,
@@ -231,7 +170,7 @@ class ValuationHandler:
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            selected_marks = _marks_from_execution_snapshot(
+            selected_marks = select_prices(
                 snapshot,
                 instant,
                 previous=account_state.latest_mark,
@@ -243,7 +182,22 @@ class ValuationHandler:
             owner=self._context.layer.agenda,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
-            mark = self._context.valuation_service.mark(before, selected_marks)
+            prices = prices_of(selected_marks, account_version=before.version)
+        with self._context.due_boundary(
+            stage=SimulationStage.DUE_ACCOUNT_MARK,
+            cutoff=instant,
+            owner=account_state,
+            kind=SimulationFailureKind.PRE_COMMIT,
+        ):
+            prepared_account = self._context.account.mark(
+                account_state,
+                prices,
+                marked_at=instant,
+                observed_at={
+                    selected.instrument_id: selected.observed_at for selected in selected_marks
+                },
+            )
+        mark = prepared_account.mark.marks
         evidence = ValuationEvidence(
             run_identity=self._context.frozen_run.identity,
             agenda=self._context.layer.agenda,
@@ -254,21 +208,6 @@ class ValuationHandler:
             root_version=self._context.state.current.version,
             account_version=before.version,
         )
-        with self._context.due_boundary(
-            stage=SimulationStage.DUE_ACCOUNT_MARK,
-            cutoff=instant,
-            owner=account_state,
-            kind=SimulationFailureKind.PRE_COMMIT,
-        ):
-            prepared_account = self._context.account.mark(
-                account_state,
-                mark,
-                provenance=evidence,
-                marked_at=instant,
-                observed_at={
-                    selected.instrument_id: selected.observed_at for selected in selected_marks
-                },
-            )
         with self._context.due_boundary(
             stage=SimulationStage.DUE_ACCOUNT_MARK,
             cutoff=instant,

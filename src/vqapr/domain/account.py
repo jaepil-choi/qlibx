@@ -215,6 +215,23 @@ class AccountSnapshot(BaseModel):
             version=version, cash=cash, positions=MappingProxyType(dict(positions))
         )
 
+    def value(self, prices: Mapping[str, Decimal]) -> MarkBatch:
+        """This book at `prices`: every holding with a price, quantity times price, by name.
+
+        The snapshot multiplies its own holdings, so a valuation can only value what is held, at
+        the held quantity -- what `Account.mark` once had to check of a batch built elsewhere is
+        true by construction (record `276`). A holding with no price leaves the valuation and
+        stays in the book: `domain/valuation.py::select_prices` has already carried a halted
+        name's last price forward, so a name missing here is one the venue never priced, and there
+        is no honest number to put in the denominator.
+        """
+        marks = [
+            Mark(instrument, quantity, prices[instrument], quantity * prices[instrument])
+            for instrument, quantity in sorted(self.positions.items())
+            if quantity != 0 and instrument in prices
+        ]
+        return MarkBatch(tuple(marks), sum((mark.value for mark in marks), Decimal("0")))
+
     @field_validator("version")
     @classmethod
     def _non_negative_version(cls, value: int) -> int:
@@ -255,7 +272,6 @@ class AccountMark:
     account_version: int
     marks: MarkBatch
     nav: Decimal
-    provenance: object
     marked_at: datetime | None = None
     observed_at_by_instrument: Mapping[str, datetime] | None = None
     """When each carried price was observed, which is not always when the mark was taken.
@@ -434,29 +450,6 @@ class PreparedMark:
             raise ValueError("a mark values the current account snapshot")
 
 
-def _require_marks_within(marks: MarkBatch, snapshot: AccountSnapshot) -> None:
-    """Marks must be a subset of the held positions, at the held quantities.
-
-    Not an exact cover. A holding the venue cannot price at this instant carries no mark and
-    contributes nothing to NAV, which is the position record 020 already took for the execution
-    path: valuing it from a stale quote would put an invented number in the denominator every
-    later weight is converted against. The position itself stays in the snapshot, so it is never
-    silently dropped from the book -- only from the valuation.
-    """
-    marked = marks.quantities()
-    held = dict(snapshot.positions)
-    unknown = tuple(sorted(set(marked) - set(held)))
-    if unknown:
-        raise ValueError(f"marks contain instruments the account does not hold: {unknown}")
-    mismatched = tuple(
-        sorted(
-            instrument for instrument, quantity in marked.items() if held[instrument] != quantity
-        )
-    )
-    if mismatched:
-        raise ValueError(f"marks must value the held quantity for {mismatched}")
-
-
 class Account:
     """Owns append permission; `AcceptedRunState` owns publication."""
 
@@ -531,29 +524,29 @@ class Account:
     def mark(
         self,
         state: AccountState,
-        marks: MarkBatch,
+        prices: Mapping[str, Decimal],
         *,
-        provenance: object,
         marked_at: datetime | None = None,
         observed_at: Mapping[str, datetime] | None = None,
     ) -> PreparedMark:
-        """May this valuation go after this state? It must value what the state holds.
+        """Value what this state holds at `prices`, and agree to append that mark after it.
 
         One door for both market-clock cases (design §3.1): the mark after a fill and the mark of
         a held book differ only in what the ledger did just before, which is not the mark's
-        concern. The account does not change; the window slides.
+        concern. The caller chooses the prices (`domain/valuation.py`); the account multiplies
+        its own holdings (`AccountSnapshot.value`). The account does not change; the window
+        slides.
         """
         if not isinstance(state, AccountState):
             raise TypeError("state must be an AccountState")
-        if not isinstance(marks, MarkBatch):
-            raise TypeError("marks must be a MarkBatch")
+        if not isinstance(prices, Mapping):
+            raise TypeError("prices must be a mapping of instrument to price")
         current = state.snapshot
-        _require_marks_within(marks, current)
+        marks = current.value(prices)
         mark = AccountMark(
             account_version=current.version,
             marks=marks,
             nav=current.cash + marks.total_value,
-            provenance=provenance,
             marked_at=marked_at,
             observed_at_by_instrument=observed_at,
         )

@@ -51,7 +51,7 @@ from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.intent import EconomicPortfolioIntent
 from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.domain.valuation import SelectedMark, ValuationService
+from vqapr.domain.valuation import SelectedMark
 from vqapr.record.schema import (
     ACCOUNT_TABLE,
     DEFAULT_TABLE_PREFIX,
@@ -523,7 +523,6 @@ class FlowContext:
     exchange: Exchange
     strategy: StrategyModel
     compliance: tuple[Compliance, ...]
-    valuation_service: ValuationService
     strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
     compliance_window_at: Callable[[datetime], ModelWindow]
     """The window the Compliance rules read at a market-clock instant (design §7.2): what they

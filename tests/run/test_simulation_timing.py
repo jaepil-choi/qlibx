@@ -16,7 +16,6 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.intent import PortfolioTarget
-from vqapr.domain.valuation import ValuationService
 from vqapr.run.engine.stages.observe import evaluate_compliance
 
 
@@ -65,7 +64,7 @@ def test_portfolio_target_is_a_weight_and_never_a_quantity() -> None:
 
 def test_closed_compliance_evaluation_preserves_pass_and_violation_without_mutation() -> None:
     account = AccountSnapshot(4, Decimal("10"), {"ABC": Decimal("2")})
-    marks = ValuationService().mark(account, {"ABC": Decimal("3")})
+    marks = account.value({"ABC": Decimal("3")})
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     window = ModelWindow(
         evaluation_time=datetime(2024, 1, 1, tzinfo=UTC),

@@ -12,7 +12,6 @@ from vqapr.domain.instrument import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.intent import Budget, PortfolioDirection
 from vqapr.domain.listing import ExchangeRulesView, ListingAccess, Side, TradeRule, TradeTerms
 from vqapr.domain.order import plan_orders
-from vqapr.domain.valuation import ValuationService
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 
@@ -222,12 +221,7 @@ def test_account_appends_the_entries_and_then_the_mark() -> None:
     )
 
     appended = account.append(root, fill_entries(_AT, fills), expected_version=3)
-    marked = account.mark(
-        appended.next_state,
-        ValuationService().mark(appended.next_snapshot, {"A": decimal("4")}),
-        provenance="test",
-        marked_at=_AT,
-    )
+    marked = account.mark(appended.next_state, {"A": decimal("4")}, marked_at=_AT)
 
     assert appended.next_state.snapshot == AccountSnapshot(4, decimal("6"), {"A": decimal("1")})
     assert len(appended.next_state.ledger) == 2, "the refused fill is an entry too: a fact"

@@ -15,7 +15,6 @@ from vqapr.domain.fill import ZeroDealtReason
 from vqapr.domain.instrument import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.listing import ExchangeRulesView, ListingAccess, Side, TradeRule, TradeTerms
 from vqapr.domain.order import OrderBatch, OrderRequest
-from vqapr.domain.valuation import ValuationService
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)
 
@@ -140,7 +139,7 @@ def test_duplicate_present_rows_reject_the_entire_batch() -> None:
 def test_valuation_marks_every_residual_holding_it_has_a_price_for() -> None:
     account = _account(positions={"B": Decimal("-2"), "A": Decimal("3"), "ZERO": Decimal("0")})
 
-    marks = ValuationService().mark(account, {"A": Decimal("4"), "B": Decimal("5")})
+    marks = account.value({"A": Decimal("4"), "B": Decimal("5")})
 
     assert [(mark.instrument_id, mark.quantity, mark.value) for mark in marks.marks] == [
         ("A", Decimal("3"), Decimal("12")),
@@ -158,7 +157,7 @@ def test_a_holding_with_no_price_is_left_out_of_nav_rather_than_ending_the_run()
     """
     account = _account(positions={"B": Decimal("-2"), "A": Decimal("3")})
 
-    marks = ValuationService().mark(account, {"A": Decimal("4")})
+    marks = account.value({"A": Decimal("4")})
 
     assert [mark.instrument_id for mark in marks.marks] == ["A"]
     assert marks.total_value == Decimal("12")

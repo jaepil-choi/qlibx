@@ -20,8 +20,7 @@ import pytest
 
 from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountMark, Mark, MarkBatch
-from vqapr.domain.valuation import SelectedMark
-from vqapr.run.engine.stages.value import _marks_from_execution_snapshot
+from vqapr.domain.valuation import SelectedMark, select_prices
 
 QUOTED = datetime(2024, 1, 4, 6, 30, tzinfo=UTC)
 """The last instant the venue published a price for the halted name."""
@@ -46,7 +45,6 @@ def _previous_mark(*, price: str, observed_at: datetime) -> AccountMark:
         account_version=1,
         marks=MarkBatch((mark,), mark.value),
         nav=Decimal("1000") + mark.value,
-        provenance=None,
         marked_at=QUOTED,
         observed_at_by_instrument={"HALT": observed_at},
     )
@@ -59,7 +57,7 @@ def _by_instrument(marks: tuple[SelectedMark, ...]) -> dict[str, SelectedMark]:
 def test_a_holding_that_stopped_quoting_keeps_its_last_price() -> None:
     """Writing a halted position down to nothing would report a loss that did not happen."""
     marks = _by_instrument(
-        _marks_from_execution_snapshot(
+        select_prices(
             _snapshot(LATER, ExactExecutionRow(LATER, "LIVE", True, Decimal("109"))),
             LATER,
             previous=_previous_mark(price="203", observed_at=QUOTED),
@@ -78,7 +76,7 @@ def test_each_mark_reports_how_old_its_price_is() -> None:
     the instrument trades again, which is a fact from the future.
     """
     marks = _by_instrument(
-        _marks_from_execution_snapshot(
+        select_prices(
             _snapshot(LATER, ExactExecutionRow(LATER, "LIVE", True, Decimal("109"))),
             LATER,
             previous=_previous_mark(price="203", observed_at=QUOTED),
@@ -96,13 +94,13 @@ def test_carrying_a_mark_forward_does_not_restamp_when_it_was_observed() -> None
     If a carried mark took the current instant as its own, a name halted for a year would look
     freshly priced at every occurrence and the halt would be invisible in the evidence.
     """
-    once = _marks_from_execution_snapshot(
+    once = select_prices(
         _snapshot(LATER),
         LATER,
         previous=_previous_mark(price="203", observed_at=QUOTED),
         held={"HALT": Decimal("5")},
     )
-    twice = _marks_from_execution_snapshot(
+    twice = select_prices(
         _snapshot(LATER + timedelta(days=30)),
         LATER + timedelta(days=30),
         previous=AccountMark(
@@ -111,7 +109,6 @@ def test_carrying_a_mark_forward_does_not_restamp_when_it_was_observed() -> None
                 (Mark("HALT", Decimal("5"), Decimal("203"), Decimal("1015")),), Decimal("1015")
             ),
             nav=Decimal("2015"),
-            provenance=None,
             marked_at=LATER,
             observed_at_by_instrument={"HALT": once[0].observed_at},
         ),
@@ -125,7 +122,7 @@ def test_carrying_a_mark_forward_does_not_restamp_when_it_was_observed() -> None
 def test_a_venue_price_wins_over_a_carried_one() -> None:
     """A carried mark is a fallback, never a preference. Trading resumes and the price moves."""
     marks = _by_instrument(
-        _marks_from_execution_snapshot(
+        select_prices(
             _snapshot(LATER, ExactExecutionRow(LATER, "HALT", True, Decimal("250"))),
             LATER,
             previous=_previous_mark(price="203", observed_at=QUOTED),
@@ -144,7 +141,7 @@ def test_a_name_the_venue_will_not_trade_is_still_priced_by_it() -> None:
     and that price is the best statement of what the holding is worth.
     """
     marks = _by_instrument(
-        _marks_from_execution_snapshot(
+        select_prices(
             _snapshot(LATER, ExactExecutionRow(LATER, "HALT", False, Decimal("190"))),
             LATER,
             previous=_previous_mark(price="203", observed_at=QUOTED),
@@ -161,7 +158,7 @@ def test_a_holding_that_was_never_priced_produces_no_mark() -> None:
 
     It is left out of NAV rather than refused, and it keeps its quantity in the account.
     """
-    marks = _marks_from_execution_snapshot(
+    marks = select_prices(
         _snapshot(LATER),
         LATER,
         previous=None,
@@ -176,7 +173,7 @@ def test_a_sold_holding_is_not_carried_back_into_the_book() -> None:
 
     A name that is no longer held must not reappear in NAV because an older mark mentioned it.
     """
-    marks = _marks_from_execution_snapshot(
+    marks = select_prices(
         _snapshot(LATER),
         LATER,
         previous=_previous_mark(price="203", observed_at=QUOTED),

@@ -1331,7 +1331,7 @@ def test_due_failures_preserve_pre_and_post_commit_authority_lineage(
     # snapshot the fill was priced against, so that reader is the seam that can fail after commit.
     # The due path binds the helper in the execution phase's module (record `147`).
     monkeypatch.setattr(
-        valuation_phase, "_marks_from_execution_snapshot", required_valuation_failure
+        valuation_phase, "select_prices", required_valuation_failure
     )
     with pytest.raises(SimulationFailure) as raised:
         _flow(
@@ -1413,7 +1413,7 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
     else:
         # Valuation now reads the execution snapshot the fill was priced from, so the seam that
         # can fault is that reader rather than a separate observation subscription.
-        monkeypatch.setattr(valuation_phase, "_marks_from_execution_snapshot", fail)
+        monkeypatch.setattr(valuation_phase, "select_prices", fail)
 
     with pytest.raises(SimulationFailure) as raised:
         flow.run()

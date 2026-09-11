@@ -49,7 +49,6 @@ from vqapr.domain.fill import ExecutionHorizon
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.domain.valuation import ValuationService
 from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 from vqapr.run.engine.context import (
     DEFAULT_TABLES,
@@ -344,7 +343,6 @@ def strategy_loop(
     compliance_window_at: Callable[[datetime], ModelWindow] | None = None,
     exchange: Exchange,
     compliance: tuple[Compliance, ...] = (),
-    valuation_service: ValuationService | None = None,
     scan_session: ScanSession | None = None,
     on_progress: Callable[[], None] | None = None,
     registry: InstrumentRoster | None = None,
@@ -411,7 +409,6 @@ def strategy_loop(
         exchange=exchange,
         strategy=strategy,
         compliance=compliance,
-        valuation_service=valuation_service or ValuationService(),
         strategy_window_for_occurrence=strategy_window_for_occurrence,
         compliance_window_at=compliance_window_at or _no_compliance_window,
         scan_session=scan_session,

@@ -38,7 +38,7 @@ class Call:
     Every role's one callback takes exactly one Call, and what the Call exposes is all the
     callback may reach -- point-in-time correctness by inaccessibility rather than by a rule
     somebody has to remember. The four are `DataCall`, `StrategyCall`, `ComplianceCall` and
-    `ExecutionCall`; the engine builds them (`flow/run/calls.py`, and the market clock for an
+    `ExecutionCall`; the engine builds them (`run/engine/calls.py`, and the market clock for an
     `ExecutionCall`).
 
     The base has no member yet. The three abstract calls name the event's time

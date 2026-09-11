@@ -39,10 +39,10 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.wiring import Role
-from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.engine.run_state import RunStateRepository
-from vqapr.flow.run.loop import RunLoop, strategy_loop
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
+from vqapr.run.engine.loop import RunLoop, strategy_loop
+from vqapr.run.engine.run_state import RunStateRepository
+from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 ROWS_PER_OCCURRENCE = 200

@@ -65,7 +65,7 @@ def test_the_emitted_strategy_fits_in_forty_lines_of_code() -> None:
 def test_the_call_says_the_models_own_things_are_on_self() -> None:
     """Record `267`. `call.recorder.append(...)` failed on a sentence naming what was missing and
     not where it was; the call now says `self.recorder`, and any other name fails as before."""
-    from vqapr.flow.run.calls import StrategyModelContext
+    from vqapr.run.engine.calls import StrategyModelContext
 
     call = object.__new__(StrategyModelContext)
     with pytest.raises(AttributeError, match=r"write `self\.recorder` inside decide\(\)"):

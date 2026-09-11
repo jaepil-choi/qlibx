@@ -40,7 +40,7 @@ __all__ = [
 class ComplianceCall(Call, ABC):
     """The complete, bounded capability surface for one Compliance observation.
 
-    An abstract contract, like `DataCall` and `StrategyCall`; `vqapr.flow.run.calls` supplies
+    An abstract contract, like `DataCall` and `StrategyCall`; `vqapr.run.engine.calls` supplies
     the one concrete implementation. Everything a rule may reach is here -- its declared reads
     as of the instant, the run's instruments, and the committed, marked account -- and nothing
     is handed beside it (record `229`): a role's Call is the whole of its authority, which is

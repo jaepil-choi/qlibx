@@ -24,8 +24,8 @@ from vqapr.component.compliance.report import (
     StampedFinding,
     default_tolerance,
 )
-from vqapr.flow.freeze import contract_report
-from vqapr.flow.run.compliance import _tolerance_override
+from vqapr.run.engine.stages.observe import _tolerance_override
+from vqapr.run.recording import contract_report
 
 
 def _finding(*, passed: bool, bound: str, excess: str) -> ComplianceFinding:

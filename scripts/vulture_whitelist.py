@@ -30,11 +30,11 @@ SampleExchange  # src/vqapr/agent/sample/exchange.py
 
 
 # --- Frozen dataclass fields: written at construction, read by serialization ----------
-# src/vqapr/flow/artifacts.py, class FailureObservation
+# src/vqapr/run/engine/failure.py, class FailureObservation
 exception_type
 arguments
 
-# src/vqapr/flow/artifacts.py, class AccountCommitEvidence
+# src/vqapr/run/engine/evidence.py, class AccountCommitEvidence
 planning_nav
 planning_cash_target
 planning_budget
@@ -43,10 +43,10 @@ requested_orders
 account_version_before
 account_version_committed
 
-# src/vqapr/flow/artifacts.py, class MarkEvidence
+# src/vqapr/run/engine/evidence.py, class MarkEvidence
 limitations
 
-# src/vqapr/flow/strategy/loop.py, class DueExecutionResult; built in `_execute_due`.
+# src/vqapr/run/engine/context.py, class DueExecutionResult; built in `_execute_due`.
 post_account_result
 
 
@@ -56,7 +56,7 @@ pytestmark
 
 # `@pytest.fixture` definitions are covered by `ignore_decorators` in pyproject, but a test
 # requesting one names it as a parameter, and that parameter has no reader in the body.
-bound_every_source  # tests/flow/test_hot_path_costs.py
+bound_every_source  # tests/run/test_hot_path_costs.py
 
 # --- pydantic fields the model reads and drops, or a test model reads only by key ------
 # `WorkspaceDocument` admits the four sections records 144 and 148 retired so a 0.3.0 document

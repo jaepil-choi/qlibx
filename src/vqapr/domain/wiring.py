@@ -165,7 +165,7 @@ WIRING: Mapping[Role, Wiring] = MappingProxyType(
 MARKET_CLOCK_ORDER: tuple[Role, ...] = (Role.ACCRUAL, Role.EXCHANGE, Role.COMPLIANCE)
 """The roles a market-clock instant calls, in the order §3.1 fixes: ACCRUE, EXECUTE, then --
 after the framework's own VALUATION -- COMPLIANCE. A decision (DECIDE) is the strategy clock's,
-sorted after the market instant it coincides with. `flow/run/loop.py::MarketClock.at` is the one
+sorted after the market instant it coincides with. `run/engine/loop.py::MarketClock.at` is the one
 place this order is written as calls, and the wiring test holds the two together."""
 
 

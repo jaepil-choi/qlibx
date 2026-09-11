@@ -38,8 +38,8 @@ from vqapr.data.source import SourceSpec
 from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.wiring import Role
-from vqapr.flow.declaration import judgments as judgments_module
 from vqapr.public import register_instruments
+from vqapr.run.preflight import checks as judgments_module
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
     RunAgenda,

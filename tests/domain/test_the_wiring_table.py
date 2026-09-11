@@ -25,7 +25,7 @@ from vqapr.domain.wiring import (
     roles_on,
     tools,
 )
-from vqapr.flow.run.loop import MarketClock
+from vqapr.run.engine.loop import MarketClock
 
 
 def test_every_role_has_exactly_one_row_and_no_row_is_without_a_role() -> None:

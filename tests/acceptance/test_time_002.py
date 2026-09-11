@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-import vqapr.flow.run.execution as execution_phase
-import vqapr.flow.run.valuation as valuation_phase
+import vqapr.run.engine.stages.execute as execution_phase
+import vqapr.run.engine.stages.value as valuation_phase
 from vqapr.authoring import (
     Compliance,
     ComplianceCall,
@@ -45,20 +45,18 @@ from vqapr.domain.intent import (
 from vqapr.domain.listing import ListingAccess, TradeRule
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
 from vqapr.domain.wiring import Role
-from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
-from vqapr.flow.engine.artifacts import (
+from vqapr.public import register_dataset
+from vqapr.run.engine.evidence import (
     AccountCommitEvidence,
     CallbackEvidence,
     DueExecutionEvidence,
     FeedbackEvidence,
     MarkEvidence,
-    SimulationFailure,
-    SimulationFailureKind,
-    SimulationStage,
 )
-from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.flow.run.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
-from vqapr.public import register_dataset
+from vqapr.run.engine.failure import SimulationFailure, SimulationFailureKind, SimulationStage
+from vqapr.run.engine.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
+from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
+from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 

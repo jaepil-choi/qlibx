@@ -73,20 +73,6 @@ from vqapr.domain.listing import (
 )
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.wiring import Role
-from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.flow.engine.artifacts import SimulationFailure
-
-# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
-# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
-# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
-# a lint autofix from deleting them as unused.
-from vqapr.flow.freeze import contract_report as contract_report
-from vqapr.flow.freeze import freeze_strategy_record as freeze_strategy_record
-from vqapr.flow.orchestration import RunResult, StrategyOutcome, preflight_run, run
-from vqapr.flow.roster import registered_roster as registered_roster
-from vqapr.flow.roster import roster_report as roster_report
-from vqapr.flow.run.calls import DataModelContext, StrategyModelContext
-from vqapr.flow.run.loop import DataModelResult, SimulationResult, callback_evidence
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
     AllocationSign,
@@ -113,6 +99,20 @@ from vqapr.record import (
 from vqapr.record import read_typed_table as read_strategy_table
 from vqapr.report.document import RunReport, StrategyReport
 from vqapr.report.record import run_report, strategy_report
+from vqapr.run.assemble import RunResult, StrategyOutcome, preflight_run, run
+from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
+from vqapr.run.engine.failure import SimulationFailure
+from vqapr.run.engine.loop import DataModelResult, SimulationResult, callback_evidence
+from vqapr.run.preflight.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+
+# Orchestration, evidence and roster reading moved to their owning layers by record `111`.
+# Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
+# deliberate: it marks these as intentional re-exports, which is both what they are and what stops
+# a lint autofix from deleting them as unused.
+from vqapr.run.recording import contract_report as contract_report
+from vqapr.run.recording import freeze_strategy_record as freeze_strategy_record
+from vqapr.run.roster import registered_roster as registered_roster
+from vqapr.run.roster import roster_report as roster_report
 from vqapr.signals.evaluation import (
     decay,
     hit_rate,

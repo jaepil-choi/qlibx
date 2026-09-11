@@ -451,7 +451,7 @@ def _compliance_identity(ref: ComponentRef, rule: Compliance) -> None:
     It cannot be the ONLY place, because it can only ask once per load. A `compliance_id` that
     returns a different string on each access satisfies this check at registration and again at
     `check`, and still disagrees by run assembly; `_require_compliance_identity` in
-    `flow/run/context.py` is what catches that, and red-teaming confirmed the path is live.
+    `run/engine/context.py` is what catches that, and red-teaming confirmed the path is live.
     """
     declared = str(ref.component_id)
     answered = rule.compliance_id

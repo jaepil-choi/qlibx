@@ -1,6 +1,6 @@
 """Adversarial attack on claim 4: run records survive their process, and races are refused.
 
-Four attacks, each stronger than what `tests/flow/test_run_records.py` already covers:
+Four attacks, each stronger than what `tests/run/test_run_records.py` already covers:
 
 1. A run INTERRUPTED mid-write -- a real OS signal to a separate process, not a hand-written
    partial record -- leaves every row it recorded and no `record.json`, and `run_ids` must not
@@ -76,7 +76,7 @@ def main() -> None:
             time.sleep(0.02)
         writer.finish({{"account": {{"version": 2000}}}})
     except BaseException:
-        # What `flow/orchestration.py` does on a strategy's failure path.
+        # What `run/assemble.py` does on a strategy's failure path.
         writer.release()
         raise
 
@@ -166,7 +166,7 @@ def test_a_process_interrupted_mid_write_leaves_every_row_and_no_record(
 ) -> None:
     """A real signal to a separate OS process, not a hand-authored partial record.
 
-    `tests/flow/test_run_records.py::test_an_unfinished_run_is_not_listed_as_a_finished_one`
+    `tests/run/test_run_records.py::test_an_unfinished_run_is_not_listed_as_a_finished_one`
     calls `release()` itself in the same process. This drives a genuinely separate process and
     interrupts it externally: the rows were in memory when the signal arrived (`087`), the
     failure path's `release` wrote them, and the record was never written.
@@ -220,7 +220,7 @@ def test_five_processes_racing_the_same_run_id_refuse_rather_than_interleave(
 ) -> None:
     """Five independent OS processes contend for one run id. Exactly one may win.
 
-    `tests/flow/test_run_records.py` only ever exercises DISTINCT run ids in parallel (AC-R4) or
+    `tests/run/test_run_records.py` only ever exercises DISTINCT run ids in parallel (AC-R4) or
     a same-process double-`open()` (which proves the check exists, not that it holds under real
     contention). This launches five real processes at the same shared id and checks that the
     result is a clean single winner, never a record whose fields came from more than one writer.

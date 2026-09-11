@@ -12,7 +12,7 @@ cannot serve raises rather than quietly producing a thin result.
 **The resolver tests that stood below are gone with record `124`.** They drove
 `project.resolver(...)`, and both resolver classes -- the catalog-backed one and the
 store-backed one no module ever imported -- went with the Project cluster. What they read
-through is exercised for real by every run in `tests/flow/`.
+through is exercised for real by every run in `tests/run/`.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from decimal import Decimal
 import pytest
 
 from vqapr.authoring import CalendarLookback, DatasetInput, Observation, RowsLookback
-from vqapr.flow.run.calls import observations, requirements_for
+from vqapr.run.engine.calls import observations, requirements_for
 
 EVALUATION_TIME = datetime(2024, 3, 15, 16, tzinfo=UTC)
 

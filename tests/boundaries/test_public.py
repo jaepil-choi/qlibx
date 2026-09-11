@@ -9,8 +9,8 @@ from types import SimpleNamespace
 import duckdb
 import pytest
 
-import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
+import vqapr.run.assemble as orchestration
 from vqapr.public import (
     QUANTUM,
     SHIPPED_COMPLIANCE,
@@ -418,7 +418,7 @@ def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
-    from vqapr.flow.declaration.frozen import FrozenStrategy
+    from vqapr.run.preflight.frozen import FrozenStrategy
 
     memory = {"carry": [1]}
     layer = object.__new__(FrozenStrategy)
@@ -484,7 +484,7 @@ def test_public_run_uses_frozen_initial_model_memory(
         "preflight_run",
         lambda *_args: pytest.fail("run must not preflight a FrozenRun"),
     )
-    # `run` lives in `vqapr.flow.orchestration` since record `111`, so the loader it calls is
+    # `run` lives in `vqapr.run.assemble` since record `111`, so the loader it calls is
     # patched there. `vqapr.public.run` is the same function object, re-exported.
     monkeypatch.setattr(orchestration, "load_strategy_model", lambda *_a, **_k: strategy)
     monkeypatch.setattr(orchestration, "load_exchange", lambda *_args, **_kwargs: object())

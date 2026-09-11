@@ -15,7 +15,7 @@ registration had already established. This module is the whole of it:
 
 The stages are the ones `datasets.py` held, moved here whole; what changed is that the execution
 role's facts are measured here too, for every candidate price at once, so the run's choice of
-price is judged against a stored fact rather than a fresh scan (`flow/declaration/preflight.py::
+price is judged against a stored fact rather than a fresh scan (`run/preflight/facts.py::
 bound_execution_table`). `tests/boundaries/test_physical_reads_pass_one_door.py` holds the door:
 no module outside this one calls the scan's check kernels.
 """

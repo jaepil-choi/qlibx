@@ -35,14 +35,14 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import InputError, Stage, VqaprError
-from vqapr.flow.declaration.judgments import JUDGMENT_CODES
-from vqapr.flow.declaration.verify import RunVerdict, verify_run
 from vqapr.public import Workspace
+from vqapr.run.preflight.checks import JUDGMENT_CODES
+from vqapr.run.preflight.verdict import RunVerdict, verify_run
 
 STAGE = Stage.CHECK
 
 SIMULATION_CODES = frozenset(JUDGMENT_CODES)
-"""The judgments this verb makes about a registered RUN -- `flow/declaration/judgments.py`'s list,
+"""The judgments this verb makes about a registered RUN -- `run/preflight/checks.py`'s list,
 not a copy.
 
 This was a hand-written tuple of the codes the judges raise, and it drifted: a judge was added
@@ -61,7 +61,7 @@ The two named here (`cli/run.preflight_refusal`) carry a bare `TypeError`/`Value
 framework invariant, which has no structured body of its own and would otherwise surface as an
 `unhandled` failure.
 
-`judgment.blocked` (`flow/declaration/judgments.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
+`judgment.blocked` (`run/preflight/checks.JUDGMENT_BLOCKED`) is deliberately NOT here. It is
 the entry for a judgment that could not answer; on the run path `RunVerdict.require_frozen` raises
 it, while this verb reads the same verdict and reports such an entry under `blocked`, never under
 `failures`.
@@ -106,7 +106,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
     workspace: Workspace | None = None
     definition: object | None = None
     # One reading of the declaration serves both the judgments phase and the preflight phase
-    # (`flow/declaration/verify.py`): the judgments' answers and the freeze's refusal come out
+    # (`run/preflight/verdict.py`): the judgments' answers and the freeze's refusal come out
     # of one call, made when the first of the two phases asks.
     verdict: RunVerdict | None = None
     phases = _PHASES

@@ -33,7 +33,7 @@ FORBIDDEN = (
     "vqapr.data",
     "vqapr.component.strategy.recorder",
     "vqapr.component.exchange",
-    "vqapr.flow",
+    "vqapr.run",
     # `vqapr.runtime` was listed here until one-shape Step 7 (record 162) moved its agendas to
     # `domain/` (which a leaf may import) and its envelopes into `flow/loop` (already listed).
     "duckdb",

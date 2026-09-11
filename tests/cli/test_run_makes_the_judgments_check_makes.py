@@ -24,8 +24,8 @@ from test_commands import _cli, _register_run, _workspace_for_run
 
 from vqapr.cli.check import check
 from vqapr.domain.errors import VqaprError
-from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.public import Workspace, preflight_run
+from vqapr.run.preflight.checks import JUDGMENT_CODES
 
 
 def _run(capsys: pytest.CaptureFixture[str], root: Path, run_id: str) -> tuple[int, dict]:
@@ -136,7 +136,7 @@ def test_run_refuses_when_a_judgment_could_not_answer(
 
     assert check("r1", tmp_path)["ok"] is True, "fixture must otherwise pass"
 
-    import vqapr.flow.declaration.judgments as judgments_module
+    import vqapr.run.preflight.checks as judgments_module
 
     def _cannot_look(*_args: object, **_kwargs: object) -> None:
         raise KeyError("a judgment read a key nobody wrote")

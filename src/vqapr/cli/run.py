@@ -32,17 +32,6 @@ from vqapr.domain.errors import (
     VqaprError,
     status_of,
 )
-from vqapr.flow.declaration.verify import verify_run
-from vqapr.flow.orchestration import (
-    COMPLETED,
-    FAILED,
-    batch_cubes,
-    batch_reads,
-    in_workers,
-    require_independent_batch,
-    run_registered_datamodel,
-    run_registered_strategy,
-)
 from vqapr.public import RunDefinition, Workspace
 from vqapr.public import run as execute_run
 from vqapr.record import (
@@ -52,6 +41,9 @@ from vqapr.record import (
     read_typed_table,
 )
 from vqapr.record.schema import FILL_TABLE
+from vqapr.run.assemble import COMPLETED, FAILED, run_registered_datamodel, run_registered_strategy
+from vqapr.run.batch import batch_cubes, batch_reads, in_workers, require_independent_batch
+from vqapr.run.preflight.verdict import verify_run
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY
 
 
@@ -205,7 +197,7 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
         # SAME judgment as `stage: "unhandled"` (`docs/issues/archive/076`).
         #
         # These two types are the WHOLE escape set, not a guessed subset: every `raise` in
-        # `flow/declaration/preflight.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and
+        # `run/preflight/{facts,freeze}.py` is a `TypeError`, a `ValueError`, or a `VqaprError`, and
         # user code reached through `load_strategy_model` comes back already bounded as
         # `component.load`.
         # `VqaprError` and `InputError` are therefore deliberately not caught -- both already

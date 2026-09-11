@@ -30,9 +30,9 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.flow.run.compliance import build_account_view
 from vqapr.portfolio.allocation import AllocationViolation
 from vqapr.portfolio.bounds import single_name_cap
+from vqapr.run.engine.stages.observe import build_account_view
 
 FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "real"
 VENUE = "Asia/Seoul"

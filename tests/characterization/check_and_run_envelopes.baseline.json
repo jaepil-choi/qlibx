@@ -8,7 +8,7 @@
       "origin": "framework",
       "traceback": "<traceback>",
       "type": "VqaprError",
-      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+      "where": "vqapr/run/preflight/facts.py:<n> (bound_execution_table)"
      },
      "code": "judgment.blocked",
      "example_total": 0,
@@ -37,7 +37,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+      "where": "vqapr/run/preflight/facts.py:<n> (bound_execution_table)"
      },
      "code": "execution.price_not_a_field",
      "example_total": 0,
@@ -80,7 +80,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/preflight.py:<n> (unresolved_target_failures)"
+      "where": "vqapr/run/preflight/facts.py:<n> (unresolved_target_failures)"
      },
      "code": "execution.not_after_decision",
      "example_total": 1,
@@ -103,7 +103,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_weights)"
+      "where": "vqapr/run/preflight/checks.py:<n> (_judge_weights)"
      },
      "code": "weights.venue_conflict",
      "example_total": 3,
@@ -128,7 +128,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_outputs)"
+      "where": "vqapr/run/preflight/checks.py:<n> (_judge_outputs)"
      },
      "code": "run.output_registered",
      "example_total": 0,
@@ -149,7 +149,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/preflight.py:<n> (_refuse_taken_output)"
+      "where": "vqapr/run/preflight/freeze.py:<n> (_refuse_taken_output)"
      },
      "code": "run.output_registered",
      "example_total": 0,
@@ -296,7 +296,7 @@
       "origin": "framework",
       "traceback": "<traceback>",
       "type": "VqaprError",
-      "where": "vqapr/flow/declaration/preflight.py:<n> (bound_execution_table)"
+      "where": "vqapr/run/preflight/facts.py:<n> (bound_execution_table)"
      },
      "code": "judgment.blocked",
      "example_total": 0,
@@ -331,7 +331,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/preflight.py:<n> (unresolved_target_failures)"
+      "where": "vqapr/run/preflight/facts.py:<n> (unresolved_target_failures)"
      },
      "code": "execution.not_after_decision",
      "example_total": 1,
@@ -354,7 +354,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_weights)"
+      "where": "vqapr/run/preflight/checks.py:<n> (_judge_weights)"
      },
      "code": "weights.venue_conflict",
      "example_total": 3,
@@ -379,7 +379,7 @@
       "origin": "framework",
       "traceback": null,
       "type": null,
-      "where": "vqapr/flow/declaration/judgments.py:<n> (_judge_outputs)"
+      "where": "vqapr/run/preflight/checks.py:<n> (_judge_outputs)"
      },
      "code": "run.output_registered",
      "example_total": 0,

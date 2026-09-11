@@ -2,7 +2,7 @@
 
 AC-R5 asks for two properties that sound like one. They are not.
 
-**A cold process gets the same values.** Proved in `tests/flow/test_run_records.py` with real
+**A cold process gets the same values.** Proved in `tests/run/test_run_records.py` with real
 spawned processes, because that is the only honest way to prove it.
 
 **The output and the record carry the same field set.** Proved here, and proved structurally

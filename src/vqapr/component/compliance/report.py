@@ -6,8 +6,8 @@ once for every rule -- the rule's own, or `default_tolerance` -- so the record k
 `passed` beside the framework's `verdict` and a generous default hides nothing. A
 `ComplianceReport` is every stamped finding from one observation of a committed account version.
 
-The engine's OBSERVE stage builds these (`flow/run/compliance.py`), and the run context carries
-them; both import this module, which is why the values are not kept beside the stage.
+The engine's OBSERVE stage builds these (`run/engine/stages/observe.py`), and the run context
+carries them; both import this module, which is why the values are not kept beside the stage.
 """
 
 from __future__ import annotations

@@ -23,8 +23,8 @@ import duckdb
 
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
-from vqapr.flow.run.loop import DataModelResult
 from vqapr.public import preflight_run, register_data_model, register_dataset, run
+from vqapr.run.engine.loop import DataModelResult
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY
 from vqapr.workspace.run_definition import DataModelEntry, RunAgenda, RunDefinition
 

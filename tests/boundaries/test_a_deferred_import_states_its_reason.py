@@ -62,10 +62,10 @@ ratchet was counting — `project.py` alone deferred nearly all of its own. Reco
 more out of `strategy_bridge`, which stopped importing `vqapr.public` at all once the Flow took
 over stamping the intent. Lowering the constant in the same commit is what this ratchet is for.
 
-Was 104 before that. Record `115` hoisted five function-local imports out of `flow/roster.py` and
+Was 104 before that. Record `115` hoisted five function-local imports out of `run/roster.py` and
 `flow/records.py` that had been deferred inside `vqapr.public`, where the facade sits above
 everything; that justification did not travel when the code moved to `flow/`, and
-`flow/orchestration.py` already imports `vqapr.workspace` (now `vqapr.workspace.registry`) eagerly.
+`run/assemble.py` already imports `vqapr.workspace` (now `vqapr.workspace.registry`) eagerly.
 
 This number may go DOWN freely; it may not go up.
 

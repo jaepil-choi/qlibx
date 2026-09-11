@@ -18,7 +18,7 @@ import pytest
 
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.store import AccessRecord
-from vqapr.flow.run.output import LookAheadDetected, derived_available_at
+from vqapr.run.engine.output import LookAheadDetected, derived_available_at
 
 _EVAL = datetime(2024, 1, 1, 15, 30, tzinfo=UTC)
 

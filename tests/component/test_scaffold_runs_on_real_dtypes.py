@@ -48,8 +48,8 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.wiring import Role
-from vqapr.flow.run.calls import DataModelContext, StrategyModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
+from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
 
 KST = ZoneInfo("Asia/Seoul")
 

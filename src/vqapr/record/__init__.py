@@ -29,7 +29,7 @@ streams now.
 Reading a record is what a report, a CLI listing and a second process do, and none of them runs
 anything -- so the machinery lives above `flow/` and imports nothing from it. The half that DID
 need the engine, because it turns a `SimulationResult` into a record, stayed behind as
-`flow/freeze.py`.
+`run/recording.py`.
 
 Three modules, layered in one direction so the cycle that promotion could have introduced cannot
 come back: `schema.py` (what a record is: filenames, models, paths, encodings) is imported by

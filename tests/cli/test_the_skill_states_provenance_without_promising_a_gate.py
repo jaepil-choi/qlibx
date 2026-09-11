@@ -7,7 +7,7 @@
 
 **That refusal was removed on purpose.** `docs/issues/archive/009` argued the component fingerprint should
 report rather than refuse, because editing a registered component is the ordinary development loop,
-and `tests/flow/test_edit_loop.py` is the acceptance test it asked for. So the skill was describing
+and `tests/run/test_edit_loop.py` is the acceptance test it asked for. So the skill was describing
 a gate the package had deliberately stopped having, and sending readers to invent a new component id
 for every edit.
 

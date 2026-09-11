@@ -1,0 +1,741 @@
+"""The value classes of a simulation, and the state its four phases share.
+
+Record `147` (deletion campaign Step 6) split `StrategyEventLoop` -- 2,200 lines, 55 methods -- into
+the loop (`simulation.py`), the callback phase (`callback.py`: decide -> intent), the execution
+phase (`execution.py`: intent -> fill -> commit) and the valuation phase (`valuation.py`: mark ->
+account) and, since record `209`, the compliance phase (`compliance.py`: the declared rules
+observe the marked book). The phases share this module: the dataclasses every phase produces or
+consumes, the package tables, and `FlowContext`, the one object holding the run's state and the
+failure envelope (`guard`, `failure`, `due_boundary`).
+"""
+
+from __future__ import annotations
+
+import inspect
+import time
+import unicodedata
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from vqapr.component.base import Component
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.compliance.report import ComplianceReport
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.reference import ComponentRef
+from vqapr.component.strategy.base import StrategyModel
+from vqapr.component.strategy.decision import Hold
+from vqapr.component.strategy.history import AccountHistoryInput
+from vqapr.component.strategy.recorder import TableSpec
+from vqapr.data.execution_table import (
+    ExactExecutionSnapshot,
+    ExecutionSnapshots,
+    exact_execution_snapshot,
+)
+from vqapr.data.scan import ScanSession
+from vqapr.data.window import ModelWindow
+from vqapr.domain.account import (
+    Account,
+    AccountMark,
+    AccountSnapshot,
+    MarkBatch,
+    MarkSummary,
+    PreparedAppend,
+)
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
+from vqapr.domain.fill import ExactExecutionTarget, ExecutionHorizon
+from vqapr.domain.instrument import InstrumentRoster
+from vqapr.domain.intent import EconomicPortfolioIntent
+from vqapr.domain.memory import ModelMemory, normalize_memory
+from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.valuation import SelectedMark, ValuationService
+from vqapr.record.schema import (
+    ACCOUNT_TABLE,
+    DEFAULT_TABLE_PREFIX,
+    FILL_TABLE,
+    MONITORING_TABLE,
+    WEIGHT_TABLE,
+)
+from vqapr.run.engine.events import MarketEvent
+from vqapr.run.engine.evidence import (
+    AccountCommitEvidence,
+    CallbackEvidence,
+    DueExecutionEvidence,
+    MarkEvidence,
+    MonitoringEvidence,
+    ValuationEvidence,
+)
+from vqapr.run.engine.failure import (
+    FailureObservation,
+    RetryPrecondition,
+    SimulationFailure,
+    SimulationFailureKind,
+    SimulationStage,
+)
+from vqapr.run.engine.run_state import AcceptedRunState, RunStateRepository
+from vqapr.run.preflight.frozen import FrozenRun, FrozenStrategy
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedIntent:
+    """A timestamp-free Strategy payload bound to one Flow-selected target."""
+
+    intent: EconomicPortfolioIntent
+    occurrence: OperationOccurrence
+    decision_time: datetime
+    target: ExactExecutionTarget
+
+    def __post_init__(self) -> None:
+        if self.decision_time != self.occurrence.evaluation_time:
+            raise ValueError("decision_time must be the current occurrence evaluation_time")
+        if self.decision_time.tzinfo is None:
+            raise ValueError("decision_time must be timezone-aware")
+        target_at = self.target.target_at
+        if target_at.astimezone(UTC) <= self.decision_time.astimezone(UTC):
+            raise ValueError("execution target must be strictly later than decision_time")
+
+    @property
+    def pending_id(self) -> str:
+        return str(self.intent.intent_id)
+
+
+@dataclass(frozen=True, slots=True)
+class Filled:
+    """What EXECUTE leaves for the stages after it at one market instant (record `207`).
+
+    The committed account and everything VALUATION and the fill's epilogue read: the snapshot
+    the fill was priced from, the fills, the prepared fill (the Account's own transition), the
+    mark that stood before it (a halted name carries its price forward), and the commit
+    evidence and root. Handler-to-handler only; nothing here reaches a record on its own.
+    """
+
+    pending: AcceptedIntent
+    snapshot: object
+    fills: object
+    prepared_fill: PreparedAppend
+    previous_mark: AccountMark | None
+    commit_evidence: AccountCommitEvidence
+    committed_root: AcceptedRunState
+
+
+@dataclass(frozen=True, slots=True)
+class Marked:
+    """What VALUATION leaves at one market instant: the root it published, the mark batch it
+    committed, the evidence (a fill's `MarkEvidence`, a held book's `ValuationEvidence`) and
+    the marks it selected."""
+
+    root: AcceptedRunState
+    mark: MarkBatch
+    evidence: MarkEvidence | ValuationEvidence
+    selected: tuple[SelectedMark, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MarketInstant:
+    """One instant of the market clock as its stages leave it, in the order design §3.1 fixes.
+
+    ACCRUE, EXECUTE, VALUATION, COMPLIANCE and the instant's close each take this and return
+    it with their own field set (record `226`). What a stage may read is what the stages before
+    it left and nothing else, so the loop's five lines are a fold over this value rather than a
+    hand-off of four differently shaped locals: `due` is what the loop found pending for this
+    instant, `filled` what EXECUTE did with it, `marked` what VALUATION committed, `monitoring`
+    what the rules found, `result` what the instant's trace records.
+    """
+
+    at: datetime
+    due: AcceptedIntent | None
+    filled: Filled | None = None
+    marked: Marked | None = None
+    monitoring: MonitoringResult | None = None
+    result: DueExecutionResult | HeldResult | None = None
+
+    def require_marked(self) -> Marked:
+        if self.marked is None:
+            raise RuntimeError("this stage runs after VALUATION; the instant has not been marked")
+        return self.marked
+
+
+@dataclass(frozen=True, slots=True)
+class OccurrenceTrace:
+    occurrence: OperationOccurrence
+    result: Hold | EconomicPortfolioIntent
+    """The decision as the callback left it: a `Hold`, or a `Rebalance` stamped into the intent
+    the run accepted."""
+    root_version: int
+    """The version of the root this callback published. The root itself is not kept: a trace
+    that held it held that instant's whole account, marks and all, until the run ended (record
+    `224`), and nothing read it back -- `final_state` is the run's authority."""
+
+
+@dataclass(frozen=True, slots=True)
+class DueExecutionTrace:
+    """What one market-clock instant did: a fill (with its valuation and monitoring) when the
+    pending intent was due here, or a valuation of the held book (and its monitoring)."""
+
+    due: MarketEvent
+    result: DueExecutionResult | HeldResult | InstantOutcome
+    """The whole result for a run without a record; its `InstantOutcome` for one with (record
+    `256`) -- both answer `report` and `monitoring`."""
+    root_version: int
+    """The version of the root this instant left (record `224`: the root is not kept)."""
+
+
+@dataclass(frozen=True, slots=True)
+class SimulationResult:
+    occurrences: tuple[OccurrenceTrace | DueExecutionTrace, ...]
+    final_state: AcceptedRunState
+    timing: Mapping[str, float] = field(default_factory=dict)
+    """Seconds spent, by phase, over the whole run (`docs/issues/archive/068`): `total`, `callback`
+    (window and decide, every static occurrence), `due` (every fill-side item), and one entry
+    per due stage -- `simulation.due.snapshot`, `simulation.due.order_planning`, ... -- so a
+    reader learns where a run's wall clock went without a profiler. Wall-clock, not CPU."""
+
+
+def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
+    """Every Strategy callback evidence a finished run published, in lifecycle order.
+
+    A run's decisions are reachable only through its state root, and reconstructing them from
+    ``occurrences`` would mean re-deriving what the Flow already stamped. Read by tests and
+    showcases that want the decisions in-process; a later run that wants them reads the run's
+    recorded ``vqapr.weight`` table, registered as a dataset (one-shape campaign Step 4).
+    Declining callbacks are included, because whether a decline counts is the reader's rule to
+    apply, not this accessor's.
+    """
+    if not isinstance(result, SimulationResult):
+        raise TypeError("result must be a SimulationResult returned by run()")
+    return tuple(
+        trace.detail
+        for trace in result.final_state.lifecycle_trace
+        if isinstance(trace.detail, CallbackEvidence)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DueExecutionResult:
+    """Evidence returned only after the complete post-decision account chain.
+
+    `monitoring` is what the declared Compliance rules found on the committed, marked book right
+    after this commit (record `148`; design §7.2), or `None` when the run declared none.
+    """
+
+    consumed_pending_id: str
+    account_version: int
+    post_account_result: DueExecutionEvidence
+    monitoring: MonitoringResult | None = None
+
+    @property
+    def report(self) -> ComplianceReport | None:
+        """The compliance report, where `contract_report` looks for one."""
+        return None if self.monitoring is None else self.monitoring.report
+
+    def outcome(self) -> InstantOutcome:
+        """What a run with a record keeps of this instant (record `256`)."""
+        return InstantOutcome(self.account_version, self.monitoring)
+
+    def __post_init__(self) -> None:
+        if not self.consumed_pending_id:
+            raise ValueError("consumed_pending_id must be a non-empty string")
+        if isinstance(self.account_version, bool) or not isinstance(self.account_version, int):
+            raise TypeError("account_version must be an integer")
+        if self.account_version < 0:
+            raise ValueError("account_version must be non-negative")
+
+
+class FailedAfterCommit(SimulationFailure):
+    """A due-chain failure after the Account authority has advanced."""
+
+
+@dataclass(frozen=True, slots=True)
+class ValuationResult:
+    """One committed AccountSnapshot and the summary of the marks that valued it."""
+
+    account: AccountSnapshot
+    marks: MarkSummary
+    evidence: ValuationEvidence
+
+
+@dataclass(frozen=True, slots=True)
+class HeldResult:
+    """The book valued at a market-clock instant no fill was due at, and what monitoring found
+    there (design §3.1: VALUATION and COMPLIANCE happen at every point of the market clock)."""
+
+    valuation: ValuationEvidence
+    monitoring: MonitoringResult | None = None
+
+    @property
+    def report(self) -> ComplianceReport | None:
+        return None if self.monitoring is None else self.monitoring.report
+
+    def outcome(self) -> InstantOutcome:
+        """What a run with a record keeps of this instant (record `256`)."""
+        return InstantOutcome(self.valuation.account_version, self.monitoring)
+
+
+@dataclass(frozen=True, slots=True)
+class InstantOutcome:
+    """What a run with a record keeps of one market-clock instant (record `256`).
+
+    The fill, the mark and the commit are the record's rows the moment they are made, so a run
+    streaming to a record does not also hold their evidence until it ends: the account version the
+    instant left, and what monitoring found there -- which the record's `contract` block and the
+    run's own report read back. A run without a record keeps the whole `DueExecutionResult` or
+    `HeldResult`, for the in-process reader of its evidence.
+    """
+
+    account_version: int
+    monitoring: MonitoringResult | None = None
+
+    @property
+    def report(self) -> ComplianceReport | None:
+        return None if self.monitoring is None else self.monitoring.report
+
+
+@dataclass(frozen=True, slots=True)
+class MonitoringResult:
+    """Compliance evidence over exactly the AccountSnapshot just marked."""
+
+    valuation: ValuationResult
+    report: ComplianceReport
+    evidence: MonitoringEvidence
+
+    def __post_init__(self) -> None:
+        if self.report.account_version != self.valuation.account.version:
+            raise ValueError("report must evaluate the marked account version")
+
+
+def _shadows_package_table(table_id: str) -> bool:
+    """Whether a declared table id lays claim to the package's reserved namespace.
+
+    Comparison is normalised because a raw ``startswith`` is trivially defeated. A plain
+    case-sensitive check let ``VQAPR.account`` and a leading-space `` vqapr.account`` through;
+    adding ``casefold`` alone still let the full-width rendering and zero-width insertions through.
+    In every case the spoofed table sat beside the real one in the same recorder under a distinct
+    key, and a reader had no way to tell which was authoritative -- which is precisely what the
+    reservation exists to prevent.
+
+    Only *visible* disguises are this function's problem. Invisible characters are refused where a
+    `TableSpec` is built, so by the time an id reaches here it cannot contain one. What remains is
+    the class of spellings that look like the prefix and fold onto it -- the full-width rendering,
+    mathematical alphanumerics, case variants -- which compatibility folding and case folding catch.
+
+    It does not chase homoglyphs from other scripts: a Cyrillic lookalike is a different string by
+    any normalisation, and defeating it needs a confusables skeleton, which is disproportionate for
+    a namespace guard and would start rejecting legitimate non-Latin ids.
+    """
+    folded = unicodedata.normalize("NFKC", table_id).strip().casefold()
+    return folded.startswith(DEFAULT_TABLE_PREFIX)
+
+
+
+_ACCOUNT_IDENTITY = "_ACCOUNT"
+"""Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""
+
+CALLBACK_STAGE = "STRATEGY_CALLBACK"
+VALUATION_STAGE = "VALUATION"
+MONITORING_STAGE = "MONITORING"
+"""The `stage` label every package row carries: which handler wrote it. These were the values
+of an `OperationRole` an occurrence used to carry (record `182` removed it: the one agenda has
+no role); the labels stay so a record written before reads the same as one written after."""
+
+DEFAULT_TABLES = (
+    TableSpec(WEIGHT_TABLE, ("instrument", "weight")),
+    TableSpec(
+        ACCOUNT_TABLE,
+        ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
+    ),
+    # One row per declared Compliance rule per market-clock instant: which rule, the limit it
+    # held the book to, the value it measured, and the names that breached. PRD 7.1 asks a breach
+    # to leave exactly those behind, and the `contract` block of the strategy record only ever
+    # counted them -- `held` and `checked` say how often, not what or by how much.
+    TableSpec(
+        MONITORING_TABLE,
+        (
+            "rule",
+            "passed",
+            "measured",
+            "bound",
+            "excess",
+            "verdict",
+            "tolerance",
+            "offenders",
+            "account_version",
+        ),
+    ),
+    TableSpec(
+        FILL_TABLE,
+        (
+            "instrument",
+            # The category this fill was charged under. Declared here because the charge is a
+            # lookup at fill time and nothing downstream can re-derive it; without the column the
+            # value is computed and then dropped, and the report's cost by kind has one
+            # "unknown" bucket.
+            "kind",
+            "account_version",
+            "requested_quantity",
+            # What the weight sized to before the planner cut buys to the cash (record `261`):
+            # beside `requested_quantity`, the cut is visible in the record rather than inferred.
+            "sized_quantity",
+            "dealt_quantity",
+            "price",
+            "cash_delta",
+            "commission",
+            "tax",
+            "reason",
+        ),
+    ),
+)
+
+"""What every run records without the Strategy asking.
+
+Canon 9.2 makes these defaults rather than opt-in because both are package-computed -- the weights
+from the accepted intent, the account state from the committed Account. Requiring a declaration
+would make a package fact contingent on user opt-in.
+
+**This is decision-time state, not a performance series.** A callback sees an `AccountSnapshot`,
+which carries version, cash and positions but no marks: marking happens on the due-execution path,
+so at callback time there is no NAV to copy. Recording cash under the name NAV would put a wrong
+number under a true-sounding name, which is worse than recording nothing. The NAV series canon 5.2
+requires -- stamped at its mark instant -- needs a recorder where marks exist, and is a named
+follow-up rather than something this table quietly approximates.
+"""
+
+
+def _require_compliance_identity(
+    rules: tuple[Compliance, ...], declared: tuple[ComponentRef, ...]
+) -> None:
+    """Refuse an assembly whose loaded Compliance rules are not the ones the run froze.
+
+    Both halves were bare `ValueError`s, and a bare exception here has no structured body, so it
+    surfaced as `stage: "unhandled"` with an empty `failures` list -- the framework announcing its
+    own breakage when the real cause was a component registered under the wrong id.
+
+    `load_compliance` refuses a mismatch at registration, so a rule with a STABLE id can no
+    longer reach here from the CLI. A rule whose `compliance_id` is **volatile** -- one that
+    returns a different string on each access -- still can, and does: it matches on the access
+    `register` makes, matches again under `check`, and disagrees by the time the run is assembled.
+    Red-teaming found exactly that, so this is a live gate rather than defence in depth, and it is
+    the last place the disagreement can be caught.
+    """
+    loaded_ids = tuple(rule.compliance_id for rule in rules)
+    declared_ids = tuple(str(component.component_id) for component in declared)
+    if loaded_ids == declared_ids:
+        return
+    requirement = (
+        "the compliance rules handed to a run must be exactly the ones its FrozenRun declared, "
+        "in the same order and answering to the same ids"
+    )
+    observed = f"loaded {loaded_ids!r}, FrozenRun declared {declared_ids!r}"
+    raise VqaprError(
+        stage=Stage.RUN,
+        failures=[
+            Failure.bounded(
+                code="compliance.identity_mismatch",
+                status=Status.CONFLICT,
+                requirement=requirement,
+                observed=observed,
+                fix=(
+                    "register each Compliance rule under the id its own compliance_id returns, "
+                    "then re-run; vqapr check reports this before a run is spent"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition="re-register the mismatched Compliance rule, then retry",
+    )
+
+
+def _raise_callback_return_type(returned: object) -> None:
+    """Refuse a callback return that is not the decision algebra, naming what came back.
+
+    `decide` returns `Hold | Rebalance` since record `125`, and until now nothing checked.
+    A Strategy that returned a stamped `EconomicPortfolioIntent` -- the shape the contract used to
+    take -- fell through every branch and surfaced as a complaint from inside intent
+    validation, three frames from the callback that caused it. Refusing here names the contract
+    and the type that missed it.
+    """
+    raise TypeError(
+        "decide must return Hold or Rebalance; got "
+        f"{type(returned).__name__}. An intent's id, strategy, provenance and account version "
+        "are stamped by the Flow (record 125), so a callback returns economics only"
+    )
+
+
+def _component_id_of(layer: object) -> str:
+    """The component id of a strategy layer (`config.component`) or a datamodel layer
+    (`component`); the failure envelope names the member either way."""
+    config = getattr(layer, "config", None)
+    ref = getattr(config, "component", None) if config is not None else None
+    if ref is None:
+        ref = getattr(layer, "component", None)
+    return str(getattr(ref, "component_id", "?"))
+
+
+def _author_frame(cause: BaseException, strategy: object, component_id: str) -> FailureSource:
+    """Where in the author's own file the failure came from, as a `FailureSource`.
+
+    The traceback of a callback failure runs from the Flow's guard down through the author's
+    `decide()` and, often, back into this package -- a `Rebalance` refused in its validator is
+    raised in `authoring.py` from a line in the author's file. The frame the author needs is the
+    innermost one IN THEIR FILE, so every frame is compared against the file the strategy class
+    was loaded from and the last match wins. `key_path` names the strategy either way, so a
+    framework raise with no author frame still says which strategy it was about
+    (`docs/issues/archive/071`).
+    """
+    source = FailureSource(key_path=f"strategies.{component_id}")
+    try:
+        loaded_from = inspect.getsourcefile(type(strategy)) or inspect.getfile(type(strategy))
+    except (TypeError, OSError):
+        return source
+    wanted = _resolved(loaded_from)
+    found: tuple[str, int] | None = None
+    trace = cause.__traceback__
+    while trace is not None:
+        filename = trace.tb_frame.f_code.co_filename
+        if filename == loaded_from or _resolved(filename) == wanted:
+            found = (filename, trace.tb_lineno)
+        trace = trace.tb_next
+    if found is None:
+        return source
+    return FailureSource(file=found[0], key_path=source.key_path, line=found[1])
+
+
+def _resolved(filename: str) -> Path:
+    """The path with symlinks and relative segments settled, or as given when that fails."""
+    try:
+        return Path(filename).resolve()
+    except OSError:
+        return Path(filename)
+
+
+@dataclass(kw_only=True, slots=True)
+class FlowContext:
+    """What every phase of one strategy's run shares: the frozen run, this strategy's layer, the run
+    state, the account and venue, and the failure envelope. Built by `strategy_loop`, read by
+    `CallbackHandler`, `ExecutionHandler` and `ValuationHandler`; nothing here dispatches."""
+
+    frozen_run: FrozenRun
+    layer: FrozenStrategy
+    state: RunStateRepository
+    account: Account
+    exchange: Exchange
+    strategy: StrategyModel
+    compliance: tuple[Compliance, ...]
+    valuation_service: ValuationService
+    strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
+    compliance_window_at: Callable[[datetime], ModelWindow]
+    """The window the Compliance rules read at a market-clock instant (design §7.2): what they
+    subscribed to, as of the instant the book was marked."""
+    scan_session: ScanSession | None = None
+    registry: InstrumentRoster | None = None
+    reference_price: str | None = None
+    record_account_positions: bool = True
+    account_history_declaration: AccountHistoryInput | None = None
+    # Mutable bookkeeping is local to this strategy; authorities above are supplied once. The
+    # measurements are the mark instants whose NAV already reached `vqapr.account`.
+    recorded_measurements: set[datetime] = field(default_factory=set)
+    horizon: ExecutionHorizon | None = None
+    snapshots: ExecutionSnapshots | None = None
+    """The execution table read ahead along the market clock (record `222`), built on the first
+    snapshot a handler asks for, once the horizon is known."""
+    timing: dict[str, float] = field(default_factory=dict)
+
+    @contextmanager
+    def timed(self, phase: str) -> Iterator[None]:
+        """Measure a lexical phase without adding frames to the operation it contains."""
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.timing[phase] = self.timing.get(phase, 0.0) + (time.perf_counter() - started)
+
+    # Component memory (records `181`, `184`). Every Component carries memory; a Compliance
+    # rule's is restored from the root before `observe`, the exchange's before `execute`, and
+    # what each callback left is committed with that callback's publication. One implementation
+    # here, because three handlers do it. The Strategy's own memory has a payload beside it and
+    # its own ref; it is not in this map.
+
+    def stateful_components(self) -> tuple[tuple[str, Component], ...]:
+        """The components whose memory this run commits beside the Strategy's, by id.
+
+        Every loaded Compliance rule, and the venue when it is a `Component` -- a test double
+        that only offers `execute` carries no memory and is left alone.
+        """
+        pairs: list[tuple[str, Component]] = [
+            (rule.compliance_id, rule) for rule in self.compliance
+        ]
+        if isinstance(self.exchange, Component):
+            pairs.append((self.exchange.exchange_id, self.exchange))
+        return tuple(pairs)
+
+    def visible_component_memory(self) -> dict[str, ModelMemory]:
+        """What the current root holds for every stateful component, by id."""
+        return self.state.current.component_memory()
+
+    def restore_component_memory(self, memory: Mapping[str, ModelMemory]) -> None:
+        """Put the root's memory back on each loaded component instance."""
+        for component_id, component in self.stateful_components():
+            component.memory = memory[component_id]
+
+    def candidate_component_memory(self) -> dict[str, ModelMemory]:
+        """What every component's callback left, detached for the root that will commit it."""
+        return {
+            component_id: normalize_memory(component.memory)
+            for component_id, component in self.stateful_components()
+        }
+
+    def next_sequence(self) -> int:
+        """The run's next row position, for every recorder a handler builds (record `225`)."""
+        return self.state.next_sequence()
+
+    def in_agenda_zone(self, instant: datetime) -> datetime:
+        """An instant expressed in the strategy agenda's zone; the same instant.
+
+        Every package table stamps `event_time` in that zone (`docs/issues/archive/058`): the
+        execution table normalises targets to UTC, and a reader lining a fill up against the NAV or
+        the monitoring row that followed it was converting by hand.
+        """
+        zone = self.layer.agenda.timezone
+        return instant.astimezone(ZoneInfo(zone)) if zone else instant
+
+    def execution_snapshot(
+        self,
+        target_at: datetime,
+        *,
+        target_instruments: Sequence[str],
+        held_instruments: Sequence[str],
+        trade_price: str,
+        with_reference: bool = True,
+    ) -> ExactExecutionSnapshot:
+        """The venue's rows at one market-clock instant: the fill's and the valuation's one read.
+
+        Served from `snapshots`, the table read ahead in windows of the clock (record `222`),
+        which exists once the horizon does -- `events()` reads it before the first market instant
+        is handled. Without a horizon, or for a price the run did not freeze, the exact
+        per-instant read answers instead; both return the same snapshot.
+        """
+        execution_table = self.frozen_run.execution
+        if execution_table is None:
+            raise RuntimeError("an execution snapshot requires a frozen execution dataset")
+        if self.snapshots is None and self.horizon is not None:
+            account = self.state.current.account
+            held = () if account is None else tuple(account.snapshot.positions)
+            self.snapshots = ExecutionSnapshots(
+                execution_table.table,
+                instants=self.horizon.instants,
+                # The run's declared names and whatever the opening book holds: a fill's targets
+                # are inside the first (`_validate_intent_authority`) and its holdings inside the
+                # union, so every read stays within the window; one that does not falls through.
+                instruments=(*self.frozen_run.instruments, *held),
+                trade_price=execution_table.fill.trade_price,
+                reference_price=self.reference_price,
+                session=self.scan_session,
+            )
+        if self.snapshots is None or trade_price != execution_table.fill.trade_price:
+            return exact_execution_snapshot(
+                execution_table.table,
+                target_at=target_at,
+                target_instruments=target_instruments,
+                held_instruments=held_instruments,
+                trade_price=trade_price,
+                reference_price=self.reference_price if with_reference else None,
+                session=self.scan_session,
+            )
+        return self.snapshots.at(
+            target_at,
+            target_instruments=target_instruments,
+            held_instruments=held_instruments,
+            with_reference=with_reference,
+        )
+
+    @contextmanager
+    def guard(
+        self,
+        stage: SimulationStage,
+        cutoff: datetime,
+        *,
+        owner: object,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except SimulationFailure:
+            raise
+        except Exception as error:
+            raise self.failure(
+                stage=stage,
+                cutoff=cutoff,
+                owner=owner,
+                cause=error,
+                kind=SimulationFailureKind.PRE_COMMIT,
+            ) from error
+
+    def failure(
+        self,
+        *,
+        stage: SimulationStage,
+        cutoff: datetime,
+        owner: object,
+        cause: Exception,
+        kind: SimulationFailureKind,
+    ) -> SimulationFailure:
+        root = self.state.current
+        account = root.account
+        pending = root.pending_accepted_intent
+        component_id = _component_id_of(self.layer)
+        failed_requirement: object = owner
+        if isinstance(cause, VqaprError):
+            failed_requirement = cause.failures[0] if len(cause.failures) == 1 else cause.failures
+        failure_type = (
+            FailedAfterCommit
+            if kind is SimulationFailureKind.FAILED_AFTER_COMMIT
+            else SimulationFailure
+        )
+        return failure_type(
+            stage=stage,
+            clock=cutoff,
+            failed_requirement=failed_requirement,
+            observed=FailureObservation(type(cause), tuple(cause.args)),
+            retry_precondition=RetryPrecondition(
+                requires_replay_from_root=True,
+                required_pending_id=getattr(pending, "pending_id", None),
+            ),
+            correlation_id=self.frozen_run.identity,
+            frozen_run_identity=self.frozen_run.identity,
+            cutoff=cutoff,
+            root_version=root.version,
+            model_version=root.model_state_commit_count,
+            model_state_ref=root.current_model_state_ref,
+            account_version=None if account is None else account.snapshot.version,
+            pending_id=getattr(pending, "pending_id", None),
+            cause=cause,
+            kind=kind,
+            component_id=component_id,
+            source=_author_frame(cause, self.strategy, component_id),
+        )
+
+    @contextmanager
+    def due_boundary(
+        self,
+        *,
+        stage: SimulationStage,
+        cutoff: datetime,
+        owner: object,
+        kind: SimulationFailureKind,
+    ) -> Iterator[None]:
+        try:
+            # The due stages run one after another inside one due item, never nested, so their
+            # seconds add up to the due item's and each is reported under its own name.
+            with self.timed(stage.value):
+                yield
+        except SimulationFailure:
+            raise
+        except Exception as error:
+            raise self.failure(
+                stage=stage,
+                cutoff=cutoff,
+                owner=owner,
+                cause=error,
+                kind=kind,
+            ) from error

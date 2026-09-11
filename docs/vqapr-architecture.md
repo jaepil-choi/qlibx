@@ -1083,6 +1083,8 @@ preflight(workspace, definition) -> RunVerdict            run/preflight/verdict.
 - `run/engine/loop.py`: `RunLoop.run` = 시작 → 사건을 정렬해 한 번 걷기 → 끝. `ScheduledEvent`는 부품의
   `dispatch`(decide 또는 compute)로, `MarketEvent`는 `MarketClock.at`(§1.1의 다섯 줄)으로 간다. 전략 run과 DataModel
   run은 같은 루프이고 조립만 다르다(`strategy_loop`: 부품 + 시장 시계, `datamodel_loop`: 부품만).
+- `run/engine/events.py`: 루프가 정렬하는 사건(`ScheduledEvent` · `MarketEvent`). `loop.py`와 따로 둔 것은 순환
+  때문이다 — 문맥(`context.py`)이 `MarketEvent`를 들고, `loop.py`가 문맥을 import한다.
 - `run/engine/stages/`: 배선표의 행마다 한 파일. 파일 이름이 곧 컴포넌트의 메서드다 — `decide.py`가
   `StrategyModel.decide`를, `compute.py`가 `DataModel.compute`를, `execute.py`가 `Exchange.execute`를,
   `observe.py`가 `Compliance.observe`를 부른다. `accrue.py`는 자리, `value.py`는 프레임워크 자신의 단계다. 각 단계는
@@ -1327,10 +1329,12 @@ src/vqapr/
 │   ├── preflight/     [40]  출발 전 — 판정(check)과 얼리기(freeze)
 │   │   ├── facts.py         RunFacts — schedule · 체결표 · horizon · 컴포넌트를 명령당 한 번 읽는다
 │   │   ├── checks.py        `vqapr check` 가 보이는 판정들 (모아서 보고)
-│   │   ├── freeze.py        이름 → 값: FrozenRun · FrozenStrategy · FrozenDataModel · FrozenSchedule
+│   │   ├── freeze.py        이름 → 값: 얼리는 절차와 그것이 내는 거절
+│   │   ├── frozen.py        얼린 값: FrozenRun · FrozenStrategy · FrozenDataModel · FrozenSchedule
 │   │   └── verdict.py       preflight() — 판정 + 얼리기를 한 문에서.  RunVerdict · RunResources
 │   ├── engine/        [45]  고리
-│   │   ├── loop.py          RunLoop · MarketClock · ScheduledEvent/MarketEvent 정렬 · 조립 함수
+│   │   ├── loop.py          RunLoop · MarketClock · 사건 정렬 · 조립 함수
+│   │   ├── events.py        ScheduledEvent · MarketEvent — 루프가 정렬하는 사건
 │   │   ├── context.py       단계들이 공유하는 run 상태와 실패 봉투
 │   │   ├── run_state.py     받아들여진 상태(계좌 · memory · 대기 의도)의 뿌리
 │   │   ├── calls.py         Call 구현 — 선언한 읽기 · 계좌 view
@@ -1716,9 +1720,9 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `project/registration.py` · `merge.py` · `references.py` · `state.py` · `refusals.py` | `workspace/`의 같은 이름 |
 | `flow/declaration/verify.py` | `run/preflight/verdict.py` (`verify_run` → `preflight`) |
 | `flow/declaration/judgments.py`, `flow/declaration/roster.py` | `run/preflight/checks.py` |
-| `flow/declaration/preflight.py` | 나눈다: `run/preflight/facts.py` (RunFacts · 유도된 일정 · 묶인 체결표 · horizon), `run/preflight/freeze.py` (`preflight_run` → `freeze`) |
-| `flow/declaration/frozen.py` | `run/preflight/freeze.py` |
-| `flow/run/loop.py`, `flow/engine/loop.py` | `run/engine/loop.py` |
+| `flow/declaration/preflight.py` | 나눈다: `run/preflight/facts.py` (RunFacts · 유도된 일정 · 묶인 체결표 · horizon · 풀리지 않는 체결 목표 — check와 freeze가 같이 묻는 답이라 아래 모듈에), `run/preflight/freeze.py` (`preflight_run` → `freeze`) |
+| `flow/declaration/frozen.py` | `run/preflight/frozen.py` (엔진이 import하는 값은 얼리는 절차와 따로 — 합치면 1,100줄이 넘는다) |
+| `flow/run/loop.py`, `flow/engine/loop.py` | `run/engine/loop.py`, `run/engine/events.py` (문맥이 `MarketEvent`를 들고 loop가 문맥을 import하므로 한 모듈이면 순환) |
 | `flow/run/context.py` · `flow/engine/run_state.py` · `flow/run/output.py` | `run/engine/context.py` · `run_state.py` · `output.py` |
 | `flow/engine/artifacts.py` | `run/engine/evidence.py` (증거 값), `run/engine/failure.py` (SimulationFailure) |
 | `flow/run/callback.py` · `compute.py` · `accrual.py` · `execution.py` · `valuation.py` · `compliance.py` | `run/engine/stages/decide.py` · `compute.py` · `accrue.py` · `execute.py` · `value.py` · `observe.py` |

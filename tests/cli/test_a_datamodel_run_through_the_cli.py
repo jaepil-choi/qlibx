@@ -25,8 +25,9 @@ import pytest
 import vqapr.cli.run as run_command
 from vqapr.cli.main import main
 from vqapr.data import store as store_module
-from vqapr.flow import orchestration
-from vqapr.flow.orchestration import batch_cubes, in_workers, run_registered_datamodel
+from vqapr.run import batch as run_batch
+from vqapr.run.assemble import run_registered_datamodel
+from vqapr.run.batch import batch_cubes, in_workers
 from vqapr.workspace.registry import Workspace
 
 _MODELS = """from vqapr import authoring as va
@@ -602,7 +603,7 @@ def test_a_jobs_batch_bakes_once_maps_in_every_worker_and_leaves_nothing_behind(
     stale = root / "1-dead"
     stale.mkdir()
     (stale / "batch.lock").write_text("1", encoding="ascii")
-    old = time.time() - orchestration.CUBE_STALE_AFTER - 60
+    old = time.time() - run_batch.CUBE_STALE_AFTER - 60
     os.utime(stale / "batch.lock", (old, old))
     live = root / "2-alive"
     live.mkdir()
@@ -620,7 +621,7 @@ def test_the_batch_driver_asks_each_run_what_it_reads_once(
     """Record `238`: the independence judgment and the bake each loaded every component of the
     batch to ask what it reads (`experiments/exp_238`, `15_run_batch`: `_reads` x4 for two
     runs). The CLI asks once through `batch_reads` and hands the answer to both doors."""
-    from vqapr.flow.orchestration import batch_reads, require_independent_batch
+    from vqapr.run.batch import batch_reads, require_independent_batch
 
     project = ("--project-root", str(tmp_path))
     code, registered = _cli(capsys, *project, "register", str(_declaration(tmp_path)))
@@ -629,13 +630,13 @@ def test_the_batch_driver_asks_each_run_what_it_reads_once(
     targets = ["factors-reversal", "factors-momentum"]
 
     asked: list[str] = []
-    original = orchestration._reads
+    original = run_batch._reads
 
     def counting(space, definition):
         asked.append(definition.run_id)
         return original(space, definition)
 
-    monkeypatch.setattr(orchestration, "_reads", counting)
+    monkeypatch.setattr(run_batch, "_reads", counting)
 
     reads = batch_reads(workspace, targets)
     assert set(reads) == set(targets)

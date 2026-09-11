@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-from vqapr.flow.run.calls import DataModelContext
+from vqapr.run.engine.calls import DataModelContext
 
 
 def test_datamodel_context_has_no_account_execution_or_workspace_surface() -> None:

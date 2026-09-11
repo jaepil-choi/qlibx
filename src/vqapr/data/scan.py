@@ -119,7 +119,7 @@ def _normalize(duck_type: str) -> ColumnType:
 def column_type_of_arrow(arrow_type: pa.DataType) -> ColumnType:
     """The `ColumnType` an arrow type lands as when duckdb reads the parquet it is written to.
 
-    The producer of a materialized dataset (`flow/run/output.py`) states its field types
+    The producer of a materialized dataset (`run/engine/output.py`) states its field types
     from the schema it wrote, through this one mapping, so that what it declares is what
     `DESCRIBE` will measure on the file (`docs/issues/088`). Kept next to `_normalize` because the
     two are one vocabulary read from two directions.

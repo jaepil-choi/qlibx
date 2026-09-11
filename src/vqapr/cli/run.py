@@ -508,9 +508,8 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
         # What the orders did, not only that they were placed. `ok: true` means the simulation
         # executed; it does not mean the book that was declared is the book that was held, and
         # those differed by nine percent of NAV in the run that filed `docs/issues/archive/039`.
-        "fills": fill_summary(
-            tuple(read_typed_table(store_root, run_id, FILL_TABLE, strategy_ref))
-        ),
+        # Streamed, a batch at a time (record `254`): the whole table as dicts was the peak.
+        "fills": fill_summary(read_typed_table(store_root, run_id, FILL_TABLE, strategy_ref)),
         "contract": record.get("contract"),
         # Seconds by phase (`docs/issues/archive/068`), so "my strategy is 5% of the wall clock and
         # the snapshot is half of it" is read off the result rather than off a profiler.

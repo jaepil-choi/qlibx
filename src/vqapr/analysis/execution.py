@@ -8,15 +8,22 @@ compute by hand in time.
 Takes rows rather than a `SimulationResult`, deliberately. That keeps it a pure function of data --
 testable with a list of dicts, no run, no flow types, and no inversion of the kind record `113` had
 to undo in `evidence/records.py`.
+
+**Any iterable, walked once** (record `254`). `vqapr run` handed it `tuple(read_typed_table(...))`
+-- every fill row of the run as a Python dict at once, after the run had ended -- and that was the
+peak of a daily 309-name run: about 1.7 KB a fill, 0.8 GB at 460k fills, on top of everything the
+run still held
+(`docs/issues/report-2026-09-11-a-strategy-runs-memory-grows-with-its-orders-...`). The reader
+streams a record table a batch at a time, so the tally below now holds one batch and the counts.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 
 
-def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+def fill_summary(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
     """What this run's orders actually did, which `ok: true` says nothing about.
 
     `docs/issues/archive/039`. A market-neutral run reported `{"ok": true, "occurrences": 732,
@@ -36,12 +43,14 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     Reported on the SUCCESS path deliberately. The run is legitimate; what is worth saying is what
     it managed to trade.
     """
+    orders = 0
     dealt = 0
     partial = 0
     zero_dealt = 0
     reasons: dict[str, int] = {}
     per_instrument: dict[str, _PerInstrument] = {}
     for row in rows:
+        orders += 1
         instrument = str(row.get("instrument"))
         tally = per_instrument.setdefault(instrument, _PerInstrument())
         tally.orders += 1
@@ -76,7 +85,7 @@ def fill_summary(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
     never_filled.sort(key=lambda entry: (-int(entry["orders"]), str(entry["instrument"])))
     return {
         # Every order the venue answered, so the three counts below are readable as shares of it.
-        "orders": len(rows),
+        "orders": orders,
         "dealt": dealt,
         "partial": partial,
         "zero_dealt": zero_dealt,

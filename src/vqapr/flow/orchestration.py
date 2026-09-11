@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
+from itertools import batched
 from pathlib import Path
 from types import MappingProxyType
 
@@ -1196,16 +1197,25 @@ def _publish_allocation(
     run streams every row to its record and keeps none there, so `vqapr run` published nothing
     while an in-process `run()` did (the showcases registered their allocations by hand from the
     record, which is why nothing noticed).
+
+    **A batch at a time** (record `254`). The whole table became one list of dicts before a row was
+    typed -- every weight of the run in Python at once, after the run had ended and beside
+    everything it still held -- and a daily 309-name run peaked there. The record reader already
+    streams, and `RunOutput` holds what it is handed as Arrow.
     """
-    rows = [
-        {
-            "available_at": row["event_time"],
-            "instrument": row["instrument"],
-            "weight": float(Decimal(str(row["weight"]))),
-        }
-        for row in recorded
-    ]
-    if not rows:
+    batches = batched(
+        (
+            {
+                "available_at": row["event_time"],
+                "instrument": row["instrument"],
+                "weight": float(Decimal(str(row["weight"]))),
+            }
+            for row in recorded
+        ),
+        ALLOCATION_BATCH_ROWS,
+    )
+    first = next(batches, None)
+    if first is None:
         return None
     output = RunOutput(
         root_path,
@@ -1215,9 +1225,16 @@ def _publish_allocation(
         record_ref=None if frozen.strategy is None else frozen.strategy.record_ref,
     )
     output.open()
-    output.append(rows)
+    output.append(first)
+    for batch in batches:
+        output.append(batch)
     output.register(workspace if workspace is not None else Workspace.open(root_path))
     return frozen.writes
+
+
+ALLOCATION_BATCH_ROWS = 50_000
+"""How many weight rows `_publish_allocation` types at once: small next to a run, large next to
+the per-batch cost of `pa.Table.from_pylist`."""
 
 
 def _roster_report_or_stale(roster: RegisteredRoster | None) -> dict[str, object] | None:

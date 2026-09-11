@@ -67,10 +67,6 @@ hides become visible.
 
 ## What it does not do
 
-- **No month-end cadence.** A decision schedule picks trading days forward — `every: 1M` is the
-  first trading day of each month, `every: 12M` once a year from the run's first month. "The last
-  trading day of June" is decided on the first trading day of July instead, and the new book
-  fills at that day's close.
 - **A delisted holding is never sold.** It stays in the book at its last price until the run
   ends, and money held in a name that cannot be sold — halted or delisted — cannot pay for the
   next book, so the smallest new buys go unfilled. A leg held a year at a time carries a few

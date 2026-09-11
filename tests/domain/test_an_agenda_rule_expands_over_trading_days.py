@@ -75,6 +75,59 @@ def test_weekly_and_monthly_fire_on_the_first_trading_day_of_the_group() -> None
     ]
 
 
+FEBRUARY_OPENING = (date(2024, 2, 1), date(2024, 2, 2), date(2024, 2, 5))
+"""The first three sessions of February 2024: Thursday, Friday and the next Monday."""
+
+
+def _dates(agenda: OperationAgenda) -> list[date]:
+    return [o.local_instant.local_date for o in agenda.occurrences]
+
+
+def test_on_last_fires_on_the_last_trading_day_of_each_group_the_days_show_over() -> None:
+    """`docs/issues/report-2026-09-11-an-agenda-cannot-fire-on-the-last-trading-day-of-a-month.md`.
+
+    Record `253`. January is over because February's sessions follow it; February is not -- the
+    days stop on the 5th -- so it does not fire, rather than firing on a day that may not be its
+    last. The ISO week of Monday the 29th runs to Friday 2 February.
+    """
+    days = JANUARY + FEBRUARY_OPENING
+    assert _dates(_expand(AgendaRule("1M", (time(15, 20),), on="last"), days)) == [
+        date(2024, 1, 31)
+    ]
+    assert _dates(_expand(AgendaRule("1w", (time(15, 20),), on="last"), days)) == [
+        date(2024, 1, 5),
+        date(2024, 1, 12),
+        date(2024, 1, 19),
+        date(2024, 1, 26),
+        date(2024, 2, 2),
+    ]
+    # A holiday on the 31st makes the 30th the month's last trading day.
+    without = tuple(day for day in days if day != date(2024, 1, 31))
+    assert _dates(_expand(AgendaRule("1M", (time(15, 20),), on="last"), without)) == [
+        date(2024, 1, 30)
+    ]
+
+
+def test_a_month_is_over_when_no_calendar_day_of_it_is_left() -> None:
+    """Days that stop on the month's last calendar day need no later session to end it; days
+    that stop on Friday the 26th say nothing about the 29th to the 31st."""
+    rule = AgendaRule("1M", (time(15, 20),), on="last")
+    assert _dates(_expand(rule, JANUARY)) == [date(2024, 1, 31)]
+    assert _dates(_expand(rule, JANUARY[:-3])) == []
+
+
+def test_through_keeps_the_days_fired_on_or_before_it() -> None:
+    """How a run hands `on: last` the days past its `end` and fires on none of them."""
+    agenda = OperationAgenda.expand(
+        agenda_id=agenda_id("r"),
+        days=JANUARY + FEBRUARY_OPENING,
+        rule=AgendaRule("1w", (time(9),), on="last"),
+        timezone=SEOUL,
+        through=date(2024, 1, 20),
+    )
+    assert _dates(agenda) == [date(2024, 1, 5), date(2024, 1, 12), date(2024, 1, 19)]
+
+
 def test_several_wall_times_a_day_are_several_occurrences_in_order() -> None:
     agenda = _expand(AgendaRule("1d", (time(15, 0), time(9, 0))), JANUARY[:1])
     assert [o.occurrence_id for o in agenda.occurrences] == [
@@ -119,6 +172,9 @@ def test_a_minute_grid_over_a_year_expands() -> None:
         ({"every": "5m", "from_time": time(9)}, "needs from and to"),
         ({"every": "5m", "from_time": time(10), "to_time": time(9)}, "from must not be later"),
         ({"every": "1d", "at": (time(9, tzinfo=UTC),)}, "timezone-naive"),
+        # `on` names a day of a week or a month, so a rule with neither has nothing to be last in.
+        ({"every": "1d", "at": (time(9),), "on": "last"}, "pairs with a w or M rule"),
+        ({"every": "1M", "at": (time(9),), "on": "middle"}, "on is first or last"),
     ],
 )
 def test_a_rule_whose_halves_disagree_is_refused_by_name(kwargs: dict, said: str) -> None:
@@ -128,6 +184,10 @@ def test_a_rule_whose_halves_disagree_is_refused_by_name(kwargs: dict, said: str
 
 def test_the_rule_describes_itself_the_way_the_declaration_reads() -> None:
     assert AgendaRule("1M", (time(9, 30),)).describe() == "every 1M at 09:30:00"
+    assert (
+        AgendaRule("1M", (time(15, 29),), on="last").describe()
+        == "every 1M on the last trading day at 15:29:00"
+    )
     assert (
         AgendaRule("5m", from_time=time(9), to_time=time(15, 20)).describe()
         == "every 5m from 09:00:00 to 15:20:00 on each trading day"

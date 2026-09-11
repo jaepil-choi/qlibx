@@ -186,6 +186,23 @@ def test_an_agenda_is_a_day_filter_and_a_within_day_rule() -> None:
         _definition(agenda={"every": "1d", "at": "15:29", "days_from": "prices"})
 
 
+def test_on_last_is_stored_only_when_it_is_last() -> None:
+    """Record `253`. `on: first` is what every run before it meant, so a run that says nothing and
+    one that says `first` store the same body -- and keep the identity they had."""
+    last = RunAgenda(every="1M", at=(time(15, 29),), on="last")
+    assert last.rule.on == "last"
+    assert last.model_dump(mode="json") == {"every": "1M", "at": ["15:29:00"], "on": "last"}
+    assert RunAgenda(every="1M", at=(time(9),), on="first").model_dump(mode="json") == {
+        "every": "1M",
+        "at": ["09:00:00"],
+    }
+    assert _definition(agenda={"every": "1M", "at": "15:29", "on": "first"}).model_dump(
+        mode="json"
+    ) == _definition(agenda={"every": "1M", "at": "15:29"}).model_dump(mode="json")
+    with pytest.raises(ValueError, match="pairs with a w or M rule"):
+        RunAgenda(every="1d", at=(time(9),), on="last")
+
+
 def test_the_agenda_a_run_derives_is_named_after_the_run_and_is_not_a_field() -> None:
     """The one agenda is preflight's to build; the definition only knows what it will be called."""
     assert _definition(run_id="alpha").agenda_id == "alpha.agenda"

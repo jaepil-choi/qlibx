@@ -866,6 +866,54 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     assert len(frozen.strategy.agenda.occurrences) == 1
 
 
+def test_an_on_last_agenda_reads_past_end_to_know_its_last_month_is_over(
+    tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `253`. Whether 29 March is March's last session is the next session's to say, and
+    that session lies past `end`: the agenda reads on, fires on nothing it read past `end`, and
+    shares its one read of the table with the horizon as before (record `238`)."""
+    from vqapr.flow.declaration.preflight import bound_execution_horizon
+    from vqapr.project import store as store_module
+
+    workspace, definition = _setup(
+        tmp_path,
+        model_price_parquet,
+        days=(
+            date(2024, 3, 27),
+            date(2024, 3, 28),
+            date(2024, 3, 29),
+            date(2024, 4, 1),
+            date(2024, 4, 2),
+        ),
+    )
+    month_end = definition.replace(
+        agenda=RunAgenda(every="1M", at=(time(15, 20),), on="last"),
+        start=datetime(2024, 3, 1, tzinfo=_ZONE),
+        end=datetime(2024, 3, 29, 15, 30, tzinfo=_ZONE),
+    )
+
+    assert [o.evaluation_time for o in derived_agenda(workspace, month_end).occurrences] == [
+        datetime(2024, 3, 29, 15, 20, tzinfo=_ZONE)
+    ], "April's sessions say March is over, and fire nothing themselves"
+    before = month_end.replace(end=datetime(2024, 3, 28, 15, 30, tzinfo=_ZONE))
+    assert derived_agenda(workspace, before).occurrences == (), (
+        "March's last session is after this `end`, so the run holds no month-end"
+    )
+
+    calls: list[str] = []
+    original = store_module.scan.distinct_values
+
+    def counted(spec, field, **kwargs):
+        calls.append(field)
+        return original(spec, field, **kwargs)
+
+    monkeypatch.setattr(store_module.scan, "distinct_values", counted)
+    fresh = Workspace.open(tmp_path)
+    derived_agenda(fresh, month_end)
+    bound_execution_horizon(fresh, month_end)
+    assert calls == ["trade_at"], f"the agenda and the horizon read the sessions {len(calls)} times"
+
+
 def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:

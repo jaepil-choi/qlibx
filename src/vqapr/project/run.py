@@ -372,6 +372,11 @@ class RunAgenda(BaseModel):
     nothing to declare; for a datamodel run, which has no venue, the dataset named by
     `days_from`. The rule is validated by the domain's `AgendaRule`, which is also what
     preflight expands.
+
+    `on: last` fires a `w` or `M` rule on the last trading day of each week or month instead of
+    the first (record `253`). It is stored only when given as `last`: `first` is what every run
+    before it meant, so a run that says nothing and a run that says `on: first` are the same
+    declaration and keep the identity they had.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False, populate_by_name=True)
@@ -380,6 +385,7 @@ class RunAgenda(BaseModel):
     at: tuple[time, ...] = ()
     from_: time | None = Field(default=None, alias="from")
     to: time | None = None
+    on: str = "first"
     days_from: str | None = None
 
     @model_validator(mode="before")
@@ -414,7 +420,7 @@ class RunAgenda(BaseModel):
 
     @property
     def rule(self) -> AgendaRule:
-        return AgendaRule(self.every, self.at, self.from_, self.to)
+        return AgendaRule(self.every, self.at, self.from_, self.to, self.on)
 
     @model_serializer(mode="plain")
     def _stored(self) -> dict[str, Any]:
@@ -425,6 +431,8 @@ class RunAgenda(BaseModel):
             body["from"] = self.from_.isoformat()
         if self.to is not None:
             body["to"] = self.to.isoformat()
+        if self.on != "first":
+            body["on"] = self.on
         if self.days_from is not None:
             body["days_from"] = self.days_from
         return body

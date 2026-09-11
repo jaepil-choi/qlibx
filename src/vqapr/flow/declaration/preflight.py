@@ -57,7 +57,16 @@ def _session_bounds(definition: RunDefinition) -> tuple[datetime, datetime] | No
     """
     if definition.start is None or definition.end is None:
         return None
-    return (definition.start - timedelta(days=1), definition.end + timedelta(days=1))
+    # An `on: last` agenda reads on past `end` (record `253`): whether `end`'s month is over is
+    # the next session's to say, and one can be a month and a holiday away.
+    past = LAST_DAY_LOOKAHEAD if definition.agenda.rule.on == "last" else timedelta(0)
+    return (definition.start - timedelta(days=1), definition.end + timedelta(days=1) + past)
+
+
+LAST_DAY_LOOKAHEAD = timedelta(days=45)
+"""How far past `end` an `on: last` agenda reads its trading days: the rest of `end`'s month, the
+holidays that can open the next one, and margin. The horizon is cut from the same read, to
+`(start, end]`, so nothing past `end` reaches a run."""
 
 
 def derived_agenda(workspace: Workspace, definition: RunDefinition) -> OperationAgenda:
@@ -81,6 +90,8 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
     sessions: Iterable[datetime | date] = workspace.evaluation_times(
         source, between=_session_bounds(definition)
     )
+    rule = definition.agenda.rule
+    through: date | None = None
     if definition.start is not None and definition.end is not None:
         # Cut on DATES before an occurrence is built, not on occurrences after
         # (`docs/issues/archive/069`: a run of 15 sessions built 735 occurrences, with their fold
@@ -98,12 +109,21 @@ def derived_agenda(workspace: Workspace, definition: RunDefinition) -> Operation
                 return (session.astimezone(zone) if session.tzinfo is not None else session).date()
             return session
 
-        sessions = tuple(session for session in sessions if first <= _local_date(session) <= last)
+        if rule.on == "last":
+            # The sessions past `end` stay: they are how the last month inside the run is known
+            # to be over, and `expand` fires on none of them (record `253`).
+            sessions = tuple(session for session in sessions if first <= _local_date(session))
+            through = last
+        else:
+            sessions = tuple(
+                session for session in sessions if first <= _local_date(session) <= last
+            )
     return OperationAgenda.expand(
         agenda_id=agenda_id(definition.agenda_id),
         days=sessions,
-        rule=definition.agenda.rule,
+        rule=rule,
         timezone=definition.timezone,
+        through=through,
     )
 
 

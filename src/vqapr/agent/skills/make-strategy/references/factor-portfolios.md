@@ -107,11 +107,12 @@ class FfLeg(va.StrategyModel):
 
 ## What it cannot express exactly
 
-- **The June-end formation.** There is no month-end cadence: `every: 12M` fires on the first
-  trading day of the run's first month, and a book fills strictly after the decision. So the new
-  book is decided on July's first session from June-end data and fills at that session's close;
-  the first July session still carries last year's book. Measured: 6 and 5 bp² of daily MSE on
-  SMB and HML.
+- **The June-end formation, in the recipe above.** `every: 12M` from a July `start` fires on July's
+  first session, and a book fills strictly after the decision. So the new book is decided from
+  June-end data on that session and fills at its close; the first July session still carries last
+  year's book. Measured: 6 and 5 bp² of daily MSE on SMB and HML. `every: 12M` with `on: last` in a
+  run that starts in June decides on June's last session instead; that variant has not been
+  measured against the published series.
 - **Delisted holdings.** A held name that stops trading is never sold; it stays at its last price
   until the run ends. Money in a name that cannot be sold — halted or delisted — cannot pay for the
   next book, and the smallest new buys go unfilled (recorded `no_trade`). In the replication that

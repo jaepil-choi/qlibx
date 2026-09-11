@@ -159,6 +159,7 @@ runs:
     agenda:                          # the strategy clock: a day filter and a within-day rule
       every: 1d                      # 1d | 2d | 1w | 1M select trading days and pair with `at`;
       at: "15:29"                    #   1m | 5m | 1h select instants and pair with `from`/`to`
+      # on: last                     # 1w | 1M only: the LAST trading day of each week or month
       # from: "09:00"                # the trading days are the days the execution dataset
       # to: "15:20"                  #   below has rows for -- nothing to declare here
     exchange: my-venue               # component_id of a registered Exchange

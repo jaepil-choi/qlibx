@@ -72,6 +72,8 @@ def _require_identifier(value: str, *, name: str) -> str:
 _EVERY = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhdwM])$")
 DAY_UNITS = frozenset({"d", "w", "M"})
 INTRADAY_UNITS = frozenset({"m", "h"})
+GROUP_UNITS = frozenset({"w", "M"})
+ANCHORS = ("first", "last")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,12 +87,21 @@ class AgendaRule:
     `at`. Which days are trading days is not this value's to know: it is handed them, resolved
     from data (§3.3), and does only arithmetic on top -- so nothing here is a guess about a
     market.
+
+    `on` picks WHICH trading day of each week or month a `w` or `M` rule fires on: `first`, the
+    default, or `last` (record `253`). Month-end rebalancing had no spelling, and three agents
+    given "rebalance on the last trading day of each month" declared it three different ways,
+    moving the fill between month-end close, next-day open and next-day close
+    (`docs/issues/report-2026-09-11-an-agenda-cannot-fire-on-the-last-trading-day-of-a-month.md`).
+    The trading days are the table's, known before the run as every agenda's are, so `last` asks
+    nothing of the future that `1d` does not.
     """
 
     every: str
     at: tuple[time, ...] = ()
     from_time: time | None = None
     to_time: time | None = None
+    on: str = "first"
 
     def __post_init__(self) -> None:
         if not isinstance(self.every, str) or not _EVERY.match(self.every):
@@ -104,8 +115,19 @@ class AgendaRule:
             raise ValueError(
                 "every is a count and a unit -- the count is any positive integer; the unit is "
                 "d, w or M to select trading days (every Nth trading day, the first trading day of "
-                "every Nth ISO week or Nth calendar month: 2d, 1w, 3M, 12M) or m, h to select "
-                f"instants inside each day (5m, 1h); got {self.every!r}{hint}"
+                "every Nth ISO week or Nth calendar month -- or the last, with `on: last`: 2d, "
+                "1w, 3M, 12M) or m, h to select instants inside each day (5m, 1h); "
+                f"got {self.every!r}{hint}"
+            )
+        if self.on not in ANCHORS:
+            raise ValueError(
+                "on is first or last: which trading day of each week or month a w or M rule "
+                f"fires on; got {self.on!r}"
+            )
+        if self.on != "first" and self.unit not in GROUP_UNITS:
+            raise ValueError(
+                f"on: {self.on} picks a trading day of each week or month, so it pairs with a w "
+                f"or M rule; every {self.every} has no week or month to be {self.on} in"
             )
         at = tuple(self.at)
         for value in (*at, self.from_time, self.to_time):
@@ -148,22 +170,34 @@ class AgendaRule:
         return self.unit in INTRADAY_UNITS
 
     def select_days(self, days: Sequence[date]) -> tuple[date, ...]:
-        """The trading days this rule fires on, out of the sorted trading days it is handed."""
+        """The trading days this rule fires on, out of the sorted trading days it is handed.
+
+        `on: last` picks the last day of each week or month the days show to be OVER: one a later
+        handed day follows, or one falling on its group's last calendar day. A table that stops
+        mid-month does not say whether that month had more sessions, so its final group does not
+        fire rather than firing on a day that may not be the last (record `253`). A caller that
+        wants every month inside a run hands days past the run's end and cuts after
+        (`OperationAgenda.expand(through=...)`).
+        """
         if self.unit in ("d", "m", "h"):
             return tuple(days[:: self.count]) if self.unit == "d" else tuple(days)
-        key = (
-            (lambda day: day.isocalendar()[:2])
-            if self.unit == "w"
-            else (lambda day: (day.year, day.month))
-        )
-        firsts: list[date] = []
-        seen: set[object] = set()
+        groups: dict[object, list[date]] = {}
         for day in days:
-            group = key(day)
-            if group not in seen:
-                seen.add(group)
-                firsts.append(day)
-        return tuple(firsts[:: self.count])
+            groups.setdefault(self._group(day), []).append(day)
+        members = list(groups.values())
+        picked: list[date] = []
+        for index, group in enumerate(members):
+            if self.on == "first":
+                picked.append(group[0])
+            elif index + 1 < len(members) or self._group(group[-1] + timedelta(days=1)) != (
+                self._group(group[-1])
+            ):
+                picked.append(group[-1])
+        return tuple(picked[:: self.count])
+
+    def _group(self, day: date) -> object:
+        """The ISO week or the calendar month `day` belongs to, by this rule's unit."""
+        return day.isocalendar()[:2] if self.unit == "w" else (day.year, day.month)
 
     def times(self) -> tuple[time, ...]:
         """The wall times on one selected day, in order."""
@@ -188,7 +222,8 @@ class AgendaRule:
                 f"{self.to_time.isoformat()} on each trading day"
             )
         when = ", ".join(value.isoformat() for value in self.at)
-        return f"every {self.every} at {when}"
+        anchor = " on the last trading day" if self.on == "last" else ""
+        return f"every {self.every}{anchor} at {when}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,6 +331,7 @@ class OperationAgenda:
         days: Iterable[datetime | date],
         rule: AgendaRule,
         timezone: str,
+        through: date | None = None,
     ) -> OperationAgenda:
         """Resolve a rule over the trading days it is handed into a finite, ordered agenda.
 
@@ -306,6 +342,9 @@ class OperationAgenda:
         `{agenda_id}-{date}T{HHMM}` -- one scheme for one and for many instants a day. A wall
         time that does not exist, or happens twice, on any selected day is refused rather than
         resolved by guess (`declare_local_instant`).
+
+        `through` keeps the days selected on or before it: an `on: last` rule is handed days past
+        the run's end, which say whether its last month is over, and fires on none of them.
         """
         zone = ZoneInfo(timezone)
         seen: set[date] = set()
@@ -332,6 +371,7 @@ class OperationAgenda:
                 declare_local_instant(day, at, timezone),
             )
             for day in rule.select_days(ordered)
+            if through is None or day <= through
             for at in times
         )
         return cls(agenda_id=agenda_id, timezone=timezone, occurrences=occurrences)

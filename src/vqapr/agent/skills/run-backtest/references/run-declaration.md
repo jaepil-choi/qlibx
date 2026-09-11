@@ -13,6 +13,7 @@ A run declares **when it fires** as one block, a trading-day filter plus a withi
     agenda:
       every: 1d          # <count><unit>; d, w, M pick trading days and pair with `at`
       at: "15:29"        #   one wall time or a list
+      # on: last         #   w, M only: the last trading day of each week or month, not the first
     # agenda:
     #   every: 5m        # <count><unit>; m, h pick instants inside each day and pair with from/to
     #   from: "09:00"
@@ -30,6 +31,13 @@ day of each ISO week, `1M` on the first trading day of each calendar month, `2d`
 trading day, `3M` quarterly and `12M` once a year, counted from the run's `start` -- a run that
 starts in June forms every June. A strategy called on a day it does not want to act still decides
 for itself (`Hold`).
+
+**`on: last` fires a `w` or `M` rule on the last trading day instead of the first.** `every: 1M`
+with `on: last` is month-end rebalancing; `every: 12M` with `on: last`, in a run that starts in
+June, is each June's last session. A month counts once the execution table shows it over: the run
+reads that table past `end` to find the next session, so the last month inside the run fires, and
+a month the table stops in the middle of does not. Do not hard-code session dates in the strategy
+to get a month-end.
 
 ## No valuation or monitoring time
 

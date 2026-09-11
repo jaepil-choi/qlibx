@@ -41,6 +41,23 @@ comes from the registered roster at fill time. No strategy run starts without a 
 (`instrument.undeclared`) rather than charging it as a share — the roster names what is ordered,
 not the whole execution table.
 
+**What a KRX rebalance does, in order** — the rules a written execution spec asks you to confirm:
+
+1. **Size.** Each target weight × the NAV at the execution instant, at the execution price, is the
+   quantity wanted; the change from what is held is rounded **toward zero** onto whole shares,
+   never up. A held name the target leaves out is sold to zero.
+2. **Fund.** Sale proceeds, net of their cost, join the cash first. Buys are then funded **largest
+   money delta first** (a tie goes by instrument id): a buy that no longer fits is cut to the whole
+   shares the remaining cash pays for, its cost included, and the buys after it get what is left —
+   possibly nothing. Nothing is refused; what cannot be spent stays in cash.
+3. **Settle.** At the fill **sells settle before buys**, and the cash they raise pays for the buys.
+   A buy the purse still cannot cover deals fewer shares, or none (`unfunded`).
+
+The record shows the outcome, not the order. `vqapr.fill` lists its rows in instrument order, not
+the order they settled in. `requested_quantity` is the order **after** step 2's cut, and nothing
+marks a request as cut, so on a day cash ran short the smallest-delta buys request less than
+`trunc(w × NAV / price − held)`. `dealt_quantity` below `requested_quantity` is step 3.
+
 ## The name is not the claim
 
 *"KRX"* does not mean the exchange is reproduced. Only the rules actually implemented and the

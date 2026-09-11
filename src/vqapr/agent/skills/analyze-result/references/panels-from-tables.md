@@ -190,6 +190,11 @@ partial = fill[
 `costs["fees"].sum()` is `trading.costs.total`. `reason` is `absent`, `nontradable`, `no_trade` or
 `unfunded`; `requested_quantity` beside `dealt_quantity` is the order beside what it got.
 
+On KRX the order is already cut to the cash: sale proceeds join the cash first, buys are funded
+largest money delta first, and sells settle before buys at the fill. A `requested_quantity` smaller
+than your own `w × NAV / price − held` on a day cash ran short is that cut, not a sizing error, and
+the rows are in instrument order, not the order they settled in.
+
 ## Fill price against the price at the decision
 
 The record holds when each weight was decided (`vqapr.weight` `event_time`) and what each fill dealt

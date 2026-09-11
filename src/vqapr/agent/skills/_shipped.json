@@ -1,14 +1,20 @@
 {
   "analyze-result/SKILL.md": {
     "0dd4ff9047b1942d7844893df834b4fdf6f2e72647e619e9ac7c34b24d8d6259": "0.10.0",
+    "16abd0dcbd396d252f8a498dac2685eab85ff53396357d822d8c07ebabb4e24a": "0.14.4",
     "b512da792ac08d63846f127c43f5e3a03bba6b12515b4cd65b3335bdd92554ba": "0.8.0",
     "c39266b8f14cac865c798069be7092980dd5a7b7e22e31db523be95f40a11c6a": "0.11.0"
   },
+  "analyze-result/references/panels-from-tables.md": {
+    "fa2c33ea62bf007711b12972dd9c9316208fc9b7256a2773a3a9b5c33bfed219": "0.14.4"
+  },
   "analyze-result/references/paper-figures.md": {
     "6fdd9e0e0697a17bf4bb9cc0ce37c2576cf416837dbd2175637dc0a59f22266c": "0.10.0",
+    "a4a376e4c764c65509e97a0ca1487c88a8af587ef174a95ce49a3269314ec4bb": "0.14.4",
     "bc96df8120d12ece6e79070a247cfd136bba028b07b42a687ed6663ddac99993": "0.8.0"
   },
   "analyze-result/references/plotting-environment.md": {
+    "0755727d4020d96869fd125306100cdd16de105c4796df51dec1e8ed44113239": "0.14.4",
     "3ef824999c0774a27cc1dde84588ccb5e5ff5904f67c7ec1824f346b60fa2e2f": "0.8.0"
   },
   "analyze-result/references/reading-a-record.md": {
@@ -18,13 +24,16 @@
   },
   "analyze-result/references/report-sections.md": {
     "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0",
+    "5d0be40c6a2f963d7b263cd8025dd1a8adcd16244b0a1317a225755e691740e0": "0.14.4",
     "cf82917bf2cccc37faf9ce0a71093bd1f3a67fc4a3ee1a3090a2932ad0e72bd5": "0.10.0"
   },
   "analyze-result/references/result-tables.md": {
+    "6183b8626f360d2b8f0a6f0faff6ee86c8a9e4a2732d3a76df4a460c6ac65c41": "0.14.4",
     "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0",
     "c402e1c9478d3a212edab89eb46be553de1b2f91572e1776fcc45a9759784e5e": "0.10.0"
   },
   "analyze-result/scripts/check_plotting_env.py": {
+    "1c099f314755b5069c64cecc7775b01d0459237f8f9c8524b4f11a389d9d5317": "0.14.4",
     "9b437bc625e9d852efe1565ca69630d1d3792a252a05f6f66344ae977ff739bb": "0.8.0"
   },
   "inspect-workspace/SKILL.md": {
@@ -43,6 +52,7 @@
   "introduce-vqapr/SKILL.md": {
     "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0",
     "0cd651bf892804edd9022d688b270922bc2e96cbce287bc9b03840fd7eeec1e6": "0.10.0",
+    "20cf6afd4929db37ac83c32ebae2c9aeb28846497a18a61335012f133ea048f6": "0.14.4",
     "dbac118645b2cd9c9dbc921c435e5814f63712064363b39b181a14ebd750239b": "0.11.0",
     "fff93d3aee7e38d620daea8a865780607df0c4a5ac49324b3071bd6d78246ec3": "0.9.0.dev1"
   },
@@ -92,12 +102,14 @@
     "3b7f8892b5a0b9a3f95f2361ca7debab80c489217a50707c38caa95e94cbed9b": "0.8.0"
   },
   "make-datamodel/SKILL.md": {
+    "00780f63ebe0e8a74adb7e77818bbbb0c31e7c226486a8da60d614d3b35c11f5": "0.14.4",
     "5752b61165140d42bfe7cd259608f40b8ec4ce27bc58ac3c09b1ea548ab4aaf4": "0.10.0",
     "609e1f7a959c7953a93f605b96550898744f54e2383c69d737a3e8746d2649cf": "0.11.0",
     "c00c898a8bd66724b6ce2abab0821df99a258ffe18bd9a84c4882472f90e1f46": "0.8.0"
   },
   "make-datamodel/references/datamodel-or-strategy.md": {
-    "474ec0b562319267aae8655bd736ec010af3cba9fa4dbaa02047ae31e6d10196": "0.8.0"
+    "474ec0b562319267aae8655bd736ec010af3cba9fa4dbaa02047ae31e6d10196": "0.8.0",
+    "b3da0a2471e2406b26d1b85ace84e0c57192e87ea8ec9c2966afa7a52f944a1a": "0.14.4"
   },
   "make-datamodel/references/output-schema.md": {
     "75af009b704d5522b8636692b54b9ab59a682a77f6f7c15d52fb3962151aa273": "0.8.0",
@@ -133,11 +145,15 @@
     "1b303aa9a32616e06ab2c7a50a05d5475dac67a0f7d57e4c22660fd730ea0819": "0.8.0"
   },
   "make-strategy/SKILL.md": {
+    "279649bea0c91a7b433508357233b2cb3a2d89deab19dbe179248fe4722521bf": "0.14.4",
     "541e46f9041a7ba3678fa992f26dab1dbe67e695bf2ba6a88f33cf125f3a0b59": "0.11.0",
     "fd570362c354edd089af796dedc73bb67ce26b35bfad2afb1f032168bf4f8b60": "0.8.0"
   },
   "make-strategy/references/composition-and-budget.md": {
     "9338d7dc7f3c2b47ccffb153c556b21e53e4af56c69ffb938e30781eb66bf65f": "0.8.0"
+  },
+  "make-strategy/references/factor-portfolios.md": {
+    "60e375b279ac9c8c710eb08e98b9c88d2bdf00e19183060579145635bb42822b": "0.14.4"
   },
   "make-strategy/references/memory-and-payload.md": {
     "5cb2473443628daf196af870d0ef7c6c1ed465f2b22fdb039f467862fc014708": "0.8.0",
@@ -197,6 +213,7 @@
   "run-backtest/SKILL.md": {
     "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0",
     "335a4c80015d491d8473fe12443607af539874fa6684361d3112afe5ead88a3d": "0.14.2",
+    "4fdc21dbd174e18ae4a807231d12cb607241368bd6c85e3d6d4ceff31dd2af6b": "0.14.4",
     "8bef17630a9c2a59c81df5de64dc4266e3fb1e8febd069face957643e151698f": "0.11.0",
     "8f49db5b695a877643ce092d7a1f4c86c7ae168722c7e29f820a724a2b718100": "0.10.0",
     "ada0b9e28135eb27f677c944019707b3dec57f7038f04384206d786739249585": "0.12.0",
@@ -216,10 +233,12 @@
   },
   "run-backtest/references/run-declaration.md": {
     "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "89ffea3b9dbbc04b1e16aca47c704ac3466e1161d088184497a88d3b72f231c8": "0.14.4",
     "cc9fa55dff37106f895229b3ac23eb5e97fdd4ff92aefbfed1055a5948395186": "0.14.2",
     "ec3fea404ee4694c5b5b365eaa17ad1b36f41fc59a3b2317fb60421fd71101df": "0.10.0"
   },
   "run-backtest/references/watching-and-failures.md": {
-    "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0"
+    "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0",
+    "531ba12b21b34b6cfef45881c1318ca36fff6b0b14e449faddbd090dfeae7c8f": "0.14.4"
   }
 }

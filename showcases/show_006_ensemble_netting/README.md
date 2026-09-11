@@ -65,7 +65,7 @@ whenever the members agreed on direction and positive only where they genuinely 
 
 ## Results
 
-Last verified 2026-09-11 against `vqapr-0.14.3`, on the committed April 2026 KRX slice
+Last verified 2026-09-11 against `vqapr-0.14.4`, on the committed April 2026 KRX slice
 (22 sessions, 21 member callbacks, 11 ensemble callbacks, 4 instruments).
 
 | Metric | Value |

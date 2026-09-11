@@ -7,6 +7,7 @@ from typing import ClassVar
 import pytest
 
 from tests.exchange.support import bound, execution_call
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.cost import SideCost
 from vqapr.domain.fill import ZeroDealtReason
@@ -14,7 +15,6 @@ from vqapr.domain.instrument import InstrumentKind, InstrumentRoster, instrument
 from vqapr.domain.listing import ExchangeRulesView, ListingAccess, Side, TradeTerms
 from vqapr.domain.order import OrderBatch, OrderRequest
 from vqapr.domain.valuation import ValuationService
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 
 _AT = datetime(2024, 1, 2, 15, 30, tzinfo=UTC)

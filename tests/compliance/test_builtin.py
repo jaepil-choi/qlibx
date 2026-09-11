@@ -26,12 +26,12 @@ from vqapr.compliance.builtin import (
     shipped_compliance_path,
 )
 from vqapr.compliance.evaluation import build_account_view
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.portfolio.allocation import AllocationViolation

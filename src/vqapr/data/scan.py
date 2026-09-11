@@ -21,7 +21,7 @@ from typing import Any
 import duckdb
 import pyarrow as pa
 
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 
 _EXAMPLE_LIMIT = 5

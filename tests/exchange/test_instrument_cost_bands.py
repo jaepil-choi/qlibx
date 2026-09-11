@@ -19,6 +19,7 @@ import duckdb
 import pytest
 
 from tests.exchange.support import execution_call
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.fill import fill_entries
 from vqapr.domain.instants import LocalInstantDeclaration
@@ -34,7 +35,6 @@ from vqapr.domain.instrument import (
 from vqapr.domain.intent import Budget, PortfolioDirection
 from vqapr.domain.listing import Side, TradeRule
 from vqapr.domain.order import OrderBatch, OrderRequest, plan_orders
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import (
     COMMISSION_RATE,

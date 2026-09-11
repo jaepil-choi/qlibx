@@ -41,14 +41,8 @@ from vqapr.cli.show import resolve_strategy
 from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.record import read_table, table_ids
-from vqapr.report.record import (
-    ACCOUNT_TABLE,
-    FILL_TABLE,
-    MONITORING_TABLE,
-    WEIGHT_TABLE,
-    strategy_report,
-    valuation_grid,
-)
+from vqapr.record.schema import ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE
+from vqapr.report.record import strategy_report, valuation_grid
 
 NAV_FILE = "nav.csv"
 HOLDINGS_FILE = "holdings.csv"

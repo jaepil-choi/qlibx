@@ -23,10 +23,9 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration, Grain
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
-from vqapr.domain.shapes import Grain
 from vqapr.flow.declaration.judgments import judgments
 from vqapr.flow.declaration.preflight import preflight_run
 from vqapr.flow.orchestration import (

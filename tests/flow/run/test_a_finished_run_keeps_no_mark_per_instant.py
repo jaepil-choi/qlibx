@@ -23,8 +23,8 @@ import pytest
 
 from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _workspace
 from tests.cli.test_commands import _cli
+from vqapr.data.execution_table import ExecutionSnapshotSummary
 from vqapr.domain.account import Mark, MarkSummary
-from vqapr.exchange.execution_table import ExecutionSnapshotSummary
 from vqapr.flow.engine.artifacts import AccountCommitEvidence, MarkEvidence, ValuationEvidence
 from vqapr.flow.run.loop import DueExecutionTrace
 from vqapr.public import Workspace, preflight_run, run

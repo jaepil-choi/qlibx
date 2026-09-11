@@ -24,8 +24,13 @@ from zoneinfo import ZoneInfo
 from vqapr.authoring import AccountHistoryInput, Compliance, Component, Hold, StrategyModel
 from vqapr.authoring.records import TableSpec
 from vqapr.compliance.evaluation import ComplianceReport
+from vqapr.data.execution_table import (
+    ExactExecutionSnapshot,
+    ExecutionSnapshots,
+    exact_execution_snapshot,
+)
 from vqapr.data.scan import ScanSession
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import (
     Account,
     AccountMark,
@@ -35,17 +40,12 @@ from vqapr.domain.account import (
     PreparedAppend,
 )
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
+from vqapr.domain.fill import ExactExecutionTarget, ExecutionHorizon
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.intent import EconomicPortfolioIntent
 from vqapr.domain.memory import ModelMemory, normalize_memory
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import SelectedMark, ValuationService
-from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon
-from vqapr.exchange.execution_table import (
-    ExactExecutionSnapshot,
-    ExecutionSnapshots,
-    exact_execution_snapshot,
-)
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.component import ComponentRef
 from vqapr.flow.declaration.frozen import FrozenRun, FrozenStrategy
@@ -63,10 +63,13 @@ from vqapr.flow.engine.artifacts import (
     ValuationEvidence,
 )
 from vqapr.flow.engine.loop import MarketEvent
-from vqapr.flow.engine.run_state import (
+from vqapr.flow.engine.run_state import AcceptedRunState, RunStateRepository
+from vqapr.record.schema import (
+    ACCOUNT_TABLE,
+    DEFAULT_TABLE_PREFIX,
     FILL_TABLE,
-    AcceptedRunState,
-    RunStateRepository,
+    MONITORING_TABLE,
+    WEIGHT_TABLE,
 )
 
 
@@ -324,9 +327,6 @@ def _shadows_package_table(table_id: str) -> bool:
 _ACCOUNT_IDENTITY = "_ACCOUNT"
 """Synthetic instrument identity for the account-level series (canon 11.2 precedent)."""
 
-DEFAULT_TABLE_PREFIX = "vqapr."
-"""Table ids the package owns. A Strategy declaring one is refused when the recorder is built."""
-
 CALLBACK_STAGE = "STRATEGY_CALLBACK"
 VALUATION_STAGE = "VALUATION"
 MONITORING_STAGE = "MONITORING"
@@ -335,9 +335,9 @@ of an `OperationRole` an occurrence used to carry (record `182` removed it: the 
 no role); the labels stay so a record written before reads the same as one written after."""
 
 DEFAULT_TABLES = (
-    TableSpec(f"{DEFAULT_TABLE_PREFIX}weight", ("instrument", "weight")),
+    TableSpec(WEIGHT_TABLE, ("instrument", "weight")),
     TableSpec(
-        f"{DEFAULT_TABLE_PREFIX}account",
+        ACCOUNT_TABLE,
         ("instrument", "cash", "nav", "quantity", "price", "observed_at", "account_version"),
     ),
     # One row per declared Compliance rule per market-clock instant: which rule, the limit it
@@ -345,7 +345,7 @@ DEFAULT_TABLES = (
     # to leave exactly those behind, and the `contract` block of the strategy record only ever
     # counted them -- `held` and `checked` say how often, not what or by how much.
     TableSpec(
-        f"{DEFAULT_TABLE_PREFIX}monitoring",
+        MONITORING_TABLE,
         (
             "rule",
             "passed",
@@ -382,11 +382,6 @@ DEFAULT_TABLES = (
     ),
 )
 
-FRAMEWORK_TABLES = tuple(spec.table_id for spec in DEFAULT_TABLES)
-"""The tables the package records on a strategy's behalf, which nobody declares -- derived from
-`DEFAULT_TABLES` rather than listed again (`flow/reporting.py` listed them a second time; one-shape
-Step 6 folded it here). `vqapr.monitoring` is written only by a run that declared a Compliance
-rule, but it is the package's table either way."""
 """What every run records without the Strategy asking.
 
 Canon 9.2 makes these defaults rather than opt-in because both are package-computed -- the weights

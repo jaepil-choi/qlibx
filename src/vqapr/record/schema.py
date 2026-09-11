@@ -90,6 +90,19 @@ occurrences, rows per table and the last `event_time`, rewritten by the heartbea
 `PROGRESS_EVERY` seconds. `list strategies --run` reads it (`member_progress`); before `087`
 it counted part files, and there are none to count now."""
 
+DEFAULT_TABLE_PREFIX = "vqapr."
+"""Table ids the package owns. A Strategy declaring one is refused when its recorder is built."""
+
+WEIGHT_TABLE = f"{DEFAULT_TABLE_PREFIX}weight"
+ACCOUNT_TABLE = f"{DEFAULT_TABLE_PREFIX}account"
+MONITORING_TABLE = f"{DEFAULT_TABLE_PREFIX}monitoring"
+FILL_TABLE = f"{DEFAULT_TABLE_PREFIX}fill"
+FRAMEWORK_TABLES = (WEIGHT_TABLE, ACCOUNT_TABLE, MONITORING_TABLE, FILL_TABLE)
+"""The tables the package records on a strategy's behalf, which nobody declares. Named here, where a
+record is described, so a reader of records never imports the engine that writes them; the engine
+builds their column specs from these names. `vqapr.monitoring` is written only by a run that
+declared a Compliance rule, but it is the package's table either way."""
+
 SCHEMA = "vqapr-run-record/v2"
 """Bumped from `v1` by record `115`, when the record gained a `kind` discriminator.
 

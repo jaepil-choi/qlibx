@@ -16,13 +16,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillRule, parse_duration
-from vqapr.exchange.execution_table import (
-    ExecutionTable,
-    ExecutionTableSpec,
-    exact_execution_snapshot,
-)
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
+from vqapr.data.source import SourceSpec
+from vqapr.domain.fill import FillRule, parse_duration
 
 
 def _write(path: Path, rows: str) -> Path:

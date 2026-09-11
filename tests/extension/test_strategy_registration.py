@@ -14,7 +14,7 @@ from vqapr.extension.scaffold import render
 _HEAD = """from __future__ import annotations
 
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.public import DataRequirement
 from vqapr.authoring import Hold
 from vqapr.authoring import StrategyModel
 

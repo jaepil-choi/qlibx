@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from vqapr.data import scan
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 
 

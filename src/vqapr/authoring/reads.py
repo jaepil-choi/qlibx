@@ -22,7 +22,7 @@ from vqapr.authoring._validation import (
     _unique_identifiers,
 )
 from vqapr.data.lookback import Lookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 
 
 class DatasetInput(BaseModel):

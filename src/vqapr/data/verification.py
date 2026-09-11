@@ -29,9 +29,9 @@ from datetime import datetime
 from pathlib import Path
 
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration, execution_price_fields
+from vqapr.data.dataset import DatasetRegistration, Grain, execution_price_fields
 from vqapr.data.scan import ColumnType
-from vqapr.data.sources import SourceSpec, physical_digest
+from vqapr.data.source import SourceSpec, physical_digest
 from vqapr.domain.errors import (
     Diagnosis,
     Failure,
@@ -42,7 +42,6 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.instrument import INSTRUMENT_ID_FIELD, KIND_FIELD
-from vqapr.domain.shapes import Grain
 
 _RETRY = "fix the prepared dataset, then register again"
 

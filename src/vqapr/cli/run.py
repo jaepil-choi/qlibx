@@ -33,7 +33,6 @@ from vqapr.domain.errors import (
     status_of,
 )
 from vqapr.flow.declaration.verify import verify_run
-from vqapr.flow.engine.run_state import FILL_TABLE
 from vqapr.flow.orchestration import (
     COMPLETED,
     FAILED,
@@ -53,6 +52,7 @@ from vqapr.record import (
     RunRecordLive,
     read_typed_table,
 )
+from vqapr.record.schema import FILL_TABLE
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

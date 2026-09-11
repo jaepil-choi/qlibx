@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.domain.errors import Failure, Stage, VqaprError
-from vqapr.exchange.conventions import ExecutionHorizon
+from vqapr.domain.fill import ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.extension.loading import load_compliance, load_data_model, load_strategy_model
 from vqapr.flow.declaration.frozen import FrozenRun

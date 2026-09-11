@@ -31,9 +31,9 @@ import duckdb
 import pytest
 
 from vqapr.cli.check import check
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.data.validation import verify_source
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component

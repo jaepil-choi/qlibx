@@ -37,10 +37,10 @@ from vqapr.authoring import (
     requirements_for,
 )
 from vqapr.authoring.history import AccountHistory
+from vqapr.data.dataset import Grain
 from vqapr.data.panel import PanelWindow
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.domain.shapes import Grain
 
 
 def observations(

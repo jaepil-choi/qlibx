@@ -9,14 +9,14 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.data.validation import verify_source
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
+from vqapr.domain.fill import FillRule
 from vqapr.domain.memory import prepare_model_state
-from vqapr.exchange.conventions import FillRule
-from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.extension.fingerprint import fingerprint_component
@@ -710,7 +710,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     rule_path.write_text(
         "from vqapr.authoring import Compliance\n"
         "from vqapr.data.lookback import RowsLookback\n"
-        "from vqapr.data.requirements import DataRequirement\n"
+        "from vqapr.public import DataRequirement\n"
         "class Limit(Compliance):\n"
         "    @property\n"
         "    def compliance_id(self):\n"
@@ -991,7 +991,7 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
     for the horizon (`experiments/exp_238`, `08_run_factor`: `distinct_values` x2,
     `candidate_instants` x3). The horizon is the same column cut to `(start, end]`, so the
     judgments and the freeze now take it from the instants the workspace read once."""
-    from vqapr.exchange import conventions
+    from vqapr.data import scan
     from vqapr.flow.declaration.judgments import judgments
     from vqapr.flow.declaration.preflight import bound_execution_horizon, bound_execution_table
 
@@ -1013,7 +1013,7 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
 
     candidates: list[object] = []
     instants: list[str] = []
-    original_candidates = conventions.scan.candidate_instants
+    original_candidates = scan.candidate_instants
     original_instants = Workspace.evaluation_times
 
     def counting_candidates(*args, **kwargs):
@@ -1024,7 +1024,7 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
         instants.append(dataset_id)
         return original_instants(self, dataset_id, **kwargs)
 
-    monkeypatch.setattr(conventions.scan, "candidate_instants", counting_candidates)
+    monkeypatch.setattr(scan, "candidate_instants", counting_candidates)
     monkeypatch.setattr(Workspace, "evaluation_times", counting_instants)
 
     fresh = Workspace.open(tmp_path)
@@ -1109,7 +1109,7 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     to import the strategy, the venue and every rule again and scan the execution horizon again
     on its first accepted intent. The verdict now carries `RunResources` -- the instances the
     verification loaded and the horizon it cut -- and `run` takes them: no import, no scan."""
-    from vqapr.exchange import conventions
+    from vqapr.data import scan
     from vqapr.extension import loading
     from vqapr.flow.declaration.preflight import bound_execution_horizon
     from vqapr.flow.declaration.verify import verify_run
@@ -1141,14 +1141,14 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
         return original_load(ref, kind=kind, project_root=project_root)
 
     scans: list[object] = []
-    original_scan = conventions.scan.candidate_instants
+    original_scan = scan.candidate_instants
 
     def counted_scan(*args, **kwargs):
         scans.append(args)
         return original_scan(*args, **kwargs)
 
     monkeypatch.setattr(loading, "_load", counted_load)
-    monkeypatch.setattr(conventions.scan, "candidate_instants", counted_scan)
+    monkeypatch.setattr(scan, "candidate_instants", counted_scan)
 
     outcome = execute_run(tmp_path, frozen, workspace=workspace, resources=resources)
     assert outcome.ok, outcome.errors

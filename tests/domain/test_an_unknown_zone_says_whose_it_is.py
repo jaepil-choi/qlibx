@@ -16,8 +16,8 @@ import pytest
 
 from vqapr.data.lookback import CalendarLookback
 from vqapr.domain import instants
+from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import iana_zone
-from vqapr.exchange.conventions import FillRule
 
 
 def test_the_zone_of_every_krx_example_resolves() -> None:

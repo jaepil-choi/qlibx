@@ -26,7 +26,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from vqapr._internal import atomic
-from vqapr.domain.shapes import RecordChunk
+from vqapr.record.chunk import RecordChunk
 from vqapr.record.reader import (
     LOCK_FILENAME,
     RunRecordLive,

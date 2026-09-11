@@ -11,7 +11,7 @@ from typing import Protocol
 
 from vqapr.data import scan
 from vqapr.data.cube import Cube, open_cube, panel_from_cube
-from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain, require_declared
+from vqapr.data.dataset import DatasetRegistration, Grain, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
@@ -19,13 +19,11 @@ from vqapr.data.lookback import (
     RowsLookback,
 )
 from vqapr.data.panel import Panel, panel_identity
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.resolution import resolve_field
-from vqapr.data.sources import SourceSpec, physical_digest
+from vqapr.data.requirement import DataRequirement, resolve_field
+from vqapr.data.source import SourceSpec, physical_digest
 from vqapr.domain.identifiers import DatasetId
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.rows import Rows, normalize_rows
-from vqapr.domain.shapes import Grain
 
 
 class DatasetCatalog(Protocol):

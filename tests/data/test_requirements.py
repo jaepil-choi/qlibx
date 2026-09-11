@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 
 
 def test_rows_lookback_requires_a_positive_integer() -> None:

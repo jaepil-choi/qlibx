@@ -24,7 +24,6 @@ from vqapr.flow.engine.artifacts import (
 from vqapr.flow.engine.run_state import AcceptedRunState, PreparedRunState
 from vqapr.flow.run.context import (
     _ACCOUNT_IDENTITY,
-    DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     VALUATION_STAGE,
     Filled,
@@ -32,6 +31,7 @@ from vqapr.flow.run.context import (
     Marked,
     MarketInstant,
 )
+from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 
 
 def _marks_from_execution_snapshot(

@@ -18,21 +18,20 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration, Grain
 from vqapr.data.scan import (
     DECLARABLE_FIELD_TYPE_NAMES,
     DECLARABLE_FIELD_TYPES,
     ColumnType,
     column_type_of_arrow,
 )
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import AccessRecord
-from vqapr.data.validation import verify_source
+from vqapr.data.verification import verify_source
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.rows import Row, Rows, normalize_rows
-from vqapr.domain.shapes import Grain
 from vqapr.project.store import Workspace
 from vqapr.record import COMPACT_FILENAME, SPILL_BYTES
 

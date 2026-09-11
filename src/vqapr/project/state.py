@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.domain.identifiers import ComponentId, DatasetId, SourceId
 from vqapr.extension.component import ComponentRef
 from vqapr.project.run import RunDefinition

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from vqapr.data.panel import PanelWindow
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import AccessRecord, DuckDbObservationStore, ObservationBatch
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import instrument_id

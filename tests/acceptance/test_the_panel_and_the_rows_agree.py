@@ -21,12 +21,12 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.flow.run.loop import DataModelResult
 from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition
-from vqapr.public import preflight_run, register_data_model, register_dataset, run
 from vqapr.project.store import WORKSPACE_DIRECTORY
+from vqapr.public import preflight_run, register_data_model, register_dataset, run
 
 KST = ZoneInfo("Asia/Seoul")
 

@@ -6,15 +6,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.errors import Stage, VqaprError
-from vqapr.public import register_dataset
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
 

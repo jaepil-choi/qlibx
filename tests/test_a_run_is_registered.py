@@ -22,8 +22,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef

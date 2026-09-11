@@ -17,13 +17,13 @@ import pytest
 import yaml
 
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration, Grain, require_declared
-from vqapr.data.validation import check_key
-from vqapr.data.sources import SourceSpec
-from vqapr.project.registration import apply
+from vqapr.data.dataset import DatasetRegistration, Grain, require_declared
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import check_key
 from vqapr.domain.errors import VqaprError
-from vqapr.public import register_dataset
+from vqapr.project.registration import apply
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 
 def _registration(grain: object = Grain.INSTRUMENT_INSTANT, **overrides) -> DatasetRegistration:

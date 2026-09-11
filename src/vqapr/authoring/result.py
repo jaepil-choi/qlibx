@@ -25,8 +25,8 @@ from vqapr.authoring._validation import (
     _copy_weights,
     _identifier,
 )
+from vqapr.data.panel import CrossSection
 from vqapr.domain.intent import Budget, PortfolioDirection
-from vqapr.domain.shapes import CrossSection
 from vqapr.portfolio.optimize import QUANTUM
 from vqapr.portfolio.weighting import rescale
 

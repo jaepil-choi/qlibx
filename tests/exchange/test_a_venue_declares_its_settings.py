@@ -15,11 +15,11 @@ from pathlib import Path
 import pytest
 
 from tests.exchange.support import execution_call
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.instrument import InstrumentRoster, instrument
 from vqapr.domain.memory import normalize_memory
 from vqapr.domain.order import OrderBatch, OrderRequest
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import (
     COMMISSION_RATE,

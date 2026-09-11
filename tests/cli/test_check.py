@@ -34,9 +34,9 @@ import duckdb
 import pytest
 
 from vqapr.cli.check import CODES, check
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.data.validation import verify_source
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import FailureSource
 from vqapr.extension.component import ComponentKind, ComponentRef
@@ -294,18 +294,18 @@ def test_check_reads_no_file_content(workspace: Path, monkeypatch: pytest.Monkey
     """Record `234`: `check` judged the execution table by scanning it again for the schema, the
     key and the price -- 11.8 s of the sample project's `check` trace (`docs/issues/095`). Every
     fact it needs was measured at registration; what it verifies now is the file's identity."""
-    from vqapr.data import validation
+    from vqapr.data import verification
 
     scans: list[str] = []
     for name in ("describe", "describe_projection", "key_check", "span_check", "finite_check",
                  "positive_finite_when_true"):
-        original = getattr(validation.scan, name)
+        original = getattr(verification.scan, name)
 
         def counting(*args, _name=name, _original=original, **kwargs):
             scans.append(_name)
             return _original(*args, **kwargs)
 
-        monkeypatch.setattr(validation.scan, name, counting)
+        monkeypatch.setattr(verification.scan, name, counting)
 
     body = check(RUN, workspace)
 

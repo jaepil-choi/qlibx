@@ -27,11 +27,11 @@ import pytest
 
 from vqapr.authoring.context import DataModelContext
 from vqapr.cli.new import run as new_command
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.extension.component import ComponentKind
 from vqapr.extension.loading import load_data_model
 from vqapr.extension.scaffold import render

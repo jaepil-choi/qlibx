@@ -21,7 +21,7 @@ import pytest
 
 from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.data import scan, store
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.flow.engine.run_state import LifecycleKind, LifecycleTrace, RunStateRepository
 from vqapr.public import (
@@ -171,7 +171,7 @@ def test_the_execution_table_reuses_the_run_connection(priced_workspace: Workspa
     # And the execution-table reader accepts one, which is what closes the gap.
     import inspect
 
-    from vqapr.exchange.execution_table import exact_execution_snapshot
+    from vqapr.data.execution_table import exact_execution_snapshot
 
     assert "session" in inspect.signature(exact_execution_snapshot).parameters, (
         "the execution table must be able to borrow the run's connection"
@@ -659,7 +659,7 @@ def test_the_writer_never_walks_the_rows_of_a_chunk(tmp_path: Path, monkeypatch)
     """A chunk reaches the disk as the columns it was staged as; rows are not rebuilt on the way."""
     from decimal import Decimal
 
-    from vqapr.domain.shapes import RecordChunk
+    from vqapr.record.chunk import RecordChunk
     from vqapr.record.writer import RunRecordWriter
 
     def never(self):
@@ -693,7 +693,7 @@ def _execution_table(tmp_path: Path):
     """Six minutes of two names; B twice at 09:02 (a duplicate), A absent at 09:03."""
     import duckdb
 
-    from vqapr.exchange.execution_table import ExecutionTableSpec
+    from vqapr.data.execution_table import ExecutionTableSpec
 
     path = tmp_path / "execution.parquet"
     rows = []
@@ -736,8 +736,8 @@ def test_a_window_answers_every_instant_of_the_clock_with_one_query(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Six instants, one query; each answer equal to the exact per-instant read."""
-    from vqapr.exchange import execution_table as module
-    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+    from vqapr.data import execution_table as module
+    from vqapr.data.execution_table import ExecutionSnapshots, exact_execution_snapshot
 
     spec = _execution_table(tmp_path)
     queries = 0
@@ -774,8 +774,8 @@ def test_a_smaller_window_reads_again_and_an_outside_request_falls_through(
 ) -> None:
     from datetime import timedelta
 
-    from vqapr.exchange import execution_table as module
-    from vqapr.exchange.execution_table import ExecutionSnapshots, exact_execution_snapshot
+    from vqapr.data import execution_table as module
+    from vqapr.data.execution_table import ExecutionSnapshots, exact_execution_snapshot
 
     spec = _execution_table(tmp_path)
     windows = 0

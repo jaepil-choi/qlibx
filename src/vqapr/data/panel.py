@@ -27,14 +27,17 @@ read is refused, never silently truncated.
 
 Only a panel grain (`instrument_instant`, `instant`) has a panel. A `rows` grain keeps the row
 stream (`rows(alias)`), because the vendor's long table has no shared instant axis to pivot on.
+
+A panel's row at one instant is a `CrossSection` (instrument -> value) and its column for one
+instrument is a `Series` (instant -> value); both live here beside the panel they slice.
 """
 
 from __future__ import annotations
 
 import hashlib
 from bisect import bisect_left, bisect_right
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from dataclasses import field as dataclass_field
 from datetime import datetime
 from types import MappingProxyType
@@ -44,7 +47,145 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from vqapr.data.lookback import CalendarLookback, RowsLookback
-from vqapr.domain.shapes import CrossSection, Series
+from vqapr.domain.identifiers import require_identifier
+from vqapr.domain.instants import require_tz_aware
+
+__all__ = [
+    "NO_INSTRUMENT",
+    "CrossSection",
+    "Panel",
+    "PanelWindow",
+    "Series",
+    "panel_identity",
+]
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class CrossSection[T](Mapping[str, T]):
+    """Instrument -> value at one instant: the shape every judgment is spoken in.
+
+    A `Mapping`, so `weights["A"]`, `"A" in weights`, `weights.items()` and `weights == {...}`
+    all mean what they did when this was a dict. What it adds is a name, an optional instant
+    (`at`: the instant the values are the cross-section OF -- a panel's last row knows it, a
+    strategy's target does not), and the operations its consumers kept writing by hand.
+
+    Keys are validated as instrument ids and kept sorted; the mapping is read-only. A
+    cross-section built by the framework from cells it already proved goes through `_trusted`.
+    """
+
+    cells: Mapping[str, T]
+    at: datetime | None = None
+    _keys: tuple[str, ...] = field(default=(), init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.cells, Mapping):
+            raise TypeError("cells must be a mapping of instrument id to value")
+        normalized: dict[str, T] = {}
+        for key, value in self.cells.items():
+            normalized[require_identifier(key, name="instrument id")] = value
+        ordered = dict(sorted(normalized.items()))
+        object.__setattr__(self, "cells", MappingProxyType(ordered))
+        object.__setattr__(self, "_keys", tuple(ordered))
+        if self.at is not None:
+            require_tz_aware(self.at, name="at")
+
+    @classmethod
+    def _trusted(cls, cells: dict[str, T], at: datetime | None = None) -> CrossSection[T]:
+        """From cells the framework built in sorted order: no re-validation, same shape."""
+        section = object.__new__(cls)
+        object.__setattr__(section, "cells", MappingProxyType(cells))
+        object.__setattr__(section, "_keys", tuple(cells))
+        object.__setattr__(section, "at", at)
+        return section
+
+    def __getitem__(self, instrument_id: str) -> T:
+        return self.cells[instrument_id]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._keys)
+
+    def __len__(self) -> int:
+        return len(self._keys)
+
+    def __contains__(self, instrument_id: object) -> bool:
+        return instrument_id in self.cells
+
+    @property
+    def instruments(self) -> tuple[str, ...]:
+        return self._keys
+
+    def map[U](self, fn: Callable[[T], U]) -> CrossSection[U]:
+        """The same names, each value passed through `fn`."""
+        return CrossSection._trusted(
+            {name: fn(value) for name, value in self.cells.items()}, self.at
+        )
+
+    def elementwise[U](
+        self, fn: Callable[..., U], *others: Mapping[str, T]
+    ) -> CrossSection[U]:
+        """`fn` applied name by name across this and `others`, which must cover the same names.
+
+        What `vqapr.portfolio.bounds.intersect` does with `max` and `min`: a box that misses a
+        name is refused rather than defaulted, because a missing bound would silently widen it.
+        """
+        for other in others:
+            if set(other) != set(self._keys):
+                raise ValueError(
+                    "elementwise operands must cover the same instruments: "
+                    f"{sorted(set(other) ^ set(self._keys))!r} differ"
+                )
+        return CrossSection._trusted(
+            {
+                name: fn(self.cells[name], *(other[name] for other in others))
+                for name in self._keys
+            },
+            self.at,
+        )
+
+    def total(self, zero: T) -> T:
+        """The sum of every value, starting from `zero` so the type is the caller's."""
+        return sum(self.cells.values(), zero)  # type: ignore[arg-type]
+
+    def where(self, predicate: Callable[[T], bool]) -> tuple[str, ...]:
+        """The names whose value satisfies `predicate`, in id order: what a rule blames."""
+        return tuple(name for name in self._keys if predicate(self.cells[name]))
+
+
+@dataclass(frozen=True, slots=True)
+class Series[T]:
+    """Instant -> value for one instrument: a panel's column over a window, oldest first.
+
+    `cells` is a tuple aligned with `instants`; `None` where the name had no value at that
+    instant, never a fabricated zero. `latest()` is the newest non-null value, or `None`.
+    """
+
+    instrument: str
+    instants: tuple[datetime, ...]
+    cells: tuple[T | None, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.instants) != len(self.cells):
+            raise ValueError("a series has one cell per instant")
+
+    def __len__(self) -> int:
+        return len(self.cells)
+
+    def __iter__(self) -> Iterator[T | None]:
+        return iter(self.cells)
+
+    def __getitem__(self, index: int) -> T | None:
+        return self.cells[index]
+
+    def latest(self) -> T | None:
+        for value in reversed(self.cells):
+            if value is not None:
+                return value
+        return None
+
+    def present(self) -> tuple[T, ...]:
+        """The non-null values, oldest first: what a lookback arithmetic reads."""
+        return tuple(value for value in self.cells if value is not None)
+
 
 NO_INSTRUMENT = ""
 """The one column key of a panel built from a dataset with no instrument axis (`grain: instant`).
@@ -499,6 +640,3 @@ class _LazyColumns(Mapping[str, tuple[object, ...]]):
 
     def __repr__(self) -> str:
         return f"PanelWindow.values({', '.join(self._keys())})"
-
-
-__all__ = ["NO_INSTRUMENT", "Panel", "PanelWindow", "panel_identity"]

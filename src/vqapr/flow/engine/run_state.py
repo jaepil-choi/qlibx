@@ -25,7 +25,8 @@ from vqapr.domain.memory import (
     opening_memory,
     prepare_model_state,
 )
-from vqapr.domain.shapes import RecordChunk
+from vqapr.record.chunk import RecordChunk
+from vqapr.record.schema import FILL_TABLE
 
 
 class LifecycleKind(StrEnum):
@@ -219,9 +220,6 @@ class PreparedRunState:
 
 _UNSET = object()
 
-FILL_TABLE = "vqapr.fill"
-"""The fill journal's table id, named once: `context.DEFAULT_TABLES` builds its spec from
-this and every reader imports it from here (one-shape Step 6; it was spelled in three places)."""
 """Package-owned, fixed-schema record of every committed fill.
 
 Canon 9.1 forbids a *free-form* recorder at the execution stage, because two ways to state the

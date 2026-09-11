@@ -21,14 +21,16 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.fill import ExactExecutionTarget, FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.instrument import instruments as _instruments
@@ -41,12 +43,6 @@ from vqapr.domain.intent import (
 )
 from vqapr.domain.listing import ListingAccess
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
-from vqapr.exchange.conventions import ExactExecutionTarget, FillRule
-from vqapr.exchange.execution_table import (
-    ExecutionTable,
-    ExecutionTableSpec,
-    exact_execution_snapshot,
-)
 from vqapr.exchange.venue import AcademicExchange, TradeRule
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
@@ -1003,8 +999,8 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
 
     # The venue table is a dataset with an execution role (record `185`), measured through the
     # one door (record `234`): the key it fills by is the dataset's key.
-    from vqapr.data.datasets import DatasetRegistration
-    from vqapr.data.validation import verify_source
+    from vqapr.data.dataset import DatasetRegistration
+    from vqapr.data.verification import verify_source
 
     diagnosis, _, _ = verify_source(
         DatasetRegistration.of(

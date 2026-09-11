@@ -23,7 +23,7 @@ from pathlib import Path
 # `flow/orchestration.py` already imports `vqapr.project.store` at module scope. An architecture
 # review of VB002 found them being carried at full weight against a ratchet whose stated point
 # is that lowering it is the goal.
-from vqapr.data.validation import verify_roster
+from vqapr.data.verification import verify_roster
 from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.instrument import InstrumentRoster, build_roster
 from vqapr.project.store import Workspace

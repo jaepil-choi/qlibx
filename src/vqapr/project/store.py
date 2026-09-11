@@ -16,9 +16,9 @@ import yaml
 
 from vqapr._internal import atomic, filelock
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec, physical_digest
-from vqapr.data.validation import require_verified
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec, physical_digest
+from vqapr.data.verification import require_verified
 from vqapr.domain.errors import FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import (
     ComponentId,

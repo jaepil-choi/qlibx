@@ -19,14 +19,14 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain
+from vqapr.data.dataset import DatasetRegistration, lookback_fits_grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
-from vqapr.public import register_dataset
+from vqapr.data.window import ModelWindow
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -133,7 +133,7 @@ def test_the_wrong_kind_of_lookback_is_refused_by_name_at_the_read(
 
 
 def test_the_steering_rule_is_stated_once() -> None:
-    from vqapr.data.datasets import Grain
+    from vqapr.data.dataset import Grain
 
     assert lookback_fits_grain(RowsLookback(1), Grain.INSTRUMENT_INSTANT) is None
     assert lookback_fits_grain(CalendarLookback(days=1), Grain.INSTANT) is None

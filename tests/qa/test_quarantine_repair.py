@@ -24,11 +24,11 @@ import pytest
 import yaml
 
 from vqapr.cli.main import main
-from vqapr.data.datasets import DatasetRegistration, require_declared
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration, require_declared
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset as pub_register_dataset
 
 
 def _cli(

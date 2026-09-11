@@ -1677,7 +1677,7 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `domain/errors.py`, `domain/inputs.py` | `domain/errors.py` |
 | `domain/values.py` | 나눈다: `domain/instants.py` (시간대 · 현지 시각 · 달력 이동), `domain/memory.py` (ModelMemory · 정규화), `domain/listing.py` (Side), `domain/account.py` (Mark · MarkBatch · MarkSummary) |
 | `domain/model_state.py` | `domain/memory.py` |
-| `domain/shapes.py` | 흩는다: `Grain` → `data/dataset.py` · `CrossSection` · `Series` → `data/panel.py` (domain의 `Panel` Protocol은 필요 없으면 삭제) · `Observation` → `data/observation.py` · `Rows` · `Row` · `Scalar` · 정규화 → `domain/rows.py` · `RecordChunk` → `record/chunk.py` |
+| `domain/shapes.py` | 흩는다: `Grain` → `data/dataset.py` · `CrossSection` · `Series` → `data/panel.py` (domain의 `Panel` Protocol은 필요 없으면 삭제) · `Observation` → `data/observation.py` · `Rows` · `Row` · `Scalar` · 정규화 → `domain/rows.py` · `RecordChunk` → `record/chunk.py` · 둘이 함께 쓰던 이름 검사 `_identifier` → `domain/identifiers.py::require_identifier` |
 | `domain/wiring.py`, `extension/component.py::ComponentKind` | `domain/wiring.py` (`Role` 하나) |
 | `domain/instruments.py` | `domain/instrument.py` |
 | `domain/agendas.py` | `domain/schedule.py` |
@@ -1686,7 +1686,7 @@ PRD §0.3은 각 `UC-*`의 trigger · 허용된 읽기 · 계산 · 상태 전�
 | `domain/orders.py`, `exchange/planning.py` | `domain/order.py` |
 | `domain/costs.py` | `domain/cost.py` — `fill.py`에 합치면 `fill → order → listing → fill` 순환이 생긴다 |
 | `domain/fills.py`, `exchange/conventions.py`의 `FillRule` · `ExactExecutionTarget`, `domain/ledger.py::fill_entries` | `domain/fill.py` (`FillRule`은 data 단계에서: 소스를 스캔하는 두 메서드가 `data/execution_table.py`로 간 뒤) |
-| `exchange/conventions.py`의 `ExecutionHorizon` | `data/execution_table.py` |
+| `exchange/conventions.py`의 `ExecutionHorizon` | `domain/fill.py` — 정렬된 시각들일 뿐인 순수한 값이다. 그것을 스캔으로 읽는 일은 `data/execution_table.py` |
 | `domain/ledger.py`, `domain/account_state.py`, `account/account.py` | `domain/account.py` |
 | `account/marking.py`, `flow/run/valuation.py::_marks_from_execution_snapshot` | `domain/valuation.py` |
 | `data/sources.py` · `datasets.py` · `requirements.py` + `resolution.py` · `validation.py` · `windows.py` | `data/source.py` · `dataset.py` · `requirement.py` · `verification.py` · `window.py` |

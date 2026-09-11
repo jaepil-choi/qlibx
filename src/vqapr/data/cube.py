@@ -36,9 +36,9 @@ import numpy as np
 import pyarrow as pa
 
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.panel import NO_INSTRUMENT, Panel, dense_block, placement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 
 CUBE_META = "cube.json"
 INSTANTS_FILE = "instants.npy"

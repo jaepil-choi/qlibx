@@ -1,11 +1,24 @@
-"""Logical observation requirements declared by consumers."""
+"""What a consumer declares it reads, and how that resolves to a physical column.
+
+A `DataRequirement` is one field of one dataset with a past-only lookback, declared by the
+consumer that reads it. `resolve_field` translates the requested field through the dataset that
+exposes it; a field the dataset does not declare is refused by name.
+"""
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import Lookback
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
 from vqapr.domain.identifiers import DatasetId, dataset_id
+
+__all__ = [
+    "DataRequirement",
+    "resolve_field",
+]
+
 
 _RESERVED_FIELDS = frozenset({"available_at", "instrument"})
 
@@ -53,3 +66,40 @@ class DataRequirement(BaseModel):
         if field_id in _RESERVED_FIELDS:
             raise ValueError(f"framework field is reserved by ModelWindow: {field_id!r}")
         return cls(dataset_id=dataset_id(raw_dataset_id), field_id=field_id, lookback=lookback)
+
+
+def resolve_field(registration: DatasetRegistration, requirement: DataRequirement) -> str:
+    """The expression the named dataset exposes under the requirement's field id.
+
+    A requirement names a dataset and a field, so this asks only the second half: the dataset was
+    resolved by name before getting here. A field id is unique **within** a dataset and not across
+    the workspace (`docs/issues/049`, the owner's 2026-09-01 correction), which is why the pair is
+    what identifies a read.
+    """
+    expression = registration.fields.get(requirement.field_id)
+    if expression is not None:
+        return expression
+    raise VqaprError(
+        stage=Stage.RUN,
+        failures=[
+            Failure.bounded(
+                code="store.field_missing",
+                status=Status.MISSING,
+                requirement=(
+                    f"dataset {str(registration.dataset_id)!r} must expose the field a "
+                    "requirement names"
+                ),
+                observed=(
+                    f"missing={requirement.field_id!r}; "
+                    f"exposed={sorted(registration.fields)!r}"
+                ),
+                fix=(
+                    f"register {requirement.field_id!r} on dataset "
+                    f"{str(registration.dataset_id)!r} under `fields`, or name a field it "
+                    "already exposes"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition="register the required field or change the requirement, then retry",
+    )

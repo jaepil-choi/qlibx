@@ -23,7 +23,7 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.data.validation import verify_roster
+from vqapr.data.verification import verify_roster
 from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.domain.instrument import build_roster
 from vqapr.extension.component import ComponentKind

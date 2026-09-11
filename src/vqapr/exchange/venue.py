@@ -35,6 +35,12 @@ from decimal import Decimal
 from typing import ClassVar
 
 from vqapr.authoring import Tool
+from vqapr.data.execution_table import (
+    ExactExecutionSnapshot,
+    accepted_requests,
+    requested_rows,
+    validate_requests,
+)
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.fill import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instants import require_tz_aware
@@ -49,12 +55,6 @@ from vqapr.domain.listing import (
 from vqapr.domain.memory import ModelMemory
 from vqapr.domain.order import OrderBatch
 from vqapr.domain.wiring import Role
-from vqapr.exchange.execution_table import (
-    ExactExecutionSnapshot,
-    accepted_requests,
-    requested_rows,
-    validate_requests,
-)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -36,16 +36,15 @@ from vqapr.compliance.evaluation import (
     compliance_requirements as declared_compliance_requirements,
 )
 from vqapr.data import cube as cube_module
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.dataset import DatasetRegistration, Grain
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.scan import ScanSession
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore, physical_digest
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountState
 from vqapr.domain.errors import Failure, FailureSource, InputError, Stage, Status, VqaprError
 from vqapr.domain.memory import normalize_memory
-from vqapr.domain.shapes import Grain
 from vqapr.extension.component import ComponentRef
 from vqapr.extension.loading import (
     as_loaded_fingerprint,
@@ -69,7 +68,6 @@ from vqapr.flow.roster import (
     registered_roster,
     roster_report,
 )
-from vqapr.flow.run.context import DEFAULT_TABLE_PREFIX
 from vqapr.flow.run.loop import (
     DataModelResult,
     SimulationResult,
@@ -87,6 +85,7 @@ from vqapr.record import (
     read_strategy_record,
     read_table,
 )
+from vqapr.record.schema import WEIGHT_TABLE
 
 
 def preflight_run(
@@ -1193,9 +1192,6 @@ def _own_output_or_refuse(
         )
     workspace.remove("dataset", frozen.writes)
 
-
-WEIGHT_TABLE = f"{DEFAULT_TABLE_PREFIX}weight"
-"""The package table a strategy's allocation is published from."""
 
 
 def _publish_allocation(

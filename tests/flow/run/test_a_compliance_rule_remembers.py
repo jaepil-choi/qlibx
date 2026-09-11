@@ -33,14 +33,14 @@ from vqapr.authoring import (
     Hold,
     StrategyModel,
 )
-from vqapr.data.sources import SourceSpec
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
+from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.exchange.conventions import FillRule
-from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage

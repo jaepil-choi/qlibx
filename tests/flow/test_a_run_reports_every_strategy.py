@@ -24,7 +24,6 @@ import pytest
 import tests.sample.journey as journey
 from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.orchestration import in_workers, run_registered_strategy
-from vqapr.record import read_run_record, strategy_refs
 from vqapr.public import (
     StrategyEntry,
     StrategyOutcome,
@@ -34,6 +33,7 @@ from vqapr.public import (
     register_strategy_model,
 )
 from vqapr.public import run as execute_run
+from vqapr.record import read_run_record, strategy_refs
 
 RAISING_SOURCE = '''"""A strategy whose signal is never ready; it raises from a helper in this file."""
 

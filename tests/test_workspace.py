@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.store import Workspace
@@ -514,7 +514,7 @@ def test_a_registration_without_field_types_is_quarantined_not_a_deadlock(tmp_pa
     every read on it is refused by name until its author declares the types, and registering it
     again with them is the repair -- through the same `register` the refusal advertises.
     """
-    from vqapr.data.datasets import require_declared
+    from vqapr.data.dataset import require_declared
 
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "gamma"):
@@ -602,7 +602,7 @@ def test_a_workspace_reads_a_datasets_instants_and_hashes_its_file_once_per_comm
     once for its life -- including the digest of a file whose compare FAILS."""
     import duckdb
 
-    from vqapr.data.validation import verify_source
+    from vqapr.data.verification import verify_source
     from vqapr.project import store as store_module
 
     path = tmp_path / "prices.parquet"

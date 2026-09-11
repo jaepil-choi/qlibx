@@ -16,7 +16,6 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.flow.run.context import FRAMEWORK_TABLES
 from vqapr.record import (
     read_run_record,
     read_strategy_record,
@@ -25,15 +24,11 @@ from vqapr.record import (
     resolve_strategy_ref,
     strategy_refs,
 )
+from vqapr.record.schema import ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE
 from vqapr.report import measure
 from vqapr.report.document import RunReport, StrategyReport
 
 __all__ = ["run_report", "strategy_report", "valuation_grid"]
-
-ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE = (
-    next(table for table in FRAMEWORK_TABLES if table.endswith(suffix))
-    for suffix in ("account", "fill", "monitoring", "weight")
-)
 
 
 def strategy_report(

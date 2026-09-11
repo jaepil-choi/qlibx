@@ -13,9 +13,9 @@ from vqapr.authoring import (
 )
 from vqapr.compliance.evaluation import evaluate_compliance
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.intent import PortfolioTarget
 from vqapr.domain.valuation import ValuationService

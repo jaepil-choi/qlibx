@@ -15,14 +15,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.memory import ModelMemory, opening_memory
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.extension.component import ComponentKind, ComponentRef
 from vqapr.project.run import (
     FINGERPRINT_PREFIX,

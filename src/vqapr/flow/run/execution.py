@@ -14,11 +14,11 @@ from __future__ import annotations
 from dataclasses import replace
 from decimal import Decimal
 
+from vqapr.data.execution_table import ExactExecutionSnapshot
 from vqapr.domain.fill import fill_entries
 from vqapr.domain.instrument import InstrumentRoster, require_declared
 from vqapr.domain.listing import ExchangeRulesView
 from vqapr.domain.order import plan_orders
-from vqapr.exchange.execution_table import ExactExecutionSnapshot
 from vqapr.exchange.venue import ExecutionCall
 from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,

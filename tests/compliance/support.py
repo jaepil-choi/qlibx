@@ -18,7 +18,7 @@ from decimal import Decimal
 
 from vqapr.authoring import ComplianceCall, EconomicAccountView
 from vqapr.authoring.context import ComplianceContext
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 
 
 def reading_call(

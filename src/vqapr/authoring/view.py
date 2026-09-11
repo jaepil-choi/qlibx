@@ -18,7 +18,7 @@ from vqapr.authoring._validation import (
     _identifier,
     _tz_aware,
 )
-from vqapr.domain.shapes import CrossSection
+from vqapr.data.panel import CrossSection
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

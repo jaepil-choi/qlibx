@@ -81,6 +81,13 @@ def instrument_id(raw: str) -> InstrumentId:
     return InstrumentId(value)
 
 
+def require_identifier(value: object, *, name: str) -> str:
+    """A name inside a row or a cross-section: a non-empty string without whitespace."""
+    if not isinstance(value, str) or not value or any(char.isspace() for char in value):
+        raise ValueError(f"{name} must be a non-empty string without whitespace")
+    return value
+
+
 # ------------------------------------------------------------------------------------------
 # references.py, folded in (one-shape Step 7, record 162)
 #

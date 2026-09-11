@@ -16,11 +16,11 @@ from uuid import UUID
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.intent import (
     Budget,
     EconomicPortfolioIntent,

@@ -10,9 +10,9 @@ import pyarrow as pa
 import pytest
 
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.validation import verify_source
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
 from vqapr.domain.errors import MAX_EXAMPLES, Stage, VqaprError
 
 

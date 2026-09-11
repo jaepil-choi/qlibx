@@ -1,4 +1,4 @@
-"""The one door (`data/validation.py`, record `234`): measured once, verified by identity after.
+"""The one door (`data/verification.py`, record `234`): measured once, verified by identity after.
 
 `verify_source` is what registration runs, and what it hands back carries the digest of the
 bytes it measured and, for an execution-role table, the prices that are positive on every
@@ -14,9 +14,9 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data import validation
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data import verification
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.project.store import Workspace
 from vqapr.public import register_dataset
@@ -63,7 +63,7 @@ def _registration() -> DatasetRegistration:
 def test_verify_source_measures_the_digest_and_registration_keeps_it(tmp_path: Path) -> None:
     parquet = _prices(tmp_path)
 
-    diagnosis, _, measured = validation.verify_source(
+    diagnosis, _, measured = verification.verify_source(
         _registration(), SourceSpec.of("prices", parquet)
     )
 
@@ -88,21 +88,21 @@ def test_a_verified_read_hashes_once_and_scans_nothing(
     register_dataset(tmp_path, _registration(), SourceSpec.of("prices", parquet))
     scans: list[str] = []
     for name in KERNELS:
-        original = getattr(validation.scan, name)
+        original = getattr(verification.scan, name)
 
         def counting(*args, _name=name, _original=original, **kwargs):
             scans.append(_name)
             return _original(*args, **kwargs)
 
-        monkeypatch.setattr(validation.scan, name, counting)
+        monkeypatch.setattr(verification.scan, name, counting)
     hashes: list[Path] = []
-    original_digest = validation.physical_digest
+    original_digest = verification.physical_digest
 
     def counting_digest(path: Path) -> str:
         hashes.append(path)
         return original_digest(path)
 
-    monkeypatch.setattr(validation, "physical_digest", counting_digest)
+    monkeypatch.setattr(verification, "physical_digest", counting_digest)
     # `Workspace.source_digest` hashes through its own import; count it the same way.
     from vqapr.project import store as store_module
 
@@ -193,7 +193,7 @@ def test_a_registration_without_a_measurement_is_refused_by_name(tmp_path: Path)
     assert not registration.verified
 
     with pytest.raises(VqaprError) as refused:
-        validation.require_verified(registration, SourceSpec.of("prices", parquet))
+        verification.require_verified(registration, SourceSpec.of("prices", parquet))
 
     assert refused.value.failures[0].code == "dataset.unverified"
     assert "`vqapr register <its declaration file>`" in str(refused.value.failures[0].fix)
@@ -215,7 +215,7 @@ def test_a_run_published_registration_is_told_to_publish_again(tmp_path: Path) -
     )
 
     with pytest.raises(VqaprError) as unverified:
-        validation.require_verified(published, spec)
+        verification.require_verified(published, spec)
     failure = unverified.value.failures[0]
     assert failure.code == "dataset.unverified"
     assert "published by run 'alpha-001'" in str(failure.observed)
@@ -224,7 +224,7 @@ def test_a_run_published_registration_is_told_to_publish_again(tmp_path: Path) -
     assert "`vqapr run alpha-001 --force`" in str(unverified.value.retry_precondition)
 
     with pytest.raises(VqaprError) as changed:
-        validation.require_verified(
+        verification.require_verified(
             published.with_verification("0" * 64, None), spec, digest="1" * 64
         )
     assert changed.value.failures[0].code == "dataset.source_changed"
@@ -232,7 +232,7 @@ def test_a_run_published_registration_is_told_to_publish_again(tmp_path: Path) -
 
 
 def test_verify_roster_names_the_table_it_cannot_read(tmp_path: Path) -> None:
-    diagnosis, rows = validation.verify_roster({"stock": tmp_path / "absent.parquet"})
+    diagnosis, rows = verification.verify_roster({"stock": tmp_path / "absent.parquet"})
 
     assert rows == {}
     assert [failure.code for failure in diagnosis.failures] == ["roster.table_missing"]

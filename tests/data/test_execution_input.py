@@ -5,11 +5,11 @@ from pathlib import Path
 
 import duckdb
 
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.data.validation import verify_source
-from vqapr.exchange.conventions import FillRule
-from vqapr.exchange.execution_table import ExecutionTable, ExecutionTableSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
+from vqapr.domain.fill import FillRule
 
 
 def _write(path: Path, rows: str) -> Path:

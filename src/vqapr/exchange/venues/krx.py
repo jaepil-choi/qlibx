@@ -21,6 +21,7 @@ from decimal import Decimal, InvalidOperation
 
 from pydantic import field_validator
 
+from vqapr.data.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.domain.cost import FREE, FillCost, SideCost
 from vqapr.domain.fill import Fill, FillBatch, ZeroDealtReason
 from vqapr.domain.instrument import Instrument, InstrumentKind
@@ -37,7 +38,6 @@ from vqapr.domain.listing import (
 )
 from vqapr.domain.memory import ModelMemory
 from vqapr.domain.order import OrderRequest
-from vqapr.exchange.execution_table import accepted_requests, requested_rows, validate_requests
 from vqapr.exchange.venue import Exchange, ExecutionCall
 
 COMMISSION_RATE = Decimal("0.0003")

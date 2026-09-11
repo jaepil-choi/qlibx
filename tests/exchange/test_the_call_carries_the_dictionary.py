@@ -9,10 +9,10 @@ from decimal import Decimal
 
 import pytest
 
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.instrument import InstrumentRoster, instrument
 from vqapr.domain.order import OrderBatch, OrderRequest
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import ExecutionCall
 from vqapr.exchange.venues.krx import KrxExchange
 

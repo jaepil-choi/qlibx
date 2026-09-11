@@ -19,6 +19,7 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.instrument import (
     EtfInstrument,
@@ -31,7 +32,6 @@ from vqapr.domain.instrument import (
 from vqapr.domain.intent import Budget, PortfolioDirection
 from vqapr.domain.listing import ExchangeRulesView, ListingAccess, Side, TradeRule
 from vqapr.domain.order import plan_orders
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import krx_listing
 

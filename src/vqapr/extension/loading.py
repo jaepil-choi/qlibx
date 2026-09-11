@@ -22,7 +22,7 @@ from pathlib import Path
 from types import ModuleType
 
 from vqapr.authoring import Compliance, DataModel, StrategyModel
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.listing import ExchangeRulesView
 from vqapr.domain.memory import normalize_memory

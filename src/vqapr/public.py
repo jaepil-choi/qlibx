@@ -32,17 +32,18 @@ from vqapr.authoring.context import DataModelContext, StrategyModelContext
 from vqapr.authoring.records import TableSpec
 from vqapr.compliance.builtin import SHIPPED_COMPLIANCE, shipped_compliance_path
 from vqapr.compliance.evaluation import ComplianceReport
-from vqapr.data.datasets import DatasetRegistration, ExecutionRole
+from vqapr.data.dataset import DatasetRegistration, ExecutionRole, Grain
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.panel import PanelWindow
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.panel import CrossSection, PanelWindow, Series
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import ObservationBatch
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountMode, AccountSnapshot, Mark, MarkBatch
 from vqapr.domain.cost import FillCost, SideCost
 from vqapr.domain.errors import Stage, Status, VqaprError
-from vqapr.domain.fill import ZeroDealtReason
+from vqapr.domain.fill import ExactExecutionTarget, FillRule, ZeroDealtReason
 from vqapr.domain.instants import LocalInstantDeclaration, declare_local_instant
 from vqapr.domain.instrument import (
     EtfInstrument,
@@ -74,12 +75,6 @@ from vqapr.domain.listing import (
     trade_rules_by_kind,
 )
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.domain.shapes import CrossSection, Grain, Series
-from vqapr.exchange.conventions import ExactExecutionTarget, FillRule
-from vqapr.exchange.execution_table import (
-    ExecutionTable,
-    ExecutionTableSpec,
-)
 from vqapr.exchange.venue import AcademicExchange, ExecutionCall
 from vqapr.exchange.venues.krx import (
     KrxExchange,

@@ -93,7 +93,7 @@ written". I expected a venue missing its `trade_at` column to be refused by `che
     $ uv run vqapr run enhanced-run
     {"ok": false, "stage": "flow.session", "failures": [{"status": 500, "code":
     "unhandled", "cause": {"type": "KeyError", "message": "trade_at", "where":
-    "vqapr/exchange/execution_table.py:212"}, "fix": null, ...}]}
+    "vqapr/data/execution_table.py:212"}, "fix": null, ...}]}
 
 ## Reproduction
 

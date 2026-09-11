@@ -13,8 +13,9 @@ from decimal import Decimal
 import pytest
 
 from vqapr import authoring, public
-from vqapr.domain.shapes import CrossSection, Grain, Observation, Panel, Series
-from vqapr.domain.shapes import Grain as ShapesGrain
+from vqapr.data.dataset import Grain
+from vqapr.data.observation import Observation
+from vqapr.data.panel import CrossSection, Series
 
 AT = datetime(2024, 3, 5, 15, 30, tzinfo=UTC)
 
@@ -71,8 +72,7 @@ def test_a_series_is_a_column_with_nulls_where_the_name_had_nothing() -> None:
         Series("A", (AT,), (1.0, 2.0))
 
 
-def test_the_grain_and_the_observation_are_domain_facts() -> None:
-    assert ShapesGrain is Grain
+def test_the_grain_and_the_observation_have_one_home() -> None:
     assert public.Grain is Grain, "the public door keeps the one enum"
     assert authoring.Observation is Observation, "the author surface re-exports the long row"
     assert {member.value for member in Grain} == {"instrument_instant", "instant", "rows"}
@@ -82,4 +82,3 @@ def test_the_grain_and_the_observation_are_domain_facts() -> None:
 def test_the_public_door_names_the_shapes_an_author_receives() -> None:
     assert public.CrossSection is CrossSection
     assert public.Series is Series
-    assert isinstance(Panel, type)

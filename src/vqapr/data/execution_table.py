@@ -25,12 +25,12 @@ from typing import Any
 import pyarrow.compute as pc
 
 from vqapr.data import scan
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountSnapshot
+from vqapr.domain.fill import ExactExecutionTarget, ExecutionHorizon, FillRule
 from vqapr.domain.identifiers import DatasetId, dataset_id
 from vqapr.domain.listing import ExchangeRulesView, side_of
 from vqapr.domain.order import OrderBatch
-from vqapr.exchange.conventions import ExactExecutionTarget, ExecutionHorizon, FillRule
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 
@@ -100,12 +100,14 @@ class ExecutionTable:
         session: scan.ScanSession | None = None,
     ) -> ExecutionHorizon:
         """The run's candidate instants, read once from this table by this fill convention."""
-        return self.fill.build_horizon(
-            self.table.source,
-            trade_at_field=self.table.trade_at_field,
-            start_time=start_time,
-            end_time=end_time,
-            session=session,
+        return ExecutionHorizon.of(
+            scan.candidate_instants(
+                self.table.source,
+                trade_at_field=self.table.trade_at_field,
+                decision_time=start_time,
+                end_time=end_time,
+                session=session,
+            )
         )
 
     def select_target(
@@ -116,9 +118,16 @@ class ExecutionTable:
         horizon: ExecutionHorizon | None = None,
     ) -> ExactExecutionTarget | None:
         """When a decision at `decision_time` fills, by this table's binding and this convention."""
+        if horizon is None:
+            horizon = ExecutionHorizon.of(
+                scan.candidate_instants(
+                    self.table.source,
+                    trade_at_field=self.table.trade_at_field,
+                    decision_time=decision_time,
+                    end_time=end_time,
+                )
+            )
         return self.fill.select_target(
-            self.table.source,
-            trade_at_field=self.table.trade_at_field,
             dataset_id=self.dataset_id,
             decision_time=decision_time,
             end_time=end_time,

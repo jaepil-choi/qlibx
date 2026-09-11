@@ -17,19 +17,15 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
+from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillRule
-from vqapr.exchange.execution_table import (
-    ExecutionTable,
-    ExecutionTableSpec,
-    exact_execution_snapshot,
-)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))

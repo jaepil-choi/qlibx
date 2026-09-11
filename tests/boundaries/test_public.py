@@ -522,8 +522,8 @@ def test_a_non_positive_execution_price_is_measured_without_creating_a_workspace
         )
     finally:
         con.close()
-    from vqapr.data.datasets import DatasetRegistration
-    from vqapr.data.validation import verify_source
+    from vqapr.data.dataset import DatasetRegistration
+    from vqapr.data.verification import verify_source
 
     registration = DatasetRegistration.of(
         "krx-daily",

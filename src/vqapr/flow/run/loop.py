@@ -36,15 +36,15 @@ from pathlib import Path
 from typing import Protocol
 
 from vqapr.authoring import AccountHistoryInput, Compliance, Component, DataModel, StrategyModel
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.scan import ScanSession
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account
+from vqapr.domain.fill import ExecutionHorizon
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import ValuationService
-from vqapr.exchange.conventions import ExecutionHorizon
 from vqapr.exchange.venue import Exchange
 from vqapr.flow.declaration.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
@@ -52,16 +52,12 @@ from vqapr.flow.engine.artifacts import (
     SimulationStage,
 )
 from vqapr.flow.engine.loop import MarketEvent, OccurrenceEvent
-from vqapr.flow.engine.run_state import (
-    RunFinalization,
-    RunStateRepository,
-)
+from vqapr.flow.engine.run_state import RunFinalization, RunStateRepository
 from vqapr.flow.run.accrual import AccrualHandler
 from vqapr.flow.run.callback import CallbackHandler
 from vqapr.flow.run.compliance import ComplianceHandler
 from vqapr.flow.run.compute import ComputeHandler, DataModelTrace
 from vqapr.flow.run.context import (
-    DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     AcceptedIntent,
     DueExecutionResult,
@@ -79,6 +75,7 @@ from vqapr.flow.run.context import (
 from vqapr.flow.run.execution import ExecutionHandler
 from vqapr.flow.run.output import RunOutput
 from vqapr.flow.run.valuation import ValuationHandler
+from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 
 __all__ = [
     "DEFAULT_TABLES",

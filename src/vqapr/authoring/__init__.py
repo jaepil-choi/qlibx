@@ -49,8 +49,8 @@ from vqapr.authoring.records import TableSpec
 from vqapr.authoring.result import ComplianceFinding, Hold, Rebalance
 from vqapr.authoring.view import EconomicAccountView
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow
-from vqapr.domain.shapes import Observation
 
 __all__ = (
     "AccountHistory",

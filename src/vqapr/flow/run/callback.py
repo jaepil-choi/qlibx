@@ -18,9 +18,11 @@ from vqapr.authoring.context import StrategyModelContext
 from vqapr.authoring.history import AccountHistory
 from vqapr.authoring.records import InvocationRecorder, TableSpec
 from vqapr.compliance.evaluation import build_account_view
-from vqapr.data.windows import ModelWindow
+from vqapr.data.execution_table import ExecutionTable
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot, AccountState
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.fill import ExecutionHorizon
 from vqapr.domain.identifiers import ModelStateRef
 from vqapr.domain.intent import (
     EconomicPortfolioIntent,
@@ -35,23 +37,16 @@ from vqapr.domain.memory import (
     prepare_model_state,
 )
 from vqapr.domain.schedule import OperationOccurrence
-from vqapr.exchange.conventions import ExecutionHorizon
-from vqapr.exchange.execution_table import ExecutionTable
 from vqapr.flow.engine.artifacts import (
     CallbackEvidence,
     SimulationFailure,
     SimulationFailureKind,
     SimulationStage,
 )
-from vqapr.flow.engine.run_state import (
-    LifecycleKind,
-    LifecycleTrace,
-    PreparedRunState,
-)
+from vqapr.flow.engine.run_state import LifecycleKind, LifecycleTrace, PreparedRunState
 from vqapr.flow.run.context import (
     _ACCOUNT_IDENTITY,
     CALLBACK_STAGE,
-    DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     AcceptedIntent,
     FlowContext,
@@ -59,6 +54,7 @@ from vqapr.flow.run.context import (
     _raise_callback_return_type,
     _shadows_package_table,
 )
+from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 
 
 class CallbackHandler:

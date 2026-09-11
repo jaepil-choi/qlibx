@@ -4,6 +4,8 @@
 한다(기록 `234`, `docs/issues/095`). 여기는 **그 값이 무엇인지**를 안다. 등록이 요구하는 것은 일곱
 개가 전부이며(PRD §4.1; `grain`은 기록 `137`에서 더해졌다), 그 이상은 그것을 필요로 하는
 operation이 호출될 때 요구한다.
+
+`Grain` -- what one row of the dataset IS -- is part of the declaration and lives here beside it.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import StrEnum
 
 from vqapr.data import scan
 from vqapr.data.lookback import InstantsLookback, Lookback
@@ -24,7 +27,50 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.identifiers import DatasetId, SourceId, dataset_id, source_id
-from vqapr.domain.shapes import Grain
+
+__all__ = [
+    "GRAIN_NAMES",
+    "ROWS_LOOKBACK_MEANING",
+    "DatasetRegistration",
+    "ExecutionRole",
+    "Grain",
+    "execution_price_fields",
+    "lookback_fits_grain",
+    "parse_execution_role",
+    "parse_field_types",
+    "parse_grain",
+    "require_declared",
+]
+
+
+class Grain(StrEnum):
+    """What one row of the dataset IS, declared by the author and never derived.
+
+    `docs/design/the-panel-the-surface-and-the-run.md` §2.2. The grain decides what registration
+    checks for uniqueness, whether a panel can be built from the table, and -- with the lookback
+    types that follow it (§2.4) -- what `RowsLookback` means on it. An `aggregated` projection is
+    a *means* of reaching `instrument_instant` from a long source; it is not the grain itself, and
+    a fact derived from expressions gives the author no place to state intent. `049`'s story --
+    registered long, six hundred times slower, and nobody said why -- is what a declared grain
+    prevents.
+
+    It is a property of the TABLE, not of a read. "At or before the instant" and "exactly at the
+    instant" are two ways of reading a table, decided by the event that reads it (`flow/loop.py`),
+    and neither is a grain (owner ruling, 2026-09-08: no `Grain.POINT`).
+    """
+
+    INSTRUMENT_INSTANT = "instrument_instant"
+    """One value per field per (available_at, instrument). A panel can be built."""
+
+    INSTANT = "instant"
+    """One value per available_at; no instrument axis (`docs/issues/archive/038`).
+
+    A one-column panel.
+    """
+
+    ROWS = "rows"
+    """The vendor's grain: long / EAV. Unique on the declared `key_fields`. No panel."""
+
 
 _BARE_COLUMN = re.compile(r"[^\W\d]\w*", re.UNICODE)
 """A field expression that is nothing but a name, which is what every registration wrote before
@@ -36,9 +82,9 @@ an expression nobody here can check on its own, so it gets duckdb's message from
 untouched.
 """
 
-# `Grain` -- what one row of the dataset IS -- lives in `domain/shapes.py` since record `183`:
-# it is the fact the shapes are derived from, and it belongs beside them.
+
 GRAIN_NAMES = ", ".join(member.value for member in Grain)
+
 
 ROWS_LOOKBACK_MEANING = (
     "on a panel grain (instrument_instant, instant) a RowsLookback(n) is the last n rows of the "
@@ -51,6 +97,7 @@ Every registration written before `grain` existed is edited once, by hand, to ad
 is the one sure moment to tell the author that `RowsLookback` on their table now means something
 else. Nothing decodes a grain-less registration as `rows` silently (§7-3).
 """
+
 
 _RETRY = "fix the prepared dataset, then register again"
 

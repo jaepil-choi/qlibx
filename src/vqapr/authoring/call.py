@@ -18,8 +18,8 @@ from datetime import datetime
 
 from vqapr.authoring.history import AccountHistory
 from vqapr.authoring.view import EconomicAccountView
+from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow
-from vqapr.domain.shapes import Observation
 
 
 class DataCall(ABC):

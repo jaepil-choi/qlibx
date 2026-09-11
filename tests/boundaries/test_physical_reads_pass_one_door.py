@@ -4,7 +4,7 @@ The scan's check kernels -- the queries that describe a file, prove a key, measu
 count non-finite values, or count non-positive prices -- are what "validating a file" costs.
 Until record `234` three modules called them with three shapes, and the same execution table
 was scanned at registration, at preflight and at run for facts registration had already
-established. `data/validation.py` is the one module that may call them now; every later reader
+established. `data/verification.py` is the one module that may call them now; every later reader
 asks `require_verified` for the file's identity instead.
 
 Held by reading the source, not by mocking: a new module that opens a kernel of its own fails
@@ -17,7 +17,7 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "vqapr"
-DOOR = SRC / "data" / "validation.py"
+DOOR = SRC / "data" / "verification.py"
 KERNELS = {
     "describe",
     "describe_projection",
@@ -49,14 +49,14 @@ def _kernel_calls(path: Path) -> list[str]:
     return found
 
 
-def test_only_the_validation_module_calls_the_scan_check_kernels() -> None:
+def test_only_the_verification_module_calls_the_scan_check_kernels() -> None:
     offenders: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         if path == DOOR or path == SRC / "data" / "scan.py":
             continue
         offenders.extend(_kernel_calls(path))
     assert offenders == [], (
-        "a physical read is measured at data/validation.py::verify_source and nowhere else; "
+        "a physical read is measured at data/verification.py::verify_source and nowhere else; "
         "these call a check kernel directly:\n  " + "\n  ".join(offenders)
     )
 

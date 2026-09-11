@@ -13,9 +13,9 @@ from vqapr.authoring import (
 )
 from vqapr.authoring.context import StrategyModelContext
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection

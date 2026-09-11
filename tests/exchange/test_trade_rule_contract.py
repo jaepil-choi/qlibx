@@ -16,10 +16,10 @@ from decimal import Decimal
 import pytest
 
 from tests.exchange.support import execution_call
+from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.listing import ExchangeRulesView, ListingAccess, TradeRule
 from vqapr.domain.order import OrderBatch, OrderRequest
-from vqapr.exchange.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.exchange.venue import AcademicExchange
 from vqapr.exchange.venues.krx import KrxExchange, krx_listing
 

@@ -26,10 +26,10 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from vqapr.data.datasets import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
+from vqapr.data.dataset import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
 from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
-from vqapr.data.sources import SourceSpec
-from vqapr.data.validation import verify_roster, verify_source
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_roster, verify_source
 from vqapr.domain import identifiers
 from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import (

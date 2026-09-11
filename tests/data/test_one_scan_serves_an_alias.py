@@ -20,13 +20,13 @@ import pytest
 from vqapr.authoring import DatasetInput, RowsLookback
 from vqapr.authoring.context import DataModelContext, requirements_for
 from vqapr.data import store as store_module
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
-from vqapr.public import register_dataset
+from vqapr.data.window import ModelWindow
 from vqapr.project.store import Workspace
+from vqapr.public import register_dataset
 
 KST = ZoneInfo("Asia/Seoul")
 AT = datetime(2024, 3, 7, 16, tzinfo=KST)

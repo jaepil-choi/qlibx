@@ -26,7 +26,6 @@ from vqapr.flow.engine.artifacts import (
     ValuationEvidence,
 )
 from vqapr.flow.run.context import (
-    DEFAULT_TABLE_PREFIX,
     DEFAULT_TABLES,
     MONITORING_STAGE,
     FlowContext,
@@ -34,6 +33,7 @@ from vqapr.flow.run.context import (
     MonitoringResult,
     ValuationResult,
 )
+from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 
 
 class ComplianceHandler:

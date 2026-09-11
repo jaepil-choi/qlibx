@@ -2,7 +2,7 @@
 
 **Kind: index.** This file is a handoff and carries no finding of its own.
 
-**Status: RECEIVED 2026-09-11 (접수).** The owner kept the export request, narrowed, and replaced the
+**Status: CLOSED 2026-09-11.** Every report it indexes is closed (records 259, 260, 261, 264-267). Received 2026-09-11 (접수). The owner kept the export request, narrowed, and replaced the
 recipe request with a scaffold that shows every piece; each report's own Status line carries its
 ruling.
 

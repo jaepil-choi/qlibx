@@ -52,7 +52,7 @@
 | ~~`report-2026-09-11-a-decide-after-close-run-is-refused-on-every-friday-...`~~ | decide-after-close run이 `within: 1d`로 금요일마다 거절되고, 같은 occurrence의 두 번째 거절이 run end를 가리킨다 | **닫힘 — record `259`.** 원인을 한 곳에서 가른다(`within`이 짧다 / end 전에 instant가 없다): 창에는 가장 긴 대기와 통하는 `within`, 끝에는 마지막 체결과 그 결정 사이의 `end`; 두 문이 같은 분류기를 쓰고 `check`는 한 번만 싣는다 | 코드 + skill |
 | ~~`report-2026-09-11-rebalance-of-refuses-a-zero-weight-...`~~ | `Rebalance.of`가 `signed`는 받는 0 비중을 거절하고, 0으로 두는 법을 말하지 않는다 | **닫힘 — record `260`.** 오너 판정 "0을 받는다": 0은 flat position, 0만인 쪽은 쪽이 아니다 | 코드 |
 | ~~`report-2026-09-11-the-krx-settlement-order-is-not-written-...`~~ | KRX 체결 순서(매도 먼저, 큰 매수 먼저)가 agent가 읽는 곳에 없다 | **닫힘.** skill 절반은 commit `5cef5321`(세 단계와 record에 보이는 것); record 절반은 record `261`(오너 판정 "열을 더한다"): `vqapr.fill`의 `sized_quantity` | skill + 코드 |
-| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 다른 세션이 맡음**(2026-09-11 오너: "다른 에이전트가 접수해서 처리하고 있어"). 이 세션은 손대지 않는다 | — |
+| ~~`report-2026-09-11-adding-one-strategy-...-costs-agents-more-...`~~ | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **닫힘 — record `267`** (campaign `redesign/one-reading`, 아래 절) | 코드 + skill |
 
 ### 2026-09-11의 번호 없는 보고 둘 더 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수
 
@@ -67,19 +67,19 @@
 |---|---|---|---|
 | ~~`report-2026-09-11-skill-install-writes-into-the-enclosing-repositorys-git-root-...`~~ | `skill install`이 프로젝트가 아니라 그것을 감싼 저장소의 `.git` 루트에 쓰고, `--project-root .`로는 바꿀 수 없다 | **닫힘 2026-09-11 — record `258`.** 루트가 하나: skill은 workspace root(현재 디렉터리, 또는 `--project-root`)에 깔리고 — 다른 모든 명령과 stale 검사(`upgrade_note`)가 보는 곳 — `--into`가 다른 곳을 댄다. `.git` 걷기와 `argument.no_git_root` 삭제. 깨지는 변화 한 줄(git 루트 아래 workspace의 옛 사본은 `skill remove --into <git 루트>`)은 다음 릴리스 노트에 | 코드 + skill + PRD |
 
-### 2026-09-11 incremental testbed의 나머지 — 오너 판정 뒤 접수 (campaign `redesign/one-reading`)
+### 2026-09-11 incremental testbed의 나머지 — 오너 판정 뒤 접수, 닫힘 (campaign `redesign/one-reading`, records `264`–`267`)
 
 위 incremental 넷 중 비용 보고와, 그 뒤에 온 셋과 색인. 오너 판정(2026-09-11): `--recipe`는 만들지 않고 strategy
 scaffold 하나가 에이전트가 찾아본 부품을 전부 보인다; export는 좁혀서 만든다; 그 전에 record가 숫자를 글자로 쓰는
-결함을 쓰는 곳에서 고친다. 위 표의 비용 보고 행("다른 세션이 맡음")은 이 절이 대신한다.
+결함을 쓰는 곳에서 고친다. 요약은 `docs/refactoring/2026-09-11-the-one-reading-campaign.md`.
 
 | 파일 | 제목 | 상태 | 닫은 것 |
 |---|---|---|---|
-| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 오너 판정.** 레시피 대신 scaffold가 그 예제가 된다 | — |
-| `report-2026-09-11-feature-request-copyable-strategy-recipes-...` | 복사할 전략 레시피를 패키지에 싣고 `new strategy --recipe`로 | **접수 — 대체.** 문 하나: scaffold가 `self.memory` · 자기 표(`self.recorder`) · 두 번째 읽기 · 체결 사실이 어디 있는지를 보인다 | — |
-| `report-2026-09-11-feature-request-an-export-command-...` | `vqapr export`가 NAV·표를 숫자 열의 CSV로 | **접수 — 좁혀서.** 소스 확인: `weight`·fill 수량·`cash_delta`를 writer가 `str`로 써서 reader가 못 되돌린다. writer를 먼저 고치고(옛 record는 열 이름으로), export는 report와 같은 reader 위에. 조인·parquet 형식은 없음 | — |
-| `report-2026-09-11-a-decide-after-close-strategy-cannot-log-its-last-fill-...` | decide-after-close 전략이 콜백에서 마지막 체결을 기록할 수 없다 | **접수.** scaffold와 make-strategy가 "결정을 기록하고 체결은 `vqapr.fill`에서"를 말한다 | — |
-| `report-2026-09-11-incremental-testbed-index-...` | 이 testbed 보고들의 색인 | **접수.** 판정은 각 보고의 Status 줄 | — |
+| ~~`report-2026-09-11-adding-one-strategy-...-costs-agents-more-...`~~ | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **닫힘 — record `267`.** 레시피 대신 scaffold가 그 예제: 자기 표·`self.memory`·두 번째 읽기·체결 사실의 자리; 재실행이 API 조회량으로 판정한다 | 코드 + skill |
+| ~~`report-2026-09-11-feature-request-copyable-strategy-recipes-...`~~ | 복사할 전략 레시피를 패키지에 싣고 `new strategy --recipe`로 | **닫힘(대체) — record `267`.** `--recipe` 없음; scaffold 하나가 부품을 보이고 `call.recorder`는 `self.recorder`를 말한다 | 코드 + skill |
+| ~~`report-2026-09-11-feature-request-an-export-command-...`~~ | `vqapr export`가 NAV·표를 숫자 열의 CSV로 | **닫힘 — records `264`–`266`.** writer가 숫자를 숫자로(옛 record는 열 이름으로, 264); 주소 하나(`str` store, `<run>/<ref>`, 265); `vqapr export`(nav는 report의 계열, 266). 조인·parquet 형식은 없음 | 코드 + skill |
+| ~~`report-2026-09-11-a-decide-after-close-strategy-cannot-log-its-last-fill-...`~~ | decide-after-close 전략이 콜백에서 마지막 체결을 기록할 수 없다 | **닫힘 — record `267`.** scaffold와 make-strategy가 "결정을 기록하고 체결은 `vqapr.fill`에서, 마지막 체결 뒤엔 콜백이 없다"를 말한다 | 코드 + skill |
+| ~~`report-2026-09-11-incremental-testbed-index-...`~~ | 이 testbed 보고들의 색인 | **닫힘.** 색인의 보고 전부 닫힘(259 · 260 · 261 · 264–267) | — |
 
 ### 2026-09-11의 번호 없는 보고 아홉 — testbed(`0.14.2` wheel): A/B testbed · FF3 testbed · enhanced-index-3 — 일곱 닫힘, 하나 다른 세션, 하나 보류
 

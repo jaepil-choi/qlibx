@@ -1,6 +1,6 @@
 # Adding one strategy to an existing workspace still cost agents 1.3 to 3.8 times a pandas project, mostly in reading the authoring API
 
-**Status: RECEIVED 2026-09-11 (접수).** A measurement rather than a defect in one place, beside the held 2026-09-11 smaller-model report. The ask — one runnable example the scaffold points to, or a `vqapr new strategy` option that emits it — is a product direction and waits for the owner. **Owner ruling 2026-09-11:** the scaffold becomes that example — no `--recipe` option; see the recipe request's Status. Campaign `redesign/one-reading`.
+**Status: CLOSED 2026-09-11 by record 267.** Received 2026-09-11 (접수). A measurement rather than a defect in one place, beside the held 2026-09-11 smaller-model report. The ask — one runnable example the scaffold points to, or a `vqapr new strategy` option that emits it — is a product direction and waits for the owner. **Owner ruling 2026-09-11:** the scaffold becomes that example — no `--recipe` option; see the recipe request's Status. Campaign `redesign/one-reading`.
 
 | | |
 |---|---|

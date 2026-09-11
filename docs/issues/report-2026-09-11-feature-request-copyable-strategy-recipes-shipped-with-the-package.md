@@ -2,7 +2,7 @@
 
 **Kind: feature request.**
 
-**Status: RECEIVED 2026-09-11 (접수) — replaced by owner ruling.** No `--recipe`: a second door beside
+**Status: CLOSED 2026-09-11 by record 267 (replaced).** Received 2026-09-11 (접수) and replaced by owner ruling. No `--recipe`: a second door beside
 `vqapr new strategy`, and half of the four recipes are not strategy code (the clocks are the run
 declaration's, the fill-price join is the export request's). Instead the one strategy scaffold shows
 every piece the three agents looked up — `self.memory`, a table of its own written through

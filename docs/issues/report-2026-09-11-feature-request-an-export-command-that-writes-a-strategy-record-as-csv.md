@@ -2,7 +2,7 @@
 
 **Kind: feature request.**
 
-**Status: RECEIVED 2026-09-11 (접수) — accepted narrower, by owner ruling.** Confirmed in source that
+**Status: CLOSED 2026-09-11 by records 264, 265 and 266.** Received 2026-09-11 (접수) and accepted narrower, by owner ruling. Confirmed in source that
 the type errors are a writer defect, not a reading mistake: `vqapr.weight.weight`
 (`flow/run/callback.py`) and the fill quantities and `cash_delta` (`flow/engine/run_state.py`) are
 stringified before the schema sees them, so they are recorded as plain text and no reader can

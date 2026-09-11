@@ -1,0 +1,5 @@
+# Everything prepare.py generates: the prepared parquet (6M price rows), the vqapr workspace
+# (.vqapr/ catalog, run records), the generated venue/roster/strategy files and declarations.
+# All of it is rebuilt by `uv run python experiments/exp_250_ff3_through_vqapr/prepare.py`.
+work/
+*.parquet

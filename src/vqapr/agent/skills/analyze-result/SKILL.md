@@ -33,8 +33,20 @@ versions = run_report(store, "reversal", risk_free_annual=Decimal("0.03"))  # ev
 one.as_record()                              # JSON-ready: Decimal as text, instants with offset
 ```
 
-**These are library calls. There is no reporting CLI** — the values are the package's and the
-picture is this skill's.
+**The report is library calls** — the values are the package's and the picture is this skill's.
+
+**To hand a record over as files — to a user, a spreadsheet, a comparison script — run
+`vqapr export`, and do not write an exporter:**
+
+```bash
+vqapr export <run-id>/<strategy-id>@<fp8> --out outputs/
+```
+
+It writes `nav.csv` (the report's own NAV series, one row per valuation, with the local `date`),
+`holdings.csv`, `fills.csv`, `weights.csv`, each table the strategy formed under `tables/`, and
+`report.json`, every number exact decimal text. Three agents each wrote their own exporter
+instead, and each broke on the way — on which `vqapr.account` rows carry the NAV, on types, on
+JSON keys.
 
 A `StrategyReport` has six sections; each is `None` with a reason in `omitted` when the record
 cannot give it. What each holds, and the traps in reading them, is in

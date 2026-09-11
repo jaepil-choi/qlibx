@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from vqapr.agent.skillset import upgrade_note
-from vqapr.cli import check, list_, new, register, rm, run, show, skill
+from vqapr.cli import check, export, list_, new, register, rm, run, show, skill
 from vqapr.cli.envelope import UsageError, emit, failure, note
 from vqapr.domain.errors import Stage
 from vqapr.domain.inputs import VALUE_INVALID, InputError
@@ -33,6 +33,7 @@ _COMMANDS: dict[str, Any] = {
     "run": run,
     "list": list_,
     "show": show,
+    "export": export,
     "rm": rm,
     "skill": skill,
 }
@@ -44,14 +45,15 @@ _STAGES: dict[str, Stage] = {
     "run": Stage.RUN,
     "list": Stage.READ,
     "show": Stage.READ,
+    "export": Stage.WRITE,
     "rm": Stage.REMOVE,
     "skill": Stage.READ,
 }
 """The operation each verb is, for an exception the verb itself did not classify.
 
 An unhandled exception does not know which stage it escaped from; the command that was running
-does (record `171`). `read` for the three verbs that only read; `write` for `new`, which writes
-a file and touches no workspace.
+does (record `171`). `read` for the three verbs that only read; `write` for `new` and `export`,
+which write files and touch no workspace.
 """
 
 _SUMMARIES: dict[str, str] = {
@@ -61,6 +63,7 @@ _SUMMARIES: dict[str, str] = {
     "run": "freeze a registered run, preflight it, and execute its strategies",
     "list": "show what the workspace holds and what the store recorded",
     "show": "answer questions about one run or one strategy record, from what was frozen",
+    "export": "write one strategy record as CSV files: NAV, holdings, fills, weights, its tables",
     "rm": "remove a run's records, or withdraw a registration nothing still names",
     "skill": "install the agent skills into this project, or remove and inspect them",
 }
@@ -140,6 +143,22 @@ _DESCRIPTIONS: dict[str, str] = {
         "                                     one strategy's output, or its rows\n\n"
         "Reads what the run froze to disk, so it answers from any process. Nothing is "
         "recomputed; re-running to answer a question about a run would be a different run."
+    ),
+    "export": (
+        "Write one strategy record as files, for a user or a comparison script to read.\n\n"
+        "  vqapr export <run-id>/<strategy-id>@<fp8> --out <dir> [--force]\n\n"
+        "  nav.csv          event_time, date, account_version, cash, nav: one row per valuation,\n"
+        "                   the series the report measures (the opening point included)\n"
+        "  holdings.csv     event_time, date, instrument, quantity, price, value\n"
+        "  fills.csv        vqapr.fill as recorded: requested and dealt quantity, price, cash,\n"
+        "                   commission, tax, and the reason a fill dealt nothing\n"
+        "  weights.csv      vqapr.weight: the weights each decision asked for\n"
+        "  monitoring.csv   vqapr.monitoring, when the run declared a compliance rule\n"
+        "  tables/<t>.csv   each table the strategy formed, as recorded\n"
+        "  report.json      the strategy's report (strategy_report(...).as_record())\n\n"
+        "Numbers are exact decimal text, never rounded through a float; `date` is the local date "
+        "of `event_time` in the zone it was recorded in. Nothing is joined or recomputed. A file "
+        "an earlier export left is refused unless --force."
     ),
     "rm": (
         "Remove records, or withdraw a registration.\n\n"

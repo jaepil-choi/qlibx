@@ -28,7 +28,7 @@ from vqapr.record import (
 from vqapr.report import measure
 from vqapr.report.document import RunReport, StrategyReport
 
-__all__ = ["run_report", "strategy_report"]
+__all__ = ["run_report", "strategy_report", "valuation_grid"]
 
 ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE = (
     next(table for table in FRAMEWORK_TABLES if table.endswith(suffix))
@@ -61,19 +61,7 @@ def strategy_report(
             "strategy record"
         )
     record = read_strategy_record(root, run_id, resolved)
-    run = read_run_record(root, run_id)
-
-    initial = run.get("initial_account") or {}
-    initial_nav = (
-        Decimal(str(initial["cash"]))
-        if initial.get("cash") is not None and not initial.get("positions")
-        else None
-    )
-    grid = measure.opening(
-        measure.valuations(read_table(root, run_id, ACCOUNT_TABLE, resolved)),
-        initial_cash=initial_nav,
-        period_start=_instant((run.get("period") or {}).get("start")),
-    )
+    grid, initial_nav = _opening_grid(root, run_id, resolved)
     if not grid:
         raise ValueError(f"{run_id!r}/{resolved!r} recorded no valuation; nothing to report")
     fill_rows = list(read_table(root, run_id, FILL_TABLE, resolved))
@@ -192,6 +180,43 @@ def run_report(
         correlation=measure.correlation(ordered),
         relative=relative,
     )
+
+
+def valuation_grid(
+    root: Path | str, run_id: str, strategy_ref: str | None = None
+) -> list[measure.Valuation]:
+    """The valuation grid a strategy's report is computed on, in time order.
+
+    One point per `vqapr.account` valuation -- its `_ACCOUNT` row's cash and NAV and the names
+    held -- with the run's initial account in front when the first valuation already reflects a
+    fill. `vqapr export` writes `nav.csv` and `holdings.csv` from this, so the files and the
+    report's `performance.nav` are one series, not two computed alike (record `266`).
+    """
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
+    resolved = resolve_strategy_ref(root, run_id, strategy_ref)
+    if resolved is None:
+        raise ValueError(f"run {run_id!r} records tables of its own and no strategy")
+    grid, _ = _opening_grid(root, run_id, resolved)
+    return grid
+
+
+def _opening_grid(
+    root: Path, run_id: str, resolved: str
+) -> tuple[list[measure.Valuation], Decimal | None]:
+    """The grid and the initial NAV it opens from, when the run began with cash only."""
+    run = read_run_record(root, run_id)
+    initial = run.get("initial_account") or {}
+    initial_nav = (
+        Decimal(str(initial["cash"]))
+        if initial.get("cash") is not None and not initial.get("positions")
+        else None
+    )
+    grid = measure.opening(
+        measure.valuations(read_table(root, run_id, ACCOUNT_TABLE, resolved)),
+        initial_cash=initial_nav,
+        period_start=_instant((run.get("period") or {}).get("start")),
+    )
+    return grid, initial_nav
 
 
 def _instant(value: object) -> datetime | None:

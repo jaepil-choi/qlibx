@@ -104,7 +104,11 @@ instead of scanning the source, and the directory is removed when the batch retu
 worker is therefore at least its own period × lookback × instruments (once, shared, for a
 whole-universe run) on top of about 130 MB of interpreter — **a floor, not an estimate**: one daily
 strategy over 4,276 names and six and a half years, with few fills, peaked at 1.7–2.1 GB private
-where that rule gives 0.25 GB. Measure one run alone and size `--jobs` by that, not by core count.
+where that rule gives 0.25 GB. A strategy run also holds the rows it records until it ends — on
+the order of half a kilobyte a fill for a 300-name daily book, spilled to disk past 256 MB — and
+each decision's evidence. A worker of a batch starts with one BLAS thread (`OPENBLAS_NUM_THREADS=1`
+and its siblings, unless you set them), because a BLAS that may use every core reserves memory for
+each one. Measure one run alone and size `--jobs` by that, not by core count.
 
 A YAML path handed to `run` or `check` is refused by name — both take a registered id.
 

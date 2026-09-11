@@ -413,7 +413,10 @@ def in_workers[Returned](
             "jobs > 1 needs a store_root: a worker's result comes back through the record store"
         )
     context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=min(jobs, len(run_ids)), mp_context=context) as pool:
+    with (
+        one_blas_thread_for_workers(),
+        ProcessPoolExecutor(max_workers=min(jobs, len(run_ids)), mp_context=context) as pool,
+    ):
         futures = {
             run_id: pool.submit(worker, str(root_path), run_id, str(store), *arguments)
             for run_id in run_ids
@@ -427,6 +430,33 @@ def in_workers[Returned](
             except Exception as raised:
                 outcomes[run_id] = raised
         return outcomes
+
+
+BLAS_THREAD_VARIABLES = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS")
+"""The thread counts numpy's BLAS builds read when they load (record `257`)."""
+
+
+@contextmanager
+def one_blas_thread_for_workers() -> Iterator[None]:
+    """Start a batch's workers with one BLAS thread each, unless the user set a count.
+
+    Record `257` (owner decision 2026-09-11). numpy's OpenBLAS commits a working buffer for every
+    core it may use when it loads -- about 0.8 GB of private memory on the 32-core machine the
+    2026-09-11 memory report was measured on, 27 MB of it ever touched -- and every `--jobs`
+    worker is its own process loading its own. N workers already use the cores; N x 32 BLAS
+    threads only fight over them. A spawned worker copies the environment when it starts, so the
+    variables are set around the pool and put back after it: the parent -- a Python caller's own
+    process -- is left as it was, and a count the user set is theirs and is not touched. A single
+    run is not a batch and keeps whatever its process has.
+    """
+    set_here = [name for name in BLAS_THREAD_VARIABLES if name not in os.environ]
+    for name in set_here:
+        os.environ[name] = "1"
+    try:
+        yield
+    finally:
+        for name in set_here:
+            os.environ.pop(name, None)
 
 
 RUN_BATCH_DEPENDENT = "run.batch_dependent"

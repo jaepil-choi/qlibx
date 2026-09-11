@@ -31,7 +31,10 @@ Rows stay in memory while the run executes and land once, when it ends — norma
 exception, or through Ctrl+C, all three of which keep every row recorded up to that point.
 
 Only a **hard kill** (`taskkill /F`, an OOM kill) loses rows, and then only what came after the
-last spill: a part is written whenever the buffer passes 256 MB.
+last spill: a part is written whenever the buffer passes 256 MB. The same line bounds what the rows
+cost in memory: the buffer never holds more, and the fold into one file at the end reads the parts
+back a row group at a time. It is not the whole of a run's memory — see the sizing paragraph in the
+skill.
 
 ## When one run in a batch fails
 

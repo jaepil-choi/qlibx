@@ -24,7 +24,7 @@ Then:
 1. **If the project already renders charts with something else** — plotly, altair, an in-house
    wrapper — use that. Do not add a second renderer because this reference names matplotlib.
 2. **If something is missing**, ask once: which libraries, why the figure needs them, and the exact
-   command the script printed — in a uv project, `uv add --group dev matplotlib seaborn`.
+   command the script printed — in a uv project, `uv add matplotlib seaborn`.
 3. **Install only after they agree**, with that command, then draw.
 
 ## Which library for which figure

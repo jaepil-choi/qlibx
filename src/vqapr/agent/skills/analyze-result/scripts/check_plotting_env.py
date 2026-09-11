@@ -66,11 +66,11 @@ def _installer(root: Path, packages: list[str]) -> tuple[str, str]:
     pip = f"{Path(sys.executable).name} -m pip install {names}"
     for parent in (root, *root.parents):
         if (parent / "uv.lock").is_file():
-            return "uv", f"uv add --group dev {names}"
+            return "uv", f"uv add {names}"
         if (parent / "poetry.lock").is_file():
-            return "poetry", f"poetry add --group dev {names}"
+            return "poetry", f"poetry add {names}"
         if (parent / "Pipfile.lock").is_file():
-            return "pipenv", f"pipenv install --dev {names}"
+            return "pipenv", f"pipenv install {names}"
         if (parent / "environment.yml").is_file():
             return "conda", f"conda install {names}"
         if (parent / "pyproject.toml").is_file() or (parent / "requirements.txt").is_file():

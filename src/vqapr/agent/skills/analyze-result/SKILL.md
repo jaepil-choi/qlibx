@@ -93,7 +93,7 @@ Then:
 1. If the project already renders charts with something else, use that. Do not add a second one.
 2. If something is missing, **ask once**, naming the libraries, what they are for, and the command:
    *"To draw this I need to add matplotlib and seaborn to this project with
-   `uv add --group dev matplotlib seaborn`. Shall I?"* Adding a dependency changes their lockfile.
+   `uv add matplotlib seaborn`. Shall I?"* Adding a dependency changes their lockfile.
 3. **Yes:** run that command, then draw.
 4. **No:** say that the data is ready but this project has no tool to visualize it, so the figure
    cannot be shown — and stop there. Do not substitute ASCII charts, hand-written SVG or HTML, or an

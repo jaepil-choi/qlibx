@@ -31,28 +31,28 @@ from vqapr.domain.identifiers import (
 )
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.wiring import Role
-from vqapr.project.document import read_workspace, write_workspace
-from vqapr.project.merge import (
+from vqapr.workspace.declarations import read_workspace, write_workspace
+from vqapr.workspace.merge import (
     _merge_component as merge_component,
 )
-from vqapr.project.merge import (
+from vqapr.workspace.merge import (
     _merge_dataset as merge_dataset,
 )
-from vqapr.project.merge import (
+from vqapr.workspace.merge import (
     _merge_declaration as merge_declaration,
 )
-from vqapr.project.references import (
+from vqapr.workspace.references import (
     _config_lookup as config_lookup,
 )
-from vqapr.project.references import (
+from vqapr.workspace.references import (
     _reference_error as reference_error,
 )
-from vqapr.project.references import (
+from vqapr.workspace.references import (
     _references_in as references_in,
 )
-from vqapr.project.refusals import _workspace_error
-from vqapr.project.run import RunDefinition
-from vqapr.project.state import _State
+from vqapr.workspace.refusals import _workspace_error
+from vqapr.workspace.run_definition import RunDefinition
+from vqapr.workspace.state import _State
 
 WORKSPACE_DIRECTORY = ".vqapr"
 WORKSPACE_FILENAME = "workspace.yaml"

@@ -28,7 +28,7 @@ PERMITTED: frozenset[str] = frozenset(
         # Reaches `_internal.atomic` for the one durable write (record `107`).
         "src/vqapr/record/writer.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
-        "src/vqapr/project/store.py",
+        "src/vqapr/workspace/registry.py",
     }
 )
 
@@ -109,7 +109,7 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     # remain are still at their promoted paths, not that the original five all survived.
     #
     # `registration` is `prepare` since record `198`. Record `196` moved the half that writes down
-    # to `project/registration.py` -- the workspace is the project's -- and what stayed only
+    # to `workspace/registration.py` -- the workspace is the project's -- and what stayed only
     # prepares, so the old name had become false rather than merely dated. The property here is
     # unchanged: the authority is in `extension/`, not under `_internal`.
     #

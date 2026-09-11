@@ -16,7 +16,7 @@ from vqapr.cli.main import main
 from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.wiring import Role
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 STRATEGY = '''
 from vqapr import authoring as va

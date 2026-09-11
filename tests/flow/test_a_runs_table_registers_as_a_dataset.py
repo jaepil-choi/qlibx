@@ -20,7 +20,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.record import RunRecordWriter
 from vqapr.public import (
     DataRequirement,
     DatasetRegistration,
@@ -29,7 +28,8 @@ from vqapr.public import (
     SourceSpec,
     register_dataset,
 )
-from vqapr.project.store import Workspace
+from vqapr.record import RunRecordWriter
+from vqapr.workspace.registry import Workspace
 
 T1 = datetime(2024, 3, 5, 15, 30, tzinfo=UTC)
 T2 = T1 + timedelta(days=1)

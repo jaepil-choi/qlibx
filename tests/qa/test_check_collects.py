@@ -39,9 +39,15 @@ from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.wiring import Role
 from vqapr.flow.declaration import judgments as judgments_module
-from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.project.store import Workspace
 from vqapr.public import register_instruments
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    RunAgenda,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 

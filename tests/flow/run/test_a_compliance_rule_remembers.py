@@ -46,7 +46,7 @@ from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrateg
 from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.run.loop import RunLoop, strategy_loop
-from vqapr.project.run import ComplianceSet, StrategyConfig
+from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
 RULE = "three-strikes"

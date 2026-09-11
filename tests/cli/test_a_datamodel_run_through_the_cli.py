@@ -27,7 +27,7 @@ from vqapr.cli.main import main
 from vqapr.data import store as store_module
 from vqapr.flow import orchestration
 from vqapr.flow.orchestration import batch_cubes, in_workers, run_registered_datamodel
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 _MODELS = """from vqapr import authoring as va
 

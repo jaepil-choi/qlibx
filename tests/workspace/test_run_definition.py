@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.wiring import EXTENSION_POINTS, Role
-from vqapr.project.run import (
+from vqapr.workspace.run_definition import (
     ComplianceSet,
     DataModelEntry,
     RunAgenda,

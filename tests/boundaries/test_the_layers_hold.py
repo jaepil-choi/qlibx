@@ -65,8 +65,8 @@ LAYERS: dict[str, int] = {
     "component": 20,
     # 21 -- transitional: `vqapr.authoring` re-exports `component` until the breaking release.
     "authoring": 21,
-    # 50 -- what a project accumulates between commands, and how a document enters it.
-    "project": 50,
+    # 50 -- the workspace: what a project keeps between commands, and how a document enters it.
+    "workspace": 50,
     # 60-70 -- running one. The substrate the phases share, the phases, then assembly.
     "flow.engine": 60,
     "flow.declaration": 63,

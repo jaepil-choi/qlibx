@@ -103,36 +103,6 @@ from vqapr.portfolio.weights import (
     rescale,
     signal_weight,
 )
-
-# One door into the extension authorities: `vqapr.component.*`, never `vqapr._internal.*`.
-# (The four `register_*` below left `extension/` for `project/` at record `196` -- the write
-# half is the workspace's -- but they are still reached by one path, which is the rule here.)
-# The adapters below are transitional and scheduled for deletion, and that is the reason to use
-# them rather than a reason to route around them -- a deletion whose callers all name one path is
-# four files removed and imports breaking loudly, while one reached by two paths has to be found
-# by grep. `as_loaded_fingerprint` was the exception that proved it: this file imported it from
-# `_internal` and the three names below from the adapter, and two later modules copied the
-# bypass without the reasoning (`docs/issues/archive/029`; the rule is in
-# `docs/design/agent-first-surface.md`, and `tests/boundaries/test_internal_has_one_door.py`
-# enforces it).
-from vqapr.project.registration import (
-    register_compliance,
-    register_data_model,
-    register_exchange,
-    register_instruments,
-    register_strategy_model,
-)
-from vqapr.project.registration import register_dataset as register_dataset
-from vqapr.project.run import (
-    ComplianceSet,
-    DataModelEntry,
-    RunAgenda,
-    RunDefinition,
-    RunExecution,
-    RunFill,
-    StrategyEntry,
-)
-from vqapr.project.store import Workspace
 from vqapr.record import (
     RunRecordMissing,
     read_run_record,
@@ -155,6 +125,36 @@ from vqapr.signals.transform import (
     fama_french_cut_points,
     neutralize,
     rank,
+)
+
+# One door into the extension authorities: `vqapr.component.*`, never `vqapr._internal.*`.
+# (The four `register_*` below left `extension/` for `project/` at record `196` -- the write
+# half is the workspace's -- but they are still reached by one path, which is the rule here.)
+# The adapters below are transitional and scheduled for deletion, and that is the reason to use
+# them rather than a reason to route around them -- a deletion whose callers all name one path is
+# four files removed and imports breaking loudly, while one reached by two paths has to be found
+# by grep. `as_loaded_fingerprint` was the exception that proved it: this file imported it from
+# `_internal` and the three names below from the adapter, and two later modules copied the
+# bypass without the reasoning (`docs/issues/archive/029`; the rule is in
+# `docs/design/agent-first-surface.md`, and `tests/boundaries/test_internal_has_one_door.py`
+# enforces it).
+from vqapr.workspace.registration import (
+    register_compliance,
+    register_data_model,
+    register_exchange,
+    register_instruments,
+    register_strategy_model,
+)
+from vqapr.workspace.registration import register_dataset as register_dataset
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    ComplianceSet,
+    DataModelEntry,
+    RunAgenda,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
 )
 
 __all__ = (

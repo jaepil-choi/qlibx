@@ -13,7 +13,7 @@ from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
 # during validation and a stored registration missing it would force the next reader to re-read
@@ -604,7 +604,7 @@ def test_a_workspace_reads_a_datasets_instants_and_hashes_its_file_once_per_comm
     import duckdb
 
     from vqapr.data.verification import verify_source
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     path = tmp_path / "prices.parquet"
     con = duckdb.connect()

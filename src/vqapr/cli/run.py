@@ -43,7 +43,6 @@ from vqapr.flow.orchestration import (
     run_registered_datamodel,
     run_registered_strategy,
 )
-from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.public import RunDefinition, Workspace
 from vqapr.public import run as execute_run
 from vqapr.record import (
@@ -53,6 +52,7 @@ from vqapr.record import (
     read_typed_table,
 )
 from vqapr.record.schema import FILL_TABLE
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

@@ -39,7 +39,7 @@ from vqapr.data.scan import ColumnType
 from vqapr.data.source import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id
 from vqapr.domain.wiring import Role
-from vqapr.project.run import RunDefinition
+from vqapr.workspace.run_definition import RunDefinition
 
 
 class Document(BaseModel):

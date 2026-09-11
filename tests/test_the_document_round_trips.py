@@ -18,7 +18,7 @@ from pathlib import Path
 import duckdb
 
 from vqapr.public import DatasetRegistration, SourceSpec, register_dataset
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 
 def _parquet(path: Path) -> Path:

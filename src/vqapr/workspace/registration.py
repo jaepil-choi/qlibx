@@ -48,13 +48,13 @@ from vqapr.domain.errors import (
 )
 from vqapr.domain.instrument import export_roster
 from vqapr.domain.wiring import Role
-from vqapr.project.document import (
+from vqapr.workspace.declarations import (
     ComponentDeclaration,
     DatasetDeclaration,
     InstrumentsDeclaration,
 )
-from vqapr.project.run import RunDefinition
-from vqapr.project.store import Transaction, Workspace
+from vqapr.workspace.registry import Transaction, Workspace
+from vqapr.workspace.run_definition import RunDefinition
 
 _COMPONENT_KINDS = {
     "datamodel": Role.DATA_MODEL,

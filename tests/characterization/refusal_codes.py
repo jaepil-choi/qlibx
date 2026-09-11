@@ -1033,7 +1033,7 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
 
 def _runtime_declaration_read(tmp_path: Path) -> list[str]:
     from vqapr.domain.errors import VqaprError
-    from vqapr.project.registration import apply
+    from vqapr.workspace.registration import apply
 
     # A run is the declaration that carries the sessions and the wall time since record `148`
     # (`agendas:` is no longer a section), so the two malformed-document scenarios that used to
@@ -1072,7 +1072,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     from vqapr.data.dataset import DatasetRegistration
     from vqapr.data.source import SourceSpec
     from vqapr.domain.errors import VqaprError
-    from vqapr.project.store import Workspace
+    from vqapr.workspace.registry import Workspace
 
     codes: list[str] = []
     workspace = Workspace.create(tmp_path)
@@ -1142,7 +1142,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     from vqapr.component.fingerprint import fingerprint_component
     from vqapr.component.reference import ComponentRef
     from vqapr.domain.wiring import Role
-    from vqapr.project.run import RunAgenda, RunDefinition, StrategyEntry
+    from vqapr.workspace.run_definition import RunAgenda, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(
@@ -1192,7 +1192,7 @@ def _runtime_model_window(tmp_path: Path) -> list[str]:
     from vqapr.data.store import DuckDbObservationStore
     from vqapr.data.window import ModelWindow
     from vqapr.domain.errors import VqaprError
-    from vqapr.project.store import Workspace
+    from vqapr.workspace.registry import Workspace
 
     workspace = Workspace.create(tmp_path)
     prices = _write_parquet(

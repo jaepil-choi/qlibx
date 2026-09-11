@@ -24,8 +24,8 @@ import pytest
 
 from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import VqaprError
-from vqapr.project.registration import _enum, apply
-from vqapr.project.store import Workspace
+from vqapr.workspace.registration import _enum, apply
+from vqapr.workspace.registry import Workspace
 
 
 class _Unit(StrEnum):

@@ -224,7 +224,7 @@ def test_the_authored_class_is_found_however_it_was_written(
     Matching direct bases by bare name in the module body only was wrong three ways, and each way
     produced a confident wrong answer rather than an error.
     """
-    from vqapr.project.registration import _sole_subclass
+    from vqapr.workspace.registration import _sole_subclass
 
     source = tmp_path / f"{label.replace(' ', '_')}.py"
     source.write_text(
@@ -239,7 +239,7 @@ def test_the_authored_class_is_found_however_it_was_written(
 def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None:
     """AC-A4. Wrote none, versus which one did you mean: different mistakes, different repairs."""
     from vqapr.domain.errors import InputError
-    from vqapr.project.registration import _sole_subclass
+    from vqapr.workspace.registration import _sole_subclass
 
     empty = tmp_path / "empty.py"
     empty.write_text("x = 1\n", encoding="utf-8")
@@ -253,7 +253,7 @@ def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None
 def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
     """AC-A4's other half: the count AND the names, because the reader has to choose."""
     from vqapr.domain.errors import InputError
-    from vqapr.project.registration import _sole_subclass
+    from vqapr.workspace.registration import _sole_subclass
 
     crowded = tmp_path / "two.py"
     crowded.write_text(
@@ -286,7 +286,7 @@ def test_a_leaf_through_an_imported_base_is_found_by_the_object(
     while the YAML route loaded the same file and registered it (record `252`). A class the file
     merely uses (`Params`) is not a strategy, and the imported base is not the file's.
     """
-    from vqapr.project.registration import _sole_subclass
+    from vqapr.workspace.registration import _sole_subclass
 
     shared = tmp_path / "shared"
     shared.mkdir()
@@ -307,7 +307,7 @@ def test_a_base_beside_the_component_is_named_as_why_it_does_not_import(tmp_path
     """The same leaf with its base beside it and not importable: the loader's refusal, whose
     `fix` names the one-file rule instead of "fix the exception" (record `252`)."""
     from vqapr.domain.errors import VqaprError
-    from vqapr.project.registration import _sole_subclass
+    from vqapr.workspace.registration import _sole_subclass
 
     (tmp_path / "beside_common_252.py").write_text(_SHARED_BASE, encoding="utf-8")
     leaf = tmp_path / "leg.py"

@@ -73,8 +73,6 @@ from vqapr.flow.run.loop import (
     strategy_loop,
 )
 from vqapr.flow.run.output import RunOutput
-from vqapr.project.run import RunDefinition
-from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.record import (
     DATAMODEL_KIND,
     STRATEGY_KIND,
@@ -84,6 +82,8 @@ from vqapr.record import (
     read_table,
 )
 from vqapr.record.schema import WEIGHT_TABLE
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.run_definition import RunDefinition
 
 
 def preflight_run(

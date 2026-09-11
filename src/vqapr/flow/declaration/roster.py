@@ -12,7 +12,7 @@ lives in `domain/instruments.py`: it needs no workspace, only the roster and the
 from __future__ import annotations
 
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 ROSTER_ABSENT = "roster.absent"
 """Spelled here for preflight and again in `judgments.py` for `check`, the way

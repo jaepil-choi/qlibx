@@ -30,7 +30,9 @@ from vqapr.domain.instrument import (
 )
 from vqapr.flow.declaration import judgments
 from vqapr.flow.declaration.roster import ROSTER_ABSENT, require_declared_roster
-from vqapr.project.run import (
+from vqapr.public import register_instruments
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
     DataModelEntry,
     RunAgenda,
     RunDefinition,
@@ -38,8 +40,6 @@ from vqapr.project.run import (
     RunFill,
     StrategyEntry,
 )
-from vqapr.project.store import Workspace
-from vqapr.public import register_instruments
 
 KST = ZoneInfo("Asia/Seoul")
 DECLARED = InstrumentRoster(instruments({"A005930": "stock", "A069500": "etf"}))

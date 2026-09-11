@@ -36,9 +36,9 @@ from vqapr.portfolio.allocation import (
 )
 from vqapr.portfolio.bounds import intersect, no_short, single_name_cap
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, optimize
-from vqapr.project.store import Workspace
 from vqapr.public import register_dataset
 from vqapr.record import RunRecordWriter
+from vqapr.workspace.registry import Workspace
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real"
 CAP = Decimal("0.10")

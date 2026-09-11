@@ -2,8 +2,8 @@
 
 Its own module because three others need it and none of them should have to import the class that
 happens to hold one: `merge.py` folds a declaration into a state, `references.py` searches one, and
-`store.py` reads and writes them. A `_State` in `store.py` would make both of the first two import
-the `Workspace` module to name their own argument type.
+`registry.py` reads and writes them. A `_State` in `registry.py` would make both of the first two
+import the `Workspace` module to name their own argument type.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.identifiers import ComponentId, DatasetId, SourceId
-from vqapr.project.run import RunDefinition
+from vqapr.workspace.run_definition import RunDefinition
 
 
 class _State(NamedTuple):

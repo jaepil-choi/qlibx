@@ -28,7 +28,6 @@ import yaml
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.project.store import Workspace
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
@@ -37,6 +36,7 @@ from vqapr.public import (
     StrategyEntry,
     register_run,
 )
+from vqapr.workspace.registry import Workspace
 
 RETIRED_SECTIONS = """valuation_configs:
   daily-valuation:
@@ -149,7 +149,7 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
 def test_a_declaration_that_still_carries_a_retired_section_is_refused_by_name(
     tmp_path: Path, section: str
 ) -> None:
-    from vqapr.project.registration import SECTIONS, apply
+    from vqapr.workspace.registration import SECTIONS, apply
 
     assert section not in SECTIONS
     document = {"datasets": {}, section: {"daily": {"agenda_id": "daily"}}}

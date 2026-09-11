@@ -18,7 +18,7 @@ from pathlib import Path
 from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.wiring import Role
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 SOURCE = "class Model:\n    factor = {value}\n"
 

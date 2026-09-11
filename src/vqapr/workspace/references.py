@@ -13,9 +13,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from vqapr.domain.errors import Stage, Status, VqaprError
-from vqapr.project.refusals import _workspace_error
-from vqapr.project.run import RunDefinition
-from vqapr.project.state import _State
+from vqapr.workspace.refusals import _workspace_error
+from vqapr.workspace.run_definition import RunDefinition
+from vqapr.workspace.state import _State
 
 
 def _references_in(state: _State, kind: str, identity: str) -> tuple[str, ...]:

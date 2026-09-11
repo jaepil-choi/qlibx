@@ -28,9 +28,9 @@ from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.project.registration import apply
-from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.project.store import Workspace
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import RunDefinition, RunExecution, RunFill, StrategyEntry
 
 KST = ZoneInfo("Asia/Seoul")
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))

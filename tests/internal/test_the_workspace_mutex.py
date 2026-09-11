@@ -21,7 +21,7 @@ import time as _time
 from pathlib import Path
 
 from vqapr._internal import filelock
-from vqapr.project.store import (
+from vqapr.workspace.registry import (
     WORKSPACE_LOCK_FILENAME,
     WORKSPACE_LOCK_STALE_AFTER,
     WORKSPACE_LOCK_TIMEOUT,

@@ -2,7 +2,7 @@
 
 Canon §10.2 says the four extension points *"enter through the same door and pass the same
 conformance"*. Registration is that door (`prepare_component` below proves,
-`project/registration.py` writes), and it already proves a
+`workspace/registration.py` writes), and it already proves a
 component **loads**: the fingerprint matches, the object constructs, it implements its contract
 type, and it declares its data requirements.
 

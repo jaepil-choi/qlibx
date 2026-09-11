@@ -18,8 +18,8 @@ from vqapr.data import verification
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.project.store import Workspace
 from vqapr.public import register_dataset
+from vqapr.workspace.registry import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 KERNELS = ("describe", "describe_projection", "key_check", "span_check", "finite_check")
@@ -104,7 +104,7 @@ def test_a_verified_read_hashes_once_and_scans_nothing(
 
     monkeypatch.setattr(verification, "physical_digest", counting_digest)
     # `Workspace.source_digest` hashes through its own import; count it the same way.
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     monkeypatch.setattr(store_module, "physical_digest", counting_digest)
 

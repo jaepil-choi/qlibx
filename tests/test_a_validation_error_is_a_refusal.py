@@ -21,8 +21,8 @@ from enum import StrEnum
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from vqapr.project.registration import refusals_from
 from vqapr.domain.errors import Stage, Status, VqaprError
+from vqapr.workspace.registration import refusals_from
 
 
 class Role(StrEnum):

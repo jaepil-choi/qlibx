@@ -29,8 +29,8 @@ next reader restore a constraint the tree no longer has. What remains is the pro
 one file that a later step can discard as a region, and that file raises no refusal of its own.
 
 The second half is worth keeping even though the inventory could now follow a codec refusal. A
-codec that raises is a codec that has opinions about validity, and `project/document.py` exists so
-that pydantic holds the shape and `project/registration.py` holds the argument about what a wrong
+codec that raises is a codec that has opinions about validity, and `workspace/declarations.py` exists so
+that pydantic holds the shape and `workspace/registration.py` holds the argument about what a wrong
 shape means to a user. The assertion is about that division, not about the baseline any more.
 """
 
@@ -39,8 +39,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
-DOCUMENT = pathlib.Path("src/vqapr/project/document.py")
-REFUSALS = pathlib.Path("src/vqapr/project/refusals.py")
+DOCUMENT = pathlib.Path("src/vqapr/workspace/declarations.py")
+REFUSALS = pathlib.Path("src/vqapr/workspace/refusals.py")
 
 
 def _constructs_a_failure(path: pathlib.Path) -> list[str]:
@@ -70,8 +70,8 @@ def test_the_document_constructs_no_refusal() -> None:
     assert not raising, (
         "these codec functions construct a Failure: "
         + ", ".join(raising)
-        + ". `project/document.py` declares what the document IS -- pydantic refuses a wrong shape "
-        "and `project/registration.py` turns that into a refusal an agent can parse. A codec that "
+        + ". `workspace/declarations.py` declares what the document IS -- pydantic refuses a wrong shape "
+        "and `workspace/registration.py` turns that into a refusal an agent can parse. A codec that "
         "raises its own has started deciding what a wrong shape means to a user."
     )
 
@@ -80,18 +80,18 @@ def test_the_refusal_constructor_is_one_function_in_one_place() -> None:
     """Twenty-odd project refusals still funnel through one constructor.
 
     What moved is where it lives, not how many there are of it. A second constructor beside it --
-    or a `Failure.bounded` raised inline in `store.py` -- is how a layer ends up with two refusal
+    or a `Failure.bounded` raised inline in `registry.py` -- is how a layer ends up with two refusal
     vocabularies, which is the thing record `171` spent a rebuild removing.
     """
     source = REFUSALS.read_text(encoding="utf-8")
 
     assert "def _workspace_error(" in source, (
-        "`_workspace_error` left `project/refusals.py`. It may live anywhere the project layer can "
+        "`_workspace_error` left `workspace/refusals.py`. It may live anywhere the project layer can "
         "reach -- the refusal-code inventory has followed cross-module forwarding since record "
         "`171` -- but it must be one function, and this file is where the layer keeps it."
     )
 
-    for module in ("store.py", "merge.py", "references.py"):
+    for module in ("registry.py", "merge.py", "references.py"):
         path = DOCUMENT.parent / module
         inline = _constructs_a_failure(path)
         assert not inline, (

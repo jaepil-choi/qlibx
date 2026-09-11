@@ -43,7 +43,7 @@ from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import strategy_loop
-from vqapr.project.run import ComplianceSet, StrategyConfig
+from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
 

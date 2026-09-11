@@ -43,8 +43,8 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.domain.errors import read_yaml_mapping
-from vqapr.project.registration import AUTHORED_KINDS, apply, register_authored
-from vqapr.project.registration import (
+from vqapr.workspace.registration import AUTHORED_KINDS, apply, register_authored
+from vqapr.workspace.registration import (
     cli_kind as cli_kind,  # re-export: cli/check.py, run.py, list_.py
 )
 

@@ -39,10 +39,10 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.show import resolve_strategy
 from vqapr.domain.errors import VALUE_INVALID, InputError
-from vqapr.project.store import WORKSPACE_DIRECTORY
 from vqapr.record import read_table, table_ids
 from vqapr.record.schema import ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE
 from vqapr.report.record import strategy_report, valuation_grid
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY
 
 NAV_FILE = "nav.csv"
 HOLDINGS_FILE = "holdings.csv"

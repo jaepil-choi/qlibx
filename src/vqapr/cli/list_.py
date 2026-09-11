@@ -28,9 +28,6 @@ from vqapr.data.verification import verify_roster
 from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.domain.instrument import build_roster
 from vqapr.domain.wiring import Role
-from vqapr.project.registration import AUTHORED_KINDS
-from vqapr.project.run import RunDefinition
-from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 from vqapr.record import (
     STATUS_COMPLETED,
     datamodel_progress,
@@ -43,6 +40,9 @@ from vqapr.record import (
     unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
+from vqapr.workspace.registration import AUTHORED_KINDS
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.workspace.run_definition import RunDefinition
 
 KINDS = (
     "datasets",

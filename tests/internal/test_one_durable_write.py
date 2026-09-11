@@ -24,7 +24,7 @@ import pytest
 
 from vqapr._internal import atomic
 from vqapr.record import RunRecordTaken, RunRecordWriter
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
 
 EXPLODE = "the write failed after staging and before the swap"
 

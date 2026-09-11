@@ -58,9 +58,9 @@ from vqapr.flow.engine.artifacts import (
 )
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
 from vqapr.flow.run.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
-from vqapr.project.run import ComplianceSet, StrategyConfig
-from vqapr.project.store import Workspace
 from vqapr.public import register_dataset
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
 

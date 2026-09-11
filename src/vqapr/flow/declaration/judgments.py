@@ -47,14 +47,14 @@ from vqapr.flow.declaration.preflight import (
     unresolved_targets,
 )
 from vqapr.flow.declaration.roster import absent_roster_failure
-from vqapr.project.run import FINGERPRINT_PREFIX, RunDefinition
 
-# `vqapr.project.store`, not `vqapr.public`. The facade is the CLI's supported surface and sits
+# `vqapr.workspace.registry`, not `vqapr.public`. The facade is the CLI's supported surface and sits
 # ABOVE this layer; a module under `flow/` importing it reaches back up through the thing it is
 # supposed to sit beneath. `flow/declaration/preflight.py` takes the same class from the same
 # place, and the boundary tripwire in `docs/design/agent-first-surface.md` counts modules that do
 # otherwise.
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import FINGERPRINT_PREFIX, RunDefinition
 
 __all__ = [
     "JUDGMENT_BLOCKED",

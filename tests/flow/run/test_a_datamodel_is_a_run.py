@@ -37,8 +37,6 @@ from vqapr.flow.orchestration import (
 )
 from vqapr.flow.run.loop import DataModelResult
 from vqapr.flow.run.output import output_directory, output_source_id
-from vqapr.project.run import DataModelEntry, RunAgenda, RunDefinition
-from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.public import register_data_model, register_dataset, register_run
 from vqapr.record import (
     DATAMODEL_KIND,
@@ -48,6 +46,8 @@ from vqapr.record import (
     strategy_refs,
 )
 from vqapr.record.schema import _DATAMODEL_FIELDS
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.run_definition import DataModelEntry, RunAgenda, RunDefinition
 
 KST = ZoneInfo("Asia/Seoul")
 START = datetime(2024, 3, 6, tzinfo=KST)

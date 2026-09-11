@@ -32,8 +32,8 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 from vqapr.domain.identifiers import instrument_id
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.rows import Row, Rows, normalize_rows
-from vqapr.project.store import Workspace
 from vqapr.record import COMPACT_FILENAME, SPILL_BYTES
+from vqapr.workspace.registry import Workspace
 
 MATERIALIZED_DIRECTORY = "materialized"
 """Under `.vqapr/`: one directory per output dataset, one parquet file (`all.parquet`) once

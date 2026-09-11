@@ -26,10 +26,9 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.skill_prose import installed_prose
 from vqapr import public
 from vqapr.cli.main import _COMMANDS, _DESCRIPTIONS, _SUMMARIES, main
-
-from tests.skill_prose import installed_prose
 
 
 def _parquet(root: Path, name: str, rows: str) -> Path:
@@ -580,7 +579,7 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     than as a YAML template, so they are the two the YAML templates need not carry.
     """
     from vqapr.cli.new import _DATASET_TEMPLATE, _RUN_TEMPLATE
-    from vqapr.project.registration import SECTIONS
+    from vqapr.workspace.registration import SECTIONS
 
     emitted = "\n".join((_DATASET_TEMPLATE, _RUN_TEMPLATE))
 

@@ -25,7 +25,7 @@ from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.memory import ModelMemory, opening_memory
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.wiring import Role
-from vqapr.project.run import (
+from vqapr.workspace.run_definition import (
     FINGERPRINT_PREFIX,
     ComplianceSet,
     StrategyConfig,

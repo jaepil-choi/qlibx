@@ -24,8 +24,8 @@ from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.project.store import Workspace
 from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
+from vqapr.workspace.registry import Workspace
 
 ZONE = "Asia/Seoul"
 

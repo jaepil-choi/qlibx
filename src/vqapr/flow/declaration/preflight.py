@@ -36,14 +36,14 @@ from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
 from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.roster import require_declared_roster
-from vqapr.project.run import (
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
     ComplianceSet,
     DataModelEntry,
     RunDefinition,
     StrategyConfig,
     StrategyEntry,
 )
-from vqapr.project.store import Workspace
 
 
 def _session_bounds(definition: RunDefinition) -> tuple[datetime, datetime] | None:

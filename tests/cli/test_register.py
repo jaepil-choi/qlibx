@@ -297,7 +297,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
             "    path: limit.py\n    object_name: Limit\n"
         ),
     }
-    from vqapr.project.registration import _DECLARED_IDS
+    from vqapr.workspace.registration import _DECLARED_IDS
 
     assert set(sections) == set(_DECLARED_IDS), "a section became an id and this table missed it"
     for section, template in sections.items():

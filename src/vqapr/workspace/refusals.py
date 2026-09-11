@@ -12,8 +12,8 @@ measured that before moving anything: the constructor moved to a probe module, i
 and the gate reported gained 0 / lost 0 with all 22 literal codes still resolved
 (`docs/refactoring/2026-09-08-the-layering-campaign.md` section 5).
 
-So it lives here, where `store.py`, `merge.py` and `references.py` can all reach it without one of
-them owning the other.
+So it lives here, where `registry.py`, `merge.py` and `references.py` can all reach it without one
+of them owning the other.
 """
 
 from __future__ import annotations

@@ -23,9 +23,15 @@ from vqapr.domain.fill import FillRule
 from vqapr.domain.memory import prepare_model_state
 from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
-from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.project.store import Workspace
 from vqapr.public import register_dataset, register_instruments
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    RunAgenda,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 _ZONE = ZoneInfo("Asia/Seoul")
 SESSION = date(2024, 3, 5)
@@ -843,7 +849,7 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
         date(2024, 3, 5)
     ], "the agenda is the run's period, not the table's whole span"
 
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     # The READ is what is counted, not the asking: since record `238` the workspace hands the
     # instants it read once to every judge and freeze that asks (the horizon asks too).
@@ -873,7 +879,7 @@ def test_an_on_last_agenda_reads_past_end_to_know_its_last_month_is_over(
     that session lies past `end`: the agenda reads on, fires on nothing it read past `end`, and
     shares its one read of the table with the horizon as before (record `238`)."""
     from vqapr.flow.declaration.preflight import bound_execution_horizon
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     workspace, definition = _setup(
         tmp_path,
@@ -1080,7 +1086,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
         monkeypatch.setattr(
             preflight_module, name, counting(name, getattr(preflight_module, name))
         )
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     monkeypatch.setattr(
         store_module.scan, "distinct_values", counting("scan", store_module.scan.distinct_values)
@@ -1226,7 +1232,7 @@ def test_the_sessions_are_read_for_the_run_period_not_the_table(
 
     from vqapr.flow.declaration.judgments import judgments
     from vqapr.flow.declaration.preflight import bound_execution_horizon, bound_execution_table
-    from vqapr.project import store as store_module
+    from vqapr.workspace import registry as store_module
 
     workspace, definition = _setup(
         tmp_path,

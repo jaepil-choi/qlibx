@@ -42,8 +42,8 @@ from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import RunLoop, strategy_loop
-from vqapr.project.run import ComplianceSet, StrategyConfig
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
+from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 ROWS_PER_OCCURRENCE = 200
 PADDING = "x" * 100

@@ -29,10 +29,16 @@ from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import InputError
 from vqapr.domain.wiring import Role
-from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
-from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.public import register_instruments
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.run_definition import (
+    RunAgenda,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 

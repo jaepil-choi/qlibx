@@ -28,7 +28,6 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.record import RunRecordWriter
 from vqapr.public import (
     QUANTUM,
     DatasetRegistration,
@@ -40,7 +39,8 @@ from vqapr.public import (
     register_dataset,
     rescale,
 )
-from vqapr.project.store import Workspace  # scaffolding only; deliberately not a public name
+from vqapr.record import RunRecordWriter
+from vqapr.workspace.registry import Workspace  # scaffolding only; deliberately not a public name
 
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "real"
 SHOWCASE = Path(__file__).resolve().parents[2] / "showcases" / "show_006_ensemble_netting"

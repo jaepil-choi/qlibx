@@ -27,9 +27,9 @@ import pytest
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import InputError, VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.project import store as workspace_module
-from vqapr.project.registration import apply
-from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace import registry as workspace_module
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
 
 
 def _fingerprint(root: Path) -> dict[str, str]:

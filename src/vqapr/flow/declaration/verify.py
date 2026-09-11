@@ -34,8 +34,8 @@ from vqapr.flow.declaration.frozen import FrozenRun
 from vqapr.flow.declaration.judgments import RUN_OUTPUT_STALE, judgments
 from vqapr.flow.declaration.preflight import RunFacts
 from vqapr.flow.declaration.preflight import preflight_run as _freeze
-from vqapr.project.run import RunDefinition
-from vqapr.project.store import Workspace
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import RunDefinition
 
 
 @dataclass(frozen=True, slots=True)

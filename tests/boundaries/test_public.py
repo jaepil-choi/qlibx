@@ -11,7 +11,6 @@ import pytest
 
 import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
-from vqapr.project.store import Workspace
 from vqapr.public import (
     QUANTUM,
     SHIPPED_COMPLIANCE,
@@ -76,6 +75,7 @@ from vqapr.public import (
     shipped_compliance_path,
     validate_allocation,
 )
+from vqapr.workspace.registry import Workspace
 
 
 def _registration(**overrides) -> DatasetRegistration:

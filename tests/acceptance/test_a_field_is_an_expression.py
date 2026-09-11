@@ -26,8 +26,8 @@ from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.errors import VqaprError
-from vqapr.project.store import Workspace
 from vqapr.public import DatasetRegistration, SourceSpec, register_dataset
+from vqapr.workspace.registry import Workspace
 
 EVALUATED_AT = datetime(2024, 4, 1, tzinfo=UTC)
 

@@ -22,8 +22,8 @@ from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import Stage, Status
-from vqapr.project.refusals import _workspace_error
-from vqapr.project.state import _State
+from vqapr.workspace.refusals import _workspace_error
+from vqapr.workspace.state import _State
 
 
 def _merge_dataset(

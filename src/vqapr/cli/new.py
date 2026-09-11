@@ -37,7 +37,7 @@ from vqapr.component.scaffold import _class_name, lookback_declaration, render
 from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
 from vqapr.domain.wiring import Role
-from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
     "datamodel": Role.DATA_MODEL,

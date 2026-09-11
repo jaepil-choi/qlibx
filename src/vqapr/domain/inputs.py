@@ -24,6 +24,7 @@ carries its cause whole: the `OSError` or `YAMLError` that was in hand, or the l
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,32 @@ class InputError(BoundedRefusal):
         }
 
 
+_BOOLEAN = "tag:yaml.org,2002:bool"
+
+
+class _DeclarationLoader(yaml.SafeLoader):
+    """PyYAML's safe loader with YAML 1.2's booleans: only `true` and `false` are booleans.
+
+    PyYAML resolves YAML 1.1, where `on`, `off`, `yes`, `no`, `y` and `n` are booleans too. So
+    `agenda.on: last` -- the key the `vqapr new run` template, the run-backtest skill and the
+    0.14.4 notes all write unquoted -- arrived as `{True: "last"}` and was refused as "Keys should
+    be strings" (report 2026-09-11, record `262`). No declaration key or value means a YAML 1.1
+    boolean, so the word is read as the word, wherever it appears.
+
+    The pure-Python loader: a declaration is a few dozen lines, so libyaml buys nothing here (the
+    workspace document, which grows with every agenda occurrence, is read through it elsewhere).
+    """
+
+
+_DeclarationLoader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != _BOOLEAN]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+_DeclarationLoader.add_implicit_resolver(
+    _BOOLEAN, re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"), list("tTfF")
+)
+
+
 def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
     """Read one user-authored YAML document, or refuse in a way an agent can parse.
 
@@ -175,7 +202,7 @@ def read_yaml_mapping(path: Path, *, what: str) -> dict[str, Any]:
         ) from error
 
     try:
-        document = yaml.safe_load(text)
+        document = yaml.load(text, Loader=_DeclarationLoader)
     except yaml.YAMLError as error:
         # YAML 파서의 문구는 줄/열을 담고 있어 그 자체가 증거다. 새로 쓰지 않는다.
         raise InputError(

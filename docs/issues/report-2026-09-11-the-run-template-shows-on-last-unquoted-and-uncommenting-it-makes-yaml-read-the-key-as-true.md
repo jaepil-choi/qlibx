@@ -1,6 +1,6 @@
 # The run template shows `on: last` unquoted, and uncommenting it makes YAML read the key as `True`
 
-**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop`: `src/vqapr/cli/new.py` writes `# on: last` unquoted (record `253` added it), and PyYAML reads the bare key `on` as `True`. Being fixed on `develop`.**
+**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop`: `src/vqapr/cli/new.py` writes `# on: last` unquoted (record `253` added it), and PyYAML reads the bare key `on` as `True`. Being fixed on `develop`.** **CLOSED 2026-09-11 by record `262` — declarations are read with YAML 1.2's booleans (`true`/`false` only), so `on: last` is the key `on` however it is written, and every document that already shows it unquoted is right.**
 
 | | |
 |---|---|

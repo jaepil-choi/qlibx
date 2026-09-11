@@ -37,6 +37,7 @@ it saw — is what lets another study reuse it as a frozen input.
 | the thing | which | why |
 |---|---|---|
 | a beta, a market cap, a factor exposure | DataModel | a value; nothing to fill |
+| a factor's return — SMB, HML, momentum, any long-short spread | StrategyModel | the return of the portfolio that mimics the factor; each sorted leg is a strategy, and the factor is arithmetic on their NAV returns after the run |
 | an ML prediction table | DataModel | a value, computed per session |
 | a rank or a bucket assignment | DataModel *or* inside `decide()` | a value — put it in a DataModel when several strategies share it |
 | "top 100 by liquidity" as a stored universe | DataModel | a value; the *choice to use it* is the strategy's |

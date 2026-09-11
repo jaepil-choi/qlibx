@@ -1,6 +1,6 @@
 ---
 name: make-strategy
-description: Writes and validates a project-local vqapr StrategyModel — the code that turns signals into signed weights and intended positions, including instance memory, lookback warm-up, alpha budgets, and ensembles over other strategies. Use when the user wants to build, code, or test a trading strategy, alpha, or signal; mentions momentum, reversal, long-short, enhanced index, or ensemble; or asks how a strategy carries state between decisions.
+description: Writes and validates a project-local vqapr StrategyModel — the code that turns signals into signed weights and intended positions, including instance memory, lookback warm-up, alpha budgets, and ensembles over other strategies. Use when the user wants to build, code, or test a trading strategy, alpha, or signal; mentions momentum, reversal, long-short, enhanced index, or ensemble; wants a factor's return series such as Fama-French SMB or HML, whose legs are value-weighted sorted portfolios; or asks how a strategy carries state between decisions.
 ---
 
 # Write a vqapr StrategyModel
@@ -117,6 +117,14 @@ import vqapr.public as public
 A first-time journey hand-rolled 30/70 breakpoints and a bucket assignment that were already in
 the package, and four of that journey's findings turned out to be answerable from this one module.
 Check it first: [references/public-helpers.md](references/public-helpers.md).
+
+## A factor is a portfolio
+
+A factor's return — SMB, HML, momentum, any long-short spread — is the return of the portfolios
+that mimic it. **Each leg is a StrategyModel in its own run, and the factor is arithmetic on their
+daily NAV returns afterwards.** A DataModel cannot give it: it returns a value per instrument, and
+a return needs something held. The Fama-French 2×3 recipe, its code, and the two things it cannot
+express exactly are in [references/factor-portfolios.md](references/factor-portfolios.md).
 
 ## Composing strategies
 

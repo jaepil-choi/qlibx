@@ -1,6 +1,6 @@
 ---
 name: make-datamodel
-description: Writes and validates a project-local vqapr DataModel — reusable derived panels such as factor exposures, betas, rolling statistics, or ML predictions that several strategies subscribe to. Use when the user wants to precompute or share an intermediate value across strategies, mentions a factor or feature table, or asks whether a calculation belongs in a DataModel or inside the StrategyModel.
+description: Writes and validates a project-local vqapr DataModel — reusable per-instrument derived panels such as factor exposures (loadings), betas, rolling statistics, or ML predictions that several strategies subscribe to. Use when the user wants to precompute or share an intermediate value across strategies, mentions a factor-exposure or feature table, or asks whether a calculation belongs in a DataModel or inside the StrategyModel. A factor's return series (SMB, HML, a long-short spread) is not a DataModel — it is the return of a factor-mimicking portfolio, which make-strategy builds.
 ---
 
 # Write a vqapr DataModel

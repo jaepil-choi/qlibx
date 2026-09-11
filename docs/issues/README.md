@@ -43,11 +43,11 @@
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
-### 2026-09-11의 번호 없는 보고 하나 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수
+### 2026-09-11의 번호 없는 보고 하나 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수 후 닫힘
 
 | 파일 | 제목 | 상태 | 닫은 것 |
 |---|---|---|---|
-| `report-2026-09-11-skill-install-writes-into-the-enclosing-repositorys-git-root-...` | `skill install`이 프로젝트가 아니라 그것을 감싼 저장소의 `.git` 루트에 쓰고, `--project-root .`로는 바꿀 수 없다 | **접수 2026-09-11.** 세 발견 모두 소스에서 확인; 넷째를 덧붙임 — 다른 모든 명령의 stale 검사(`upgrade_note`)는 workspace root를 읽어 그 설치본을 검사하지 않는다 | — |
+| ~~`report-2026-09-11-skill-install-writes-into-the-enclosing-repositorys-git-root-...`~~ | `skill install`이 프로젝트가 아니라 그것을 감싼 저장소의 `.git` 루트에 쓰고, `--project-root .`로는 바꿀 수 없다 | **닫힘 2026-09-11 — record `258`.** 루트가 하나: skill은 workspace root(현재 디렉터리, 또는 `--project-root`)에 깔리고 — 다른 모든 명령과 stale 검사(`upgrade_note`)가 보는 곳 — `--into`가 다른 곳을 댄다. `.git` 걷기와 `argument.no_git_root` 삭제. 깨지는 변화 한 줄(git 루트 아래 workspace의 옛 사본은 `skill remove --into <git 루트>`)은 다음 릴리스 노트에 | 코드 + skill + PRD |
 
 ### 2026-09-11의 번호 없는 보고 아홉 — testbed(`0.14.2` wheel): A/B testbed · FF3 testbed · enhanced-index-3 — 일곱 닫힘, 하나 다른 세션, 하나 보류
 

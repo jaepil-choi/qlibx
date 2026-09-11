@@ -12,8 +12,13 @@ skill은 PRD §11.2가 정한 집합이고, target마다 `<target>/skills/vqapr-
 판정은 이 파일이 하지 않는다. `agent/skillset.py`가 소유하고 여기는 동사와 봉투만 담당한다 --
 record `168`: CLI만 묻는 판정은 결함이다.
 
-설치 루트는 `.git`이 있는 가장 가까운 조상이며 `--into`로 덮어쓴다. `AGENTS.md`와 `CLAUDE.md`는
-건드리지 않는다.
+설치 루트는 workspace root -- 다른 모든 명령이 일하는 그 디렉터리(현재 디렉터리, 또는
+`vqapr --project-root`)이며 `--into`로 덮어쓴다. `AGENTS.md`와 `CLAUDE.md`는 건드리지 않는다.
+
+전에는 `.git`이 있는 가장 가까운 조상이었다. 프로젝트가 다른 저장소 안에 들어 있으면 skill이 그
+바깥 저장소에 깔렸고, 그 저장소를 연 agent가 부르지 않은 skill을 읽었다. 다른 모든 명령이 부르는
+stale 검사(`upgrade_note`)는 workspace root를 읽으므로 그렇게 깔린 사본은 한 번도 검사되지 않았다 --
+루트가 둘이었다. 설치 위치를 추측하지 않는 것은 PRD §11.2의 규칙이다(record `258`).
 """
 
 from __future__ import annotations
@@ -53,14 +58,6 @@ _DIRECTORY_PREFIX = "vqapr-"
 도구와 사용자의 skill이 함께 산다. 접두사가 없으면 `register-dataset` 같은 일반적인 이름이 남의
 것과 충돌한다.
 """
-
-
-def _find_git_root(start: Path) -> Path | None:
-    """`start`에서 위로 걸으며 `.git`을 찾는다."""
-    for parent in (start, *start.parents):
-        if (parent / ".git").exists():
-            return parent
-    return None
 
 
 def _resolve_targets(target: str) -> tuple[str, ...]:
@@ -265,7 +262,9 @@ def _list(root: Path, *, targets: tuple[str, ...]) -> dict[str, Any]:
     )
 
 
-_INTO_HELP = "install into this directory instead of the auto-detected .git root"
+_INTO_HELP = (
+    "act on this directory instead of the workspace root (the current directory, or --project-root)"
+)
 
 _TARGET_HELP = (
     "which target's skill directory to act on (default: both). Both receive identical bytes."
@@ -317,15 +316,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
-    root = Path(args.into) if getattr(args, "into", None) else _find_git_root(project_root)
-    if root is None:
-        raise InputError(
-            "argument.no_git_root",
-            requirement="skill install needs a .git root (or pass --into)",
-            observed=f"no .git found above {project_root}",
-            status=Status.MISSING,
-        )
-
+    # The root `upgrade_note` reads, so the skills a command warns about are the skills installed.
+    root = Path(args.into or project_root).resolve()
     targets = _resolve_targets(args.target)
     action = args.skill_action
     if action == "install":

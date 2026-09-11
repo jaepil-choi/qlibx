@@ -2264,6 +2264,8 @@ directory convention이나 architecture candidate가 아니다.
 같은 보조 resource는 해당 target protocol이 허용하는 범위에서 둘 수 있으며, SKILL.md에서 **한 단계 깊이로만**
 가리킨다 — reference가 다시 reference를 가리키면 읽는 쪽이 부분 읽기로 끝내고 불완전한 정보를 얻는다.
 
+위 경로는 workspace root — 다른 모든 명령이 일하는 디렉터리(현재 디렉터리, 또는 `--project-root`) — 기준이다.
+조상의 `.git`을 찾아 올라가지 않는다: 프로젝트가 다른 저장소 안에 있으면 그 저장소에 까는 것이 곧 추측이다(record `258`).
 custom target root는 user가 명시적으로 선택해야 하며 package가 임의의 output location을 추측하지 않는다.
 
 #### 여러 target에 설치된 같은 skill은 byte-identical하다

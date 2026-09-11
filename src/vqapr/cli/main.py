@@ -149,10 +149,11 @@ _DESCRIPTIONS: dict[str, str] = {
         "                                            a registration nothing live still names"
     ),
     "skill": (
-        "Install the agent skill into this project, or remove and inspect it.\n\n"
-        "Installs to .agents/skills/vqapr/, and with --target claude|both also writes a thin "
-        "adapter under .claude/skills/ that points at it. The project root is the nearest .git "
-        "ancestor unless --into overrides it. AGENTS.md and CLAUDE.md are never touched."
+        "Install the agent skills into this project, or remove and inspect them.\n\n"
+        "Writes each skill to .agents/skills/vqapr-<name>/ and .claude/skills/vqapr-<name>/ under "
+        "the workspace root (the current directory, or --project-root); both targets get "
+        "identical bytes. --into names another directory. AGENTS.md and CLAUDE.md are never "
+        "touched."
     ),
 }
 """What each verb is, written for the agent reading `--help`.

@@ -82,7 +82,6 @@ def _run(root: Path, argv: list[str]) -> subprocess.CompletedProcess[str]:
 @pytest.fixture
 def edited_install(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Path:
     """Install, then edit one installed file so it matches no release vqapr has shipped."""
-    (tmp_path / ".git").mkdir()
     code, _ = _cli(capsys, tmp_path, "skill", "install")
     assert code == 0
 
@@ -144,7 +143,6 @@ def test_a_file_vqapr_never_shipped_is_reported_and_left(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """PRD §11.3: a path we have never shipped is not ours, so it is named and not touched."""
-    (tmp_path / ".git").mkdir()
     code, _ = _cli(capsys, tmp_path, "skill", "install")
     assert code == 0
 
@@ -171,7 +169,6 @@ def test_the_upgrade_note_reaches_stderr_and_names_a_command_that_runs(
     why it is not `skill list`'s alone: a stale skill does its damage while an agent reads it and
     runs something else.
     """
-    (tmp_path / ".git").mkdir()
     code, _ = _cli(capsys, tmp_path, "skill", "install")
     assert code == 0
 
@@ -195,7 +192,6 @@ def test_force_still_belongs_to_remove(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The flag is real on its own verb too, and this branch must not have moved it."""
-    (tmp_path / ".git").mkdir()
     code, _ = _cli(capsys, tmp_path, "skill", "install")
     assert code == 0
 

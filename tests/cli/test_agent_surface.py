@@ -161,7 +161,6 @@ def test_every_skill_action_accepts_the_same_root_override(action: str) -> None:
 
 def test_skill_install_is_inspectable_before_it_writes(tmp_path: Path) -> None:
     """An agent must be able to see where a mutating command would write before it runs."""
-    (tmp_path / ".git").mkdir()
 
     result = _run("--project-root", str(tmp_path), "skill", "install", "--dry-run")
     payload = json.loads(result.stdout.decode("utf-8").strip().splitlines()[-1])
@@ -174,7 +173,6 @@ def test_skill_install_is_inspectable_before_it_writes(tmp_path: Path) -> None:
 
 def test_installing_then_removing_leaves_nothing_behind(tmp_path: Path) -> None:
     """The install must be reversible, or a testbed cannot be reset between measurements."""
-    (tmp_path / ".git").mkdir()
 
     installed = json.loads(
         _run("--project-root", str(tmp_path), "skill", "install")
@@ -200,7 +198,6 @@ def test_both_targets_receive_identical_bytes(tmp_path: Path) -> None:
     The rule that replaced the thin adapter. A copy that has drifted is now detectable per target
     (`vqapr skill list`), which is what made a second real copy safe to write.
     """
-    (tmp_path / ".git").mkdir()
     _run("--project-root", str(tmp_path), "skill", "install")
 
     def tree(target: str) -> dict[str, bytes]:
@@ -220,7 +217,6 @@ def test_the_maintainer_readme_is_not_installed_as_agent_guidance(tmp_path: Path
     Shipping it into the install would give an agent a second document to treat as authority, and
     that document talks about what the directory should contain rather than about using vqapr.
     """
-    (tmp_path / ".git").mkdir()
 
     _run("--project-root", str(tmp_path), "skill", "install")
 
@@ -442,7 +438,6 @@ def test_the_installed_skill_requires_proof_of_timezone_localization(tmp_path: P
     so the skill must make one known-instant round-trip part of preparation, not an optional
     debugging trick learned after a failed run.
     """
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
     text = installed_prose(tmp_path)
@@ -465,7 +460,6 @@ def test_the_installed_skill_points_at_the_public_library_surface(tmp_path: Path
     Asserted on the INSTALLED skill rather than the source, because that is the text an agent
     actually reads.
     """
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
     text = installed_prose(tmp_path)
@@ -654,7 +648,6 @@ def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:
 
 def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -> None:
     """The first command and first correction must not require source or prior uv knowledge."""
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
     text = installed_prose(tmp_path)
 

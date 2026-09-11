@@ -32,7 +32,6 @@ def _installed(tmp_path: Path) -> str:
     promise a reader of the *installed* copy is given. Since PRD §11.2 made the skill a set, that
     copy is nine directories, so the whole tree is read rather than one named file.
     """
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
     installed = tmp_path / ".agents" / "skills"
     return "\n".join(

@@ -11,8 +11,9 @@ vqapr skill list                    # what is installed, per skill and per file
 vqapr skill remove [--force]
 ```
 
-The root is the nearest ancestor with `.git`, or `--into <dir>`. `AGENTS.md` and `CLAUDE.md` are
-never touched.
+The root is the workspace root, the directory every other command works in (the current directory,
+or `vqapr --project-root <dir>`), or `--into <dir>`. In a fresh folder that is where `uv add vqapr`
+ran; no `git init` is needed. `AGENTS.md` and `CLAUDE.md` are never touched.
 
 ## Where they land
 

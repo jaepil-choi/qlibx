@@ -23,7 +23,6 @@ from vqapr.public import ListingAccess, krx_listings
 
 
 def _installed_skill(tmp_path: Path) -> str:
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
     return installed_prose(tmp_path)
 

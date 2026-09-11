@@ -45,6 +45,13 @@ same class with one constant changed — is **a new file under a new id**. There
 channel, so which of the two you mean is a decision only you can make, and it is the decision that
 determines whether the record reads as one strategy improved or two strategies compared.
 
+**One file is also what is loaded.** vqapr loads the file by its path, so its directory is not on
+the import path: `import helper` of a `helper.py` beside it is refused
+(`component.construction_failed`, and the `fix` says why). Code several strategies share — a base
+class for six portfolio legs, a list of dates — goes in a package installed in the environment, or
+on `PYTHONPATH`; a leg that subclasses such a base registers by either route. The fingerprint
+covers the strategy's own file only, so keep what you tune in that file.
+
 ## The shape
 
 ```python

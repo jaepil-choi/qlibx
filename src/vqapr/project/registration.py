@@ -43,6 +43,7 @@ from vqapr.domain.errors import (
 from vqapr.domain.inputs import INCOMPLETE, VALUE_INVALID, InputError
 from vqapr.domain.instruments import export_roster
 from vqapr.extension.component import ComponentKind, ComponentRef
+from vqapr.extension.loading import authored_classes
 from vqapr.extension.prepare import prepare_component
 from vqapr.project.document import (
     ComponentDeclaration,
@@ -1113,6 +1114,14 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     # component itself.
     inherited = {name for node in classes for name in _names(node)}
     found = [name for name in subclasses if name not in inherited]
+    local = {node.name for node in classes}
+    if not found and any(_names(node) - aliases - local for node in classes):
+        # A class whose base this file neither defines nor imports by the authoring name --
+        # `class Leaf(common.Base)` -- may still be one. The YAML route loads the file and
+        # registered it by the object while this said "defines 0" and asked for a class the file
+        # already had (record `252`), so this route asks the object too, and only here: the parse
+        # still decides "two". A base that does not import is refused as the loader refuses it.
+        found = list(authored_classes(path, kind))
     if len(found) == 1:
         return found[0]
     if not found:

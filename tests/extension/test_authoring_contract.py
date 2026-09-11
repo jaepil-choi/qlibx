@@ -243,3 +243,86 @@ def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
     observed = refused.value.as_dict()["failures"][0]["observed"] or ""
     assert "defines 2" in observed
     assert "First" in observed and "Second" in observed
+
+
+_SHARED_BASE = (
+    "from vqapr.authoring import StrategyModel\n\n\nclass Portfolio(StrategyModel):\n    pass\n"
+)
+
+
+def test_a_leaf_through_an_imported_base_is_found_by_the_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`docs/issues/report-2026-09-11-register-by-kind-refuses-a-strategy-that-inherits-...`.
+
+    Six one-line legs of a factor build, each `class Ff3S1(strategy_common.Ff3Portfolio)`: the
+    parse sees no `StrategyModel`, said "defines 0" and asked for a class the file already had,
+    while the YAML route loaded the same file and registered it (record `252`). A class the file
+    merely uses (`Params`) is not a strategy, and the imported base is not the file's.
+    """
+    from vqapr.project.registration import _sole_subclass
+
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "legs_common_252.py").write_text(_SHARED_BASE, encoding="utf-8")
+    monkeypatch.syspath_prepend(str(shared))
+    leaf = tmp_path / "leg.py"
+    leaf.write_text(
+        "from typing import NamedTuple\n\nimport legs_common_252\n\n\n"
+        "class Params(NamedTuple):\n    bucket: str\n\n\n"
+        "class Leg(legs_common_252.Portfolio):\n    BUCKET = 'S1'\n",
+        encoding="utf-8",
+    )
+
+    assert _sole_subclass(leaf, ComponentKind.STRATEGY_MODEL, "leg") == "Leg"
+
+
+def test_a_base_beside_the_component_is_named_as_why_it_does_not_import(tmp_path: Path) -> None:
+    """The same leaf with its base beside it and not importable: the loader's refusal, whose
+    `fix` names the one-file rule instead of "fix the exception" (record `252`)."""
+    from vqapr.domain.errors import VqaprError
+    from vqapr.project.registration import _sole_subclass
+
+    (tmp_path / "beside_common_252.py").write_text(_SHARED_BASE, encoding="utf-8")
+    leaf = tmp_path / "leg.py"
+    leaf.write_text(
+        "import beside_common_252\n\n\nclass Leg(beside_common_252.Portfolio):\n    pass\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VqaprError) as refused:
+        _sole_subclass(leaf, ComponentKind.STRATEGY_MODEL, "leg")
+
+    (failure,) = refused.value.as_dict()["failures"]
+    assert failure["code"] == "component.construction_failed"
+    assert "`beside_common_252` sits beside leg.py" in failure["fix"]
+    assert "not on the import path" in failure["fix"]
+
+
+def test_registering_a_component_that_imports_its_neighbour_names_the_rule(tmp_path: Path) -> None:
+    """`docs/issues/report-2026-09-11-a-component-cannot-import-a-module-beside-it-...`.
+
+    Where the FF3 agent met it: an ordinary `import` of a module in the component's own directory,
+    refused with "fix the exception raised while constructing the component" -- about an import
+    that is correct for the file's location. The `fix` now says why it cannot work here.
+    """
+    from vqapr.domain.errors import VqaprError
+    from vqapr.public import register_strategy_model
+
+    (tmp_path / "helper_252.py").write_text("VALUE = 1\n", encoding="utf-8")
+    source = tmp_path / "imp.py"
+    source.write_text(
+        "import helper_252\n\nfrom vqapr.authoring import StrategyModel\n\n\n"
+        "class Imp(StrategyModel):\n"
+        "    def inputs(self):\n        return {}\n\n"
+        "    def decide(self, call):\n        return None\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(VqaprError) as refused:
+        register_strategy_model(tmp_path, "imp", source, "Imp")
+
+    failure = refused.value.as_dict()["failures"][0]
+    assert failure["code"] == "component.construction_failed"
+    assert "`helper_252` sits beside imp.py" in failure["fix"]
+    assert "package installed in this environment" in failure["fix"]

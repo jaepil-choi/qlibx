@@ -41,6 +41,10 @@ writes a `.py` that **runs as written**, plus the `.yaml` that registers it and 
 that executes it. Start there: the scaffold is generated from the contracts the package enforces,
 so it cannot drift from them.
 
+The file is loaded by its path and its directory is not on the import path, so a DataModel cannot
+`import` a module beside it. Shared code goes in a package installed in the environment (or on
+`PYTHONPATH`); make-strategy's "One strategy is one file" has the rule.
+
 The `--lookback` / `--calendar-lookback` choice is not cosmetic. See below.
 
 ## The lookback pair, and why it matters more here

@@ -13,11 +13,13 @@ being renewed. See `docs/design/agent-first-surface.md` for the surface ruling t
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import inspect
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
 
 from vqapr.authoring import Compliance, DataModel, StrategyModel
 from vqapr.data.requirements import DataRequirement
@@ -95,7 +97,22 @@ def _load(
     # source moved. Keying on the registered value would map two different sources onto one
     # module name, and `sys.modules` would hand back the first one loaded -- an edit that appeared
     # to have no effect, which is worse than the refusal this replaced.
-    module_name = f"_vqapr_component_{current}"
+    module = _execute(path, f"_vqapr_component_{current}")
+    try:
+        candidate = getattr(module, ref.object_name)
+        return candidate(**dict(ref.config))
+    except Exception as error:
+        raise _construction_failed(path, error) from error
+
+
+def _execute(path: Path, module_name: str) -> ModuleType:
+    """Run a component file as a module; the one door a component's source is executed through.
+
+    `_load` builds the registered object from what this returns, and `authored_classes` finds
+    the authored class in it by the object (record `252`). The file is loaded by its PATH, so
+    its directory is not on the import path -- a component is one file, and its fingerprint
+    covers that file alone (owner decision 2026-09-04, `docs/issues/archive/065`).
+    """
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise _failure(
@@ -110,21 +127,82 @@ def _load(
     sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
-        candidate = getattr(module, ref.object_name)
-        return candidate(**dict(ref.config))
     except Exception as error:
-        raise _failure(
-            "component.construction_failed",
-            "component object must load and construct from its registered config",
-            f"{type(error).__name__}: {error}",
-            fix=(
-                "fix the exception raised while constructing the component from its "
-                "registered config; the traceback is in `cause`"
-            ),
-            status=Status.CRASHED,
-            source=FailureSource(file=str(path)),
-            cause=error,
-        ) from error
+        raise _construction_failed(path, error) from error
+    return module
+
+
+def _construction_failed(path: Path, error: BaseException) -> VqaprError:
+    """The author's code raised while its module ran or its object was built: 502, theirs."""
+    return _failure(
+        "component.construction_failed",
+        "component object must load and construct from its registered config",
+        f"{type(error).__name__}: {error}",
+        fix=_construction_fix(path, error),
+        status=Status.CRASHED,
+        source=FailureSource(file=str(path)),
+        cause=error,
+    )
+
+
+def _construction_fix(path: Path, error: BaseException) -> str:
+    """The repair, naming the one-file rule when the missing module sits beside the component.
+
+    `import helper` of a `helper.py` in the component's own directory is correct Python for a
+    script and fails here, and "fix the exception" sent the author to fix an import that was right
+    for the file's location (`docs/issues/report-2026-09-11-a-component-cannot-import-a-module-
+    beside-it-...`, record `252`). Only a module that is really there beside it gets this text:
+    any other `ModuleNotFoundError` is the author's missing dependency, as before.
+    """
+    missing = error.name if isinstance(error, ModuleNotFoundError) else None
+    if missing:
+        top = missing.split(".")[0]
+        if (path.parent / f"{top}.py").is_file() or (path.parent / top / "__init__.py").is_file():
+            return (
+                f"`{top}` sits beside {path.name}, but a component's directory is not on the "
+                "import path: a component is one file, loaded by its path, and its fingerprint "
+                f"covers that file alone. Put the shared code in {path.name} itself, or in a "
+                "package installed in this environment (or on PYTHONPATH), then register again"
+            )
+    return (
+        "fix the exception raised while constructing the component from its "
+        "registered config; the traceback is in `cause`"
+    )
+
+
+_AUTHORED_BASES: dict[ComponentKind, type] = {
+    ComponentKind.STRATEGY_MODEL: StrategyModel,
+    ComponentKind.DATA_MODEL: DataModel,
+    ComponentKind.COMPLIANCE: Compliance,
+}
+
+
+def authored_classes(path: Path, kind: ComponentKind) -> tuple[str, ...]:
+    """The leaf classes `path` defines that ARE the kind's authoring base, found by the object.
+
+    Registration's kind route (`vqapr register strategy <id> <file>`) parses the file first -- a
+    file with two strategies is refused for having two, not for whatever its import does -- and
+    asks this only when parsing cannot see the base: a class inheriting it through a module the
+    file imports, `class Leaf(common.Base)`. The YAML route loads that file by the object and
+    registered it while the kind route said "defines 0" (record `252`). A class the file merely
+    imports is not the file's (`__module__`), and a base another of its classes extends is
+    scaffolding for the leaf, as in the parse.
+    """
+    base = _AUTHORED_BASES[kind]
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    module = _execute(path, f"_vqapr_probe_{digest}")
+    try:
+        defined = [
+            (name, value)
+            for name, value in vars(module).items()
+            if isinstance(value, type)
+            and value.__module__ == module.__name__
+            and issubclass(value, base)
+        ]
+    finally:
+        sys.modules.pop(module.__name__, None)
+    extended = {parent for _, cls in defined for parent in cls.__mro__[1:]}
+    return tuple(name for name, cls in defined if cls not in extended)
 
 
 def as_loaded_fingerprint(

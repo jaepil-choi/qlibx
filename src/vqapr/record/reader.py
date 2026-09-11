@@ -170,13 +170,14 @@ def run_ids(root: Path) -> tuple[str, ...]:
     )
 
 
-def strategy_refs(root: Path, run_id: str) -> tuple[str, ...]:
+def strategy_refs(root: Path | str, run_id: str) -> tuple[str, ...]:
     """Every FINISHED strategy record this run holds, as `<id>@<fp8>`, sorted.
 
     A strategy directory without `strategy.json` is still being written, or was killed or
     refused before it finished; omitted here, exactly as `run_ids` omits an unfinished run.
     `unfinished_strategy_refs` lists those, and `strategy_progress` says what state they are in.
     """
+    root, run_id, _ = record_address(root, run_id)
     directory = root / RUNS_DIRECTORY / run_id / STRATEGIES_DIRECTORY
     if not directory.is_dir():
         return ()
@@ -338,8 +339,11 @@ def _newest_event_time(part: Path) -> datetime | None:
     return value if isinstance(value, datetime) else None
 
 
-def read_run_record(root: Path, run_id: str) -> dict[str, Any]:
-    """`run.json` -- or, for a record written before `139`, `record.json`."""
+def read_run_record(root: Path | str, run_id: str) -> dict[str, Any]:
+    """`run.json` -- or, for a record written before `139`, `record.json`.
+
+    `run_id` may be a strategy's `<run-id>/<strategy-ref>`: the run it names is the one read."""
+    root, run_id, _ = record_address(root, run_id)
     path = run_record_path(root, run_id)
     if not path.is_file():
         return read_record(root, run_id)
@@ -366,9 +370,20 @@ def datamodel_refs(root: Path, run_id: str) -> tuple[str, ...]:
     )
 
 
-def read_strategy_record(root: Path, run_id: str, strategy_ref: str) -> dict[str, Any]:
-    """One strategy's frozen facts, exactly as they were written."""
-    return read_member_record(root, run_id, strategy_ref, kind=STRATEGY_KIND)
+def read_strategy_record(
+    root: Path | str, run_id: str, strategy_ref: str | None = None
+) -> dict[str, Any]:
+    """One strategy's frozen facts, exactly as they were written.
+
+    Addressed the way every table read is (`record_address`, then `resolve_strategy_ref`): the
+    `<id>@<fp8>`, the bare `<id>` when one record of it exists, the run's only strategy when
+    `strategy_ref` is omitted, or all of it in `run_id` as the CLI writes it.
+    """
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
+    resolved = resolve_strategy_ref(root, run_id, strategy_ref)
+    if resolved is None:
+        raise RunRecordMissing(f"run {run_id!r} records tables of its own and no strategy")
+    return read_member_record(root, run_id, resolved, kind=STRATEGY_KIND)
 
 
 def read_datamodel_record(root: Path, run_id: str, datamodel_ref: str) -> dict[str, Any]:
@@ -542,15 +557,49 @@ class RunRecordMissing(ValueError):
     """
 
 
-def resolve_strategy_ref(root: Path, run_id: str, strategy_ref: str | None) -> str | None:
+def record_address(
+    root: Path | str, run_id: str, strategy_ref: str | None = None
+) -> tuple[Path, str, str | None]:
+    """Where a reader was pointed, in either spelling a user writes it (record `265`).
+
+    The CLI names a strategy record in one argument, `<run-id>/<strategy-id>@<fp8>`; the Python
+    readers took the run and the ref apart, and the store only as a `Path`. An agent that copied
+    the CLI's form into `strategy_report` was refused for a record that exists, and one that passed
+    `".vqapr"` got `unsupported operand type(s) for /: 'str' and 'str'` from inside this module.
+    A run id never holds `/` -- it is a directory name -- so the one-argument form cannot be
+    misread: what follows the slash is the strategy ref, and a different ref beside it is refused
+    rather than one of the two picked.
+    """
+    store = Path(root)
+    run, slash, named = run_id.partition("/")
+    if not slash:
+        return store, run_id, strategy_ref
+    if not run or not named:
+        raise RunRecordMissing(
+            f"{run_id!r} names no record; the one-argument form is "
+            "`<run-id>/<strategy-id>` or `<run-id>/<strategy-id>@<fp8>`"
+        )
+    if strategy_ref is not None and strategy_ref != named:
+        raise RunRecordMissing(
+            f"{run_id!r} names the strategy record {named!r} and strategy_ref names "
+            f"{strategy_ref!r}; name it once"
+        )
+    return store, run, named
+
+
+def resolve_strategy_ref(
+    root: Path | str, run_id: str, strategy_ref: str | None
+) -> str | None:
     """The member directory a table read means, or a refusal that names what exists.
 
     `None` reads the run directory when that directory holds tables of its own (a record written
     before `139`, or a writer without a member); on a current record it resolves to the run's
     only strategy, and refuses -- listing them -- when there are several. A bare `<strategy-id>`
     resolves the way `vqapr show strategy <run>/<id>` does: to the one record of that strategy,
-    refusing when there are several fingerprints to choose from.
+    refusing when there are several fingerprints to choose from. `record_address` reads the
+    arguments first, so `run_id` may carry the ref the way the CLI writes it.
     """
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
     run_directory = root / RUNS_DIRECTORY / run_id
     if not run_directory.is_dir():
         # Directories, not `run_ids()`: that lists FINISHED runs, and a reader pointed at the
@@ -621,7 +670,7 @@ def _table_files(directory: Path) -> tuple[Path, ...]:
 
 
 def read_table(
-    root: Path, run_id: str, table_id: str, strategy_ref: str | None = None
+    root: Path | str, run_id: str, table_id: str, strategy_ref: str | None = None
 ) -> Iterator[dict[str, Any]]:
     """Stream one table's rows back, a chunk at a time, as the values they were written from.
 
@@ -637,6 +686,7 @@ def read_table(
     instant an offset-aware `datetime` in the zone it was recorded in; the parquet carries both,
     so there is nothing to guess (record `146`).
     """
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
     for path in _parts(root, run_id, table_id, strategy_ref):
         try:
             reader = pq.ParquetFile(path)
@@ -681,7 +731,10 @@ read_typed_table = read_table
 construction now; kept so a caller written against record `135` reads on."""
 
 
-def table_ids(root: Path, run_id: str, strategy_ref: str | None = None) -> tuple[str, ...]:
+def table_ids(
+    root: Path | str, run_id: str, strategy_ref: str | None = None
+) -> tuple[str, ...]:
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
     resolved = resolve_strategy_ref(root, run_id, strategy_ref)
     directory = record_directory(root, run_id, resolved) / TABLES_DIRECTORY
     if not directory.is_dir():

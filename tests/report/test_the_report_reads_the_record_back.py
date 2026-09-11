@@ -535,3 +535,15 @@ def test_periods_per_year_follows_the_grids_spacing() -> None:
     assert measure.infer_periods_per_year(weekly) == 52
     assert measure.infer_periods_per_year(monthly) == 12
     assert measure.infer_periods_per_year([T1]) == 252
+
+
+def test_a_report_takes_the_address_the_cli_writes(store: Path) -> None:
+    """Record `265`: a `str` store and `<run-id>/<strategy-ref>` in one argument read the same
+    record the separate arguments do; a run report is of every strategy, so it refuses one."""
+    by_parts = strategy_report(store, RUN, S).as_record()
+
+    assert strategy_report(str(store), f"{RUN}/{S}").as_record() == by_parts
+    assert strategy_report(store, f"{RUN}/{S.split('@')[0]}").as_record() == by_parts
+    assert run_report(str(store), RUN).as_record() == run_report(store, RUN).as_record()
+    with pytest.raises(ValueError, match="reports every strategy"):
+        run_report(store, f"{RUN}/{S}")

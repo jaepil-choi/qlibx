@@ -21,6 +21,7 @@ from vqapr.record import (
     read_run_record,
     read_strategy_record,
     read_table,
+    record_address,
     resolve_strategy_ref,
     strategy_refs,
 )
@@ -36,7 +37,7 @@ ACCOUNT_TABLE, FILL_TABLE, MONITORING_TABLE, WEIGHT_TABLE = (
 
 
 def strategy_report(
-    root: Path,
+    root: Path | str,
     run_id: str,
     strategy_ref: str | None = None,
     *,
@@ -49,8 +50,10 @@ def strategy_report(
     `<strategy-id>` when one record of it exists, or `None` when the run holds one strategy.
     `periods_per_year` defaults to what the valuation grid implies (`infer_periods_per_year`)
     and the report says which. `risk_free_annual` is a simple annual rate the record does not
-    hold; zero unless given.
+    hold; zero unless given. `root` may be a `str`, and `run_id` may carry the ref the way the
+    CLI writes it, `<run-id>/<strategy-id>@<fp8>` (`record_address`).
     """
+    root, run_id, strategy_ref = record_address(root, run_id, strategy_ref)
     resolved = resolve_strategy_ref(root, run_id, strategy_ref)
     if resolved is None:
         raise ValueError(
@@ -143,7 +146,7 @@ def strategy_report(
 
 
 def run_report(
-    root: Path,
+    root: Path | str,
     run_id: str,
     *,
     benchmark: str | None = None,
@@ -156,6 +159,12 @@ def run_report(
     then also reported against it. A benchmark outside the run -- an index level, say -- is not
     something the record holds, and is not invented here.
     """
+    root, run_id, named = record_address(root, run_id)
+    if named is not None:
+        raise ValueError(
+            f"run_report reports every strategy of run {run_id!r}, and {named!r} names one; use "
+            "strategy_report for that strategy, or benchmark= to measure the others against it"
+        )
     refs = strategy_refs(root, run_id)
     if not refs:
         raise ValueError(f"run {run_id!r} has no finished strategy record under {root}")

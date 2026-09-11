@@ -38,10 +38,15 @@ rows = read_strategy_table(store_root, run_id, "vqapr.fill", strategy_ref)
 ```
 
 `store_root` is the path the run's result printed under that name — `<project>/.vqapr` unless
-`--store-root` moved it — and **not** the project directory. That is the usual mistake.
+`--store-root` moved it — and **not** the project directory. That is the usual mistake. A `str`
+or a `Path` both work.
 
 `strategy_ref` is the `record` the result printed (`<strategy-id>@<fp8>`), or the bare
 `<strategy-id>` when one record of it exists, or omitted when the run holds one strategy.
+
+**The CLI's one-argument form works here too.** `read_strategy_table(".vqapr",
+"<run-id>/<strategy-id>@<fp8>", "vqapr.fill")` and `strategy_report(".vqapr", "<run-id>/<strategy-id>")`
+read the same record `vqapr show strategy <run-id>/<strategy-id>@<fp8>` shows.
 
 A root, run id or ref that names no record is refused (`RunRecordMissing`) naming what was found
 instead — **so an empty frame means an empty table and nothing else.**

@@ -365,6 +365,9 @@ DEFAULT_TABLES = (
             "kind",
             "account_version",
             "requested_quantity",
+            # What the weight sized to before the planner cut buys to the cash (record `261`):
+            # beside `requested_quantity`, the cut is visible in the record rather than inferred.
+            "sized_quantity",
             "dealt_quantity",
             "price",
             "cash_delta",

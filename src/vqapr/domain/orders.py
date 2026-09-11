@@ -35,6 +35,13 @@ class OrderRequest:
     delta_quantity: Decimal
     execution_price: Decimal | None
     unresolved_weight_target: Decimal | None = None
+    sized_quantity: Decimal | None = None
+    """The delta the weight sized to on the venue's unit, before the planner cut buys to the cash.
+
+    Equal to `delta_quantity` unless the batch ran short of cash, when a cut buy requests less
+    than it sized to (report 2026-09-11, record `261`). `None` where nothing was sized: a request
+    built by hand, or one the venue cannot price.
+    """
 
     def __post_init__(self) -> None:
         _instrument(self.instrument_id)
@@ -43,6 +50,8 @@ class OrderRequest:
         _decimal(self.delta_quantity, name="delta_quantity")
         if self.delta_quantity != self.desired_quantity - self.current_quantity:
             raise ValueError("delta_quantity must equal desired_quantity - current_quantity")
+        if self.sized_quantity is not None:
+            _decimal(self.sized_quantity, name="sized_quantity")
         if self.execution_price is None:
             # An unpriced target may still be requested: the venue answers with typed ABSENT
             # evidence. What it may not do is move an existing holding, because settling a

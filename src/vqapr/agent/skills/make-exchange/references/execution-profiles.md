@@ -53,10 +53,10 @@ not the whole execution table.
 3. **Settle.** At the fill **sells settle before buys**, and the cash they raise pays for the buys.
    A buy the purse still cannot cover deals fewer shares, or none (`unfunded`).
 
-The record shows the outcome, not the order. `vqapr.fill` lists its rows in instrument order, not
-the order they settled in. `requested_quantity` is the order **after** step 2's cut, and nothing
-marks a request as cut, so on a day cash ran short the smallest-delta buys request less than
-`trunc(w × NAV / price − held)`. `dealt_quantity` below `requested_quantity` is step 3.
+The record shows each step's outcome, not the order they ran in. `vqapr.fill` lists its rows in
+instrument order, not the order they settled in. `sized_quantity` is step 1 — what the weight
+sized to — and `requested_quantity` is the order after step 2's cut, so the two differ only for a
+buy cut to the cash. `dealt_quantity` below `requested_quantity` is step 3.
 
 ## The name is not the claim
 

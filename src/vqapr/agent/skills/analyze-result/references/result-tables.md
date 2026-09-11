@@ -20,8 +20,12 @@ when the fact was seen, the other when it happened.
 
 ## `vqapr.fill` — what was traded and what it cost
 
-`instrument`, `kind`, `requested_quantity`, `dealt_quantity` (negative on a sale), `price`,
-`commission`, `tax`, `cash_delta`, `reason`, `account_version`.
+`instrument`, `kind`, `requested_quantity`, `sized_quantity`, `dealt_quantity` (negative on a
+sale), `price`, `commission`, `tax`, `cash_delta`, `reason`, `account_version`.
+
+`sized_quantity` is what the weight sized to on the venue's unit; `requested_quantity` is the order
+after the planner cut buys to the cash, so the two differ only for a buy that was cut (0.14.5 and
+later; an older record has no such column).
 
 **This is the table cost questions are asked of.** Commission and tax are per fill and per side, so
 a category's true cost is a sum over this table — not a rate read off a venue.

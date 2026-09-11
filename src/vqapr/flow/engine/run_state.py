@@ -277,6 +277,7 @@ def _fill_rows(
                     "kind": detail.get("kind"),
                     "account_version": int(version),
                     "requested_quantity": str(detail["requested_quantity"]),
+                    "sized_quantity": detail.get("sized_quantity"),
                     "dealt_quantity": str(detail["dealt_quantity"]),
                     "price": detail.get("price"),
                     "cash_delta": str(entry.cash),

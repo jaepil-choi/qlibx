@@ -30,6 +30,7 @@ from decimal import Decimal
 from types import MappingProxyType
 
 from vqapr.domain.fills import Fill, FillBatch
+from vqapr.domain.orders import OrderBatch
 from vqapr.domain.values import require_tz_aware
 
 __all__ = ["FILL_ORIGIN", "LedgerEntry", "fill_entries"]
@@ -81,19 +82,30 @@ class LedgerEntry:
         object.__setattr__(self, "detail", MappingProxyType(dict(self.detail)))
 
 
-def fill_entries(at: datetime, fills: FillBatch) -> tuple[LedgerEntry, ...]:
+def fill_entries(
+    at: datetime, fills: FillBatch, orders: OrderBatch | None = None
+) -> tuple[LedgerEntry, ...]:
     """The entries one fill batch makes, one per fill, in the batch's own order.
 
     The producer's half of §5.2: the venue said what each fill dealt at what price and cost, and
     `Fill` already proved those agree with each other. The ledger is handed the resulting deltas
     and the facts a reader of `vqapr.fill` needs, and asks nothing further.
+
+    `orders` is the batch the fills answer. Each fill's `sized_quantity` -- what its weight sized
+    to before the planner cut buys to the cash -- is read from it here, once, for every venue
+    (record `261`); without it the value is `None`.
     """
     if not isinstance(fills, FillBatch):
         raise TypeError("fills must be a FillBatch")
-    return tuple(_fill_entry(at, fill) for fill in fills.fills)
+    sized = (
+        {}
+        if orders is None
+        else {request.instrument_id: request.sized_quantity for request in orders.requests}
+    )
+    return tuple(_fill_entry(at, fill, sized.get(fill.instrument_id)) for fill in fills.fills)
 
 
-def _fill_entry(at: datetime, fill: Fill) -> LedgerEntry:
+def _fill_entry(at: datetime, fill: Fill, sized: Decimal | None) -> LedgerEntry:
     dealt = fill.dealt_quantity
     return LedgerEntry(
         at=at,
@@ -103,6 +115,7 @@ def _fill_entry(at: datetime, fill: Fill) -> LedgerEntry:
         detail={
             "instrument": fill.instrument_id,
             "requested_quantity": str(fill.requested_quantity),
+            "sized_quantity": None if sized is None else str(sized),
             "dealt_quantity": str(dealt),
             "price": None if fill.price is None else str(fill.price),
             "commission": str(fill.cost.commission),

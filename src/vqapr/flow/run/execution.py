@@ -173,7 +173,7 @@ class ExecutionHandler:
             # this state and whether what results is an account.
             prepared_fill = self._context.account.append(
                 account_state,
-                fill_entries(pending.target.target_at, fills),
+                fill_entries(pending.target.target_at, fills, orders),
                 expected_version=before.version,
             )
         commit_evidence = AccountCommitEvidence(

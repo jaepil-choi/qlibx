@@ -191,9 +191,10 @@ partial = fill[
 `unfunded`; `requested_quantity` beside `dealt_quantity` is the order beside what it got.
 
 On KRX the order is already cut to the cash: sale proceeds join the cash first, buys are funded
-largest money delta first, and sells settle before buys at the fill. A `requested_quantity` smaller
-than your own `w × NAV / price − held` on a day cash ran short is that cut, not a sizing error, and
-the rows are in instrument order, not the order they settled in.
+largest money delta first, and sells settle before buys at the fill. A `requested_quantity` below
+`sized_quantity` — what the weight sized to — is that cut, not a sizing error, and the rows are in
+instrument order, not the order they settled in. A record written before 0.14.5 has no
+`sized_quantity` column.
 
 ## Fill price against the price at the decision
 

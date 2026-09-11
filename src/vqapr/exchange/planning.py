@@ -185,8 +185,12 @@ def _apply_venue_rules(
     desired: Mapping[str, Decimal],
     instruments: Iterable[str],
     tradable: Mapping[str, bool],
-) -> dict[str, Decimal]:
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
     """Convert intended positions into positions the venue can actually trade.
+
+    Returns the payable positions and, beside them, the positions the weights sized to once
+    rounded onto the unit -- before any buy was cut to the cash. The record keeps both
+    (record `261`), so a reader checking the cut against a written spec can see it.
 
     Deltas are rounded toward zero onto the listing unit. If the rounded buys cannot be paid for
     out of current cash plus the rounded sell proceeds, buys are clipped in a deterministic order
@@ -226,6 +230,7 @@ def _apply_venue_rules(
             )
         delta = rules.quantize(instrument_id, desired[instrument_id] - current)
         resolved[instrument_id] = current + delta
+    sized = dict(resolved)
 
     def _delta(instrument_id: str) -> Decimal:
         return resolved[instrument_id] - account.positions.get(instrument_id, Decimal(0))
@@ -259,7 +264,7 @@ def _apply_venue_rules(
         available -= notional + rules.charge(Side.BUY, notional, instrument_id).total
         resolved[instrument_id] = account.positions.get(instrument_id, Decimal(0)) + affordable
 
-    return _settle_payable(
+    payable = _settle_payable(
         rules=rules,
         account=account,
         prices=prices,
@@ -267,6 +272,7 @@ def _apply_venue_rules(
         ordered=ordered,
         fillable=_fillable,
     )
+    return payable, sized
 
 
 def _projected_cash(
@@ -440,8 +446,9 @@ def plan_orders(
             raise ValueError("complete desired position is outside the declared budget bounds")
         desired_quantities[instrument_id] = desired
 
+    sized_quantities = dict(desired_quantities)
     if rules is not None:
-        desired_quantities = _apply_venue_rules(
+        desired_quantities, sized_quantities = _apply_venue_rules(
             rules=rules,
             account=account,
             prices=selected_prices,
@@ -463,6 +470,7 @@ def plan_orders(
             delta_quantity=desired - current,
             execution_price=price,
             unresolved_weight_target=unresolved_weights.get(instrument_id),
+            sized_quantity=None if price is None else sized_quantities[instrument_id] - current,
         )
         requests.append(request)
         if request.delta_quantity == 0 and price is not None:

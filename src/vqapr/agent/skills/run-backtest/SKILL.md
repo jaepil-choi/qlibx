@@ -101,8 +101,10 @@ single run's envelope has.
 A batch reads each panel-grain dataset once: before the workers start it bakes every field the
 runs declare into memory-mappable files under `.vqapr/cubes/<batch>/`, each worker maps them
 instead of scanning the source, and the directory is removed when the batch returns. Memory per
-worker is therefore its own period × lookback × instruments (once, shared, for a whole-universe
-run) on top of about 130 MB of interpreter; size `--jobs` by that, not by core count.
+worker is therefore at least its own period × lookback × instruments (once, shared, for a
+whole-universe run) on top of about 130 MB of interpreter — **a floor, not an estimate**: one daily
+strategy over 4,276 names and six and a half years, with few fills, peaked at 1.7–2.1 GB private
+where that rule gives 0.25 GB. Measure one run alone and size `--jobs` by that, not by core count.
 
 A YAML path handed to `run` or `check` is refused by name — both take a registered id.
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
@@ -15,11 +17,11 @@ from vqapr.data.datasets import execution_price_fields, lookback_fits_grain, req
 from vqapr.data.requirements import DataRequirement
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.account_state import AccountSnapshot
-from vqapr.domain.agendas import OperationAgenda
-from vqapr.domain.errors import Failure, Stage, Status, VqaprError
+from vqapr.domain.agendas import OperationAgenda, OperationOccurrence
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.identifiers import agenda_id
 from vqapr.domain.values import ModelMemory, require_tz_aware
-from vqapr.exchange.conventions import ExecutionHorizon
+from vqapr.exchange.conventions import ExecutionHorizon, FillRule
 from vqapr.exchange.execution_table import (
     ExecutionTable,
     ExecutionTableSpec,
@@ -685,6 +687,168 @@ def _require_execution_authority(definition: RunDefinition) -> None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class UnresolvedTargets:
+    """The occurrences no execution instant serves, split by what would serve them.
+
+    A decide-after-close run with `within: 1d` was refused on every Friday, once by the ordering
+    judgment and again by the freeze, and the second refusal told its author to widen a run end
+    that was not the problem (report 2026-09-11, record `259`). The two causes want different
+    repairs, so they are told apart here, once, for both doors:
+
+    - `waiting` -- the rule admits an instant after the decision, only further away than
+      `within`. `within` is wall-clock time, so a weekend or a holiday outlasts `1d`, and no end
+      fixes it. Each row is (occurrence id, decision, the instant it would fill at).
+    - `past_end` -- the rule admits no instant after the decision before the run's end at all:
+      the run's end, or the table's, is the problem. Each row is (occurrence id, decision).
+
+    `last_fill` is the latest instant a served occurrence fills at, a `waiting` one counted at the
+    instant a wider `within` gives it: an end after it and before
+    the first `past_end` decision keeps every fill and drops the decisions nothing can serve --
+    the end record `237` calls the only correct one for a decide-after-close, fill-next-close run.
+    """
+
+    waiting: tuple[tuple[str, datetime, datetime], ...]
+    past_end: tuple[tuple[str, datetime], ...]
+    last_fill: datetime | None
+
+    def __bool__(self) -> bool:
+        return bool(self.waiting or self.past_end)
+
+
+def unresolved_targets(
+    table: ExecutionTable,
+    occurrences: Iterable[OperationOccurrence],
+    *,
+    end: datetime,
+    horizon: ExecutionHorizon,
+) -> UnresolvedTargets:
+    """Every occurrence `select_target` cannot bind, and whether dropping `within` would bind it.
+
+    Asked again without `within` only for the occurrences that failed, so a run that passes costs
+    what it did.
+    """
+    unbounded = (
+        None if table.fill.within is None else replace(table, fill=replace(table.fill, within=None))
+    )
+    waiting: list[tuple[str, datetime, datetime]] = []
+    past_end: list[tuple[str, datetime]] = []
+    last_fill: datetime | None = None
+    for occurrence in occurrences:
+        decision = occurrence.evaluation_time
+        target = table.select_target(decision_time=decision, end_time=end, horizon=horizon)
+        if target is not None:
+            last_fill = target.target_at if last_fill is None else max(last_fill, target.target_at)
+            continue
+        later = (
+            None
+            if unbounded is None
+            else unbounded.select_target(decision_time=decision, end_time=end, horizon=horizon)
+        )
+        if later is None:
+            past_end.append((str(occurrence.occurrence_id), decision))
+        else:
+            waiting.append((str(occurrence.occurrence_id), decision, later.target_at))
+            # Counted at the instant a wider `within` gives it: the end suggested for the
+            # `past_end` decisions must not drop a fill the window's repair brings back.
+            last_fill = later.target_at if last_fill is None else max(last_fill, later.target_at)
+    return UnresolvedTargets(tuple(waiting), tuple(past_end), last_fill)
+
+
+def _wait(gap: timedelta) -> str:
+    """`2d 23h 59m`: a wait as a reader counts it, to the minute, rounded up."""
+    minutes = math.ceil(gap.total_seconds() / 60)
+    days, rest = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(rest, 60)
+    return " ".join(f"{n}{unit}" for n, unit in ((days, "d"), (hours, "h"), (minutes, "m")) if n)
+
+
+def _window_for(gap: timedelta) -> str:
+    """The smallest `within` in the duration grammar that admits `gap`, in its largest unit."""
+    for unit, size in (("d", timedelta(days=1)), ("h", timedelta(hours=1))):
+        if gap >= size:
+            return f"{math.ceil(gap / size)}{unit}"
+    return f"{max(1, math.ceil(gap / timedelta(minutes=1)))}m"
+
+
+def unresolved_target_failures(
+    unresolved: UnresolvedTargets,
+    fill: FillRule,
+    *,
+    code: str,
+    requirement: str,
+    subject: str,
+    end: datetime,
+    source: FailureSource | None = None,
+) -> list[Failure]:
+    """One failure per cause, each listing only its own occurrences, the same from either door.
+
+    `subject` is how the door names the rule (the judgment names the strategy, the freeze the
+    rule and the end). The occurrences are listed identically by both, which is what lets
+    `check` recognise the freeze restating what the judgments already said.
+    """
+    zone = ZoneInfo(fill.timezone)
+    failures: list[Failure] = []
+    if unresolved.waiting:
+        occurrence, decision, instant = max(unresolved.waiting, key=lambda row: row[2] - row[1])
+        gap = instant - decision
+        failures.append(
+            Failure.bounded(
+                code,
+                requirement,
+                observed=(
+                    f"{subject}; {len(unresolved.waiting)} occurrence(s) whose next such instant "
+                    f"lies beyond `within: {fill.within}` -- the longest wait is {_wait(gap)}, "
+                    f"{occurrence} from {decision.astimezone(zone).isoformat()} to "
+                    f"{instant.astimezone(zone).isoformat()}"
+                ),
+                examples=[row[0] for row in unresolved.waiting],
+                example_total=len(unresolved.waiting),
+                fix=(
+                    "`within` counts wall-clock time from the decision, not sessions, so a weekend "
+                    f"or a holiday outlasts `{fill.within}`: set `within: \"{_window_for(gap)}\"` "
+                    "(the longest wait in this run) or drop it, or decide before the instant the "
+                    "decision should fill at. A later run end does not help these"
+                ),
+                status=Status.PRECONDITION,
+                source=source,
+            )
+        )
+    if unresolved.past_end:
+        first = unresolved.past_end[0][1]
+        last_fill = unresolved.last_fill
+        if last_fill is not None and last_fill + timedelta(seconds=1) < first:
+            kept = (last_fill + timedelta(seconds=1)).astimezone(zone).isoformat()
+            fix = (
+                "end the run after its last fill and before that decision -- "
+                f"`end: \"{kept}\"` keeps every earlier fill -- or, if the execution table has "
+                "instants after "
+                f"{end.isoformat()}, move the end past the one that decision fills at"
+            )
+        else:
+            fix = (
+                f"extend the run end past {end.isoformat()} through the instant the decision "
+                "fills at, move the decision earlier, or loosen the fill's `at`/`after`"
+            )
+        failures.append(
+            Failure.bounded(
+                code,
+                requirement,
+                observed=(
+                    f"{subject}; {len(unresolved.past_end)} occurrence(s) with no such instant "
+                    f"before the run end {end.isoformat()}, the first deciding at "
+                    f"{first.astimezone(zone).isoformat()}"
+                ),
+                examples=[row[0] for row in unresolved.past_end],
+                example_total=len(unresolved.past_end),
+                fix=fix,
+                status=Status.PRECONDITION,
+                source=source,
+            )
+        )
+    return failures
+
+
 def _validate_execution_targets(
     execution_table: ExecutionTable,
     strategy_agenda: FrozenAgenda,
@@ -704,44 +868,25 @@ def _validate_execution_targets(
     execution table once per occurrence -- both slower and vulnerable to observing different
     bytes while preflight is supposed to be proving one run.
     """
-    missing = tuple(
-        occurrence
-        for occurrence in strategy_agenda.occurrences
-        if execution_table.select_target(
-            decision_time=occurrence.evaluation_time,
-            end_time=end,
-            horizon=horizon,
-        )
-        is None
+    unresolved = unresolved_targets(
+        execution_table, strategy_agenda.occurrences, end=end, horizon=horizon
     )
-    if not missing:
+    if not unresolved:
         return
 
-    rule = execution_table.fill.describe()
     raise VqaprError(
         stage=Stage.FREEZE,
-        failures=[
-            Failure.bounded(
-                code="execution.target_outside_horizon",
-                requirement=(
-                    "every strategy occurrence must have an execution instant after it that the "
-                    "fill rule admits, inside the run horizon; extend end through the required "
-                    "execution instant, or loosen `at`/`after`/`within`"
-                ),
-                observed=(f"fill={rule}, end={end.isoformat()}, unresolved={len(missing)}"),
-                examples=[
-                    f"{occurrence.occurrence_id}: {occurrence.evaluation_time.isoformat()}"
-                    for occurrence in missing
-                ],
-                example_total=len(missing),
-                fix=(
-                    f"widen the run end past {end.isoformat()} to cover the required execution "
-                    "instant, move the decision earlier, or loosen the fill's `at`/`after`/"
-                    "`within` so an instant after every decision qualifies"
-                ),
-                status=Status.PRECONDITION,
-            )
-        ],
+        failures=unresolved_target_failures(
+            unresolved,
+            execution_table.fill,
+            code="execution.target_outside_horizon",
+            requirement=(
+                "every strategy occurrence must have an execution instant after it that the "
+                "fill rule admits, inside the run horizon"
+            ),
+            subject=f"fill={execution_table.fill.describe()}, end={end.isoformat()}",
+            end=end,
+        ),
         mutation=False,
         retry_precondition=(
             "extend the run end through the missing execution instant, correct the execution "

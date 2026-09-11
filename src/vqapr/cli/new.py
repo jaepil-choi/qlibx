@@ -171,7 +171,9 @@ runs:
         at: "15:30"                  #   execution instant after it; `at` keeps only instants at
         # after: "10m"               #   this wall time (run timezone) -- STRICTLY LATER than the
         # within: "1d"               #   decision. `after`: minimum gap. `within`: maximum gap,
-                                     #   else the run is refused before it starts
+                                     #   else the run is refused before it starts. Both are
+                                     #   wall-clock time: a Friday decision that fills on Monday
+                                     #   waits about 3d, so `within: 1d` refuses it
     # compliance: [no-short]          # registered Compliance rules that observe the committed
                                      #   book at every market-clock instant; their parameters are
                                      #   their own, never the strategy's

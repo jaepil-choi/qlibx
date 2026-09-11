@@ -39,6 +39,19 @@ reads that table past `end` to find the next session, so the last month inside t
 a month the table stops in the middle of does not. Do not hard-code session dates in the strategy
 to get a month-end.
 
+## When a decision fills: `fill`
+
+`execution.fill` picks the instant of the execution table a decision fills at: the first one after
+the decision, kept to the wall time `at`, at least `after` later and no more than `within` later.
+**`after` and `within` are wall-clock time, not sessions.** A decision at 15:31 that fills at the
+next 15:30 waits about a day from Monday to Thursday and about three over a weekend — longer over
+a holiday — so `within: 1d` refuses every Friday. Leave `within` out unless a late fill must not
+happen at all; when it refuses, `check` names the longest wait in the run.
+
+A decide-after-close, fill-next-close run has no fill for its last decision when it ends with the
+table. End it between that day's fill and its decision — `end: "<last day>T15:30:01+09:00"` for a
+15:30 fill and a 15:31 decision — and `check` names that end when it is the case.
+
 ## No valuation or monitoring time
 
 The book is valued at every instant of the market clock, and the run's declared Compliance rules

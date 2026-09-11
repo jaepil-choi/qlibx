@@ -42,7 +42,11 @@ from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprErro
 # `flow/materialize.py:30`. Two names for one authority is how a later deletion of the
 # adapters misses a caller (`docs/issues/archive/029`).
 from vqapr.extension.loading import load_data_model, load_strategy_model
-from vqapr.flow.declaration.preflight import RunFacts
+from vqapr.flow.declaration.preflight import (
+    RunFacts,
+    unresolved_target_failures,
+    unresolved_targets,
+)
 from vqapr.flow.declaration.roster import absent_roster_failure
 from vqapr.project.run import FINGERPRINT_PREFIX, RunDefinition
 
@@ -330,34 +334,22 @@ def _judge_execution_ordering(
     table = facts.execution_table()
     # Cut from the instants the agenda was derived from, not scanned again (record `238`).
     horizon = facts.horizon()
-    late = [
-        occurrence.occurrence_id
-        for occurrence in occurrences
-        if table.select_target(
-            decision_time=occurrence.evaluation_time, end_time=definition.end, horizon=horizon
-        )
-        is None
-    ]
-    if not late or definition.strategy is None:
+    # Told apart by cause -- a `within` too short for a weekend, or an end nothing is served
+    # before -- by the same classifier the freeze uses, so each gets its own repair (record `259`).
+    unresolved = unresolved_targets(table, occurrences, end=definition.end, horizon=horizon)
+    if not unresolved or definition.strategy is None:
         return []
-    return [
-        Failure.bounded(
-            EXECUTION_NOT_AFTER_DECISION,
-            "every decision must have an execution instant after it that the fill rule admits",
-            observed=(
-                f"strategy {definition.strategy.component_id!r} fills at "
-                f"{table.fill.describe()}; {len(late)} occurrence(s) with no such instant"
-            ),
-            examples=late,
-            example_total=len(late),
-            fix=(
-                "move the decision earlier than the instant it should fill at, extend the run "
-                "end, or loosen the fill's `at`/`after`/`within`"
-            ),
-            status=Status.PRECONDITION,
-            source=_key(at, "strategies", definition.strategy.component_id),
-        )
-    ]
+    return unresolved_target_failures(
+        unresolved,
+        table.fill,
+        code=EXECUTION_NOT_AFTER_DECISION,
+        requirement=(
+            "every decision must have an execution instant after it that the fill rule admits"
+        ),
+        subject=f"strategy {definition.strategy.component_id!r} fills at {table.fill.describe()}",
+        end=definition.end,
+        source=_key(at, "strategies", definition.strategy.component_id),
+    )
 
 
 def _members(definition: RunDefinition) -> list[tuple[str, Any, Any]]:

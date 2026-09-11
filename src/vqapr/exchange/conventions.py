@@ -10,6 +10,9 @@ strategy on a daily table. Three handles narrow it:
     within   a maximum gap; a decision with no candidate inside it has no target, which
              preflight refuses                                     ("fill today or not at all")
 
+`after` and `within` are wall-clock durations, not session counts: a weekend or a holiday counts in
+full, so `within: 1d` refuses a Friday decision whose next candidate is on Monday.
+
 What retired with this module's previous shape: the `SAME_DAY` / `NEXT_ELIGIBLE` selector (the
 difference -- "may it roll to the next day" -- is `within`), the fill's own `timezone` (the run's
 zone reads `at`), and the fold/offset proof (`at` FILTERS real instants by their clock reading

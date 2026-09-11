@@ -159,7 +159,19 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
             # handling for. Re-wrapping would replace an actionable refusal with a vaguer one.
             # Every entry below is `Failure.as_dict()` -- the envelope's one failure shape, not a
             # copy of it.
-            failures.extend(failure.as_dict() for failure in error.failures)
+            refused = list(error.failures)
+            if phase.name == "preflight":
+                # The freeze proves again what the judgments already answered, for callers that
+                # freeze without judging. Occurrences the judgments listed are not listed a second
+                # time under the freeze's code (record `259`: 403 of them were, and the second
+                # listing's repair was wrong for 402).
+                listed = {tuple(entry["examples"]) for entry in failures if entry["examples"]}
+                refused = [
+                    failure
+                    for failure in refused
+                    if not (failure.examples and tuple(failure.examples) in listed)
+                ]
+            failures.extend(failure.as_dict() for failure in refused)
             continue
         except InputError as error:
             # An input refusal's own body, kept whole: the same code, source and fields it would

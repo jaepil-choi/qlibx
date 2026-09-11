@@ -327,10 +327,10 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     failure = error.failures[0]
     assert failure.code == "execution.target_outside_horizon"
     assert failure.example_total == 1
-    assert failure.examples == ("preflight.agenda-2024-03-05T1530: 2024-03-05T15:30:00+09:00",)
+    assert failure.examples == ("preflight.agenda-2024-03-05T1530",)
     assert "fill=the first execution instant after the decision" in (failure.observed or "")
     assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
-    assert "extend end" in failure.requirement
+    assert "extend the run end" in failure.fix
 
 
 def test_preflight_requires_academic_exchange_and_initial_account_compatibility(

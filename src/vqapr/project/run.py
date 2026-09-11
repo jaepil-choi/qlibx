@@ -323,7 +323,8 @@ class RunFill(BaseModel):
     Absent, a decision fills at the first market-clock instant after it. `at` keeps only the
     instants whose venue-local wall time (the run's zone) is this one; `after` is a minimum
     elapsed time; `within` a maximum gap -- a decision with no candidate inside it has no target,
-    which preflight refuses. Durations share `agenda.every`'s grammar: `10m`, `2h`, `1d`.
+    which preflight refuses. Durations share `agenda.every`'s grammar: `10m`, `2h`, `1d`, and are
+    wall-clock time, not sessions: a weekend counts (record `259`).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=False)

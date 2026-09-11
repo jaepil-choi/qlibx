@@ -68,7 +68,11 @@ Controls, on fresh copies of the same workspace:
 | `vqapr run sample-run --jobs 2`, then `vqapr run sample-run-2 --jobs 2` | both | opens both |
 
 The single-run `--jobs 2` envelope carries no `jobs` key, so a batch of one does not seem to use
-the pool. Reproduced 1 of 1 on the sample and once in the FF3 workspace with six runs.
+the pool. Reproduced 1 of 1 on the sample, and seen in two independent FF3 workspaces:
+
+- `vqapr-ff3-runs/B-1`: six portfolio runs under `--jobs 6`, none with `run.json`.
+- `vqapr-ff3-runs/B-2`: six portfolio runs (`ff3-s1` … `ff3-b3`) under `--jobs 3`, none with
+  `run.json`. That workspace's DataModel run, `ff3-classify-run`, was run on its own and has one.
 
 ## Impact
 

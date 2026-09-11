@@ -1,6 +1,6 @@
 # `Rebalance.of` refuses a zero weight that `Rebalance.signed` keeps, and the refusal does not say how to hold a name at zero
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop` `ee2e2711`.** `authoring/result.py::_relative_side` refuses `conviction <= 0` with the side-selection sentence, and `Rebalance.signed` keeps a zero as a flat position (its own docstring). Which way it closes — `of` accepts a zero as a flat position, or the refusal says how to hold none — waits for the owner.
 
 | | |
 |---|---|

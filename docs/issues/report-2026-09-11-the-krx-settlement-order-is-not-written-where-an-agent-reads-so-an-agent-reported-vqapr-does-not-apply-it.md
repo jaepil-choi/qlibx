@@ -1,6 +1,6 @@
 # The KRX settlement order is not written anywhere an agent reads, so an agent reported that vqapr does not apply two rules it does apply
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop` `ee2e2711`.** Sells settle before buys (`exchange/venues/krx.py::_settlement_order`), buys are funded largest money delta first (`exchange/planning.py::_buy_order`), and the fill batch is sorted back into instrument order before it is recorded (`krx.py`, "Back into identity order"); no shipped skill states either rule. The skill half is fixed directly; a trim marker in the record changes the record's shape and waits for the owner.
 
 | | |
 |---|---|

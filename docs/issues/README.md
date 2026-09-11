@@ -43,6 +43,17 @@
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
+### 2026-09-11의 번호 없는 보고 넷 — incremental testbed(`0.14.4` wheel, `b8b47e6c`) — 접수
+
+기존 workspace에 전략 하나를 더하는 A/B(`kwam-enhanced-index/vqapr-incr-testbed`). 넷 다 소스에서 확인했다.
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| `report-2026-09-11-a-decide-after-close-run-is-refused-on-every-friday-...` | decide-after-close run이 `within: 1d`로 금요일마다 거절되고, 같은 occurrence의 두 번째 거절이 run end를 가리킨다 | **접수.** 두 문(`judgments`의 ordering, `preflight`의 target)이 같은 occurrence를 각자 거절 | — |
+| `report-2026-09-11-rebalance-of-refuses-a-zero-weight-...` | `Rebalance.of`가 `signed`는 받는 0 비중을 거절하고, 0으로 두는 법을 말하지 않는다 | **접수 — 오너 판정 대기**(0을 받을지, 거절문만 고칠지) | — |
+| `report-2026-09-11-the-krx-settlement-order-is-not-written-...` | KRX 체결 순서(매도 먼저, 큰 매수 먼저)가 agent가 읽는 곳에 없다 | **접수.** skill 절반은 바로; record의 trim 표시는 record 모양이 바뀌어 오너 판정 대기 | — |
+| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 오너 판정 대기**(측정; 실행 가능한 예제/scaffold 옵션은 제품 방향) | — |
+
 ### 2026-09-11의 번호 없는 보고 하나 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수 후 닫힘
 
 | 파일 | 제목 | 상태 | 닫은 것 |

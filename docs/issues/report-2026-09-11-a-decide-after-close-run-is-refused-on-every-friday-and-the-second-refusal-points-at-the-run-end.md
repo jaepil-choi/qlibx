@@ -1,6 +1,6 @@
 # A decide-after-close run is refused on every Friday by `within: 1d`, and the second refusal for the same occurrences says to widen a run end that is not the problem
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop` `ee2e2711`.** Two doors refuse the same occurrences: `flow/declaration/judgments.py::_judge_execution_ordering` (`execution.not_after_decision`) and `flow/declaration/preflight.py::_validate_execution_targets` (`execution.target_outside_horizon`) each list every occurrence `select_target` cannot bind, and the second's `fix` names the run end whether the missing instant lies inside the horizon or past it. Neither says what `within` measures or names the end record `237` describes.
 
 | | |
 |---|---|

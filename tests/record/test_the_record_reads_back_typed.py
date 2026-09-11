@@ -163,6 +163,38 @@ def test_a_buffer_over_the_spill_line_lands_as_parts_that_the_end_folds_into_one
     assert pa.types.is_timestamp(pq.read_schema(directory / COMPACT_FILENAME).field("when").type)
 
 
+def test_the_end_folds_the_parts_without_reading_any_of_them_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `255`. The fold read every spilled part back whole and joined them to the buffer
+    before one write, so a run that spilled -- the valve that exists to bound its memory -- peaked
+    higher at the end than one that never did. A part is now copied a row group at a time; reading
+    one whole is the thing that must not happen, so it raises here. The column typed only by the
+    buffer's chunk still types the parts' nulls."""
+    from vqapr.record import writer as writer_module
+
+    writer = RunRecordWriter(tmp_path, "folded", spill_bytes=1)
+    writer.open()
+    writer.append("probe", [{"n": 1, "when": None}])
+    writer.append("probe", [{"n": 2, "when": None}])
+    # Two parts on disk; the third chunk stays in the buffer, where the column gets its type.
+    object.__setattr__(writer, "spill_bytes", 1 << 40)
+    writer.append("probe", [{"n": 3, "when": AT}])
+
+    def whole(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a spilled part was read back whole")
+
+    monkeypatch.setattr(writer_module.pq, "read_table", whole)
+    writer.release()
+
+    directory = writer.directory / TABLES_DIRECTORY / "probe"
+    assert sorted(path.name for path in directory.iterdir()) == [COMPACT_FILENAME]
+    rows = list(read_table(tmp_path, "folded", "probe"))
+    assert [row["n"] for row in rows] == [1, 2, 3]
+    assert rows[0]["when"] is None and rows[2]["when"] == AT
+    assert pa.types.is_timestamp(pq.read_schema(directory / COMPACT_FILENAME).field("when").type)
+
+
 def test_a_compact_file_beside_leftover_parts_is_read_alone(tmp_path: Path) -> None:
     """A seal interrupted between writing `all.parquet` and removing the parts must not double
     the rows: the compact file is the table, the parts were its input."""

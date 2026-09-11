@@ -178,6 +178,26 @@ def _write_parquet(tables: Sequence[pa.Table], target: Path) -> None:
     os.replace(staging, target)
 
 
+def _write_compact(parts: Sequence[Path], buffered: Sequence[pa.Table], target: Path) -> None:
+    """Spilled parts, then the buffer, as one complete file -- holding one row group of a part at
+    a time rather than every part at once (record `255`). Moved into place like `_write_parquet`."""
+    if not parts:
+        _write_parquet(buffered, target)
+        return
+    schema = _unified_schema(
+        [pq.read_schema(part) for part in parts] + [table.schema for table in buffered]
+    )
+    staging = target.with_name(f".{target.name}.tmp")
+    with pq.ParquetWriter(staging, schema, compression="zstd") as out:
+        for part in parts:
+            source = pq.ParquetFile(part)
+            for index in range(source.num_row_groups):
+                out.write_table(_conform(source.read_row_group(index), schema))
+        if buffered:
+            out.write_table(pa.concat_tables([_conform(table, schema) for table in buffered]))
+    os.replace(staging, target)
+
+
 
 @dataclass(frozen=True, slots=True)
 class RunRecordWriter:
@@ -440,15 +460,20 @@ class RunRecordWriter:
         Written before the record and before the lock goes, on the success path and the failure
         path alike. Spill parts are removed only once the compact file is in place, and a reader
         prefers the compact file, so a crash in between loses nothing and repeats nothing.
+
+        **A part's row group at a time** (record `255`). The parts were read back whole and joined
+        to the buffer before one write, so the spill -- the valve that exists to bound a run's
+        memory -- raised the peak at the end instead: a run spilling every 16 MB peaked higher
+        than one that never spilled (the 2026-09-11 memory report, measured).
         """
         for table_id in sorted(set(self._buffer.tables) | set(self._parts)):
             directory = self.directory / TABLES_DIRECTORY / table_id
             parts = sorted(directory.glob(f"[0-9]*{PART_SUFFIX}")) if directory.is_dir() else []
-            tables = [pq.read_table(part) for part in parts] + self._buffer.tables.get(table_id, [])
-            if not tables:
+            buffered = self._buffer.tables.get(table_id, [])
+            if not parts and not buffered:
                 continue
             directory.mkdir(parents=True, exist_ok=True)
-            _write_parquet(tables, directory / COMPACT_FILENAME)
+            _write_compact(parts, buffered, directory / COMPACT_FILENAME)
             for part in parts:
                 part.unlink()
         self._buffer.tables.clear()

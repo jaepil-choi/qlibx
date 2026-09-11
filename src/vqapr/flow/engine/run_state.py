@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 from itertools import count
 from types import MappingProxyType
@@ -262,6 +263,12 @@ def _fill_rows(
     `None` stays legal and means the run genuinely did not know: no roster reached the venue, or
     the roster described no category for this id. That is a fact worth recording rather than a
     reason to refuse, because a venue charging one flat rate does not need a category at all.
+
+    The numbers go in as `Decimal` (record `264`). The ledger keeps its facts as text, and these
+    rows used to copy that text, so the recorder saw strings and wrote untagged string columns:
+    every reader got `"15900.0"` for a price while `nav` came back a `Decimal`, and three testbed
+    agents' exporters broke on the difference. A `Decimal` is recorded as the same exact text, now
+    tagged, so `read_table` restores it.
     """
     rows = []
     stamp = dict(envelope or {})
@@ -276,13 +283,13 @@ def _fill_rows(
                     "instrument": str(detail["instrument"]),
                     "kind": detail.get("kind"),
                     "account_version": int(version),
-                    "requested_quantity": str(detail["requested_quantity"]),
-                    "sized_quantity": detail.get("sized_quantity"),
-                    "dealt_quantity": str(detail["dealt_quantity"]),
-                    "price": detail.get("price"),
-                    "cash_delta": str(entry.cash),
-                    "commission": detail.get("commission"),
-                    "tax": detail.get("tax"),
+                    "requested_quantity": _number(detail["requested_quantity"]),
+                    "sized_quantity": _number(detail.get("sized_quantity")),
+                    "dealt_quantity": _number(detail["dealt_quantity"]),
+                    "price": _number(detail.get("price")),
+                    "cash_delta": entry.cash,
+                    "commission": _number(detail.get("commission")),
+                    "tax": _number(detail.get("tax")),
                     "reason": detail.get("reason"),
                     **stamp,
                     **({"sequence": position()} if stamp else {}),
@@ -290,6 +297,11 @@ def _fill_rows(
             )
         )
     return tuple(rows)
+
+
+def _number(value: object) -> Decimal | None:
+    """A ledger detail number as the `Decimal` it was written from; `None` stays `None`."""
+    return None if value is None else Decimal(str(value))
 
 
 class RunStateRepository:

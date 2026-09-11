@@ -46,9 +46,9 @@ def table(store, run_id, name, ref=None) -> pd.DataFrame:
   UTC, and the report's opening instant carries a fixed offset. Mixed zone objects make pandas
   refuse, or fall back to an `object` index that no join matches. Convert back to local time only
   for axis labels.
-- **Some numbers come back as text.** `vqapr.weight.weight`, and in `vqapr.fill` the quantities and
-  `cash_delta` — on some venues `price`, `commission` and `tax` too — are plain strings.
-  `.astype(float)` them here and nowhere earlier.
+- **Every number comes back a `Decimal`** — in `vqapr.fill`, `vqapr.weight` and `vqapr.account`
+  alike, from a record of any version. A `Decimal` column is `object` dtype in pandas:
+  `.astype(float)` it here, at the rendering edge, and nowhere earlier.
 
 ## Held weights — instrument × valuation
 

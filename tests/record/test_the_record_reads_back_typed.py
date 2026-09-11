@@ -109,6 +109,40 @@ def test_a_decimal_weight_of_one_third_keeps_every_digit(tmp_path: Path) -> None
     assert row["weight"] == third
 
 
+def test_a_record_written_before_264_reads_its_text_numbers_back_as_decimal(tmp_path: Path) -> None:
+    """Record `264`. The fill and weight writers stringified their numbers, so an older record
+    holds them as untagged text; the reader restores the package's columns by name. A table of the
+    author's own with a column of the same name holds the author's text, and stays text."""
+    writer = RunRecordWriter(tmp_path, "old")
+    writer.open()
+    writer.append(
+        "vqapr.fill",
+        [
+            {
+                "instrument": "A",
+                "dealt_quantity": "12",
+                "price": "15900.0",
+                "cash_delta": "-190857.24",
+                "commission": "57.24",
+                "reason": None,
+                "event_time": AT,
+            }
+        ],
+    )
+    writer.append("vqapr.weight", [{"instrument": "A", "weight": "0.25", "event_time": AT}])
+    writer.append("notes", [{"price": "15900.0", "event_time": AT}])
+    writer.release()
+
+    (fill,) = read_table(tmp_path, "old", "vqapr.fill")
+    assert fill["dealt_quantity"] == Decimal("12") and isinstance(fill["price"], Decimal)
+    assert fill["cash_delta"] == Decimal("-190857.24") and fill["commission"] == Decimal("57.24")
+    assert fill["reason"] is None and fill["instrument"] == "A"
+    (weight,) = read_table(tmp_path, "old", "vqapr.weight")
+    assert weight["weight"] == Decimal("0.25")
+    (note,) = read_table(tmp_path, "old", "notes")
+    assert note["price"] == "15900.0", "a table of the author's own is read as written"
+
+
 def test_a_table_is_one_file_written_when_the_run_ends_and_a_column_keeps_its_first_type(
     tmp_path: Path,
 ) -> None:

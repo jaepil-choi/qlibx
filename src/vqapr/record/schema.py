@@ -408,10 +408,24 @@ def _arrow_table(
     return pa.Table.from_arrays(arrays, schema=pa.schema(fields))
 
 
-def _python_rows(batch: pa.RecordBatch) -> Iterator[dict[str, Any]]:
-    """Rows back as the values they were written from, `Decimal` included."""
+def _python_rows(
+    batch: pa.RecordBatch, recorded_as_text: frozenset[str] = frozenset()
+) -> Iterator[dict[str, Any]]:
+    """Rows back as the values they were written from, `Decimal` included.
+
+    `recorded_as_text` names number columns a record written before record `264` holds as
+    untagged text; such a column is restored as `Decimal` as well, so an old record and a new one
+    read the same. A tagged column needs no name.
+    """
     decimal_columns = {
-        field.name for field in batch.schema if field.metadata and field.metadata == _DECIMAL
+        field.name
+        for field in batch.schema
+        if (field.metadata and field.metadata == _DECIMAL)
+        or (
+            field.name in recorded_as_text
+            and pa.types.is_string(field.type)
+            and not field.metadata
+        )
     }
     for row in batch.to_pylist():
         for column in decimal_columns:

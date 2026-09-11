@@ -649,8 +649,31 @@ def read_table(
                 "file that does not open means it was edited or truncated; restore it, or "
                 "re-run under a new run id"
             ) from damaged
+        recorded_as_text = RECORDED_AS_TEXT.get(table_id, frozenset())
         for batch in reader.iter_batches():
-            yield from _python_rows(batch)
+            yield from _python_rows(batch, recorded_as_text)
+
+
+RECORDED_AS_TEXT: Mapping[str, frozenset[str]] = {
+    "vqapr.fill": frozenset(
+        {
+            "requested_quantity",
+            "sized_quantity",
+            "dealt_quantity",
+            "price",
+            "cash_delta",
+            "commission",
+            "tax",
+        }
+    ),
+    "vqapr.weight": frozenset({"weight"}),
+}
+"""The package's number columns a record written before record `264` holds as untagged text.
+
+The writers stringified them (`str(weight)`, the ledger's text copied into the fill rows), so the
+column carried no `vqapr.type: decimal` and read back as `str` while `nav` beside it read back as
+`Decimal`. They are the package's own tables, so they are known by name; `read_table` restores them
+when untagged, and a record written since carries the tag itself."""
 
 
 read_typed_table = read_table

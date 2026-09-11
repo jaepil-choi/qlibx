@@ -46,8 +46,9 @@ rows = read_strategy_table(store_root, run_id, "vqapr.fill", strategy_ref)
 A root, run id or ref that names no record is refused (`RunRecordMissing`) naming what was found
 instead — **so an empty frame means an empty table and nothing else.**
 
-`read_strategy_table` decodes by the column types the writer recorded beside the table, so `nav`
-comes back a `Decimal` and `observed_at` an aware `datetime`.
+`read_strategy_table` decodes by the column types the writer recorded beside the table, so **every
+number** — `nav`, a fill's `price`, `commission` and quantities, a `weight` — comes back a
+`Decimal`, and `observed_at` an aware `datetime`. It is a generator: `list(...)` it to count rows.
 
 ## Reading the parquet yourself
 

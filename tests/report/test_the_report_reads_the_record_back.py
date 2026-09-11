@@ -68,7 +68,8 @@ def _position(at: datetime, version: int, name: str, quantity: str, price: str |
 
 
 def _fill(at, version, name, requested, dealt, price, cash_delta, commission, tax, reason=None):
-    # Text, the way the recorder writes the fill table (`vqapr.weight` too).
+    # Text, the way a record written before record `264` holds the fill table (`vqapr.weight`
+    # too); the reader restores these columns by name, so this fixture reads as a current one.
     return {
         "event_time": at,
         "instrument": name,

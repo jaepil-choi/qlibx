@@ -309,9 +309,11 @@ class CallbackHandler:
             weight = getattr(target, "weight", None)
             if weight is None:
                 continue
+            # The weight as the `Decimal` it is, so the column is recorded as a number and reads
+            # back as one (record `264`); `str(weight)` made it untagged text.
             recorder.append(
                 f"{DEFAULT_TABLE_PREFIX}weight",
-                {"instrument": target.instrument_id, "weight": str(weight)},
+                {"instrument": target.instrument_id, "weight": weight},
             )
         # `vqapr.account` carries measurements only, and this path contributes one just in the
         # case where nobody else did: every fill records the NAV it was marked at (record `148`,

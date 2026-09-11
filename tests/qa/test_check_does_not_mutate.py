@@ -23,11 +23,12 @@ import pytest
 
 from vqapr.cli.check import check
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import InputError
+from vqapr.domain.wiring import Role
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
 from vqapr.public import register_dataset as pub_register_dataset
@@ -99,11 +100,11 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         t.register_component(
             ComponentRef.of(
                 "evil",
-                ComponentKind.STRATEGY_MODEL,
+                Role.STRATEGY_MODEL,
                 source,
                 "Strategy",
                 fingerprint=fingerprint_component(
-                    source, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
+                    source, kind=Role.STRATEGY_MODEL, object_name="Strategy"
                 ),
             )
         )
@@ -123,11 +124,11 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
         t.register_component(
             ComponentRef.of(
                 "venue",
-                ComponentKind.EXCHANGE,
+                Role.EXCHANGE,
                 venue_source,
                 "Venue",
                 fingerprint=fingerprint_component(
-                    venue_source, kind=ComponentKind.EXCHANGE, object_name="Venue"
+                    venue_source, kind=Role.EXCHANGE, object_name="Venue"
                 ),
             )
         )

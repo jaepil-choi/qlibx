@@ -25,7 +25,7 @@ from vqapr.component._validation import (
     _identifier,
 )
 from vqapr.component.account_view import EconomicAccountView
-from vqapr.component.base import Tool
+from vqapr.component.base import Call, Tool
 from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow
 from vqapr.domain.wiring import Role
@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 
-class ComplianceCall(ABC):
+class ComplianceCall(Call, ABC):
     """The complete, bounded capability surface for one Compliance observation.
 
     An abstract contract, like `DataCall` and `StrategyCall`; `vqapr.flow.run.calls` supplies

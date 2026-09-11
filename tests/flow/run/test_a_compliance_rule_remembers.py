@@ -32,7 +32,7 @@ from vqapr.authoring import (
     Hold,
     StrategyModel,
 )
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
@@ -41,6 +41,7 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure, SimulationStage
 from vqapr.flow.engine.run_state import LifecycleKind, RunStateRepository
@@ -109,7 +110,7 @@ class MutateThenFail(ThreeStrikes):
         raise RuntimeError("observe fault after the mutation")
 
 
-def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+def _component(raw_id: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
 
 
@@ -168,11 +169,11 @@ def _flow(
     frozen = FrozenRun(
         run_id="remembered",
         strategy=FrozenStrategy(
-            config=StrategyConfig(_component("strategy", ComponentKind.STRATEGY_MODEL), "strategy"),
-            compliance=ComplianceSet((_component(RULE, ComponentKind.COMPLIANCE),)),
+            config=StrategyConfig(_component("strategy", Role.STRATEGY_MODEL), "strategy"),
+            compliance=ComplianceSet((_component(RULE, Role.COMPLIANCE),)),
             agenda=FrozenAgenda("strategy", occurrences, timezone="Asia/Seoul"),
         ),
-        exchange=_component("exchange", ComponentKind.EXCHANGE),
+        exchange=_component("exchange", Role.EXCHANGE),
         execution=_execution_input(root, sessions),
         start=occurrences[0].evaluation_time,
         end=_fill_instant(sessions[-1]) + timedelta(hours=1),

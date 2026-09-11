@@ -12,7 +12,7 @@ import pytest
 from vqapr.component.exchange.academic import AcademicExchange
 from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.loading import load_exchange
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.source import SourceSpec
@@ -21,6 +21,7 @@ from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.fill import FillRule
 from vqapr.domain.memory import prepare_model_state
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.preflight import derived_agenda, preflight_run
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
@@ -31,7 +32,7 @@ SESSION = date(2024, 3, 5)
 """The one session the execution fixture prices: 09:30 and 15:30 on this day."""
 
 
-def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef:
+def _component(root: Path, identifier: str, kind: Role) -> ComponentRef:
     path = root / f"{identifier}.py"
     source = (
         "from vqapr.authoring import Hold\n"
@@ -41,7 +42,7 @@ def _component(root: Path, identifier: str, kind: ComponentKind) -> ComponentRef
         "        return ()\n"
         "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
-        if kind is ComponentKind.STRATEGY_MODEL
+        if kind is Role.STRATEGY_MODEL
         else "from vqapr.authoring import Compliance\n"
         f"class {identifier.title().replace('-', '')}(Compliance):\n"
         "    @property\n"
@@ -89,8 +90,8 @@ def _setup(
     the strategy clock is `every: 1d` at `at`.
     """
     workspace = Workspace.create(root)
-    strategy_component = _component(root, "strategy", ComponentKind.STRATEGY_MODEL)
-    rule_component = _component(root, "limit", ComponentKind.COMPLIANCE)
+    strategy_component = _component(root, "strategy", Role.STRATEGY_MODEL)
+    rule_component = _component(root, "limit", Role.COMPLIANCE)
     for component in (strategy_component, rule_component):
         with Workspace.transaction(workspace) as t:
             t.register_component(component)
@@ -179,11 +180,11 @@ def _execution_exchange(
     )
     component = ComponentRef.of(
         identifier,
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         path,
         "Exchange",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+            path, kind=Role.EXCHANGE, object_name="Exchange"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -275,7 +276,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
         frozen,
         sources=(SourceSpec.of("prices-source", tmp_path / "changed.parquet"),),
     )
-    exchange = _component(tmp_path, "exchange", ComponentKind.EXCHANGE)
+    exchange = _component(tmp_path, "exchange", Role.EXCHANGE)
     execution = ExecutionTable.of(
         "execution",
         ExecutionTableSpec(
@@ -369,11 +370,11 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     duck = ComponentRef.of(
         "duck",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         duck_path,
         "Duck",
         fingerprint=fingerprint_component(
-            duck_path, kind=ComponentKind.EXCHANGE, object_name="Duck"
+            duck_path, kind=Role.EXCHANGE, object_name="Duck"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -424,11 +425,11 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     no_sell = ComponentRef.of(
         "no-sell",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         no_sell_path,
         "Exchange",
         fingerprint=fingerprint_component(
-            no_sell_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+            no_sell_path, kind=Role.EXCHANGE, object_name="Exchange"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -610,11 +611,11 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     )
     component = ComponentRef.of(
         "limited",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         path,
         "Exchange",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+            path, kind=Role.EXCHANGE, object_name="Exchange"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -638,11 +639,11 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     )
     off = ComponentRef.of(
         "unlimited",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         off_path,
         "Exchange",
         fingerprint=fingerprint_component(
-            off_path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+            off_path, kind=Role.EXCHANGE, object_name="Exchange"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -678,11 +679,11 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
     )
     component = ComponentRef.of(
         "tracked",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         path,
         "Exchange",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.EXCHANGE, object_name="Exchange"
+            path, kind=Role.EXCHANGE, object_name="Exchange"
         ),
     )
     with Workspace.transaction(workspace) as t:
@@ -724,11 +725,11 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     )
     rule = ComponentRef.of(
         "limit",
-        ComponentKind.COMPLIANCE,
+        Role.COMPLIANCE,
         rule_path,
         "Limit",
         fingerprint=fingerprint_component(
-            rule_path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
+            rule_path, kind=Role.COMPLIANCE, object_name="Limit"
         ),
     )
     workspace._components[rule.component_id] = rule
@@ -960,11 +961,11 @@ def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
     )
     drifted = ComponentRef.of(
         "limit",
-        ComponentKind.COMPLIANCE,
+        Role.COMPLIANCE,
         path,
         "Drifted",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.COMPLIANCE, object_name="Drifted"
+            path, kind=Role.COMPLIANCE, object_name="Drifted"
         ),
     )
     with Workspace.transaction(workspace) as t:

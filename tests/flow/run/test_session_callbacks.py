@@ -11,7 +11,7 @@ from vqapr.authoring import (
     Rebalance,
     StrategyModel,
 )
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -20,6 +20,7 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.calls import StrategyModelContext
@@ -76,7 +77,7 @@ def _occurrence(number: int) -> OperationOccurrence:
     )
 
 
-def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+def _component(raw_id: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(
         raw_id,
         kind,
@@ -97,7 +98,7 @@ def _flow(
         run_id="test",
         strategy=FrozenStrategy(
                 config=StrategyConfig(
-                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    _component("strategy", Role.STRATEGY_MODEL),
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),
@@ -184,7 +185,7 @@ def test_the_documented_memory_example_runs_on_the_first_callback() -> None:
     it the way `orchestration` does.
     """
     layer = FrozenStrategy(
-        config=StrategyConfig(_component("strategy", ComponentKind.STRATEGY_MODEL), "strategy"),
+        config=StrategyConfig(_component("strategy", Role.STRATEGY_MODEL), "strategy"),
         compliance=ComplianceSet(()),
         agenda=FrozenAgenda("strategy", (_occurrence(1),)),
     )

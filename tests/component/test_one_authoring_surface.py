@@ -19,8 +19,8 @@ import pytest
 import vqapr.authoring as authoring
 import vqapr.public as public
 from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
+from vqapr.domain.wiring import Role
 from vqapr.public import register_compliance, register_data_model, register_strategy_model
 
 # --------------------------------------------------------------------------------------
@@ -58,9 +58,9 @@ def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
 # --------------------------------------------------------------------------------------
 
 _SCAFFOLDED_KINDS = (
-    ComponentKind.STRATEGY_MODEL,
-    ComponentKind.DATA_MODEL,
-    ComponentKind.COMPLIANCE,
+    Role.STRATEGY_MODEL,
+    Role.DATA_MODEL,
+    Role.COMPLIANCE,
 )
 
 
@@ -82,9 +82,9 @@ def test_the_three_scaffolds_declare_and_read_the_same_way() -> None:
 
 def test_each_scaffold_differs_only_in_its_own_verb() -> None:
     verbs = {
-        ComponentKind.STRATEGY_MODEL: ("def decide(self, call)",),
-        ComponentKind.DATA_MODEL: ("def compute(self, context)",),
-        ComponentKind.COMPLIANCE: ("def observe(self, call",),
+        Role.STRATEGY_MODEL: ("def decide(self, call)",),
+        Role.DATA_MODEL: ("def compute(self, context)",),
+        Role.COMPLIANCE: ("def observe(self, call",),
     }
     for kind, expected in verbs.items():
         source = render(kind, "sample", dataset_id="px")

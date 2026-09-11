@@ -14,7 +14,8 @@ import pytest
 
 from vqapr.cli.main import main
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import Role
 from vqapr.project.store import Workspace
 
 STRATEGY = '''
@@ -50,7 +51,7 @@ def _register(
     component_id: str,
     source: Path,
     *,
-    kind: ComponentKind = ComponentKind.STRATEGY_MODEL,
+    kind: Role = Role.STRATEGY_MODEL,
     object_name: str = "Wide",
 ) -> None:
     space = Workspace.create(root) if not (root / ".vqapr").exists() else Workspace.open(root)
@@ -97,7 +98,7 @@ def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused
     _register(tmp_path, "wide", source)
     venue = tmp_path / "venue.py"
     venue.write_text(EXCHANGE, encoding="utf-8")
-    _register(tmp_path, "venue", venue, kind=ComponentKind.EXCHANGE, object_name="Venue")
+    _register(tmp_path, "venue", venue, kind=Role.EXCHANGE, object_name="Venue")
 
     code = main(["--project-root", str(tmp_path), "show", "model", "venue"])
     refused = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -120,7 +121,7 @@ def test_list_components_filters_by_kind_so_the_wrong_ref_is_never_assembled(
     _register(tmp_path, "wide", source)
     venue = tmp_path / "venue.py"
     venue.write_text(EXCHANGE, encoding="utf-8")
-    _register(tmp_path, "venue", venue, kind=ComponentKind.EXCHANGE, object_name="Venue")
+    _register(tmp_path, "venue", venue, kind=Role.EXCHANGE, object_name="Venue")
 
     def listed(*argv: str) -> dict:
         main(["--project-root", str(tmp_path), "list", *argv])

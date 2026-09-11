@@ -13,8 +13,8 @@ import inspect
 
 from vqapr.authoring import Compliance, Component, DataModel, Part, StrategyModel, Tool
 from vqapr.component.exchange.base import Exchange
-from vqapr.component.reference import ComponentKind
 from vqapr.domain.wiring import (
+    EXTENSION_POINTS,
     MARKET_CLOCK_ORDER,
     WIRING,
     Clock,
@@ -86,10 +86,10 @@ def test_every_authored_class_points_at_the_row_it_implements() -> None:
         assert role_class.wiring() is WIRING[role]
 
 
-def test_every_registrable_kind_is_a_row_and_accrual_is_not_yet_a_kind() -> None:
-    """Four doors, five rows (design §8: 넷 + Accrual 자리)."""
-    assert {kind.role for kind in ComponentKind} == set(Role) - {Role.ACCRUAL}
-    assert ComponentKind.STRATEGY_MODEL.role is Role.STRATEGY_MODEL
+def test_every_extension_point_is_a_row_and_accrual_is_not_yet_one() -> None:
+    """Four doors, five rows (design §8: 넷 + Accrual 자리), named by one enum since record `272`."""
+    assert set(EXTENSION_POINTS) == set(Role) - {Role.ACCRUAL}
+    assert len(EXTENSION_POINTS) == len(set(EXTENSION_POINTS))
 
 
 def test_the_loop_calls_the_market_clock_roles_in_the_tables_order() -> None:

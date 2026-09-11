@@ -16,7 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import Role
 from vqapr.project.store import Workspace
 
 SOURCE = "class Model:\n    factor = {value}\n"
@@ -25,12 +26,12 @@ SOURCE = "class Model:\n    factor = {value}\n"
 def _ref(path: Path) -> ComponentRef:
     return ComponentRef(
         component_id="mom",
-        kind=ComponentKind.STRATEGY_MODEL,
+        kind=Role.STRATEGY_MODEL,
         path=path,
         object_name="Model",
         config={},
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.STRATEGY_MODEL, object_name="Model", config={}
+            path, kind=Role.STRATEGY_MODEL, object_name="Model", config={}
         ),
     )
 

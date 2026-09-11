@@ -16,7 +16,6 @@ temporary file stopped existing rather than being renewed. See
 from __future__ import annotations
 
 from collections.abc import Mapping
-from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
@@ -24,22 +23,7 @@ from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 
 from vqapr.domain.identifiers import ComponentId, component_id
 from vqapr.domain.memory import ModelMemory, normalize_memory
-from vqapr.domain.wiring import Role
-
-
-class ComponentKind(StrEnum):
-    """The registrable kinds: the four rows of the wiring table an author can write. `ACCRUAL`
-    is a row with no kind -- a place, not yet a door (design §7.3)."""
-
-    DATA_MODEL = "data_model"
-    STRATEGY_MODEL = "strategy_model"
-    EXCHANGE = "exchange"
-    COMPLIANCE = "compliance"
-
-    @property
-    def role(self) -> Role:
-        """This kind's row of the wiring table."""
-        return Role(self.value)
+from vqapr.domain.wiring import EXTENSION_POINTS, Role
 
 
 class ComponentRef(BaseModel):
@@ -58,7 +42,7 @@ class ComponentRef(BaseModel):
     )
 
     component_id: ComponentId
-    kind: ComponentKind
+    kind: Role
     path: Path
     object_name: str
     config: Mapping[str, ModelMemory] = MappingProxyType({})
@@ -68,6 +52,17 @@ class ComponentRef(BaseModel):
     @classmethod
     def _clean_id(cls, value: object) -> object:
         return component_id(value) if isinstance(value, str) else value
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _registrable(cls, value: object) -> object:
+        # `Role` has a fifth row, `ACCRUAL`, a place and not a door (design §7.3). Refused here,
+        # naming the four a component registers as, before the enum would accept it. A StrEnum
+        # member equals its value, so a stored string and a member both pass.
+        if value in EXTENSION_POINTS:
+            return value
+        allowed = ", ".join(repr(role.value) for role in EXTENSION_POINTS)
+        raise ValueError(f"kind must be one of {allowed}; got {value!r}")
 
     @field_validator("object_name")
     @classmethod
@@ -112,15 +107,15 @@ class ComponentRef(BaseModel):
     def of(
         cls,
         raw_component_id: str,
-        kind: ComponentKind,
+        kind: Role,
         path: str | Path,
         object_name: str,
         *,
         config: Mapping[str, object] | None = None,
         fingerprint: str,
     ) -> ComponentRef:
-        if not isinstance(kind, ComponentKind):
-            raise TypeError("kind must be a ComponentKind")
+        if not isinstance(kind, Role) or kind not in EXTENSION_POINTS:
+            raise TypeError("kind must be a Role a component registers as (EXTENSION_POINTS)")
         # Raw values in, the `mode="before"` validators above make them the fields' types.
         return cls.model_validate(
             {

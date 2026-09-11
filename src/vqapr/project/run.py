@@ -36,7 +36,7 @@ from pydantic import (
 )
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.requirement import DataRequirement
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.fill import FillRule
@@ -44,6 +44,7 @@ from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.memory import ModelMemory, opening_memory, prepare_model_state
 from vqapr.domain.schedule import AgendaRule
+from vqapr.domain.wiring import Role
 
 FINGERPRINT_PREFIX = 8
 """How much of a component fingerprint names a strategy record's directory: `<id>@<fp8>`.
@@ -148,7 +149,7 @@ class ComplianceSet:
         for rule in self.rules:
             if not isinstance(rule, ComponentRef):
                 raise TypeError("rules must contain ComponentRef values")
-            if rule.kind is not ComponentKind.COMPLIANCE:
+            if rule.kind is not Role.COMPLIANCE:
                 raise ValueError("rules must identify COMPLIANCE components")
         if len({rule.component_id for rule in self.rules}) != len(self.rules):
             raise ValueError("rules must not contain duplicate component references")
@@ -164,7 +165,7 @@ class StrategyConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.component, ComponentRef):
             raise TypeError("component must be a ComponentRef")
-        if self.component.kind is not ComponentKind.STRATEGY_MODEL:
+        if self.component.kind is not Role.STRATEGY_MODEL:
             raise ValueError("component must identify a STRATEGY_MODEL")
         if not isinstance(self.agenda_id, str) or not self.agenda_id:
             raise TypeError("agenda_id must be an AgendaId")

@@ -8,7 +8,7 @@ no longer a second module to forward to, and "carries no implementation" is now 
 these modules ARE the implementation.
 
 What was worth keeping is the part that was never about the shim: the **behaviour** those tests
-pinned. `ComponentKind` still constructs a ref, `positional_arity` still answers as before, and the
+pinned. `Role` still constructs a ref, `positional_arity` still answers as before, and the
 names callers import still resolve. Those assertions survive here, against the promoted modules,
 because a move that quietly changed behaviour would otherwise be invisible.
 """
@@ -24,12 +24,13 @@ import vqapr.component.conformance as registration
 import vqapr.component.fingerprint as fingerprint
 import vqapr.component.loading as loading
 import vqapr.component.reference as component
+import vqapr.domain.wiring as wiring
 import vqapr.public as public
 
 
 @pytest.mark.parametrize(
     "name",
-    ["ComponentKind", "ComponentRef"],
+    ["ComponentRef"],
 )
 def test_the_component_names_callers_import_still_resolve(name: str) -> None:
     """Every caller in `src/` and every emitted scaffold reaches these by name."""
@@ -60,7 +61,7 @@ def test_the_facade_and_the_module_agree_on_one_object(tmp_path: Path) -> None:
     means something: an emitted scaffold writes `from vqapr.public import ...` while `src/` reaches
     `vqapr.component.*`, so a divergence would be two classes that compare unequal.
     """
-    assert public.ComponentKind is component.ComponentKind
+    assert public.Role is wiring.Role
     assert public.ComponentRef is component.ComponentRef
 
 
@@ -70,13 +71,13 @@ def test_a_component_ref_still_constructs_and_fingerprints(tmp_path: Path) -> No
     source.write_text("class M:\n    pass\n", encoding="utf-8")
 
     digest = fingerprint.fingerprint_component(
-        source, kind=component.ComponentKind.DATA_MODEL, object_name="M", config={}
+        source, kind=wiring.Role.DATA_MODEL, object_name="M", config={}
     )
     ref = component.ComponentRef.of(
-        "m", component.ComponentKind.DATA_MODEL, source, "M", fingerprint=digest
+        "m", wiring.Role.DATA_MODEL, source, "M", fingerprint=digest
     )
 
-    assert ref.kind is component.ComponentKind.DATA_MODEL
+    assert ref.kind is wiring.Role.DATA_MODEL
     assert ref.fingerprint == digest
     assert len(digest) == 64
 
@@ -116,4 +117,23 @@ def test_the_modules_define_rather_than_re_export() -> None:
         assert members, (
             f"{module.__name__} defines nothing of its own and is forwarding again; record 110 "
             "moved the implementation here so the temporary file could stop existing"
+        )
+
+
+def test_accrual_is_a_place_and_not_a_role_a_component_registers_as(tmp_path: Path) -> None:
+    """`Role` has five rows and a component registers as one of four (`EXTENSION_POINTS`)."""
+    source = tmp_path / "model.py"
+    source.write_text("class M:\n    pass\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="EXTENSION_POINTS"):
+        component.ComponentRef.of("m", wiring.Role.ACCRUAL, source, "M", fingerprint="0" * 64)
+    with pytest.raises(ValueError, match="kind must be one of"):
+        component.ComponentRef.model_validate(
+            {
+                "component_id": "m",
+                "kind": "accrual",
+                "path": source,
+                "object_name": "M",
+                "config": {},
+                "fingerprint": "0" * 64,
+            }
         )

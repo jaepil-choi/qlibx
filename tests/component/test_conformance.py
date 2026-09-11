@@ -18,7 +18,8 @@ import pytest
 from vqapr.component.conformance import STAGE, conformance
 from vqapr.component.exchange.academic import AcademicExchange
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import Role
 from vqapr.public import register_compliance
 
 GOOD_RULE = """
@@ -53,11 +54,11 @@ def _ref(root: Path, source: str, *, name: str = "limit") -> ComponentRef:
     path.write_text(source, encoding="utf-8")
     return ComponentRef.of(
         name,
-        ComponentKind.COMPLIANCE,
+        Role.COMPLIANCE,
         path,
         "Limit",
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
+            path, kind=Role.COMPLIANCE, object_name="Limit"
         ),
     )
 
@@ -147,11 +148,11 @@ def test_the_shipped_profiles_are_the_first_two_implementations_to_pass(tmp_path
         )
         ref = ComponentRef.of(
             name,
-            ComponentKind.EXCHANGE,
+            Role.EXCHANGE,
             path,
             "Venue",
             fingerprint=fingerprint_component(
-                path, kind=ComponentKind.EXCHANGE, object_name="Venue"
+                path, kind=Role.EXCHANGE, object_name="Venue"
             ),
         )
 

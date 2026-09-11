@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.analysis.performance import drawdown, nav_series, returns
-from vqapr.component.base import Component, Part, Tool
+from vqapr.component.base import Call, Component, Part, Tool
 from vqapr.component.compliance.base import Compliance, ComplianceCall, ComplianceFinding
 from vqapr.component.compliance.report import ComplianceReport
 from vqapr.component.compliance.shipped import SHIPPED_COMPLIANCE, shipped_compliance_path
@@ -25,7 +25,7 @@ from vqapr.component.exchange.krx import (
     krx_rules,
 )
 from vqapr.component.reads import DatasetInput
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.component.strategy.base import StrategyModel
 from vqapr.component.strategy.decision import Hold, Rebalance
 from vqapr.component.strategy.recorder import TableSpec
@@ -72,6 +72,7 @@ from vqapr.domain.listing import (
     trade_rules_by_kind,
 )
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import SimulationFailure
 
@@ -167,13 +168,13 @@ __all__ = (
     "AllocationViolation",
     "Budget",
     "CalendarLookback",
+    "Call",
     "Compliance",
     "ComplianceCall",
     "ComplianceFinding",
     "ComplianceReport",
     "ComplianceSet",
     "Component",
-    "ComponentKind",
     "ComponentRef",
     "CrossSection",
     "DataModel",
@@ -230,6 +231,7 @@ __all__ = (
     "PortfolioDirection",
     "PortfolioTarget",
     "Rebalance",
+    "Role",
     "RowsLookback",
     "RunAgenda",
     "RunDefinition",

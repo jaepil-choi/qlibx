@@ -916,7 +916,8 @@ def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_cras
     and refuse in the structured shape rather than by crashing.
     """
     from vqapr.component.fingerprint import fingerprint_component
-    from vqapr.component.reference import ComponentKind, ComponentRef
+    from vqapr.component.reference import ComponentRef
+    from vqapr.domain.wiring import Role
     from vqapr.project.store import Workspace
 
     _workspace_for_run(tmp_path, capsys)
@@ -938,11 +939,11 @@ def test_a_rule_that_slipped_past_registration_is_refused_by_check_not_by_a_cras
         t.register_component(
             ComponentRef.of(
                 "limit",
-                ComponentKind.COMPLIANCE,
+                Role.COMPLIANCE,
                 source,
                 "Limit",
                 fingerprint=fingerprint_component(
-                    source, kind=ComponentKind.COMPLIANCE, object_name="Limit"
+                    source, kind=Role.COMPLIANCE, object_name="Limit"
                 ),
             )
         )

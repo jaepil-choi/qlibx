@@ -66,7 +66,7 @@ from vqapr.component.loading import (
     load_strategy_model,
     positional_arity,
 )
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.component.strategy.base import StrategyModel
 from vqapr.domain.errors import (
     Diagnosis,
@@ -77,6 +77,7 @@ from vqapr.domain.errors import (
     VqaprError,
     collector,
 )
+from vqapr.domain.wiring import Role
 
 __all__ = [
     "STAGE",
@@ -92,14 +93,14 @@ STAGE = Stage.REGISTER
 _RETRY = "fix the component to match its contract, then register it again"
 
 
-_CONTRACT_METHODS: dict[ComponentKind, tuple[tuple[type, str], ...]] = {
-    ComponentKind.DATA_MODEL: ((DataModel, "compute"),),
-    ComponentKind.STRATEGY_MODEL: (
+_CONTRACT_METHODS: dict[Role, tuple[tuple[type, str], ...]] = {
+    Role.DATA_MODEL: ((DataModel, "compute"),),
+    Role.STRATEGY_MODEL: (
         (StrategyModel, "decide"),
         (StrategyModel, "requirements"),
     ),
-    ComponentKind.COMPLIANCE: ((Compliance, "observe"),),
-    ComponentKind.EXCHANGE: ((Exchange, "execute"),),
+    Role.COMPLIANCE: ((Compliance, "observe"),),
+    Role.EXCHANGE: ((Exchange, "execute"),),
 }
 """Every method Flow calls on each kind, and the contract that declares its shape.
 
@@ -110,10 +111,10 @@ so the check is stated in one table rather than depending on which contract happ
 
 
 _LOADERS = {
-    ComponentKind.DATA_MODEL: load_data_model,
-    ComponentKind.STRATEGY_MODEL: load_strategy_model,
-    ComponentKind.COMPLIANCE: load_compliance,
-    ComponentKind.EXCHANGE: load_exchange,
+    Role.DATA_MODEL: load_data_model,
+    Role.STRATEGY_MODEL: load_strategy_model,
+    Role.COMPLIANCE: load_compliance,
+    Role.EXCHANGE: load_exchange,
 }
 
 
@@ -129,7 +130,7 @@ def _signature_hint(arity: int) -> str:
     return ", ".join(["self", *(f"arg{index}" for index in range(1, arity))])
 
 
-def _check_methods(component: object, kind: ComponentKind, found: Any) -> None:
+def _check_methods(component: object, kind: Role, found: Any) -> None:
     """Every contract method must exist, be callable, and accept the call Flow will make.
 
     Flow calls these **positionally**, so the question is arity, not spelling. A component that
@@ -288,10 +289,10 @@ def _unreadable(kind_label: str, error: OSError, path: str | Path) -> VqaprError
 
 
 _LABELS = {
-    ComponentKind.DATA_MODEL: "DataModel",
-    ComponentKind.STRATEGY_MODEL: "StrategyModel",
-    ComponentKind.COMPLIANCE: "Compliance",
-    ComponentKind.EXCHANGE: "Exchange",
+    Role.DATA_MODEL: "DataModel",
+    Role.STRATEGY_MODEL: "StrategyModel",
+    Role.COMPLIANCE: "Compliance",
+    Role.EXCHANGE: "Exchange",
 }
 
 
@@ -301,7 +302,7 @@ def prepare_component(
     path: str | Path,
     object_name: str,
     *,
-    kind: ComponentKind,
+    kind: Role,
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
     """Fingerprint the source and prove the component conforms; write nothing.

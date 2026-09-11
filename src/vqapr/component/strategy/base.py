@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import BinaryIO, ClassVar
 
 from vqapr.component.account_view import EconomicAccountView
-from vqapr.component.base import Part
+from vqapr.component.base import Call, Part
 from vqapr.component.strategy.decision import Hold, Rebalance
 from vqapr.component.strategy.history import AccountHistory, AccountHistoryInput
 from vqapr.component.strategy.recorder import InvocationRecorder, TableSpec
@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 
-class StrategyCall(ABC):
+class StrategyCall(Call, ABC):
     """The complete, bounded capability surface for one Strategy occurrence.
 
     `StrategyModelContext` is its one implementation, the way `DataModelContext` is of

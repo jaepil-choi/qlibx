@@ -22,11 +22,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.registration import apply
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
@@ -48,7 +49,7 @@ _RUN_READY: dict[str, object] = {
 """A `runs.<id>` body every model rule accepts, for the malformed cases to break one key of."""
 
 
-def _component(name: str, kind: ComponentKind, root: Path) -> ComponentRef:
+def _component(name: str, kind: Role, root: Path) -> ComponentRef:
     return ComponentRef.of(name, kind, root / f"{name}.py", "Thing", fingerprint="a" * 64)
 
 
@@ -81,10 +82,10 @@ def workspace(tmp_path: Path) -> Workspace:
     """Everything a run names, registered: four components and a venue dataset."""
     space = Workspace.create(tmp_path)
     for name, kind in (
-        ("ou-k0", ComponentKind.STRATEGY_MODEL),
-        ("ou-ff5", ComponentKind.STRATEGY_MODEL),
-        ("no-short", ComponentKind.COMPLIANCE),
-        ("venue", ComponentKind.EXCHANGE),
+        ("ou-k0", Role.STRATEGY_MODEL),
+        ("ou-ff5", Role.STRATEGY_MODEL),
+        ("no-short", Role.COMPLIANCE),
+        ("venue", Role.EXCHANGE),
     ):
         with Workspace.transaction(space) as t:
             t.register_component(_component(name, kind, tmp_path))

@@ -21,8 +21,9 @@ from pathlib import Path
 import pytest
 
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.store import Workspace
 from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
 
@@ -32,12 +33,12 @@ ZONE = "Asia/Seoul"
 def _ref(path: Path, component_id: str = "mom") -> ComponentRef:
     return ComponentRef(
         component_id=component_id,
-        kind=ComponentKind.STRATEGY_MODEL,
+        kind=Role.STRATEGY_MODEL,
         path=path,
         object_name="S",
         config={},
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.STRATEGY_MODEL, object_name="S", config={}
+            path, kind=Role.STRATEGY_MODEL, object_name="S", config={}
         ),
     )
 

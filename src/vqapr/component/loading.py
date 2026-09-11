@@ -27,12 +27,13 @@ from vqapr.component.exchange.academic import AcademicExchange
 from vqapr.component.exchange.base import Exchange
 from vqapr.component.exchange.krx import KrxExchange
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.component.strategy.base import StrategyModel
 from vqapr.data.requirement import DataRequirement
 from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 from vqapr.domain.listing import ExchangeRulesView
 from vqapr.domain.memory import normalize_memory
+from vqapr.domain.wiring import Role
 
 
 def _failure(
@@ -67,7 +68,7 @@ def _failure(
 def _load(
     ref: ComponentRef,
     *,
-    kind: ComponentKind,
+    kind: Role,
     project_root: str | Path | None = None,
 ) -> object:
     if not isinstance(ref, ComponentRef) or ref.kind is not kind:
@@ -173,14 +174,14 @@ def _construction_fix(path: Path, error: BaseException) -> str:
     )
 
 
-_AUTHORED_BASES: dict[ComponentKind, type] = {
-    ComponentKind.STRATEGY_MODEL: StrategyModel,
-    ComponentKind.DATA_MODEL: DataModel,
-    ComponentKind.COMPLIANCE: Compliance,
+_AUTHORED_BASES: dict[Role, type] = {
+    Role.STRATEGY_MODEL: StrategyModel,
+    Role.DATA_MODEL: DataModel,
+    Role.COMPLIANCE: Compliance,
 }
 
 
-def authored_classes(path: Path, kind: ComponentKind) -> tuple[str, ...]:
+def authored_classes(path: Path, kind: Role) -> tuple[str, ...]:
     """The leaf classes `path` defines that ARE the kind's authoring base, found by the object.
 
     Registration's kind route (`vqapr register strategy <id> <file>`) parses the file first -- a
@@ -378,7 +379,7 @@ def _requirements(component: object, *, label: str, required: bool) -> tuple[Dat
 
 
 def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None) -> DataModel:
-    model = _load(ref, kind=ComponentKind.DATA_MODEL, project_root=project_root)
+    model = _load(ref, kind=Role.DATA_MODEL, project_root=project_root)
     if not isinstance(model, DataModel):
         raise _failure(
             "component.wrong_type",
@@ -397,7 +398,7 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
 def load_strategy_model(
     ref: ComponentRef, *, project_root: str | Path | None = None
 ) -> StrategyModel:
-    strategy = _load(ref, kind=ComponentKind.STRATEGY_MODEL, project_root=project_root)
+    strategy = _load(ref, kind=Role.STRATEGY_MODEL, project_root=project_root)
     if not isinstance(strategy, StrategyModel):
         raise _failure(
             "component.wrong_type",
@@ -415,7 +416,7 @@ def load_strategy_model(
 
 
 def load_compliance(ref: ComponentRef, *, project_root: str | Path | None = None) -> Compliance:
-    rule = _load(ref, kind=ComponentKind.COMPLIANCE, project_root=project_root)
+    rule = _load(ref, kind=Role.COMPLIANCE, project_root=project_root)
     if not isinstance(rule, Compliance):
         raise _failure(
             "component.wrong_type",
@@ -442,7 +443,7 @@ def _compliance_identity(ref: ComponentRef, rule: Compliance) -> None:
     said so.
 
     This is the one place that can answer the question for every caller. `conformance` dispatches
-    here for `ComponentKind.COMPLIANCE`, so `vqapr register` refuses at registration; `preflight`
+    here for `Role.COMPLIANCE`, so `vqapr register` refuses at registration; `preflight`
     loads rules through here, so `vqapr check` refuses before a run is spent and `vqapr run`
     refuses before assembly. Checking the LOADED object rather than the source is what catches a
     `compliance_id` computed at runtime, which no static read of the file can see.
@@ -485,7 +486,7 @@ its own matching behaviour, because the resulting realism claim would be unverif
 
 
 def load_exchange(ref: ComponentRef, *, project_root: str | Path | None = None) -> Exchange:
-    exchange = _load(ref, kind=ComponentKind.EXCHANGE, project_root=project_root)
+    exchange = _load(ref, kind=Role.EXCHANGE, project_root=project_root)
     if not isinstance(exchange, SHIPPED_EXECUTION_PROFILES):
         names = ", ".join(base.__name__ for base in SHIPPED_EXECUTION_PROFILES)
         raise _failure(

@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.authoring import Rebalance
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
+from vqapr.domain.wiring import Role
 
 BANNED = ("uuid5", "source_refs", "account_version", "strategy_id")
 """Identity and provenance the FRAMEWORK owns. AC-A2 forbids all four from authored code.
@@ -38,7 +38,7 @@ def _strategy(**overrides: object) -> str:
         "lookback": 20,
     }
     settings.update(overrides)
-    return render(ComponentKind.STRATEGY_MODEL, "demo", **settings)  # type: ignore[arg-type]
+    return render(Role.STRATEGY_MODEL, "demo", **settings)  # type: ignore[arg-type]
 
 
 def test_the_emitted_strategy_fits_in_forty_lines_of_code() -> None:
@@ -233,7 +233,7 @@ def test_the_authored_class_is_found_however_it_was_written(
         encoding="utf-8",
     )
 
-    assert _sole_subclass(source, ComponentKind.STRATEGY_MODEL, "demo") == expected, label
+    assert _sole_subclass(source, Role.STRATEGY_MODEL, "demo") == expected, label
 
 
 def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None:
@@ -245,7 +245,7 @@ def test_a_scaffold_with_no_strategy_is_refused_by_count(tmp_path: Path) -> None
     empty.write_text("x = 1\n", encoding="utf-8")
 
     with pytest.raises(InputError) as refused:
-        _sole_subclass(empty, ComponentKind.STRATEGY_MODEL, "demo")
+        _sole_subclass(empty, Role.STRATEGY_MODEL, "demo")
 
     assert "defines 0" in (refused.value.as_dict()["failures"][0]["observed"] or "")
 
@@ -264,7 +264,7 @@ def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
     )
 
     with pytest.raises(InputError) as refused:
-        _sole_subclass(crowded, ComponentKind.STRATEGY_MODEL, "demo")
+        _sole_subclass(crowded, Role.STRATEGY_MODEL, "demo")
 
     observed = refused.value.as_dict()["failures"][0]["observed"] or ""
     assert "defines 2" in observed
@@ -300,7 +300,7 @@ def test_a_leaf_through_an_imported_base_is_found_by_the_object(
         encoding="utf-8",
     )
 
-    assert _sole_subclass(leaf, ComponentKind.STRATEGY_MODEL, "leg") == "Leg"
+    assert _sole_subclass(leaf, Role.STRATEGY_MODEL, "leg") == "Leg"
 
 
 def test_a_base_beside_the_component_is_named_as_why_it_does_not_import(tmp_path: Path) -> None:
@@ -317,7 +317,7 @@ def test_a_base_beside_the_component_is_named_as_why_it_does_not_import(tmp_path
     )
 
     with pytest.raises(VqaprError) as refused:
-        _sole_subclass(leaf, ComponentKind.STRATEGY_MODEL, "leg")
+        _sole_subclass(leaf, Role.STRATEGY_MODEL, "leg")
 
     (failure,) = refused.value.as_dict()["failures"]
     assert failure["code"] == "component.construction_failed"

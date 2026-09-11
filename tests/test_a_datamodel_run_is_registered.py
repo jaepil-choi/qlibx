@@ -17,11 +17,12 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.registration import apply
 from vqapr.project.run import (
     DataModelEntry,
@@ -82,8 +83,8 @@ def workspace(tmp_path: Path) -> Workspace:
             SourceSpec.of("prices-source", tmp_path / "prices"),
         )
     for name, kind in (
-        ("reversal", ComponentKind.DATA_MODEL),
-        ("ou-k0", ComponentKind.STRATEGY_MODEL),
+        ("reversal", Role.DATA_MODEL),
+        ("ou-k0", Role.STRATEGY_MODEL),
     ):
         with Workspace.transaction(space) as t:
             t.register_component(

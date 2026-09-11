@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import ClassVar
 
-from vqapr.component.base import Part
+from vqapr.component.base import Call, Part
 from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow
 from vqapr.domain.rows import Rows
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-class DataCall(ABC):
+class DataCall(Call, ABC):
     """The complete, bounded capability surface for one DataModel invocation."""
 
     @property

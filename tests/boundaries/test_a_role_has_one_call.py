@@ -39,6 +39,7 @@ from vqapr.authoring import (
     StrategyCall,
     StrategyModel,
 )
+from vqapr.component.base import Call
 from vqapr.component.exchange.base import Exchange, ExecutionCall
 from vqapr.domain.wiring import WIRING, Role
 
@@ -50,9 +51,9 @@ ROLES: dict[type, tuple[str, type]] = {
 }
 """Role -> (its one callback, the Call that callback receives).
 
-Four, and `Exchange` is the one whose contract does not live in `authoring/`: it is handed an
-`ExecutionCall`, whose vocabulary sits at layer 30, above the contract package at 20. The fifth
-row of the wiring table, `ACCRUAL`, is a place with no class yet (design §7.3).
+Four, each contract in its own module of `component/` (record `271`) and each Call a `Call`
+(record `272`). The fifth row of the wiring table, `ACCRUAL`, is a place with no class yet
+(design §7.3).
 """
 
 
@@ -131,3 +132,10 @@ def test_the_four_roles_are_the_four_extension_points() -> None:
         "Compliance",
         "Exchange",
     }
+
+
+@pytest.mark.parametrize("role", list(ROLES), ids=lambda role: role.__name__)
+def test_every_call_is_a_call(role: type) -> None:
+    """One base for the four, so "a role takes one Call" is a type and not only a sentence."""
+    _, call_type = ROLES[role]
+    assert issubclass(call_type, Call), f"{call_type.__name__} is not a Call"

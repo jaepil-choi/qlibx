@@ -30,7 +30,7 @@ from vqapr.authoring import (
     StrategyModel,
     TableSpec,
 )
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
@@ -38,6 +38,7 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import RunLoop, strategy_loop
@@ -81,7 +82,7 @@ class _Exchange:
         raise AssertionError("Hold callbacks must not execute orders")
 
 
-def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+def _component(raw_id: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
 
 
@@ -113,7 +114,7 @@ def _flow(
         run_id="test",
         strategy=FrozenStrategy(
                 config=StrategyConfig(
-                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    _component("strategy", Role.STRATEGY_MODEL),
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),

@@ -24,10 +24,10 @@ from typing import Any
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
 from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
-from vqapr.component.reference import ComponentKind
 from vqapr.data.verification import verify_roster
 from vqapr.domain.errors import VALUE_INVALID, InputError
 from vqapr.domain.instrument import build_roster
+from vqapr.domain.wiring import Role
 from vqapr.project.registration import AUTHORED_KINDS
 from vqapr.project.run import RunDefinition
 from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
@@ -328,9 +328,9 @@ def _reading(
     is not asked.
     """
     loaders = {
-        ComponentKind.STRATEGY_MODEL: load_strategy_model,
-        ComponentKind.DATA_MODEL: load_data_model,
-        ComponentKind.COMPLIANCE: load_compliance,
+        Role.STRATEGY_MODEL: load_strategy_model,
+        Role.DATA_MODEL: load_data_model,
+        Role.COMPLIANCE: load_compliance,
     }
     by_id = {str(ref.component_id): ref for ref in workspace.components}
     kept: list[dict[str, Any]] = []

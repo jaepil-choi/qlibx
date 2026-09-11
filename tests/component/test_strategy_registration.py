@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.registration import register_strategy_model
 
 _HEAD = """from __future__ import annotations
@@ -107,7 +107,7 @@ def test_an_unannotated_callback_is_accepted(tmp_path: Path) -> None:
         "    def decide(self, context):\n        return Hold(reason='x')\n",
     )
     ref = register_strategy_model(tmp_path, "bare", path, "S")
-    assert ref.kind is ComponentKind.STRATEGY_MODEL
+    assert ref.kind is Role.STRATEGY_MODEL
 
 
 def test_a_narrower_return_annotation_is_accepted(tmp_path: Path) -> None:
@@ -141,16 +141,16 @@ def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path
 
 @pytest.mark.parametrize(
     ("kind", "object_name"),
-    [(ComponentKind.STRATEGY_MODEL, "Sample"), (ComponentKind.DATA_MODEL, "Sample")],
+    [(Role.STRATEGY_MODEL, "Sample"), (Role.DATA_MODEL, "Sample")],
 )
 def test_a_generated_template_registers_unedited(
-    tmp_path: Path, kind: ComponentKind, object_name: str
+    tmp_path: Path, kind: Role, object_name: str
 ) -> None:
     """`new` must emit something that already runs, not a stub that raises."""
     source = render(kind, "sample", dataset_id="px")
     path = tmp_path / "sample.py"
     path.write_text(source, encoding="utf-8")
-    if kind is ComponentKind.STRATEGY_MODEL:
+    if kind is Role.STRATEGY_MODEL:
         assert register_strategy_model(tmp_path, "sample", path, object_name) is not None
     else:
         from vqapr.project.registration import register_data_model

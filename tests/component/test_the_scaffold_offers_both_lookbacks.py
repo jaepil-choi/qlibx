@@ -27,13 +27,13 @@ import pytest
 
 from vqapr.cli.new import run as new_command
 from vqapr.component.loading import load_data_model
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, RowsLookback
 from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
+from vqapr.domain.wiring import Role
 from vqapr.flow.run.calls import DataModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset
 
@@ -77,7 +77,7 @@ def test_the_pair_is_documented_at_the_call_site() -> None:
 def test_the_calendar_flavour_declares_the_other_member() -> None:
     """What the emitted file imports, declares and guards on."""
     source = render(
-        ComponentKind.DATA_MODEL,
+        Role.DATA_MODEL,
         "cross-sectional",
         dataset_id="price_daily",
         lookback=180,
@@ -95,7 +95,7 @@ def test_the_calendar_flavour_declares_the_other_member() -> None:
 
 def test_the_rows_flavour_still_emits_what_it_always_did() -> None:
     """The default is unchanged, and now says what the number means."""
-    source = render(ComponentKind.DATA_MODEL, "reversal", dataset_id="price_daily", lookback=6)
+    source = render(Role.DATA_MODEL, "reversal", dataset_id="price_daily", lookback=6)
 
     assert "RowsLookback(rows=LOOKBACK)" in source
     assert "LOOKBACK = 6" in source
@@ -130,7 +130,7 @@ def test_the_calendar_scaffold_computes_over_a_shared_window(
     source = tmp_path / "cross_sectional.py"
     source.write_text(
         render(
-            ComponentKind.DATA_MODEL,
+            Role.DATA_MODEL,
             "cross-sectional",
             dataset_id="price_daily",
             lookback=3,
@@ -233,7 +233,7 @@ def test_a_strategy_scaffolds_a_calendar_window_with_the_guard_it_implies(tmp_pa
 
 def test_the_rows_strategy_scaffold_is_what_it_always_was() -> None:
     """The default strategy text is unchanged by the second flavour, byte for byte in spirit."""
-    source = render(ComponentKind.STRATEGY_MODEL, "alpha", dataset_id="price_daily", lookback=6)
+    source = render(Role.STRATEGY_MODEL, "alpha", dataset_id="price_daily", lookback=6)
 
     assert "LOOKBACK = 6  # rows of the window" in source
     assert "lookback=va.RowsLookback(rows=LOOKBACK)" in source

@@ -21,7 +21,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from vqapr.component.base import Tool
+from vqapr.component.base import Call, Tool
 from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.fill import (
@@ -48,7 +48,7 @@ __all__ = [
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class ExecutionCall:
+class ExecutionCall(Call):
     """What an Exchange is handed at a market-clock instant (design §6.1):
 
         the order batch            `orders`

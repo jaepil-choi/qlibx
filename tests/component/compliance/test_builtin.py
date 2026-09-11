@@ -305,7 +305,8 @@ def test_a_project_local_rule_still_loads_alongside_a_builtin(tmp_path: Path) ->
     """Shipping builtins must not close a canonically open extension point."""
     from vqapr.component.fingerprint import fingerprint_component
     from vqapr.component.loading import load_compliance
-    from vqapr.component.reference import ComponentKind, ComponentRef
+    from vqapr.component.reference import ComponentRef
+    from vqapr.domain.wiring import Role
 
     source = tmp_path / "local_rule.py"
     source.write_text(
@@ -330,11 +331,11 @@ class LocalCap(Compliance):
     )
     ref = ComponentRef.of(
         "local-cap",
-        ComponentKind.COMPLIANCE,
+        Role.COMPLIANCE,
         source,
         "LocalCap",
         fingerprint=fingerprint_component(
-            source, kind=ComponentKind.COMPLIANCE, object_name="LocalCap"
+            source, kind=Role.COMPLIANCE, object_name="LocalCap"
         ),
     )
 

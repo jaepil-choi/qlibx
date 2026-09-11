@@ -15,8 +15,8 @@ Which lookback a kind's template may emit, and how much of it, is decided here t
 
 from __future__ import annotations
 
-from vqapr.component.reference import ComponentKind
 from vqapr.domain.errors import VALUE_INVALID, InputError
+from vqapr.domain.wiring import Role
 
 __all__ = [
     "DECLARATION_KIND",
@@ -31,14 +31,14 @@ LOOKBACK_DEFAULT = 6
 
 
 DECLARATION_KIND = {
-    ComponentKind.DATA_MODEL: "datamodel",
-    ComponentKind.STRATEGY_MODEL: "strategy",
+    Role.DATA_MODEL: "datamodel",
+    Role.STRATEGY_MODEL: "strategy",
 }
 """How each scaffoldable kind is spelled on the command line and in a declaration."""
 
 
 def lookback_declaration(
-    kind: ComponentKind, *, rows: int | None, calendar: int | None, instants: int | None = None
+    kind: Role, *, rows: int | None, calendar: int | None, instants: int | None = None
 ) -> dict[str, object]:
     """Which lookback the scaffold declares, and how much of it.
 
@@ -84,7 +84,7 @@ def lookback_declaration(
                 observed=f"--instants-lookback {instants}",
                 retry="pass a positive number of instants per name, then retry",
             )
-        if kind is not ComponentKind.DATA_MODEL:
+        if kind is not Role.DATA_MODEL:
             # The template refused this with a bare `ValueError`, which reached the envelope as
             # `unhandled` (record `251`).
             raise InputError(
@@ -487,9 +487,9 @@ class {class_name}(va.Compliance):
 
 
 _TEMPLATES = {
-    ComponentKind.STRATEGY_MODEL: _STRATEGY_TEMPLATE,
-    ComponentKind.DATA_MODEL: _DATA_MODEL_TEMPLATE,
-    ComponentKind.COMPLIANCE: _COMPLIANCE_TEMPLATE,
+    Role.STRATEGY_MODEL: _STRATEGY_TEMPLATE,
+    Role.DATA_MODEL: _DATA_MODEL_TEMPLATE,
+    Role.COMPLIANCE: _COMPLIANCE_TEMPLATE,
 }
 
 
@@ -523,7 +523,7 @@ def _class_name(component_id: str) -> str:
 
 
 def render(
-    kind: ComponentKind,
+    kind: Role,
     component_id: str,
     *,
     dataset_id: str | None = None,
@@ -561,7 +561,7 @@ def render(
         raise ValueError("lookback must be positive")
     if lookback_kind not in _LOOKBACK_FLAVOURS:
         raise ValueError(f"lookback_kind must be one of: {', '.join(_LOOKBACK_FLAVOURS)}")
-    if kind is ComponentKind.COMPLIANCE:
+    if kind is Role.COMPLIANCE:
         return _TEMPLATES[kind].format(
             component_id=component_id,
             class_name=_class_name(component_id),
@@ -569,7 +569,7 @@ def render(
         )
     if dataset_id is None:
         raise ValueError(f"{kind.value} reads a dataset, so dataset_id is required")
-    if kind is ComponentKind.STRATEGY_MODEL:
+    if kind is Role.STRATEGY_MODEL:
         if lookback_kind not in _STRATEGY_FLAVOURS:
             raise ValueError(
                 "the strategy scaffold declares a rows or a calendar lookback; each name's own "

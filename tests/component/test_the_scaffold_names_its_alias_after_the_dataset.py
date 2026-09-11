@@ -12,12 +12,12 @@ import ast
 
 import pytest
 
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
+from vqapr.domain.wiring import Role
 
 
-@pytest.mark.parametrize("kind", [ComponentKind.STRATEGY_MODEL, ComponentKind.DATA_MODEL])
-def test_the_alias_is_the_dataset_id_and_the_docstring_names_the_read(kind: ComponentKind) -> None:
+@pytest.mark.parametrize("kind", [Role.STRATEGY_MODEL, Role.DATA_MODEL])
+def test_the_alias_is_the_dataset_id_and_the_docstring_names_the_read(kind: Role) -> None:
     source = render(kind, "ou-thresh", dataset_id="residuals", field="resid", lookback=30)
 
     assert '"prices"' not in source, "a fixed alias reads as a required name"
@@ -29,7 +29,7 @@ def test_the_alias_is_the_dataset_id_and_the_docstring_names_the_read(kind: Comp
     assert "placeholder" in docstring, "the example signal is named as one, not as the strategy"
 
     assert '{"residuals": read}' in source
-    if kind is ComponentKind.STRATEGY_MODEL:
+    if kind is Role.STRATEGY_MODEL:
         assert 'call.read("residuals", "resid")' in source
     else:
         assert 'context.read("residuals", FIELD)' in source
@@ -37,7 +37,7 @@ def test_the_alias_is_the_dataset_id_and_the_docstring_names_the_read(kind: Comp
 
 def test_the_rows_flavour_reads_the_same_alias() -> None:
     source = render(
-        ComponentKind.DATA_MODEL,
+        Role.DATA_MODEL,
         "per-name",
         dataset_id="vendor-long",
         field="px",

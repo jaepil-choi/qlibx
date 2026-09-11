@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.public import (
     Workspace,
     register_compliance,
@@ -166,8 +166,8 @@ def test_every_door_refuses_a_source_that_cannot_be_imported(
 @pytest.mark.parametrize(
     "kind,register,object_name",
     [
-        (ComponentKind.STRATEGY_MODEL, register_strategy_model, "MyAlpha"),
-        (ComponentKind.DATA_MODEL, register_data_model, "MyAlpha"),
+        (Role.STRATEGY_MODEL, register_strategy_model, "MyAlpha"),
+        (Role.DATA_MODEL, register_data_model, "MyAlpha"),
     ],
 )
 def test_the_scaffold_registers_as_written(tmp_path: Path, kind, register, object_name) -> None:

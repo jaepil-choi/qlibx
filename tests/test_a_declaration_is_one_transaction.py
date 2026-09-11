@@ -24,8 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import InputError, VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project import store as workspace_module
 from vqapr.project.registration import apply
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
@@ -80,7 +81,7 @@ def _register_a_strategy(root: Path, name: str = "alpha") -> None:
         t.register_component(
             ComponentRef.of(
                 name,
-                ComponentKind.STRATEGY_MODEL,
+                Role.STRATEGY_MODEL,
                 root / f"{name}.py",
                 "Strategy",
                 fingerprint="a" * 64,

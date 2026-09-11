@@ -28,7 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from vqapr.component.conformance import prepare_component
 from vqapr.component.loading import authored_classes
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import GRAIN_NAMES, ROWS_LOOKBACK_MEANING, DatasetRegistration
 from vqapr.data.scan import DECLARABLE_FIELD_TYPE_NAMES
 from vqapr.data.source import SourceSpec
@@ -47,6 +47,7 @@ from vqapr.domain.errors import (
     collector,
 )
 from vqapr.domain.instrument import export_roster
+from vqapr.domain.wiring import Role
 from vqapr.project.document import (
     ComponentDeclaration,
     DatasetDeclaration,
@@ -56,10 +57,10 @@ from vqapr.project.run import RunDefinition
 from vqapr.project.store import Transaction, Workspace
 
 _COMPONENT_KINDS = {
-    "datamodel": ComponentKind.DATA_MODEL,
-    "strategy": ComponentKind.STRATEGY_MODEL,
-    "compliance": ComponentKind.COMPLIANCE,
-    "exchange": ComponentKind.EXCHANGE,
+    "datamodel": Role.DATA_MODEL,
+    "strategy": Role.STRATEGY_MODEL,
+    "compliance": Role.COMPLIANCE,
+    "exchange": Role.EXCHANGE,
 }
 """확장점 넷 전부. canon §10.2가 닫아두지 말라고 한 목록이다.
 
@@ -1053,7 +1054,7 @@ def register_authored(
     return payload
 
 
-def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
+def _sole_subclass(path: Path, kind: Role, component_id: str) -> str:
     """The one authored class in this file, refusing zero and refusing several.
 
     AC-A4. Both refusals state the COUNT, because "which class did you mean" and "you wrote none"
@@ -1062,9 +1063,9 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
     two strategies should be refused for having two, not for whatever its import happens to do.
     """
     base = {
-        ComponentKind.STRATEGY_MODEL: "StrategyModel",
-        ComponentKind.DATA_MODEL: "DataModel",
-        ComponentKind.COMPLIANCE: "Compliance",
+        Role.STRATEGY_MODEL: "StrategyModel",
+        Role.DATA_MODEL: "DataModel",
+        Role.COMPLIANCE: "Compliance",
     }[kind]
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -1148,9 +1149,9 @@ def _sole_subclass(path: Path, kind: ComponentKind, component_id: str) -> str:
 
 
 AUTHORED_KINDS = {
-    "strategy": ComponentKind.STRATEGY_MODEL,
-    "datamodel": ComponentKind.DATA_MODEL,
-    "compliance": ComponentKind.COMPLIANCE,
+    "strategy": Role.STRATEGY_MODEL,
+    "datamodel": Role.DATA_MODEL,
+    "compliance": Role.COMPLIANCE,
 }
 """The component kinds an author writes as a `.py` and registers directly.
 
@@ -1193,7 +1194,7 @@ def register_component(
     path: str | Path,
     object_name: str,
     *,
-    kind: ComponentKind,
+    kind: Role,
     config: Mapping[str, object] | None = None,
 ) -> ComponentRef:
     """Prove the component conforms, then persist the reference.
@@ -1223,7 +1224,7 @@ def register_data_model(
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.DATA_MODEL,
+        kind=Role.DATA_MODEL,
         config=config,
     )
 
@@ -1242,7 +1243,7 @@ def register_strategy_model(
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.STRATEGY_MODEL,
+        kind=Role.STRATEGY_MODEL,
         config=config,
     )
 
@@ -1267,7 +1268,7 @@ def register_compliance(
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.COMPLIANCE,
+        kind=Role.COMPLIANCE,
         config=config,
     )
 
@@ -1292,6 +1293,6 @@ def register_exchange(
         raw_component_id,
         path,
         object_name,
-        kind=ComponentKind.EXCHANGE,
+        kind=Role.EXCHANGE,
         config=config,
     )

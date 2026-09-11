@@ -33,11 +33,12 @@ from pydantic import (
     model_validator,
 )
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration, ExecutionRole, Grain
 from vqapr.data.scan import ColumnType
 from vqapr.data.source import SourceSpec
 from vqapr.domain.identifiers import component_id, dataset_id
+from vqapr.domain.wiring import Role
 from vqapr.project.run import RunDefinition
 
 
@@ -386,19 +387,19 @@ def _linked(raw: object) -> tuple[dict, ...]:
         definition = _decoded("run", raw_id, RunDefinition, {"run_id": raw_id, **entry})
         if (strategy := definition.strategy) is not None:
             component = components.get(component_id(strategy.component_id))
-            if component is None or component.kind is not ComponentKind.STRATEGY_MODEL:
+            if component is None or component.kind is not Role.STRATEGY_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered strategy")
         for name in definition.compliance:
             rule = components.get(component_id(name))
-            if rule is None or rule.kind is not ComponentKind.COMPLIANCE:
+            if rule is None or rule.kind is not Role.COMPLIANCE:
                 raise ValueError(f"run {raw_id!r} names an unregistered compliance rule")
         if (datamodel := definition.datamodel) is not None:
             component = components.get(component_id(datamodel.component_id))
-            if component is None or component.kind is not ComponentKind.DATA_MODEL:
+            if component is None or component.kind is not Role.DATA_MODEL:
                 raise ValueError(f"run {raw_id!r} names an unregistered datamodel")
         if definition.exchange is not None:
             venue = components.get(component_id(definition.exchange))
-            if venue is None or venue.kind is not ComponentKind.EXCHANGE:
+            if venue is None or venue.kind is not Role.EXCHANGE:
                 raise ValueError(f"run {raw_id!r} names an unregistered exchange")
         if definition.execution is not None:
             venue_table = datasets.get(dataset_id(definition.execution.dataset))

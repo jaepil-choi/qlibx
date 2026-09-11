@@ -2,7 +2,7 @@
 
 A Component is an object the engine calls back at an event, with that event's time. Every role --
 DataModel, StrategyModel, Exchange, Compliance -- declares what it reads (`inputs()`), is handed a
-bounded view of it at one instant (its call), carries strict-JSON `memory` between callbacks, and
+bounded view of it at one instant (its `Call`), carries strict-JSON `memory` between callbacks, and
 returns one judgment. What differs between the roles is when they are called and who receives the
 answer, and the wiring table (`domain/wiring.py`) holds both; a role class names its row with
 `ROLE`.
@@ -25,10 +25,29 @@ from vqapr.domain.memory import ModelMemory
 from vqapr.domain.wiring import WIRING, Role, Wiring
 
 __all__ = [
+    "Call",
     "Component",
     "Part",
     "Tool",
 ]
+
+
+class Call:
+    """What a role is handed at one event: the whole of its authority for that callback.
+
+    Every role's one callback takes exactly one Call, and what the Call exposes is all the
+    callback may reach -- point-in-time correctness by inaccessibility rather than by a rule
+    somebody has to remember. The four are `DataCall`, `StrategyCall`, `ComplianceCall` and
+    `ExecutionCall`; the engine builds them (`flow/run/calls.py`, and the market clock for an
+    `ExecutionCall`).
+
+    The base has no member yet. The three abstract calls name the event's time
+    `evaluation_time` and the execution call names it `at`; settling one name is an author-visible
+    rename, so it waits for the release that renames the loop's vocabulary. A marker, then, and not
+    an ABC: the three abstract calls are ABCs themselves.
+    """
+
+    __slots__ = ()
 
 
 class Component(ABC):

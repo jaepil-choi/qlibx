@@ -26,12 +26,13 @@ from vqapr.component.exchange.krx import (
 )
 from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.loading import load_exchange
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.execution_table import ExactExecutionRow, ExactExecutionSnapshot
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.instrument import InstrumentRoster, instrument
 from vqapr.domain.memory import normalize_memory
 from vqapr.domain.order import OrderBatch, OrderRequest
+from vqapr.domain.wiring import Role
 
 NAME = "A005930"
 AT = datetime(2024, 3, 5, 6, 30, tzinfo=UTC)
@@ -128,10 +129,10 @@ def test_the_loader_refuses_a_venue_whose_settings_cannot_be_recorded(tmp_path: 
     )
     ref = ComponentRef.of(
         "venue",
-        ComponentKind.EXCHANGE,
+        Role.EXCHANGE,
         path,
         "Venue",
-        fingerprint=fingerprint_component(path, kind=ComponentKind.EXCHANGE, object_name="Venue"),
+        fingerprint=fingerprint_component(path, kind=Role.EXCHANGE, object_name="Venue"),
     )
 
     with pytest.raises(Exception) as caught:
@@ -156,12 +157,12 @@ def test_a_registered_config_sets_the_rates(tmp_path: Path) -> None:
     def loaded(config: dict[str, object]) -> KrxExchange:
         ref = ComponentRef.of(
             "venue",
-            ComponentKind.EXCHANGE,
+            Role.EXCHANGE,
             path,
             "Venue",
             config=config,
             fingerprint=fingerprint_component(
-                path, kind=ComponentKind.EXCHANGE, object_name="Venue", config=config
+                path, kind=Role.EXCHANGE, object_name="Venue", config=config
             ),
         )
         venue = load_exchange(ref, project_root=tmp_path)

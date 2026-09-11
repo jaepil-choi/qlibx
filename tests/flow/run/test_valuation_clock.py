@@ -32,13 +32,14 @@ import duckdb
 import pytest
 
 from vqapr.authoring import Hold, StrategyModel
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
 from vqapr.domain.valuation import ValuationService
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.run_state import RunStateRepository
 from vqapr.flow.run.loop import strategy_loop
@@ -427,7 +428,7 @@ class _Exchange:
         raise AssertionError("Hold callbacks must not execute orders")
 
 
-def _component(raw_id: str, kind: ComponentKind) -> ComponentRef:
+def _component(raw_id: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
 
 
@@ -458,7 +459,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         run_id="fallback",
         strategy=FrozenStrategy(
                 config=StrategyConfig(
-                    _component("strategy", ComponentKind.STRATEGY_MODEL),
+                    _component("strategy", Role.STRATEGY_MODEL),
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),

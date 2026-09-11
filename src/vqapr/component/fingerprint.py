@@ -20,14 +20,14 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from vqapr.component.reference import ComponentKind
 from vqapr.domain.memory import normalize_memory
+from vqapr.domain.wiring import Role
 
 
 def fingerprint_component(
     path: str | Path,
     *,
-    kind: ComponentKind,
+    kind: Role,
     object_name: str,
     config: Mapping[str, object] | None = None,
 ) -> str:

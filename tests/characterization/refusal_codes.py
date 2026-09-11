@@ -956,8 +956,9 @@ def _runtime_execution_table(tmp_path: Path) -> list[str]:
 def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
     from vqapr.component.conformance import conformance
     from vqapr.component.fingerprint import fingerprint_component
-    from vqapr.component.reference import ComponentKind, ComponentRef
+    from vqapr.component.reference import ComponentRef
     from vqapr.domain.errors import VqaprError
+    from vqapr.domain.wiring import Role
     from vqapr.public import register_compliance
 
     codes: list[str] = []
@@ -1000,11 +1001,11 @@ def _runtime_conformance_and_loading(tmp_path: Path) -> list[str]:
         path.write_text(source, encoding="utf-8")
         return ComponentRef.of(
             component_id or name,
-            ComponentKind.COMPLIANCE,
+            Role.COMPLIANCE,
             path,
             "Limit",
             fingerprint=fingerprint_component(
-                path, kind=ComponentKind.COMPLIANCE, object_name="Limit"
+                path, kind=Role.COMPLIANCE, object_name="Limit"
             ),
         )
 
@@ -1139,7 +1140,8 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     from datetime import time
 
     from vqapr.component.fingerprint import fingerprint_component
-    from vqapr.component.reference import ComponentKind, ComponentRef
+    from vqapr.component.reference import ComponentRef
+    from vqapr.domain.wiring import Role
     from vqapr.project.run import RunAgenda, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
@@ -1154,11 +1156,11 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
         t.register_component(
             ComponentRef.of(
                 "strategy",
-                ComponentKind.STRATEGY_MODEL,
+                Role.STRATEGY_MODEL,
                 strategy,
                 "Strategy",
                 fingerprint=fingerprint_component(
-                    strategy, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
+                    strategy, kind=Role.STRATEGY_MODEL, object_name="Strategy"
                 ),
             )
         )

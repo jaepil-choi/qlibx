@@ -7,11 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data import scan
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.store import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
@@ -341,7 +342,7 @@ def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> No
     workspace = Workspace.create(tmp_path)
     expected = ComponentRef.of(
         "reversal",
-        ComponentKind.DATA_MODEL,
+        Role.DATA_MODEL,
         tmp_path / "reversal.py",
         "ReversalModel",
         config={"window": 20},

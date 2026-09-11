@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import MappingProxyType
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable
 from vqapr.data.requirement import DataRequirement
@@ -24,6 +24,7 @@ from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.identifiers import AgendaId, ModelStateRef
 from vqapr.domain.memory import ModelMemory, opening_memory
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.project.run import (
     FINGERPRINT_PREFIX,
     ComplianceSet,
@@ -180,7 +181,7 @@ class FrozenDataModel:
     _identity: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.component.kind is not ComponentKind.DATA_MODEL:
+        if self.component.kind is not Role.DATA_MODEL:
             raise ValueError("component must identify a DATA_MODEL")
         _require_value_fields(self.value_fields)
         _require_requirements("requirements", self.requirements)
@@ -265,7 +266,7 @@ class FrozenRun:
             or self.initial_account_snapshot is not None
         ):
             raise ValueError("a frozen datamodel run holds no venue, execution dataset or account")
-        if self.exchange is not None and self.exchange.kind is not ComponentKind.EXCHANGE:
+        if self.exchange is not None and self.exchange.kind is not Role.EXCHANGE:
             raise ValueError("exchange must identify an EXCHANGE component")
         if (self.exchange is None) != (self.execution is None):
             raise ValueError("exchange and execution must be frozen together")

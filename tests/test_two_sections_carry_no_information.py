@@ -25,8 +25,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
+from vqapr.domain.wiring import Role
 from vqapr.project.store import Workspace
 from vqapr.public import (
     AccountMode,
@@ -64,7 +65,7 @@ RETIRED_KEYS = ("valuation_configs", "monitoring_policies", "agendas", "strategy
 
 def _strategy(name: str, root: Path) -> ComponentRef:
     return ComponentRef.of(
-        name, ComponentKind.STRATEGY_MODEL, root / f"{name}.py", "Strategy", fingerprint="a" * 64
+        name, Role.STRATEGY_MODEL, root / f"{name}.py", "Strategy", fingerprint="a" * 64
     )
 
 

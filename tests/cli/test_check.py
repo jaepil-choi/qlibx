@@ -35,12 +35,13 @@ import pytest
 
 from vqapr.cli.check import CODES, check
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import FailureSource
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.judgments import JUDGMENT_CODES
 from vqapr.project.run import RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import WORKSPACE_DIRECTORY, Workspace
@@ -67,7 +68,7 @@ def _fingerprint(root: Path) -> dict[str, str]:
     }
 
 
-def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
+def _register_component(root: Path, component_id: str, kind: Role, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
     with Workspace.transaction(root) as t:
         t.register_component(
@@ -93,12 +94,12 @@ def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str
     source = root / f"{component_id}.py"
     source.write_text(
         render(
-            ComponentKind.STRATEGY_MODEL, component_id, dataset_id=dataset_id, field=field,
+            Role.STRATEGY_MODEL, component_id, dataset_id=dataset_id, field=field,
             lookback=3,
         ),
         encoding="utf-8",
     )
-    _register_component(root, component_id, ComponentKind.STRATEGY_MODEL, source)
+    _register_component(root, component_id, Role.STRATEGY_MODEL, source)
 
 
 def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -> None:
@@ -113,7 +114,7 @@ def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -
         f" ListingAccess.{access})}})\n",
         encoding="utf-8",
     )
-    _register_component(root, component_id, ComponentKind.EXCHANGE, source)
+    _register_component(root, component_id, Role.EXCHANGE, source)
 
 
 def _venue_dataset(
@@ -464,7 +465,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     _venue_dataset(tmp_path)
     source = tmp_path / "wide.py"
     scaffold = render(
-        ComponentKind.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
+        Role.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
         lookback=3,
     )
     assert 'fields=("close",)' in scaffold
@@ -472,7 +473,7 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
         scaffold.replace('fields=("close",)', 'fields=("close", "volume", "turnover")'),
         encoding="utf-8",
     )
-    _register_component(tmp_path, "wide", ComponentKind.STRATEGY_MODEL, source)
+    _register_component(tmp_path, "wide", Role.STRATEGY_MODEL, source)
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
@@ -681,7 +682,7 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
         "        super().__init__(listings)\n",
         encoding="utf-8",
     )
-    _register_component(tmp_path, "limited", ComponentKind.EXCHANGE, source)
+    _register_component(tmp_path, "limited", Role.EXCHANGE, source)
 
     signed = _definition(
         instruments=("ABC",),

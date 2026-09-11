@@ -32,11 +32,12 @@ import pytest
 
 from vqapr.cli.check import check
 from vqapr.component.fingerprint import fingerprint_component
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
 from vqapr.data.verification import verify_source
 from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration import judgments as judgments_module
 from vqapr.project.run import RunAgenda, RunDefinition, RunExecution, RunFill, StrategyEntry
 from vqapr.project.store import Workspace
@@ -63,7 +64,7 @@ def workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
+def _register_component(root: Path, component_id: str, kind: Role, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
     with Workspace.transaction(root) as t:
         t.register_component(
@@ -128,7 +129,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         "        return Hold(reason='qa probe')\n",
         encoding="utf-8",
     )
-    _register_component(root, "my-strat", ComponentKind.STRATEGY_MODEL, source)
+    _register_component(root, "my-strat", Role.STRATEGY_MODEL, source)
     venue = root / "venue.py"
     venue.write_text(
         "from decimal import Decimal\n"
@@ -140,7 +141,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         " ListingAccess.SIGNED)})\n",
         encoding="utf-8",
     )
-    _register_component(root, "venue", ComponentKind.EXCHANGE, venue)
+    _register_component(root, "venue", Role.EXCHANGE, venue)
     # Declared, so preflight reaches the refusal this fixture is built for rather than stopping
     # at `roster.absent` -- which is a judgment code, and this test counts the non-judgment one.
     register_instruments(root, {"A": "stock"})

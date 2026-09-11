@@ -24,7 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import Role
 from vqapr.project.store import WORKSPACE_LOCK_FILENAME
 from vqapr.public import Workspace
 
@@ -32,7 +33,7 @@ from vqapr.public import Workspace
 def _component(raw_id: str) -> ComponentRef:
     return ComponentRef.of(
         raw_id,
-        ComponentKind.STRATEGY_MODEL,
+        Role.STRATEGY_MODEL,
         Path(f"{raw_id}.py"),
         "Strategy",
         fingerprint="a" * 64,
@@ -45,12 +46,12 @@ WORKER = textwrap.dedent(
     """
     import sys
     from pathlib import Path
-    from vqapr.public import ComponentKind, ComponentRef, Workspace
+    from vqapr.public import Role, ComponentRef, Workspace
 
     project, index = sys.argv[1], sys.argv[2]
     component = ComponentRef.of(
         f"component-{index}",
-        ComponentKind.STRATEGY_MODEL,
+        Role.STRATEGY_MODEL,
         Path(f"component-{index}.py"),
         "Strategy",
         fingerprint="a" * 64,

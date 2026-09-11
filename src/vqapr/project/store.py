@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 
 from vqapr._internal import atomic, filelock
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data import scan
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec, physical_digest
@@ -30,6 +30,7 @@ from vqapr.domain.identifiers import (
     source_id,
 )
 from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.wiring import Role
 from vqapr.project.document import read_workspace, write_workspace
 from vqapr.project.merge import (
     _merge_component as merge_component,
@@ -498,11 +499,11 @@ class Workspace:
         return merge_declaration(state, "runs", definition.run_id, definition, noun="run_id")
 
     def _require_run_references(self, state: _State, definition: RunDefinition) -> None:
-        def component(component_id: str, kind: ComponentKind, role: str) -> None:
+        def component(component_id: str, kind: Role, noun: str) -> None:
             ref = state.components.get(ComponentId(component_id))
             if ref is None or ref.kind is not kind:
                 raise reference_error(
-                    f"run {definition.run_id!r} names {role} {component_id!r}, which must be "
+                    f"run {definition.run_id!r} names {noun} {component_id!r}, which must be "
                     f"a registered {kind.value} component",
                     fix=(
                         f"register {component_id!r} as a {kind.value}, or name a registered one"
@@ -513,13 +514,13 @@ class Workspace:
                 )
 
         if definition.strategy is not None:
-            component(definition.strategy.component_id, ComponentKind.STRATEGY_MODEL, "strategy")
+            component(definition.strategy.component_id, Role.STRATEGY_MODEL, "strategy")
         for name in definition.compliance:
-            component(name, ComponentKind.COMPLIANCE, "compliance rule")
+            component(name, Role.COMPLIANCE, "compliance rule")
         if definition.datamodel is not None:
-            component(definition.datamodel.component_id, ComponentKind.DATA_MODEL, "datamodel")
+            component(definition.datamodel.component_id, Role.DATA_MODEL, "datamodel")
         if definition.exchange is not None:
-            component(definition.exchange, ComponentKind.EXCHANGE, "exchange")
+            component(definition.exchange, Role.EXCHANGE, "exchange")
         if definition.execution is not None:
             venue_table = state.datasets.get(dataset_id(definition.execution.dataset))
             if venue_table is None:

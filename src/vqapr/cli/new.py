@@ -33,16 +33,16 @@ import yaml
 from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
 from vqapr.agent.sample.materialize import materialize as materialize_sample
 from vqapr.cli.envelope import success
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import _class_name, lookback_declaration, render
 from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
+from vqapr.domain.wiring import Role
 from vqapr.project.store import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
-    "datamodel": ComponentKind.DATA_MODEL,
-    "strategy": ComponentKind.STRATEGY_MODEL,
-    "compliance": ComponentKind.COMPLIANCE,
+    "datamodel": Role.DATA_MODEL,
+    "strategy": Role.STRATEGY_MODEL,
+    "compliance": Role.COMPLIANCE,
 }
 
 _LOOKBACK_DEFAULT = 6
@@ -54,13 +54,13 @@ asked for rows" from "the user left the default alone and asked for calendar day
 """
 
 _DECLARATION_KIND = {
-    ComponentKind.DATA_MODEL: "datamodel",
-    ComponentKind.STRATEGY_MODEL: "strategy",
-    ComponentKind.COMPLIANCE: "compliance",
+    Role.DATA_MODEL: "datamodel",
+    Role.STRATEGY_MODEL: "strategy",
+    Role.COMPLIANCE: "compliance",
 }
 """The declaration spelling for each authored kind.
 
-Keyed by `ComponentKind` and read while emitting the companion `.yaml`, so a kind added to
+Keyed by `Role` and read while emitting the companion `.yaml`, so a kind added to
 `_KINDS` and forgotten here surfaces as a bare `KeyError` -- `stage: "unhandled"` -- which is the
 failure shape this slice exists to remove. The three tables are the same three kinds.
 """
@@ -209,7 +209,7 @@ def _emitted_class_name(source: str) -> str:
 
 def _declaration(
     component_id: str,
-    kind: ComponentKind,
+    kind: Role,
     source: Path,
     object_name: str,
     *,
@@ -232,7 +232,7 @@ def _declaration(
             }
         }
     }
-    if kind is ComponentKind.DATA_MODEL and dataset_id:
+    if kind is Role.DATA_MODEL and dataset_id:
         document["runs"] = {
             f"{component_id}-run": {
                 "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
@@ -384,7 +384,7 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     # Compliance rule is about the book and reads nothing -- the shipped `NoShort` returns an
     # empty `requirements()`. Demanding `--dataset` from all three would make an author invent a
     # dataset to scaffold a rule that never opens one.
-    if kind is ComponentKind.COMPLIANCE:
+    if kind is Role.COMPLIANCE:
         source = render(kind, args.component_id, cap=str(getattr(args, "cap", "0.2")))
     else:
         if not args.dataset:

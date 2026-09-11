@@ -37,7 +37,6 @@ import pytest
 
 from vqapr.authoring import EconomicAccountView
 from vqapr.component.loading import load_data_model, load_strategy_model
-from vqapr.component.reference import ComponentKind
 from vqapr.component.scaffold import render
 from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.data.dataset import DatasetRegistration
@@ -48,6 +47,7 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.run.calls import DataModelContext, StrategyModelContext
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
 
@@ -117,7 +117,7 @@ def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:
     )
 
 def _emit(
-    project: Path, kind: ComponentKind, component_id: str, lookback_kind: str = "rows"
+    project: Path, kind: Role, component_id: str, lookback_kind: str = "rows"
 ) -> Path:
     path = project / f"{component_id.replace('-', '_')}.py"
     path.write_text(
@@ -153,7 +153,7 @@ def test_the_datamodel_scaffold_computes_against_a_float64_column(
 ) -> None:
     """The template's `compute` must survive the dtype a real parquet stores."""
     workspace = _workspace(tmp_path, float_price_parquet)
-    path = _emit(tmp_path, ComponentKind.DATA_MODEL, "float-model")
+    path = _emit(tmp_path, Role.DATA_MODEL, "float-model")
     ref = register_data_model(tmp_path, "float-model", path, "FloatModel")
     model = load_data_model(ref, project_root=tmp_path)
 
@@ -192,7 +192,7 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     This is the call the testbed agent's run actually made when it failed.
     """
     workspace = _workspace(tmp_path, float_price_parquet)
-    path = _emit(tmp_path, ComponentKind.STRATEGY_MODEL, "float-alpha")
+    path = _emit(tmp_path, Role.STRATEGY_MODEL, "float-alpha")
     ref = register_strategy_model(tmp_path, "float-alpha", path, "FloatAlpha")
     strategy = load_strategy_model(ref, project_root=tmp_path)
 
@@ -233,7 +233,7 @@ def test_the_calendar_strategy_scaffold_decides_against_a_float64_column(
     100 -> 105 and B 50 -> 53, so the momentum signal chooses both and the template rebalances.
     """
     workspace = _workspace(tmp_path, float_price_parquet)
-    path = _emit(tmp_path, ComponentKind.STRATEGY_MODEL, "day-alpha", lookback_kind="calendar")
+    path = _emit(tmp_path, Role.STRATEGY_MODEL, "day-alpha", lookback_kind="calendar")
     ref = register_strategy_model(tmp_path, "day-alpha", path, "DayAlpha")
     strategy = load_strategy_model(ref, project_root=tmp_path)
 
@@ -261,8 +261,8 @@ def test_the_calendar_strategy_scaffold_decides_against_a_float64_column(
     assert type(decision).__name__ == "Rebalance", decision
     assert strategy.memory == {"held": ["A", "B"]}, "what the next callback's log compares with"
 
-@pytest.mark.parametrize("kind", [ComponentKind.DATA_MODEL, ComponentKind.STRATEGY_MODEL])
-def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:
+@pytest.mark.parametrize("kind", [Role.DATA_MODEL, Role.STRATEGY_MODEL])
+def test_neither_template_collects_a_raw_cell(kind: Role) -> None:
     """Pin the conversion in the emitted source.
 
     The tests above prove the templates run on float64. This one names *why*, so an edit that
@@ -280,6 +280,6 @@ def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:
     # The rows grain has no shared instant axis and keeps the per-name reduction; there the
     # property is the old one: every cell goes through `Decimal(str(...))`, never `Decimal(...)`
     # on the raw cell.
-    rows = render(ComponentKind.DATA_MODEL, "pinned", dataset_id="vendor", lookback_kind="instants")
+    rows = render(Role.DATA_MODEL, "pinned", dataset_id="vendor", lookback_kind="instants")
     assert "Decimal(str(value))" in rows
     assert "[Decimal(v)" not in rows and ".append(value)" not in rows

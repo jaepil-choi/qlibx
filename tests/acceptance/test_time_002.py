@@ -21,7 +21,7 @@ from vqapr.authoring import (
     StrategyModel,
 )
 from vqapr.component.exchange.academic import AcademicExchange
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
 from vqapr.data.lookback import RowsLookback
@@ -44,6 +44,7 @@ from vqapr.domain.intent import (
 )
 from vqapr.domain.listing import ListingAccess, TradeRule
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
 from vqapr.flow.engine.artifacts import (
     AccountCommitEvidence,
@@ -107,7 +108,7 @@ class _PayloadFaultStrategy(_Strategy):
             raise RuntimeError("payload fault")
 
 
-def _component(identifier: str, kind: ComponentKind) -> ComponentRef:
+def _component(identifier: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(
         identifier, kind, Path(f"{identifier}.py"), "Component", fingerprint="0" * 64
     )
@@ -191,7 +192,7 @@ def _frozen(
     market-clock instant and the declared Compliance rules observe it right after.
     """
     strategy = StrategyConfig(
-        _component("strategy", ComponentKind.STRATEGY_MODEL),
+        _component("strategy", Role.STRATEGY_MODEL),
         "strategy",
     )
     bounds = {"start": callbacks[0], "end": end} if end is not None else {}
@@ -200,7 +201,7 @@ def _frozen(
         compliance=(
             compliance
             if compliance is not None
-            else ComplianceSet((_component("risk", ComponentKind.COMPLIANCE),))
+            else ComplianceSet((_component("risk", Role.COMPLIANCE),))
         ),
         agenda=_agenda("strategy", *callbacks),
         requirements=strategy_requirements,
@@ -211,7 +212,7 @@ def _frozen(
     return FrozenRun(
         run_id="test",
         strategy=layer,
-        exchange=_component("academic", ComponentKind.EXCHANGE) if execution else None,
+        exchange=_component("academic", Role.EXCHANGE) if execution else None,
         execution=execution,
         initial_account_snapshot=account,
         initial_account_mode=AccountMode.LONG_ONLY,
@@ -1041,7 +1042,7 @@ def test_shared_compliance_identity_is_the_only_rule_authority() -> None:
         def compliance_id(self) -> str:
             return "other"
 
-    rule = _component("risk", ComponentKind.COMPLIANCE)
+    rule = _component("risk", Role.COMPLIANCE)
     frozen = _frozen((datetime(2024, 3, 5, 9, tzinfo=KST),))
     # A structured refusal, not a bare `ValueError`. The guard used to raise one, which carries no
     # body, so it surfaced through the CLI as `stage: "unhandled"` with an empty `failures` list --
@@ -1063,7 +1064,7 @@ def test_shared_compliance_identity_is_the_only_rule_authority() -> None:
     # The refusal names both sides, so a reader does not have to diff two ids by eye.
     assert "'other'" in caught.value.failures[0].observed
     assert "'risk'" in caught.value.failures[0].observed
-    assert frozen.strategy.compliance.rules == (_component("risk", ComponentKind.COMPLIANCE),)
+    assert frozen.strategy.compliance.rules == (_component("risk", Role.COMPLIANCE),)
     assert ComplianceSet((rule,)).rules == (rule,)
 
 

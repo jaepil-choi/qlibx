@@ -136,8 +136,8 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     framework will actually act on.
     """
     from vqapr.component.loading import load_data_model, load_strategy_model
-    from vqapr.component.reference import ComponentKind
     from vqapr.component.strategy.base import StrategyModel
+    from vqapr.domain.wiring import Role
 
     space = Workspace.open(project_root)
     try:
@@ -152,7 +152,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         ) from None
 
     kind = getattr(ref, "kind", None)
-    if kind is ComponentKind.COMPLIANCE:
+    if kind is Role.COMPLIANCE:
         # A rule declares what it reads and answers to an id, so it is describable in the same
         # terms -- it simply forms nothing and produces no weights.
         from vqapr.component.loading import load_compliance
@@ -171,9 +171,9 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
             "weights": "none; a compliance rule observes the book and never proposes weights",
             "records": ["vqapr.monitoring"],
         }
-    if kind is ComponentKind.DATA_MODEL:
+    if kind is Role.DATA_MODEL:
         model = load_data_model(ref, project_root=project_root)
-    elif kind is ComponentKind.STRATEGY_MODEL:
+    elif kind is Role.STRATEGY_MODEL:
         model = load_strategy_model(ref, project_root=project_root)
     else:
         # A registered id of a kind this verb does not describe. It used to fall through to the
@@ -184,7 +184,7 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
         shown = ", ".join(
             cli_kind(item)
             for item in (
-                ComponentKind.STRATEGY_MODEL, ComponentKind.DATA_MODEL, ComponentKind.COMPLIANCE
+                Role.STRATEGY_MODEL, Role.DATA_MODEL, Role.COMPLIANCE
             )
         )
         raise InputError(

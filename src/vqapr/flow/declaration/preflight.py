@@ -19,7 +19,7 @@ from vqapr.component.loading import (
     load_exchange,
     load_strategy_model,
 )
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
 from vqapr.component.strategy.base import StrategyModel
 from vqapr.data.dataset import execution_price_fields, lookback_fits_grain, require_declared
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
@@ -33,6 +33,7 @@ from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.listing import TradeRule
 from vqapr.domain.memory import ModelMemory
 from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
+from vqapr.domain.wiring import Role
 from vqapr.flow.declaration.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
 from vqapr.flow.declaration.roster import require_declared_roster
 from vqapr.project.run import (
@@ -913,7 +914,7 @@ def _freeze_strategy(
     second fresh instance (`_validate_initial_model_state`, `docs/issues/archive/076`).
     """
     registered = workspace.component(entry.component_id)
-    if registered.kind is not ComponentKind.STRATEGY_MODEL:
+    if registered.kind is not Role.STRATEGY_MODEL:
         raise ValueError(
             f"strategy {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a strategy"
@@ -993,7 +994,7 @@ def _freeze_datamodel(
     the hour, and `check` asks the same question for the same reason.
     """
     registered = workspace.component(entry.component_id)
-    if registered.kind is not ComponentKind.DATA_MODEL:
+    if registered.kind is not Role.DATA_MODEL:
         raise ValueError(
             f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a datamodel"
@@ -1011,7 +1012,7 @@ def _freeze_datamodel(
 
 def _registered_compliance(workspace: Workspace, component_id: str) -> ComponentRef:
     ref = workspace.component(component_id)
-    if ref.kind is not ComponentKind.COMPLIANCE:
+    if ref.kind is not Role.COMPLIANCE:
         raise ValueError(
             f"compliance rule {component_id!r} is registered as {ref.kind.value}, not as a "
             "compliance rule"
@@ -1021,7 +1022,7 @@ def _registered_compliance(workspace: Workspace, component_id: str) -> Component
 
 def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRef:
     ref = workspace.component(component_id)
-    if ref.kind is not ComponentKind.EXCHANGE:
+    if ref.kind is not Role.EXCHANGE:
         raise ValueError(
             f"exchange {component_id!r} is registered as {ref.kind.value}, not as an exchange"
         )

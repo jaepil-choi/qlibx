@@ -215,7 +215,7 @@ def instruments(kinds: Mapping[str, InstrumentKind | str]) -> dict[str, Instrume
 #
 # **The roster is a registered table, not a component.** A component is a thing Flow CALLS, which is
 # what `conformance`'s contract table encodes; a roster is a thing a run READS. Forcing it into
-# `ComponentKind` would buy the loader machinery at the price of an entry in that table whose answer
+# a `Role` would buy the loader machinery at the price of an entry in that table whose answer
 # is nothing.
 #
 # **One file per kind.** A parquet file carries exactly one schema, so a single file cannot hold

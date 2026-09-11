@@ -17,7 +17,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from pydantic import ValidationError
 
-from vqapr.component.reference import ComponentKind, ComponentRef
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import EXTENSION_POINTS, Role
 from vqapr.project.run import (
     ComplianceSet,
     DataModelEntry,
@@ -30,7 +31,7 @@ from vqapr.project.run import (
 KST = ZoneInfo("Asia/Seoul")
 
 
-def _component(kind: ComponentKind, name: str) -> ComponentRef:
+def _component(kind: Role, name: str) -> ComponentRef:
     return ComponentRef.of(
         name,
         kind,
@@ -56,7 +57,7 @@ def _definition(**overrides: object) -> RunDefinition:
 
 def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
     """Preflight's product, not a user declaration; it carries no role (record `182`)."""
-    strategy = _component(ComponentKind.STRATEGY_MODEL, "strategy")
+    strategy = _component(Role.STRATEGY_MODEL, "strategy")
 
     config = StrategyConfig(strategy, "r.agenda")
 
@@ -64,7 +65,7 @@ def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
     assert not hasattr(config, "agenda_role")
     with pytest.raises(ValueError, match="STRATEGY_MODEL"):
         StrategyConfig(
-            _component(ComponentKind.COMPLIANCE, "limit"),
+            _component(Role.COMPLIANCE, "limit"),
             "r.agenda",
         )
 
@@ -109,7 +110,7 @@ def test_a_strategy_entry_is_an_id_and_memory_only() -> None:
     # pydantic owns the shape now (one-shape campaign Step 5): a ComponentRef where an id belongs
     # is pydantic's own shape error, not a hand-written TypeError.
     with pytest.raises(ValidationError, match="valid string"):
-        _definition(compliance=(_component(ComponentKind.COMPLIANCE, "x"),))
+        _definition(compliance=(_component(Role.COMPLIANCE, "x"),))
 
 
 def test_an_undeclared_opening_memory_is_an_empty_mapping() -> None:
@@ -231,16 +232,16 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
 
 
 def test_compliance_set_holds_compliance_refs_only() -> None:
-    rules = ComplianceSet((_component(ComponentKind.COMPLIANCE, "no-short"),))
+    rules = ComplianceSet((_component(Role.COMPLIANCE, "no-short"),))
     assert rules.rules[0].component_id == "no-short"
     with pytest.raises(ValueError, match="COMPLIANCE"):
-        ComplianceSet((_component(ComponentKind.STRATEGY_MODEL, "s"),))
+        ComplianceSet((_component(Role.STRATEGY_MODEL, "s"),))
 
 
-def test_component_kinds_remain_closed_to_the_existing_four() -> None:
-    assert tuple(ComponentKind) == (
-        ComponentKind.DATA_MODEL,
-        ComponentKind.STRATEGY_MODEL,
-        ComponentKind.EXCHANGE,
-        ComponentKind.COMPLIANCE,
+def test_the_extension_points_remain_closed_to_the_existing_four() -> None:
+    assert EXTENSION_POINTS == (
+        Role.DATA_MODEL,
+        Role.STRATEGY_MODEL,
+        Role.EXCHANGE,
+        Role.COMPLIANCE,
     )

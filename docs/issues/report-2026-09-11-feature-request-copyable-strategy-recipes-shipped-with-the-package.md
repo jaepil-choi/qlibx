@@ -2,7 +2,13 @@
 
 **Kind: feature request.**
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수) — replaced by owner ruling.** No `--recipe`: a second door beside
+`vqapr new strategy`, and half of the four recipes are not strategy code (the clocks are the run
+declaration's, the fill-price join is the export request's). Instead the one strategy scaffold shows
+every piece the three agents looked up — `self.memory`, a table of its own written through
+`self.recorder`, a second read, where fill facts come from — live where it can run as written,
+commented where it needs a second dataset. Campaign `redesign/one-reading`. The rerun's measure
+stands as written.
 
 | | |
 |---|---|

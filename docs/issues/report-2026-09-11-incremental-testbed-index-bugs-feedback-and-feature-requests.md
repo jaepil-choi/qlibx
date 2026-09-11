@@ -2,7 +2,9 @@
 
 **Kind: index.** This file is a handoff and carries no finding of its own.
 
-**Status: UNTRIAGED — written by the testbed for the owner, 2026-09-11.**
+**Status: RECEIVED 2026-09-11 (접수).** The owner kept the export request, narrowed, and replaced the
+recipe request with a scaffold that shows every piece; each report's own Status line carries its
+ruling.
 
 The testbed (`kwam-enhanced-index/vqapr-incr-testbed`) asked six agents to add one strategy, a
 gap-reversal enhanced index on KRX, to an existing project. Three worked in pandas and three in a

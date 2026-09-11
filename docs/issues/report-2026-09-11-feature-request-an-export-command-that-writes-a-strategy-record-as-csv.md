@@ -2,7 +2,15 @@
 
 **Kind: feature request.**
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수) — accepted narrower, by owner ruling.** Confirmed in source that
+the type errors are a writer defect, not a reading mistake: `vqapr.weight.weight`
+(`flow/run/callback.py`) and the fill quantities and `cash_delta` (`flow/engine/run_state.py`) are
+stringified before the schema sees them, so they are recorded as plain text and no reader can
+restore them. That is fixed at the writer first, with old records restored by column name. Then
+`vqapr export` writes the report's own valuation grid, fills, weights, holdings and each declared
+table as CSV through the readers `strategy_report` uses. Not built: the join of a strategy's table
+with fill prices (the user's code) and `--format parquet` (the store is parquet). Campaign
+`redesign/one-reading`.
 
 | | |
 |---|---|

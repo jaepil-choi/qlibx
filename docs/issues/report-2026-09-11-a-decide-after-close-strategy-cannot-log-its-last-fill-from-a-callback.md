@@ -3,7 +3,10 @@
 **Kind: constructive feedback.** This is not a defect. The record holds the fill. The pattern for
 logging fill-dependent facts is the missing piece.
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: RECEIVED 2026-09-11 (접수).** Confirmed from the B-2 transcript. The strategy scaffold and
+`make-strategy` will say it where an author writes the log: record the decision in the callback,
+read fill prices and quantities from `vqapr.fill` (which `vqapr export` writes as `fills.csv`), and
+no callback follows the last fill. Campaign `redesign/one-reading`.
 
 | | |
 |---|---|

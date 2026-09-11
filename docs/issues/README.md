@@ -67,6 +67,20 @@
 |---|---|---|---|
 | ~~`report-2026-09-11-skill-install-writes-into-the-enclosing-repositorys-git-root-...`~~ | `skill install`이 프로젝트가 아니라 그것을 감싼 저장소의 `.git` 루트에 쓰고, `--project-root .`로는 바꿀 수 없다 | **닫힘 2026-09-11 — record `258`.** 루트가 하나: skill은 workspace root(현재 디렉터리, 또는 `--project-root`)에 깔리고 — 다른 모든 명령과 stale 검사(`upgrade_note`)가 보는 곳 — `--into`가 다른 곳을 댄다. `.git` 걷기와 `argument.no_git_root` 삭제. 깨지는 변화 한 줄(git 루트 아래 workspace의 옛 사본은 `skill remove --into <git 루트>`)은 다음 릴리스 노트에 | 코드 + skill + PRD |
 
+### 2026-09-11 incremental testbed의 나머지 — 오너 판정 뒤 접수 (campaign `redesign/one-reading`)
+
+위 incremental 넷 중 비용 보고와, 그 뒤에 온 셋과 색인. 오너 판정(2026-09-11): `--recipe`는 만들지 않고 strategy
+scaffold 하나가 에이전트가 찾아본 부품을 전부 보인다; export는 좁혀서 만든다; 그 전에 record가 숫자를 글자로 쓰는
+결함을 쓰는 곳에서 고친다. 위 표의 비용 보고 행("다른 세션이 맡음")은 이 절이 대신한다.
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 오너 판정.** 레시피 대신 scaffold가 그 예제가 된다 | — |
+| `report-2026-09-11-feature-request-copyable-strategy-recipes-...` | 복사할 전략 레시피를 패키지에 싣고 `new strategy --recipe`로 | **접수 — 대체.** 문 하나: scaffold가 `self.memory` · 자기 표(`self.recorder`) · 두 번째 읽기 · 체결 사실이 어디 있는지를 보인다 | — |
+| `report-2026-09-11-feature-request-an-export-command-...` | `vqapr export`가 NAV·표를 숫자 열의 CSV로 | **접수 — 좁혀서.** 소스 확인: `weight`·fill 수량·`cash_delta`를 writer가 `str`로 써서 reader가 못 되돌린다. writer를 먼저 고치고(옛 record는 열 이름으로), export는 report와 같은 reader 위에. 조인·parquet 형식은 없음 | — |
+| `report-2026-09-11-a-decide-after-close-strategy-cannot-log-its-last-fill-...` | decide-after-close 전략이 콜백에서 마지막 체결을 기록할 수 없다 | **접수.** scaffold와 make-strategy가 "결정을 기록하고 체결은 `vqapr.fill`에서"를 말한다 | — |
+| `report-2026-09-11-incremental-testbed-index-...` | 이 testbed 보고들의 색인 | **접수.** 판정은 각 보고의 Status 줄 | — |
+
 ### 2026-09-11의 번호 없는 보고 아홉 — testbed(`0.14.2` wheel): A/B testbed · FF3 testbed · enhanced-index-3 — 일곱 닫힘, 하나 다른 세션, 하나 보류
 
 오너가 번호 없이 바로 고치게 했다(develop 위, records `249`–`257`). 월말 발화는 `on: last`, 옆 모듈 import는 "한 파일

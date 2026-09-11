@@ -4,17 +4,17 @@ The template from `vqapr new run --out runs.yaml` carries every required key wit
 it is generated from the contract the package enforces. **Fill the template rather than
 hand-writing the YAML** — this file explains the choices, not the key list.
 
-## The strategy clock: `agenda`
+## The schedule clock: `schedule`
 
 A run declares **when it fires** as one block, a trading-day filter plus a within-day rule:
 
 ```yaml
     timezone: Asia/Seoul
-    agenda:
+    schedule:
       every: 1d          # <count><unit>; d, w, M pick trading days and pair with `at`
       at: "15:29"        #   one wall time or a list
       # on: last         #   w, M only: the last trading day of each week or month, not the first
-    # agenda:
+    # schedule:
     #   every: 5m        # <count><unit>; m, h pick instants inside each day and pair with from/to
     #   from: "09:00"
     #   to: "15:20"
@@ -22,7 +22,7 @@ A run declares **when it fires** as one block, a trading-day filter plus a withi
 
 **The days are not declared.** They come from data: a strategy run's trading days are the days its
 execution dataset has rows for, so a denser table adds fill instants and never a decision day. A
-datamodel run has no venue and names the dataset whose days count with `agenda.days_from`. There
+datamodel run has no venue and names the dataset whose days count with `schedule.days_from`. There
 is no `sessions:` list to type and no calendar to register.
 
 **`every` is a count and a unit, and the count is free.** The units are `d`, `w`, `M` for trading

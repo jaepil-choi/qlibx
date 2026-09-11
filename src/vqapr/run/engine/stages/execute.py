@@ -177,8 +177,8 @@ class ExecutionHandler:
             )
         commit_evidence = AccountCommitEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=pending.occurrence,
+            schedule=self._context.layer.schedule,
+            event=pending.event,
             cutoff=pending.target.target_at,
             pending=pending,
             target=pending.target,
@@ -211,7 +211,7 @@ class ExecutionHandler:
                     "run_id": self._context.frozen_run.identity,
                     "producer_id": str(self._context.layer.config.component.component_id),
                     "stage": CALLBACK_STAGE,
-                    "event_time": self._context.in_agenda_zone(pending.target.target_at),
+                    "event_time": self._context.in_schedule_zone(pending.target.target_at),
                 },
             )
         with self._context.due_boundary(
@@ -268,8 +268,8 @@ class ExecutionHandler:
                 raise RuntimeError("a marked root must carry the Account it marked")
             feedback_evidence = FeedbackEvidence(
                 run_identity=self._context.frozen_run.identity,
-                agenda=self._context.layer.agenda,
-                occurrence=pending.occurrence,
+                schedule=self._context.layer.schedule,
+                event=pending.event,
                 cutoff=pending.target.target_at,
                 pending=pending,
                 candidates=(filled.fills, marked.mark.summary()),

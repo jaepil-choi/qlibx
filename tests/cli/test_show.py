@@ -39,7 +39,7 @@ _RECORD = {
         "by_kind": {"stock": 10, "etf": 2},
         "instruments": 12,
     },
-    "period": {"start": "2024-01-01", "end": "2024-12-31", "occurrences": 12},
+    "period": {"start": "2024-01-01", "end": "2024-12-31", "events": 12},
 }
 
 
@@ -64,7 +64,7 @@ def test_show_answers_every_question_the_record_holds(store: Path) -> None:
     assert payload["tables"]["vqapr.account"] == {"rows": 12, "instants": 6}
     assert payload["contract"] == {"accepted_intents": 7}
     assert payload["source_digest"] == "digest-abc"
-    assert payload["period"]["occurrences"] == 12
+    assert payload["period"]["events"] == 12
 
 
 def test_the_output_and_the_record_carry_one_field_set(store: Path) -> None:
@@ -127,7 +127,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
 
     # The strategy record (record 139) answers what a run record answered before -- the account,
     # the tables, the contract, the roster, the period, the digests -- plus what architecture
-    # §17.3.2 found missing: which `.py` ran, under which agenda and compliance rules, and the
+    # §17.3.2 found missing: which `.py` ran, under which schedule and compliance rules, and the
     # strategy's own fingerprint. Pinned the same way, so a builder added to `_freeze_strategy`
     # without a field here is caught at the writer.
     from vqapr.cli.show import STRATEGY_FIELDS
@@ -138,7 +138,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "strategy_id",
         "fingerprint",
         "component",
-        "agenda",
+        "schedule",
         "compliance",
         "exchange",
         "account",
@@ -164,7 +164,7 @@ def test_a_field_written_to_the_record_but_never_surfaced_is_refused_at_the_writ
         "datamodel_id",
         "fingerprint",
         "component",
-        "agenda",
+        "schedule",
         "dataset_id",
         "value_fields",
         "rows",

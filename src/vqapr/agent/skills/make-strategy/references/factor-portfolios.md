@@ -72,7 +72,7 @@ class FfLeg(va.StrategyModel):
         }
 
     def decide(self, call):
-        if call.evaluation_time.month != 7:
+        if call.at.month != 7:
             return va.Hold(reason="forms only in July")
         caps = call.read("px", "market_cap").current()   # the newest cross-section
         # caps.at is its instant: assert it is June's last close before trusting it
@@ -92,7 +92,7 @@ class FfLeg(va.StrategyModel):
   same window. `current()` is the newest cross-section; `.at` says which instant it is.
 - The market leg returns `va.Rebalance.of(long={"KOSPI": 1}, invested=1)` against its own
   one-instrument execution table.
-- The run: `agenda: {every: 12M, at: "15:29"}` with `start` on the first of July, the fill at the
+- The run: `schedule: {every: 12M, at: "15:29"}` with `start` on the first of July, the fill at the
   close (`15:30`, `trade_price: close`), the `academic` venue, and a large `initial_account`.
 - Exact weights: in the venue's `TradeRule` (the `vqapr new exchange --profile academic`
   scaffold), `fractional_allowed=True` with a fractional `quantity_step` makes a listing divisible,

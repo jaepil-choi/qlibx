@@ -25,7 +25,7 @@ runs:
     start: '2024-12-16T00:00:00+09:00'
     end: '2024-12-31T23:59:59+09:00'
     timezone: Asia/Seoul
-    agenda: {every: 1d, at: '15:31'}
+    schedule: {every: 1d, at: '15:31'}
     exchange: sample-exchange
     execution: {dataset: sample-execution, trade_price: close, fill: {at: '15:30', within: 1d}}
     initial_account: {cash: '100000000', mode: LONG_ONLY, positions: {}}
@@ -54,10 +54,10 @@ def refused(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> list[dict]:
     return body["failures"]
 
 
-def test_each_occurrence_is_listed_once(refused: list[dict]) -> None:
+def test_each_event_is_listed_once(refused: list[dict]) -> None:
     listed = [example for failure in refused for example in failure["examples"]]
 
-    assert len(listed) == len(set(listed)), "an occurrence was refused twice"
+    assert len(listed) == len(set(listed)), "an event was refused twice"
     assert {failure["code"] for failure in refused} == {"execution.not_after_decision"}
 
 
@@ -73,5 +73,5 @@ def test_a_weekend_is_named_as_the_window_and_the_window_that_works(refused: lis
 def test_the_last_session_is_given_the_end_that_keeps_every_fill(refused: list[dict]) -> None:
     (tail,) = [failure for failure in refused if "before the run end" in failure["observed"]]
 
-    assert tail["examples"] == ["after-close.agenda-2024-12-30T1531"]
+    assert tail["examples"] == ["after-close.schedule-2024-12-30T1531"]
     assert 'end: "2024-12-30T15:30:01+09:00"' in tail["fix"]

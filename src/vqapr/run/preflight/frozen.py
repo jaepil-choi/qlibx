@@ -21,9 +21,9 @@ from vqapr.data.execution_table import ExecutionTable
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.source import SourceSpec
 from vqapr.domain.account import AccountMode, AccountSnapshot
-from vqapr.domain.identifiers import AgendaId, ModelStateRef
+from vqapr.domain.identifiers import ModelStateRef, ScheduleId
 from vqapr.domain.memory import ModelMemory, opening_memory
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.workspace.run_definition import (
     FINGERPRINT_PREFIX,
@@ -42,50 +42,50 @@ from vqapr.workspace.run_definition import (
 
 
 @dataclass(frozen=True, slots=True)
-class FrozenAgenda:
-    """A resolved owner agenda identity and its inclusive run slice."""
+class FrozenSchedule:
+    """A resolved owner schedule identity and its inclusive run slice."""
 
-    agenda_id: AgendaId
-    occurrences: tuple[OperationOccurrence, ...]
+    schedule_id: ScheduleId
+    events: tuple[ScheduledEvent, ...]
     timezone: str = ""
     content_identity: str = ""
 
     def __post_init__(self) -> None:
-        if not self.agenda_id:
-            raise ValueError("agenda_id must be a non-empty AgendaId")
+        if not self.schedule_id:
+            raise ValueError("schedule_id must be a non-empty ScheduleId")
         if not self.timezone and self.content_identity:
-            raise ValueError("an agenda identity requires a timezone")
+            raise ValueError("an schedule identity requires a timezone")
         if self.content_identity and len(self.content_identity) != 64:
             raise ValueError("content_identity must be a SHA-256 identity")
 
     def encoded(self) -> tuple[str, list[tuple[str, str, str, int, str]]]:
-        """What a model's identity folds of its agenda: the sessions' CONTENT, not their name.
+        """What a model's identity folds of its schedule: the sessions' CONTENT, not their name.
 
-        The zone and each occurrence's local instant. Not the agenda id or the occurrence ids:
-        since record `148` the agenda is derived from the run (`<run_id>.sessions`, occurrences
+        The zone and each event's local instant. Not the schedule id or the event ids:
+        since record `148` the schedule is derived from the run (`<run_id>.sessions`, events
         `<run_id>.sessions-<date>`), so folding those would make the same strategy on the same
         sessions a different identity under every run id -- which is the run's identity, not
         the strategy's (owner ruling, 2026-09-03). Not a role either (record `182`): the one
-        agenda has none, and the `STRATEGY_CALLBACK` a datamodel run's identity used to fold
+        schedule has none, and the `STRATEGY_CALLBACK` a datamodel run's identity used to fold
         named a role that run never had.
         """
         return (
             self.timezone,
-            [occurrence.local_instant.identity() for occurrence in self.occurrences],
+            [event.local_instant.identity() for event in self.events],
         )
 
 
-def merged_occurrences(*agendas: FrozenAgenda | None) -> tuple[OperationOccurrence, ...]:
-    """The deterministic static dispatch order of several agendas: one sorted merge."""
+def merged_events(*schedules: FrozenSchedule | None) -> tuple[ScheduledEvent, ...]:
+    """The deterministic static dispatch order of several schedules: one sorted merge."""
     return tuple(
         sorted(
             (
-                occurrence
-                for agenda in agendas
-                if agenda is not None
-                for occurrence in agenda.occurrences
+                event
+                for schedule in schedules
+                if schedule is not None
+                for event in schedule.events
             ),
-            key=OperationOccurrence.sort_key,
+            key=ScheduledEvent.sort_key,
         )
     )
 
@@ -94,13 +94,13 @@ def merged_occurrences(*agendas: FrozenAgenda | None) -> tuple[OperationOccurren
 class FrozenStrategy:
     """One strategy's layer of a frozen run: what is its own and not the run's.
 
-    Its identity folds the component fingerprint, the run's Compliance rules, its agenda slice,
+    Its identity folds the component fingerprint, the run's Compliance rules, its schedule slice,
     its opening memory and what it and the rules read.
     """
 
     config: StrategyConfig
     compliance: ComplianceSet
-    agenda: FrozenAgenda
+    schedule: FrozenSchedule
     requirements: tuple[DataRequirement, ...] = ()
     compliance_requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = field(default_factory=dict)
@@ -109,8 +109,8 @@ class FrozenStrategy:
     _identity: str = field(default="", init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.agenda.agenda_id != self.config.agenda_id:
-            raise ValueError("agenda must match the strategy config's agenda_id")
+        if self.schedule.schedule_id != self.config.schedule_id:
+            raise ValueError("schedule must match the strategy config's schedule_id")
         _require_requirements("requirements", self.requirements)
         _require_requirements("compliance_requirements", self.compliance_requirements)
         # `{}` when nothing was declared (`docs/issues/089`): the first callback finds a mapping.
@@ -150,7 +150,7 @@ class FrozenStrategy:
                         "compliance": [
                             (rule.component_id, rule.fingerprint) for rule in self.compliance.rules
                         ],
-                        "agenda": self.agenda.encoded(),
+                        "schedule": self.schedule.encoded(),
                         "initial_model_memory": self.initial_model_memory,
                         "initial_model_state_ref": self.initial_model_state_ref.digest,
                         "initial_payload": self.initial_payload.hex(),
@@ -166,15 +166,15 @@ class FrozenStrategy:
 
 @dataclass(frozen=True, slots=True)
 class FrozenDataModel:
-    """One datamodel's layer of a frozen run: the component, its agenda slice, and its output.
+    """One datamodel's layer of a frozen run: the component, its schedule slice, and its output.
 
     The datamodel counterpart of `FrozenStrategy`, minus what a datamodel has none of: no
     compliance rules, no account, no payload. Its identity folds the component fingerprint, the
-    agenda slice, the output declaration, its opening memory and what it reads.
+    schedule slice, the output declaration, its opening memory and what it reads.
     """
 
     component: ComponentRef
-    agenda: FrozenAgenda
+    schedule: FrozenSchedule
     value_fields: tuple[str, ...]
     requirements: tuple[DataRequirement, ...] = ()
     initial_model_memory: ModelMemory = field(default_factory=dict)
@@ -205,7 +205,7 @@ class FrozenDataModel:
                 _identity(
                     {
                         "datamodel": (self.component_id, self.component.fingerprint),
-                        "agenda": self.agenda.encoded(),
+                        "schedule": self.schedule.encoded(),
                         "output": list(self.value_fields),
                         "initial_model_memory": self.initial_model_memory,
                         "requirements": _encoded_requirements(self.requirements),
@@ -250,8 +250,8 @@ class FrozenRun:
     _identity: str = field(default="", init=False, repr=False, compare=False)
     """Memo for `identity`, which every frozen field already determines.
 
-    A run reads this about sixteen times per callback, and deriving it walks every occurrence of
-    every agenda. Recomputing therefore cost O(occurrences) per callback -- quadratic in run
+    A run reads this about sixteen times per callback, and deriving it walks every event of
+    every schedule. Recomputing therefore cost O(events) per callback -- quadratic in run
     length -- to produce a string that cannot change once `__post_init__` returns.
     """
 
@@ -333,13 +333,13 @@ class FrozenRun:
 
     def dispatch_order(
         self, layer: FrozenStrategy | FrozenDataModel
-    ) -> tuple[OperationOccurrence, ...]:
-        """The static occurrences one model's flow dispatches: its sessions, at `at`.
+    ) -> tuple[ScheduledEvent, ...]:
+        """The static events one model's flow dispatches: its sessions, at `at`.
 
-        Since record `148` a run has one agenda: the book is valued at the instant the venue
+        Since record `148` a run has one schedule: the book is valued at the instant the venue
         fills and monitored right after each commit, so there is nothing else to merge in.
         """
-        return merged_occurrences(layer.agenda)
+        return merged_events(layer.schedule)
 
     @property
     def identity(self) -> str:

@@ -49,7 +49,7 @@ registered from the user's own path is withdrawn without touching their file.
 
 `vqapr rm dataset <id>` on a **materialized** dataset also deletes the files under
 `.vqapr/materialized/<id>/`. That is the way to retry a DataModel run or drop a throw-away output.
-It refuses while a registered run takes its trading days from that dataset (`agenda.days_from`), naming
+It refuses while a registered run takes its trading days from that dataset (`schedule.days_from`), naming
 the run.
 
 ## When it is genuinely a different thing

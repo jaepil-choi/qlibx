@@ -24,7 +24,7 @@ from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
+from vqapr.public import AccountMode, AccountSnapshot, RunSchedule, RunDefinition, StrategyEntry
 from vqapr.workspace.registry import Workspace
 
 ZONE = "Asia/Seoul"
@@ -58,7 +58,7 @@ def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
                 strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
-                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
                 writes="daily-weights",
@@ -183,7 +183,7 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_trading_days_from_it(
     """`docs/issues/archive/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
     A component's reads live in its code and are refused at its next preflight; a registered
-    datamodel run's `agenda.days_from` lives here, and is the blocker this walk can name.
+    datamodel run's `schedule.days_from` lives here, and is the blocker this walk can name.
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
@@ -200,14 +200,14 @@ def test_a_dataset_is_blocked_by_the_runs_that_take_their_trading_days_from_it(
                 strategy=StrategyEntry(str(ref.component_id)),
                 instruments=("A",),
                 timezone=ZONE,
-                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
                 initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
                 initial_account_mode=AccountMode.LONG_ONLY,
                 writes="daily-weights",
             )
         )
     assert workspace.references_to("dataset", "prices") == ()
-    # `agenda.days_from` naming an unregistered dataset is refused at `register_run`, so the
+    # `schedule.days_from` naming an unregistered dataset is refused at `register_run`, so the
     # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.
 
 

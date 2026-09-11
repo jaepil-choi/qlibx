@@ -235,7 +235,7 @@ components:
                         # Decide at 04:00 on every session the prices have a row for; the book
                         # is valued at the 15:30 fill it lands on (record 148).
                         "timezone": "Asia/Seoul",
-                        "agenda": {"every": "1d", "at": "04:00"},
+                        "schedule": {"every": "1d", "at": "04:00"},
                         "exchange": "krx-venue",
                         "execution": {
                             "dataset": "venue-daily",

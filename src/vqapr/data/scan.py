@@ -1115,7 +1115,7 @@ changed the answer for -- and the bounded query carries the aggregate that keeps
 current. On a real warehouse the check is worth it: 210 MB of daily prices went from 165 ms to
 88 ms per query. On a small source it is pure overhead, because duckdb reads the whole thing in
 less time than deciding not to takes; measured on a 200 KB fixture panel, and against the earlier
-form that re-checked on every query, estimating made a 2,940-occurrence run 28% *slower*. So the
+form that re-checked on every query, estimating made a 2,940-event run 28% *slower*. So the
 estimate is gated on the only thing that decides which regime a source is in, and the gate is
 measured once per run.
 """

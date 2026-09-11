@@ -15,7 +15,7 @@ from vqapr.domain.errors import VqaprError
 from vqapr.public import (
     DataModelEntry,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     SourceSpec,
     preflight_run,
@@ -241,7 +241,7 @@ def _datamodel_run(
         instruments=INSTRUMENTS,
         datamodel=DataModelEntry(component_id, value_fields),
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.combine(sessions[0], time(0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23), tzinfo=KST),
         writes=dataset_id,

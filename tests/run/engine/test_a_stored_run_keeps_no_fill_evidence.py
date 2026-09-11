@@ -66,7 +66,7 @@ def test_a_run_with_a_record_keeps_its_decisions_and_not_its_fills_evidence(
     assert fill_side, "the sample run commits and marks"
     assert all(entry.detail is None for entry in fill_side), "kinds, not evidence"
     assert result.final_state.feedback == ()
-    market = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
+    market = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]
     assert market and all(isinstance(trace.result, InstantOutcome) for trace in market)
     assert not any(isinstance(item, DueExecutionEvidence) for item in gc.get_objects()), (
         "no fill's evidence survives the run that recorded it"
@@ -87,7 +87,7 @@ def test_a_run_without_a_record_keeps_everything(tmp_path: Path) -> None:
         for entry in result.final_state.lifecycle_trace
         if entry.kind is LifecycleKind.ACCOUNT_COMMITTED
     )
-    market = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
+    market = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]
     assert market and all(
         isinstance(trace.result, DueExecutionResult | HeldResult) for trace in market
     )

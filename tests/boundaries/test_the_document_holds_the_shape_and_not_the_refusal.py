@@ -3,7 +3,7 @@
 Record `117`. `workspace.py` was 2,227 lines and the plan called for splitting it four ways. Only
 the codec split was taken, and this file used to pin the measurement that decided it: an attempt
 that moved `Workspace` away from `_workspace_error` measured **0 refusal codes added and 37
-removed** -- every `workspace.dataset.*`, `workspace.agenda.*`, `workspace.component.*`,
+removed** -- every `workspace.dataset.*`, `workspace.schedule.*`, `workspace.component.*`,
 `workspace.source.*` code and `dataset.register.span.absent` -- with a green test suite and a clean
 lint. Four repairs were tried and none restored them.
 

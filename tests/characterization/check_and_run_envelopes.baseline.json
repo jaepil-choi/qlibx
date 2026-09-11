@@ -85,10 +85,10 @@
      "code": "execution.not_after_decision",
      "example_total": 1,
      "examples": [
-      "bad-run.agenda-2022-01-14T1530"
+      "bad-run.schedule-2022-01-14T1530"
      ],
      "fix": "extend the run end past 2022-01-14T23:59:59+09:00 through the instant the decision fills at, move the decision earlier, or loosen the fill's `at`/`after`",
-     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 occurrence(s) with no such instant before the run end 2022-01-14T23:59:59+09:00, the first deciding at 2022-01-14T15:30:00+09:00",
+     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 event(s) with no such instant before the run end 2022-01-14T23:59:59+09:00, the first deciding at 2022-01-14T15:30:00+09:00",
      "requirement": "every decision must have an execution instant after it that the fill rule admits",
      "source": {
       "file": null,
@@ -336,10 +336,10 @@
      "code": "execution.not_after_decision",
      "example_total": 1,
      "examples": [
-      "bad-run.agenda-2022-01-14T1530"
+      "bad-run.schedule-2022-01-14T1530"
      ],
      "fix": "extend the run end past 2022-01-14T23:59:59+09:00 through the instant the decision fills at, move the decision earlier, or loosen the fill's `at`/`after`",
-     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 occurrence(s) with no such instant before the run end 2022-01-14T23:59:59+09:00, the first deciding at 2022-01-14T15:30:00+09:00",
+     "observed": "strategy 'sample-reversal-5d' fills at the first execution instant after the decision, at 15:30:00 Asia/Seoul; 1 event(s) with no such instant before the run end 2022-01-14T23:59:59+09:00, the first deciding at 2022-01-14T15:30:00+09:00",
      "requirement": "every decision must have an execution instant after it that the fill rule admits",
      "source": {
       "file": null,

@@ -60,7 +60,7 @@ class ComplianceCall(Call, ABC):
 
     @property
     @abstractmethod
-    def evaluation_time(self) -> datetime:
+    def at(self) -> datetime:
         """The market-clock instant this observation is bounded to: when the book was marked."""
 
     @property

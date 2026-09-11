@@ -76,8 +76,8 @@ SECTIONS = (
 )
 """Every section this command understands, in dependency order.
 
-The order is a dependency order, not a preference: an agenda may read a dataset's sessions, and a
-strategy config names both a component and an agenda that must already exist. Applying them in
+The order is a dependency order, not a preference: an schedule may read a dataset's sessions, and a
+strategy config names both a component and an schedule that must already exist. Applying them in
 file order would make a valid document fail because of the order the user typed it in.
 """
 
@@ -927,8 +927,8 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
                     requirement=(
                         "a run declares writes, and one strategy (with exchange, execution "
                         "{dataset, trade_price, fill?} and initial_account) or one datamodel "
-                        "(with agenda.days_from), plus "
-                        "instruments, start, end, timezone and agenda (every, at or from/to), "
+                        "(with schedule.days_from), plus "
+                        "instruments, start, end, timezone and schedule (every, at or from/to), "
                         "each in the shape `vqapr new run` emits"
                     ),
                     observed=observed,
@@ -954,7 +954,7 @@ def _apply(document: dict[str, Any], project_root: Path, *, base: Path) -> Regis
 def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinition]]) -> None:
     """A run whose trading days come from a dataset another run in this document will write.
 
-    `inputs()` and `agenda.days_from` are resolved at registration, so a document holding two runs
+    `inputs()` and `schedule.days_from` are resolved at registration, so a document holding two runs
     where the second takes its sessions from the first's output cannot be registered at all: the
     dataset does not exist until the first has run, and the first cannot run until the document is
     registered. The workspace refusal says only that the dataset is unregistered, and `vqapr new run
@@ -968,7 +968,7 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
         produced.setdefault(str(definition.writes), run_id)
     found = collector(Stage.REGISTER)
     for run_id, definition in definitions:
-        wanted = definition.agenda.days_from
+        wanted = definition.schedule.days_from
         producer = None if wanted is None else produced.get(str(wanted))
         if producer is None or producer == run_id:
             continue
@@ -984,7 +984,7 @@ def _refuse_a_run_fed_by_a_sibling(definitions: Sequence[tuple[str, RunDefinitio
                     f"run {run_id!r} takes its trading days from {wanted!r}, which run "
                     f"{producer!r} in this same document will write when it runs"
                 ),
-                source=_at(f"runs.{run_id}.agenda.days_from"),
+                source=_at(f"runs.{run_id}.schedule.days_from"),
                 fix=(
                     f"split the document: register and run {producer!r} first, then register "
                     f"{run_id!r} from its own file once {wanted!r} exists"

@@ -232,8 +232,8 @@ class ComplianceHandler:
         summary = marked.mark.summary()
         valuation_evidence = ValuationEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=None,
+            schedule=self._context.layer.schedule,
+            event=None,
             cutoff=instant.at,
             account=current,
             marks=summary,
@@ -244,7 +244,7 @@ class ComplianceHandler:
         report = evaluate_compliance(self._context.compliance, window, current, marked.mark)
         evidence = MonitoringEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
+            schedule=self._context.layer.schedule,
             cutoff=instant.at,
             account=current,
             valuation=valuation_evidence,
@@ -274,7 +274,7 @@ class ComplianceHandler:
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
             stage=MONITORING_STAGE,
-            event_time=self._context.in_agenda_zone(instant),
+            event_time=self._context.in_schedule_zone(instant),
             sequencer=self._context.next_sequence,
         )
         for finding in report.findings:

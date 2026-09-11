@@ -48,7 +48,7 @@ vqapr run sample-run
 ```
 
 Preflights, freezes and executes. Success is `ok: true` with a `strategies` map: `status:
-completed`, an `occurrences` count, an `account_version` and a `record` — `<strategy-id>@<fp8>`.
+completed`, an `events` count, an `account_version` and a `record` — `<strategy-id>@<fp8>`.
 
 ```bash
 vqapr show run sample-run

@@ -40,7 +40,7 @@ from vqapr.component.fingerprint import fingerprint_component
 from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.wiring import Role
-from vqapr.public import AccountMode, AccountSnapshot, RunAgenda, RunDefinition, StrategyEntry
+from vqapr.public import AccountMode, AccountSnapshot, RunSchedule, RunDefinition, StrategyEntry
 from vqapr.workspace.registry import Workspace
 
 pytestmark = pytest.mark.concurrency
@@ -75,7 +75,7 @@ def _run_naming_alpha() -> RunDefinition:
         strategy=StrategyEntry("alpha"),
         instruments=("A",),
         timezone=ZONE,
-        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         writes="cadence-weights",

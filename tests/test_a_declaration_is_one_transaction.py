@@ -62,7 +62,7 @@ def _run(*, strategy: str = "alpha", at: str = "04:00") -> dict:
         "start": None,
         "end": None,
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": at},
+        "schedule": {"every": "1d", "at": at},
         "exchange": None,
         "execution": None,
         "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
@@ -139,7 +139,7 @@ def test_a_valid_document_is_one_write(
     assert len(writes) == 1, [str(path) for path in writes]
     reopened = Workspace.open(tmp_path)
     assert {str(item.dataset_id) for item in reopened.datasets} == {"price_a", "price_b"}
-    assert reopened.run_definition("daily").agenda.every == "1d"
+    assert reopened.run_definition("daily").schedule.every == "1d"
 
 
 def test_an_idempotent_document_writes_nothing(

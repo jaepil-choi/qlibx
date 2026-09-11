@@ -7,7 +7,7 @@ transaction as everything else, refused when it names anything the workspace doe
 read back as the same value.
 
 Record `148`: a run declares its own sessions and the one wall time `at` every strategy is called
-at, so there is no agenda or strategy binding left for it to name. What a run still names is
+at, so there is no schedule or strategy binding left for it to name. What a run still names is
 components, an execution input, and -- when it takes its sessions from a dataset -- that dataset.
 """
 
@@ -39,7 +39,7 @@ _RUN_READY: dict[str, object] = {
     "start": None,
     "end": None,
     "timezone": "Asia/Seoul",
-    "agenda": {"every": "1d", "at": "15:29"},
+    "schedule": {"every": "1d", "at": "15:29"},
     "exchange": None,
     "execution": None,
     "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
@@ -61,7 +61,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "compliance": ("no-short",),
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": time(15, 29)},
+        "schedule": {"every": "1d", "at": time(15, 29)},
         "exchange": "venue",
         "execution": RunExecution(
             dataset="venue-daily",
@@ -130,16 +130,16 @@ def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> N
     assert "strategies" not in written, "the singular block replaced the keyed mapping"
     # The sessions and the one wall time are the run's own keys, in the shape an author writes.
     assert written["timezone"] == "Asia/Seoul"
-    assert written["agenda"] == {"every": "1d", "at": ["15:29:00"]}
+    assert written["schedule"] == {"every": "1d", "at": ["15:29:00"]}
     assert "at" not in written and "sessions" not in written and "sessions_from" not in written
     assert "valuation" not in written and "monitoring" not in written
 
 
 def test_a_strategy_run_names_no_day_source(workspace: Workspace) -> None:
     """Design §3.3: a strategy run's trading days are the days its execution table has rows
-    for, so `agenda.days_from` is a datamodel run's word and is refused here by name."""
-    with pytest.raises(ValueError, match="declares no agenda.days_from"):
-        _definition(agenda={"every": "1d", "at": "15:29", "days_from": "prices"})
+    for, so `schedule.days_from` is a datamodel run's word and is refused here by name."""
+    with pytest.raises(ValueError, match="declares no schedule.days_from"):
+        _definition(schedule={"every": "1d", "at": "15:29", "days_from": "prices"})
 
 
 def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
@@ -213,7 +213,7 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                 "start": "2024-03-05T00:00:00+09:00",
                 "end": "2024-03-08T15:30:00+09:00",
                 "timezone": "Asia/Seoul",
-                "agenda": {"every": "1d", "at": "15:29"},
+                "schedule": {"every": "1d", "at": "15:29"},
                 "exchange": "venue",
                 "execution": {
                     "dataset": "venue-daily",
@@ -241,10 +241,10 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
         ({"instruments": ["A"], "strategies": {}}, "timezone: Field required"),
         ({**_RUN_READY, "strategies": {}}, "exactly one of"),
         (
-            {**_RUN_READY, "agenda": {"every": "1d"}},
+            {**_RUN_READY, "schedule": {"every": "1d"}},
             "needs at",
         ),
-        ({**_RUN_READY, "agenda": {"every": "5m", "at": "15:29"}}, "not at"),
+        ({**_RUN_READY, "schedule": {"every": "5m", "at": "15:29"}}, "not at"),
     ],
 )
 def test_a_malformed_run_declaration_is_refused_with_its_own_code(
@@ -265,28 +265,28 @@ def test_a_malformed_run_declaration_is_refused_with_its_own_code(
     [
         ({"timezone": ""}, ValueError, "timezone must be a non-empty IANA timezone name"),
         ({"timezone": "Mars/Olympus"}, ValueError, "unknown IANA timezone"),
-        ({"agenda": None}, ValidationError, "agenda"),
-        ({"agenda": {"every": "1d", "at": object()}}, ValidationError, "at"),
+        ({"schedule": None}, ValidationError, "schedule"),
+        ({"schedule": {"every": "1d", "at": object()}}, ValidationError, "at"),
         (
-            {"agenda": {"every": "1d", "at": time(15, 29, tzinfo=KST)}},
+            {"schedule": {"every": "1d", "at": time(15, 29, tzinfo=KST)}},
             ValueError,
             "timezone-naive wall time",
         ),
-        ({"agenda": {"every": "1d"}}, ValueError, "needs at"),
-        ({"agenda": {"every": "1x", "at": "15:29"}}, ValueError, "count and a unit"),
-        ({"agenda": {"every": "1h", "at": "15:29"}}, ValueError, "declare from/to, not at"),
+        ({"schedule": {"every": "1d"}}, ValueError, "needs at"),
+        ({"schedule": {"every": "1x", "at": "15:29"}}, ValueError, "count and a unit"),
+        ({"schedule": {"every": "1h", "at": "15:29"}}, ValueError, "declare from/to, not at"),
     ],
 )
 def test_the_run_definition_refuses_a_half_declared_clock(
     override: dict[str, object], error: type[Exception], said: str
 ) -> None:
-    """The zone and the agenda are the run's whole clock; each half is checked."""
+    """The zone and the schedule are the run's whole clock; each half is checked."""
     with pytest.raises(error, match=said):
         _definition(**override)
 
 
-def test_the_run_names_the_one_agenda_preflight_derives() -> None:
-    assert _definition().agenda_id == "krx-2024.agenda"
+def test_the_run_names_the_one_schedule_preflight_derives() -> None:
+    assert _definition().schedule_id == "krx-2024.schedule"
 
 
 def test_a_run_without_an_initial_account_reopens(workspace: Workspace) -> None:

@@ -33,7 +33,7 @@ from vqapr.public import register_dataset as pub_register_dataset
 from vqapr.public import register_instruments
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
 from vqapr.workspace.run_definition import (
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -171,14 +171,14 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     )
 
     # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
-    # (record `148`), so nothing about the agenda is registered separately.
+    # (record `148`), so nothing about the schedule is registered separately.
     with Workspace.transaction(root) as t:
         t.register_run(
             RunDefinition(
                 run_id="probe",
                 strategy=StrategyEntry("evil"),
                 timezone="Asia/Seoul",
-                agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
                 instruments=("A",),
                 exchange="venue",
                 execution=RunExecution(

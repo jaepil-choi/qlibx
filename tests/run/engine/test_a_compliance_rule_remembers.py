@@ -40,12 +40,12 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.run.engine.failure import SimulationFailure, SimulationStage
 from vqapr.run.engine.loop import RunLoop, strategy_loop
 from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
@@ -118,10 +118,10 @@ def _sessions(count: int) -> tuple[date, ...]:
     return tuple(date(2024, 3, 4) + timedelta(days=index) for index in range(count))
 
 
-def _callbacks(sessions: tuple[date, ...]) -> tuple[OperationOccurrence, ...]:
+def _callbacks(sessions: tuple[date, ...]) -> tuple[ScheduledEvent, ...]:
     return tuple(
-        OperationOccurrence(
-            occurrence_id=f"callback-{index}",
+        ScheduledEvent(
+            event_id=f"callback-{index}",
             local_instant=LocalInstantDeclaration(session, time(9, 0), "Asia/Seoul", 0, "+09:00"),
         )
         for index, session in enumerate(sessions)
@@ -165,17 +165,17 @@ def _execution_input(root: Path, sessions: tuple[date, ...]) -> ExecutionTable:
 def _flow(
     root: Path, rule: ThreeStrikes, sessions: tuple[date, ...], state: RunStateRepository
 ) -> RunLoop:
-    occurrences = _callbacks(sessions)
+    events = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="remembered",
         strategy=FrozenStrategy(
             config=StrategyConfig(_component("strategy", Role.STRATEGY_MODEL), "strategy"),
             compliance=ComplianceSet((_component(RULE, Role.COMPLIANCE),)),
-            agenda=FrozenAgenda("strategy", occurrences, timezone="Asia/Seoul"),
+            schedule=FrozenSchedule("strategy", events, timezone="Asia/Seoul"),
         ),
         exchange=_component("exchange", Role.EXCHANGE),
         execution=_execution_input(root, sessions),
-        start=occurrences[0].evaluation_time,
+        start=events[0].evaluation_time,
         end=_fill_instant(sessions[-1]) + timedelta(hours=1),
         initial_account_snapshot=AccountSnapshot(0, Decimal(100), {"A": Decimal(1)}),
         initial_account_mode=AccountMode.LONG_ONLY,
@@ -195,8 +195,8 @@ def _flow(
         frozen,
         _Holds(),
         state,
-        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
+        strategy_window_for_event=lambda event: ModelWindow(
+            evaluation_time=event.evaluation_time,
             instruments=("A", "B"),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(),

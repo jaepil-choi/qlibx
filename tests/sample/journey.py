@@ -51,7 +51,7 @@ __all__ = [
 @dataclass(frozen=True, slots=True)
 class SampleResult:
     sample: Materialized
-    occurrences: int
+    events: int
     run_state_version: int
     """How many times the run published state, which is not the Account's version.
 
@@ -101,7 +101,7 @@ def execute(project_root: Path, sample: Materialized) -> SampleResult:
     result = run(project_root, preflight_run(workspace, definition)).result()
     return SampleResult(
         sample,
-        len(result.occurrences),
+        len(result.events),
         result.final_state.version,
         result.final_state.account.snapshot.version,
     )

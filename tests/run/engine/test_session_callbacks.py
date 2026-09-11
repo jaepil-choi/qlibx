@@ -19,9 +19,9 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.run.engine.run_state import RunStateRepository
 from vqapr.run.engine.calls import StrategyModelContext
 from vqapr.run.engine.loop import RunLoop, strategy_loop
@@ -43,11 +43,11 @@ def _state(*, memory: object = None) -> RunStateRepository:
 class EveryThreeOccurrences(StrategyModel):
     def decide(self, context: StrategyModelContext) -> Hold | EconomicPortfolioIntent:
         assert not hasattr(context, "sessions")
-        assert not hasattr(context, "future_occurrences")
+        assert not hasattr(context, "future_events")
         assert not hasattr(context, "execution_table")
         memory = dict(self.memory or {})
-        count = int(memory.get("occurrence_count", 0)) + 1
-        self.memory = {**memory, "occurrence_count": count}
+        count = int(memory.get("event_count", 0)) + 1
+        self.memory = {**memory, "event_count": count}
         if count % 3:
             return Hold(reason="cadence")
         return Rebalance(
@@ -70,8 +70,8 @@ class _Exchange:
         raise AssertionError("Hold callbacks must not execute orders")
 
 
-def _occurrence(number: int) -> OperationOccurrence:
-    return OperationOccurrence(
+def _event(number: int) -> ScheduledEvent:
+    return ScheduledEvent(
         f"strategy-{number}",
         LocalInstantDeclaration(date(2024, 3, number + 4), time(4, 0), "Asia/Seoul", 0, "+09:00"),
     )
@@ -90,9 +90,9 @@ def _component(raw_id: str, kind: Role) -> ComponentRef:
 def _flow(
     strategy: StrategyModel,
     state: RunStateRepository,
-    occurrences: tuple[OperationOccurrence, ...],
+    events: tuple[ScheduledEvent, ...],
 ) -> RunLoop:
-    strategy_agenda = FrozenAgenda("strategy", occurrences)
+    strategy_schedule = FrozenSchedule("strategy", events)
     requirement = DataRequirement.of('prices', 'close', lookback=RowsLookback(1))
     frozen = FrozenRun(
         run_id="test",
@@ -102,10 +102,10 @@ def _flow(
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),
-                agenda=strategy_agenda,
+                schedule=strategy_schedule,
             ),
-        start=occurrences[0].evaluation_time,
-        end=occurrences[-1].evaluation_time,
+        start=events[0].evaluation_time,
+        end=events[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
@@ -113,9 +113,9 @@ def _flow(
     )
     account = Account(mode=AccountMode.LONG_ONLY)
 
-    def window_for_occurrence(occurrence: OperationOccurrence) -> ModelWindow:
+    def window_for_event(event: ScheduledEvent) -> ModelWindow:
         return ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
+            evaluation_time=event.evaluation_time,
             instruments=("A",),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(requirement,),
@@ -126,40 +126,40 @@ def _flow(
         frozen,
         strategy,
         state,
-        strategy_window_for_occurrence=window_for_occurrence,
+        strategy_window_for_event=window_for_event,
         account=account,
         exchange=_Exchange(),
     )
 
 
-def test_cadence_is_strategy_memory_over_explicit_current_occurrences() -> None:
+def test_cadence_is_strategy_memory_over_explicit_current_events() -> None:
     state = _state()
 
-    result = _flow(EveryThreeOccurrences(), state, (_occurrence(1), _occurrence(2))).run()
+    result = _flow(EveryThreeOccurrences(), state, (_event(1), _event(2))).run()
 
-    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
-    assert [trace.occurrence.occurrence_id for trace in result.occurrences] == [
+    assert [type(trace.result) for trace in result.events] == [Hold, Hold]
+    assert [trace.event.event_id for trace in result.events] == [
         "strategy-1",
         "strategy-2",
     ]
     assert state.load_model_state(result.final_state.current_model_state_ref) == {
-        "occurrence_count": 2
+        "event_count": 2
     }
 
 
-def test_no_decision_state_continues_across_explicit_agenda_boundaries() -> None:
-    state = _state(memory={"occurrence_count": 1})
-    result = _flow(EveryThreeOccurrences(), state, (_occurrence(2),)).run()
+def test_no_decision_state_continues_across_explicit_schedule_boundaries() -> None:
+    state = _state(memory={"event_count": 1})
+    result = _flow(EveryThreeOccurrences(), state, (_event(2),)).run()
 
-    assert isinstance(result.occurrences[0].result, Hold)
+    assert isinstance(result.events[0].result, Hold)
     assert state.load_model_state(result.final_state.current_model_state_ref) == {
-        "occurrence_count": 2
+        "event_count": 2
     }
 
 
 class TimingOverrideStrategy(EveryThreeOccurrences):
     def decide(self, context: StrategyModelContext) -> Rebalance:
-        self.memory = {"occurrence_count": 999}
+        self.memory = {"event_count": 999}
         return Rebalance(
             target_weights={},
             cash_weight=Decimal(1),
@@ -187,13 +187,13 @@ def test_the_documented_memory_example_runs_on_the_first_callback() -> None:
     layer = FrozenStrategy(
         config=StrategyConfig(_component("strategy", Role.STRATEGY_MODEL), "strategy"),
         compliance=ComplianceSet(()),
-        agenda=FrozenAgenda("strategy", (_occurrence(1),)),
+        schedule=FrozenSchedule("strategy", (_event(1),)),
     )
     assert layer.initial_model_memory == {}
     state = _state(memory=layer.initial_model_memory)
     strategy = DocumentedMemoryExample()
 
-    _flow(strategy, state, (_occurrence(1), _occurrence(2))).run()
+    _flow(strategy, state, (_event(1), _event(2))).run()
 
     assert strategy.memory == {"sessions": 2}
     assert state.load_model_state(state.current.current_model_state_ref) == {"sessions": 2}
@@ -205,7 +205,7 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
     before_ref = state.current.current_model_state_ref
 
     with pytest.raises(ValueError, match="requires frozen execution dataset"):
-        _flow(strategy, state, (_occurrence(1),)).run()
+        _flow(strategy, state, (_event(1),)).run()
 
     assert state.current.current_model_state_ref == before_ref
     # The opening memory, restored before the callback and nothing more: what the callback wrote
@@ -215,19 +215,19 @@ def test_strategy_intent_requires_a_flow_owned_execution_target() -> None:
 
 class FailingStrategy(EveryThreeOccurrences):
     def decide(self, context: StrategyModelContext) -> Hold:
-        self.memory = {"occurrence_count": 999}
+        self.memory = {"event_count": 999}
         raise RuntimeError("strategy bug")
 
 
 def test_callback_failure_rolls_back_live_memory_and_state() -> None:
-    state = _state(memory={"occurrence_count": 1})
+    state = _state(memory={"event_count": 1})
     strategy = FailingStrategy()
 
     with pytest.raises(RuntimeError, match="strategy bug"):
-        _flow(strategy, state, (_occurrence(2),)).run()
+        _flow(strategy, state, (_event(2),)).run()
 
-    assert state.load_model_state(state.current.current_model_state_ref) == {"occurrence_count": 1}
-    assert strategy.memory == {"occurrence_count": 1}
+    assert state.load_model_state(state.current.current_model_state_ref) == {"event_count": 1}
+    assert strategy.memory == {"event_count": 1}
 
 
 def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,14 +266,14 @@ def test_a_callback_frames_its_memory_once(monkeypatch: pytest.MonkeyPatch) -> N
 
         monkeypatch.setattr(module, "normalize_memory", counting_normalize)
 
-    occurrences = (_occurrence(1), _occurrence(2))
-    result = _flow(EveryThreeOccurrences(), state, occurrences).run()
+    events = (_event(1), _event(2))
+    result = _flow(EveryThreeOccurrences(), state, events).run()
 
-    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
+    assert [type(trace.result) for trace in result.events] == [Hold, Hold]
     assert state.load_model_state(result.final_state.current_model_state_ref) == {
-        "occurrence_count": 2
+        "event_count": 2
     }
-    callbacks = len(occurrences)
+    callbacks = len(events)
     assert framed == ["vqapr.run.engine.stages.decide"] * callbacks, (
         f"{len(framed)} framings for {callbacks} callbacks: {framed}"
     )
@@ -314,11 +314,11 @@ def test_a_callback_frames_what_it_read_once(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(CallbackHandler, "_actual_source_refs", counting)
     # Two Holds: this flow has no execution table, so an intent cannot be accepted here; the
     # intent path is counted on a real run in `tests/run/preflight/test_preflight.py`.
-    occurrences = (_occurrence(1), _occurrence(2))
-    result = _flow(CountsItsDeclaration(), _state(), occurrences).run()
+    events = (_event(1), _event(2))
+    result = _flow(CountsItsDeclaration(), _state(), events).run()
 
-    assert [type(trace.result) for trace in result.occurrences] == [Hold, Hold]
-    assert framed == ["refs"] * len(occurrences), (
-        f"{len(framed)} framings of the source refs for {len(occurrences)} callbacks"
+    assert [type(trace.result) for trace in result.events] == [Hold, Hold]
+    assert framed == ["refs"] * len(events), (
+        f"{len(framed)} framings of the source refs for {len(events)} callbacks"
     )
     assert asked == ["inputs"], f"inputs() asked {len(asked)} times for one run"

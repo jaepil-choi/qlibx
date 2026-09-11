@@ -31,7 +31,7 @@ class EconomicAccountView:
     sizes or a short position asks about quantity and would otherwise have to divide back out.
 
     **`values` is `None` where the framework has no marks to offer, and that is not zero.** A
-    Strategy callback fires before the occurrence it decides for is executed or valued, so what
+    Strategy callback fires before the event it decides for is executed or valued, so what
     it sees is the previous valuation's marks -- committed, and therefore point-in-time -- and
     before the first valuation there are none; a Compliance rule fires against a marked
     account and always has them. An empty mapping would make `weight()` return a confident zero

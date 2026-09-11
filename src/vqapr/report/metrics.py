@@ -112,7 +112,7 @@ def drawdown(nav: Sequence[Decimal]) -> tuple[Decimal, ...]:
 def fill_summary(rows: Iterable[Mapping[str, object]]) -> dict[str, object]:
     """What this run's orders actually did, which `ok: true` says nothing about.
 
-    `docs/issues/archive/039`. A market-neutral run reported `{"ok": true, "occurrences": 732,
+    `docs/issues/archive/039`. A market-neutral run reported `{"ok": true, "events": 732,
     "account_version": 244}`. Its long side landed on 0.500 every time and its short side never
     did, drifting to **9.1% of NAV in unintended net long exposure** by December -- because 3.1% of
     fills dealt nothing, mostly names that were not tradable at the fill instant.

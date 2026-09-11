@@ -43,7 +43,7 @@ from vqapr.domain.intent import (
     validate_economic_intent,
 )
 from vqapr.domain.listing import ListingAccess, TradeRule
-from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
+from vqapr.domain.schedule import Schedule, ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.public import register_dataset
 from vqapr.run.engine.evidence import (
@@ -56,7 +56,7 @@ from vqapr.run.engine.evidence import (
 from vqapr.run.engine.failure import SimulationFailure, SimulationFailureKind, SimulationStage
 from vqapr.run.engine.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
 from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
@@ -83,13 +83,13 @@ class _Strategy(StrategyModel):
         self.seen: list[tuple[str, datetime, dict[str, Decimal]]] = []
 
     def decide(self, context: object) -> Hold | Rebalance:
-        occurrence = context.occurrence
-        assert not hasattr(context, "future_occurrences")
+        event = context.event
+        assert not hasattr(context, "future_events")
         assert not hasattr(context, "execution_table")
         self.seen.append(
             # The view carries no version (a framework fact, record `132`); what it shows of
             # the account's progress is the committed book itself.
-            (occurrence.occurrence_id, occurrence.evaluation_time, dict(context.account.positions))
+            (event.event_id, event.evaluation_time, dict(context.account.positions))
         )
         self.memory = {"calls": len(self.seen)}
         return next(self.results)
@@ -112,8 +112,8 @@ def _component(identifier: str, kind: Role) -> ComponentRef:
     )
 
 
-def _occurrence(identifier: str, at: datetime) -> OperationOccurrence:
-    return OperationOccurrence(
+def _event(identifier: str, at: datetime) -> ScheduledEvent:
+    return ScheduledEvent(
         identifier,
         LocalInstantDeclaration(
             at.date(), at.timetz().replace(tzinfo=None), "Asia/Seoul", 0, "+09:00"
@@ -121,10 +121,10 @@ def _occurrence(identifier: str, at: datetime) -> OperationOccurrence:
     )
 
 
-def _agenda(identifier: str, *times: datetime) -> FrozenAgenda:
-    return FrozenAgenda(
+def _schedule(identifier: str, *times: datetime) -> FrozenSchedule:
+    return FrozenSchedule(
         identifier,
-        tuple(_occurrence(f"{identifier}-{i}", at) for i, at in enumerate(times)),
+        tuple(_event(f"{identifier}-{i}", at) for i, at in enumerate(times)),
     )
 
 
@@ -184,9 +184,9 @@ def _frozen(
     compliance: ComplianceSet | None = None,
     strategy_requirements: tuple[DataRequirement, ...] = (),
 ) -> FrozenRun:
-    """A frozen run with the one agenda a run has since record `148`: its callbacks.
+    """A frozen run with the one schedule a run has since record `148`: its callbacks.
 
-    There is no valuation or monitoring agenda to declare: the book is valued at every
+    There is no valuation or monitoring schedule to declare: the book is valued at every
     market-clock instant and the declared Compliance rules observe it right after.
     """
     strategy = StrategyConfig(
@@ -201,7 +201,7 @@ def _frozen(
             if compliance is not None
             else ComplianceSet((_component("risk", Role.COMPLIANCE),))
         ),
-        agenda=_agenda("strategy", *callbacks),
+        schedule=_schedule("strategy", *callbacks),
         requirements=strategy_requirements,
         compliance_requirements=(
             (_requirement(),) if compliance is None or compliance.rules else ()
@@ -229,16 +229,16 @@ def _flow(
     state: RunStateRepository,
     compliance: tuple[Compliance, ...] = (_Rule(),),
     compliance_window_at: object = None,
-    strategy_window_for_occurrence: object = None,
+    strategy_window_for_event: object = None,
 ) -> RunLoop:
     return strategy_loop(
         frozen,
         strategy,
         state,
-        strategy_window_for_occurrence=strategy_window_for_occurrence
+        strategy_window_for_event=strategy_window_for_event
         or (
-            lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
+            lambda event: ModelWindow(
+                evaluation_time=event.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(_Catalog()),
                 allowed_requirements=frozen.strategy.requirements,
@@ -286,14 +286,14 @@ def _execution(path: Path) -> ExecutionTable:
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_daily_observations_and_intraday_callbacks_are_agenda_owned_not_row_owned() -> None:
+def test_daily_observations_and_intraday_callbacks_are_schedule_owned_not_row_owned() -> None:
     nine = datetime(2024, 3, 5, 9, tzinfo=KST)
     ten = datetime(2024, 3, 5, 10, tzinfo=KST)
     strategy = _Strategy((Hold(reason="observe"), Hold(reason="observe")))
 
     result = _flow(_frozen((nine, ten), end=ten), strategy, _state()).run()
 
-    assert [trace.occurrence.occurrence_id for trace in result.occurrences] == [
+    assert [trace.event.event_id for trace in result.events] == [
         "strategy-0",
         "strategy-1",
     ]
@@ -301,7 +301,7 @@ def test_daily_observations_and_intraday_callbacks_are_agenda_owned_not_row_owne
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path: Path) -> None:
+def test_minutely_observations_do_not_create_daily_callback_events(tmp_path: Path) -> None:
     source = _parquet(
         tmp_path / "minute.parquet",
         """
@@ -349,7 +349,7 @@ def test_minutely_observations_do_not_create_daily_callback_occurrences(tmp_path
                 _state(),
             )
             .run()
-            .occurrences
+            .events
         )
         == 1
     )
@@ -425,7 +425,7 @@ def test_an_empty_compliance_set_needs_no_window() -> None:
         unexpected_window,
     ).run()
 
-    assert len(result.occurrences) == 1
+    assert len(result.events) == 1
     assert result.final_state.pending_accepted_intent is None
 
 
@@ -435,7 +435,7 @@ def test_compliance_observes_at_the_fill_instant_with_its_own_reads(
 ) -> None:
     """A rule observes the committed book right after the fill, as of the fill instant.
 
-    Record `148`: there is no monitoring occurrence of its own. Design §7.2: the rule reads as of
+    Record `148`: there is no monitoring event of its own. Design §7.2: the rule reads as of
     the instant it observes at and measures with its own parameters -- nothing the callback
     computed is handed to it, so a limit that moved between the decision and the fill is read
     where it stands.
@@ -448,7 +448,7 @@ def test_compliance_observes_at_the_fill_instant_with_its_own_reads(
             self.observed_at: list[datetime] = []
 
         def observe(self, call: ComplianceCall) -> ComplianceFinding:
-            self.observed_at.append(call.evaluation_time)
+            self.observed_at.append(call.at)
             return ComplianceFinding(
                 passed=False,
                 measured=Decimal("1"),
@@ -479,7 +479,7 @@ def test_compliance_observes_at_the_fill_instant_with_its_own_reads(
 
     assert rule.observed_at == [fill], "once, at the market instant, never at the callback"
     # The finding rides the due execution's own result: compliance follows the commit.
-    due = result.occurrences[-1]
+    due = result.events[-1]
     assert isinstance(due, DueExecutionTrace)
     assert due.result.monitoring is not None
     assert due.result.report.passed is False
@@ -492,7 +492,7 @@ def test_compliance_observes_at_the_fill_instant_with_its_own_reads(
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurrence() -> None:
+def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_event() -> None:
     # A stamped intent on purpose, not a decision: what is under test is that the intent the
     # Flow produces carries no timing of its own, and only the stamped object has an identity
     # for a timing claim to hang on.
@@ -508,7 +508,7 @@ def test_strategy_payload_has_no_timing_authority_and_flow_stamps_current_occurr
     )
     assert validate_economic_intent(payload) is payload
     accepted = AcceptedIntent(
-        payload, _occurrence("current", at), at, target
+        payload, _event("current", at), at, target
     )
     assert accepted.decision_time == at
 
@@ -584,8 +584,8 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
         frozen,
         ReadingStrategy(),
         _state(),
-        strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
+        strategy_window_for_event=lambda event: ModelWindow(
+            evaluation_time=event.evaluation_time,
             instruments=("A",),
             store=DuckDbObservationStore(workspace),
             allowed_requirements=(requirement,),
@@ -606,7 +606,7 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
 
     stamped = next(
         trace.result
-        for trace in result.occurrences
+        for trace in result.events
         if isinstance(getattr(trace, "result", None), EconomicPortfolioIntent)
     )
     # The source actually read, at the digest it actually carried.
@@ -615,10 +615,10 @@ def test_the_flow_stamps_provenance_from_what_the_callback_actually_read(
     assert stamped.strategy_id == str(frozen.strategy.config.component.component_id)
     # The account the callback was handed.
     assert stamped.account_version_seen == _ACCOUNT.version
-    # Deterministic, so a replayed run mints the same identity for the same occurrence.
-    first_occurrence = frozen.dispatch_order(frozen.strategy)[0]
+    # Deterministic, so a replayed run mints the same identity for the same event.
+    first_event = frozen.dispatch_order(frozen.strategy)[0]
     assert stamped.intent_id == uuid5(
-        NAMESPACE_URL, f"{stamped.strategy_id}/{first_occurrence.occurrence_id}"
+        NAMESPACE_URL, f"{stamped.strategy_id}/{first_event.event_id}"
     )
     assert result.final_state.pending_accepted_intent is None
 
@@ -706,8 +706,8 @@ def test_callback_data_failure_retains_window_owner_and_rolls_back(tmp_path: Pat
             frozen,
             ReadingStrategy(()),
             state,
-            strategy_window_for_occurrence=lambda occurrence: ModelWindow(
-                evaluation_time=occurrence.evaluation_time,
+            strategy_window_for_event=lambda event: ModelWindow(
+                evaluation_time=event.evaluation_time,
                 instruments=("A",),
                 store=DuckDbObservationStore(MissingCatalog()),
                 allowed_requirements=(requirement,),
@@ -915,7 +915,7 @@ def test_flow_no_target_failure_retains_execution_owner_and_existing_pending(
     before = state.current
 
     with pytest.raises(SimulationFailure, match="no exact execution target") as raised:
-        flow.part.callback.dispatch(frozen.strategy.agenda.occurrences[0])
+        flow.part.callback.dispatch(frozen.strategy.schedule.events[0])
 
     failure = raised.value
     assert failure.stage is SimulationStage.CALLBACK_INTENT
@@ -953,27 +953,27 @@ def test_execution_snapshot_never_silently_omits_held_values_or_falls_back_for_n
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_operation_agenda_normalizes_cross_zone_order_and_rejects_unresolved_dst() -> None:
+def test_operation_schedule_normalizes_cross_zone_order_and_rejects_unresolved_dst() -> None:
     same_utc = datetime(2024, 3, 5, 4, tzinfo=UTC)
-    seoul = _occurrence("seoul", same_utc.astimezone(KST))
-    new_york = OperationOccurrence(
+    seoul = _event("seoul", same_utc.astimezone(KST))
+    new_york = ScheduledEvent(
         "new-york",
         LocalInstantDeclaration(date(2024, 3, 4), time(23), "America/New_York", 0, "-05:00"),
     )
 
-    seoul_agenda = OperationAgenda(
-        agenda_id="seoul",
+    seoul_schedule = Schedule(
+        schedule_id="seoul",
         timezone="Asia/Seoul",
-        occurrences=(seoul,),
+        events=(seoul,),
     )
-    new_york_agenda = OperationAgenda(
-        agenda_id="new-york",
+    new_york_schedule = Schedule(
+        schedule_id="new-york",
         timezone="America/New_York",
-        occurrences=(new_york,),
+        events=(new_york,),
     )
     assert [
         item.evaluation_time.astimezone(UTC)
-        for item in seoul_agenda.occurrences + new_york_agenda.occurrences
+        for item in seoul_schedule.events + new_york_schedule.events
     ] == [same_utc, same_utc]
     with pytest.raises(ValueError):
         LocalInstantDeclaration(date(2024, 3, 10), time(2, 30), "America/New_York", 0, "-05:00")
@@ -1019,10 +1019,10 @@ def test_duplicate_execution_keys_and_timing_failures_are_rejected_before_accept
 
 
 @pytest.mark.uc("UC-TIME-002")
-def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> None:
+def test_frozen_schedule_trace_is_canonical_and_dispatches_only_callbacks() -> None:
     """Two freezes of the same declarations share one identity, and the static dispatch order
-    is the strategy's own agenda and nothing else: since record `148` valuation and monitoring
-    have no occurrences to merge in."""
+    is the strategy's own schedule and nothing else: since record `148` valuation and monitoring
+    have no events to merge in."""
     nine = datetime(2024, 3, 5, 9, tzinfo=KST)
     ten = datetime(2024, 3, 5, 10, tzinfo=KST)
     first = _frozen((nine, ten))
@@ -1030,7 +1030,7 @@ def test_frozen_agenda_trace_is_canonical_and_dispatches_only_callbacks() -> Non
 
     assert first.identity == second.identity
     order = first.dispatch_order(first.strategy)
-    assert [item.occurrence_id for item in order] == ["strategy-0", "strategy-1"]
+    assert [item.event_id for item in order] == ["strategy-0", "strategy-1"]
 
 
 @pytest.mark.uc("UC-TIME-002")
@@ -1050,7 +1050,7 @@ def test_shared_compliance_identity_is_the_only_rule_authority() -> None:
             frozen,
             _Strategy((Hold(reason="x"),)),
             _state(),
-            strategy_window_for_occurrence=lambda _: None,
+            strategy_window_for_event=lambda _: None,
             compliance_window_at=lambda _: None,
             account=Account(mode=AccountMode.LONG_ONLY),
             exchange=_exchange(),
@@ -1093,11 +1093,11 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
 
     result = _flow(frozen, strategy, state).run()
 
-    # The fill is the valuation: no separate valuation occurrence follows it (record `148`).
-    assert [type(trace).__name__ for trace in result.occurrences] == [
-        "OccurrenceTrace",
+    # The fill is the valuation: no separate valuation event follows it (record `148`).
+    assert [type(trace).__name__ for trace in result.events] == [
+        "EventTrace",
         "DueExecutionTrace",
-        "OccurrenceTrace",
+        "EventTrace",
     ]
     assert result.final_state.account is not None
     assert result.final_state.account.snapshot == AccountSnapshot(
@@ -1128,8 +1128,8 @@ def test_typed_intent_runs_pending_to_due_academic_fill_feedback_and_finalizatio
     assert due_evidence.mark == mark_evidence
     assert due_evidence.feedback == feedback_evidence
     assert callback_evidence.run_identity == frozen.identity
-    assert callback_evidence.agenda == frozen.strategy.agenda
-    assert callback_evidence.occurrence.occurrence_id == "strategy-0"
+    assert callback_evidence.schedule == frozen.strategy.schedule
+    assert callback_evidence.event.event_id == "strategy-0"
     assert callback_evidence.current_model_state_ref == frozen.strategy.initial_model_state_ref
     assert callback_evidence.committed_model_state_ref != callback_evidence.current_model_state_ref
     assert commit_evidence.execution_snapshot.missing_target_instruments == ()
@@ -1447,8 +1447,8 @@ def test_due_fault_boundaries_report_their_actual_owner_and_mutation(
         assert failure.failed_requirement == AccountState(_ACCOUNT)
     elif boundary == "valuation":
         # Valuation has no configuration of its own since record `148`; the owner the failure
-        # names is the strategy agenda whose fill instant the book was being valued at.
-        assert failure.failed_requirement is frozen.strategy.agenda
+        # names is the strategy schedule whose fill instant the book was being valued at.
+        assert failure.failed_requirement is frozen.strategy.schedule
     else:
         assert isinstance(failure.failed_requirement, FeedbackEvidence)
 

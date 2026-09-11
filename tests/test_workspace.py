@@ -595,9 +595,9 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
 def test_a_workspace_reads_a_datasets_instants_and_hashes_its_file_once_per_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Record `238`: the judgments and the freeze both derive the run's agenda from the execution
+    """Record `238`: the judgments and the freeze both derive the run's schedule from the execution
     table's distinct instants, and both verify the file's digest. The sample project's `vqapr
-    run` scanned that column twice for the agenda and three times for the horizon, and a changed
+    run` scanned that column twice for the schedule and three times for the horizon, and a changed
     file was hashed once by the judgment that refused it and again by preflight
     (`experiments/exp_238`). A workspace object is one command's snapshot, so each fact is read
     once for its life -- including the digest of a file whose compare FAILS."""

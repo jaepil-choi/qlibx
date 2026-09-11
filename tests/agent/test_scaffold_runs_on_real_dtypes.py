@@ -46,7 +46,7 @@ from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
 from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
@@ -197,7 +197,7 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     strategy = load_strategy_model(ref, project_root=tmp_path)
 
     context = StrategyModelContext(
-        occurrence=OperationOccurrence(
+        event=ScheduledEvent(
             "cb-1",
             LocalInstantDeclaration(
                 EVALUATION_TIME.date(),
@@ -238,7 +238,7 @@ def test_the_calendar_strategy_scaffold_decides_against_a_float64_column(
     strategy = load_strategy_model(ref, project_root=tmp_path)
 
     context = StrategyModelContext(
-        occurrence=OperationOccurrence(
+        event=ScheduledEvent(
             "cb-1",
             LocalInstantDeclaration(
                 EVALUATION_TIME.date(),

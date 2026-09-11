@@ -37,7 +37,7 @@ records them. vqapr makes each one once, where it can be seen.
 | the user says | how vqapr does it | skill |
 |---|---|---|
 | "Register the files in data/ and tell me what's missing" | reads each column with you, asks what only you can know, writes a declaration that passes `vqapr register` | **register-dataset** |
-| "Backtest 12-month momentum, top 30, equal weight, monthly" | a StrategyModel that returns target weights on a monthly agenda | **make-strategy**, then **run-backtest** |
+| "Backtest 12-month momentum, top 30, equal weight, monthly" | a StrategyModel that returns target weights on a monthly schedule | **make-strategy**, then **run-backtest** |
 | "Build daily Fama-French SMB and HML" | each of the six sorted portfolios is a value-weighted StrategyModel on `academic`, one run each; a factor's daily return is the spread of their NAV returns. Built this way on Korean data, SMB and HML tracked a published replication at 0.99 and 0.97 daily correlation | **make-strategy** |
 | "Precompute a rolling beta or an ML prediction every strategy can use" | a DataModel: a per-instrument table computed session by session and registered as a dataset | **make-datamodel** |
 | "How much do costs and taxes eat?" | the same strategy on two venues | **make-exchange** |

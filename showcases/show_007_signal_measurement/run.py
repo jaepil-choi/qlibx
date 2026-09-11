@@ -14,7 +14,7 @@
                                                        v
                                               EconomicPortfolioIntent -> Academic exchange (SIGNED)
 
-Every occurrence that computes a signal records it — the value **before** weighting (the ranked
+Every event that computes a signal records it — the value **before** weighting (the ranked
 reversal view) and the value **after** neutralisation — on a declared recorder table. Nothing here
 constructs that table by hand: the rows come from the real callback the Flow actually dispatched.
 
@@ -58,7 +58,7 @@ from vqapr.public import (
     DatasetRegistration,
     Mark,
     MarkBatch,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -155,7 +155,7 @@ _SIGNAL_SOURCE = (
     '''"""A short-horizon reversal view: ranked, neutralised, sized, and rescaled to a fixed budget.
 
 The signal before weighting (the ranked reversal) and the signal after neutralisation are both
-recorded on every occurrence that computes one, so the record a later run reads back is exactly
+recorded on every event that computes one, so the record a later run reads back is exactly
 what this callback saw -- never a value reconstructed after the fact.
 """
 
@@ -392,7 +392,7 @@ class _Registered:
     dataset_id: str
     directory: Path
     row_count: int
-    occurrences: int
+    events: int
 
 
 def _register_run_table(
@@ -437,13 +437,13 @@ def _register_run_table(
     )
     con = duckdb.connect()
     try:
-        rows, occurrences = con.execute(
+        rows, events = con.execute(
             f"SELECT count(*), count(DISTINCT event_time) "
             f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
         ).fetchone()
     finally:
         con.close()
-    return _Registered(dataset_id, directory, int(rows), int(occurrences))
+    return _Registered(dataset_id, directory, int(rows), int(events))
 
 
 def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> dict[str, Any]:
@@ -465,9 +465,9 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
         raise AssertionError("the published account table carries no account-level rows")
 
     # Keyed by (version, event_time) rather than by version alone. The account version is no
-    # longer unique per mark: a valuation occurrence measures the book on its own clock without
+    # longer unique per mark: a valuation event measures the book on its own clock without
     # trading, so several marks legitimately share one version and are told apart only by the
-    # occurrence that took them. Grouping by version alone re-collects every instrument once per
+    # event that took them. Grouping by version alone re-collects every instrument once per
     # valuation and builds a batch holding the same name several times.
     rehydrated: dict[int, MarkBatch] = {}
     for row in account_rows:
@@ -489,7 +489,7 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
         )
         if not marks:
             continue
-        # The latest occurrence at a version wins, so the retained batch is the most recent
+        # The latest event at a version wins, so the retained batch is the most recent
         # measurement of that book rather than the first one taken of it.
         rehydrated[version] = MarkBatch(marks, sum((mark.value for mark in marks), Decimal("0")))
 
@@ -524,8 +524,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     benchmark_path = FIXTURE / str(manifest["benchmark_path"])
     universe = _universe(benchmark_path)
     sessions = _sessions(benchmark_path)
-    # The first session is the lookback base; the run's own agenda declines occurrences until the
-    # six-close reversal window fills, exactly as canon requires -- nothing here trims the agenda
+    # The first session is the lookback base; the run's own schedule declines events until the
+    # six-close reversal window fills, exactly as canon requires -- nothing here trims the schedule
     # to fit the signal.
     callback_days = sessions[1:]
 
@@ -578,7 +578,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         run_id="show007",
         strategy=StrategyEntry("show007-signal"),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(8, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(8, 0),)),
         exchange="show007-academic",
         execution=RunExecution(
             dataset="krx-daily",
@@ -672,21 +672,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         raise AssertionError("the published account series does not read back row for row")
 
     # Assertion: the neutralised signal is exactly orthogonal to a market column, on every
-    # occurrence -- recomputed from the published table alone, never assumed from the transform.
-    by_occurrence: dict[object, list[Decimal]] = {}
+    # event -- recomputed from the published table alone, never assumed from the transform.
+    by_event: dict[object, list[Decimal]] = {}
     for row in replayed_signal:
-        by_occurrence.setdefault(row["available_at"], []).append(Decimal(row["neutralized_signal"]))
-    if not by_occurrence:
+        by_event.setdefault(row["available_at"], []).append(Decimal(row["neutralized_signal"]))
+    if not by_event:
         raise AssertionError("the run never recorded a signal measurement")
-    for available_at, values in by_occurrence.items():
+    for available_at, values in by_event.items():
         if sum(values) != 0:
             raise AssertionError(
                 f"neutralised signal at {available_at} is not orthogonal to the market "
                 f"column: sum={sum(values)}"
             )
 
-    # Assertion: at least one occurrence carries a genuinely non-flat signal.
-    if all(value == 0 for values in by_occurrence.values() for value in values):
+    # Assertion: at least one event carries a genuinely non-flat signal.
+    if all(value == 0 for values in by_event.values() for value in values):
         raise AssertionError("every recorded signal was flat; nothing was ever measured")
 
     memory = _rehydrate_marks(result, replayed_account)
@@ -712,7 +712,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "universe": list(universe),
         "sessions": len(sessions),
         "callbacks": len(callback_days),
-        "signal_occurrences": len(by_occurrence),
+        "signal_events": len(by_event),
         "signal_run_record": {
             "dataset": "signal_measurement",
             "rows": signal_published.row_count,
@@ -761,7 +761,7 @@ def main() -> None:
 
     execution = trace["execution"]
     print(f"sessions / callbacks         : {trace['sessions']} / {trace['callbacks']}")
-    print(f"signal occurrences            : {trace['signal_occurrences']}")
+    print(f"signal events            : {trace['signal_events']}")
     print(
         f"signal run record             : {trace['signal_run_record']['rows']} rows published "
         f"and read back from a real run"

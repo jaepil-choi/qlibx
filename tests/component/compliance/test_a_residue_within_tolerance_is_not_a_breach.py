@@ -101,11 +101,11 @@ def test_the_override_is_read_off_the_rule_and_a_wrong_one_is_refused() -> None:
 
 
 def _result(*stamped: StampedFinding) -> SimpleNamespace:
-    occurrences = [
+    events = [
         SimpleNamespace(result=SimpleNamespace(report=SimpleNamespace(findings=(item,))))
         for item in stamped
     ]
-    return SimpleNamespace(occurrences=occurrences, final_state=SimpleNamespace(lifecycle_trace=()))
+    return SimpleNamespace(events=events, final_state=SimpleNamespace(lifecycle_trace=()))
 
 
 def test_the_contract_block_splits_the_run_that_filed_the_issue() -> None:

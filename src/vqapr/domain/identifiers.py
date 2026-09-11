@@ -10,8 +10,8 @@ DatasetId = NewType("DatasetId", str)
 SourceId = NewType("SourceId", str)
 InstrumentId = NewType("InstrumentId", str)
 ComponentId = NewType("ComponentId", str)
-AgendaId = NewType("AgendaId", str)
-OccurrenceId = NewType("OccurrenceId", str)
+ScheduleId = NewType("ScheduleId", str)
+EventId = NewType("EventId", str)
 
 _WHITESPACE = re.compile(r"\s")
 """`str.isspace` as one C-level search: an id is checked wherever it enters, and a 3,000-name run
@@ -52,18 +52,18 @@ def component_id(raw: str) -> ComponentId:
     return ComponentId(value)
 
 
-def agenda_id(raw: str) -> AgendaId:
-    value = _clean("agenda_id", raw)
+def schedule_id(raw: str) -> ScheduleId:
+    value = _clean("schedule_id", raw)
     if _WHITESPACE.search(value):
-        raise ValueError(f"agenda_id must not contain whitespace: {value!r}")
-    return AgendaId(value)
+        raise ValueError(f"schedule_id must not contain whitespace: {value!r}")
+    return ScheduleId(value)
 
 
-def occurrence_id(raw: str) -> OccurrenceId:
-    value = _clean("occurrence_id", raw)
+def event_id(raw: str) -> EventId:
+    value = _clean("event_id", raw)
     if _WHITESPACE.search(value):
-        raise ValueError(f"occurrence_id must not contain whitespace: {value!r}")
-    return OccurrenceId(value)
+        raise ValueError(f"event_id must not contain whitespace: {value!r}")
+    return EventId(value)
 
 
 def instrument_id(raw: str) -> InstrumentId:

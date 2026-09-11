@@ -42,7 +42,7 @@ from vqapr.public import register_instruments
 from vqapr.run.preflight import checks as judgments_module
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -157,7 +157,7 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
                 run_id="probe",
                 strategy=StrategyEntry("my-strat"),
                 timezone="Asia/Seoul",
-                agenda=RunAgenda(every="1d", at=(time(15, 30),)),
+                schedule=RunSchedule(every="1d", at=(time(15, 30),)),
                 instruments=("A",),
                 exchange="venue",
                 execution=RunExecution(

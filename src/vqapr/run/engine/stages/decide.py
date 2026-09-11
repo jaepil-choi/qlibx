@@ -35,7 +35,7 @@ from vqapr.domain.memory import (
     normalize_memory,
     prepare_model_state,
 )
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 from vqapr.run.engine.calls import StrategyModelContext
 from vqapr.run.engine.context import (
@@ -43,8 +43,8 @@ from vqapr.run.engine.context import (
     CALLBACK_STAGE,
     DEFAULT_TABLES,
     AcceptedIntent,
+    EventTrace,
     FlowContext,
-    OccurrenceTrace,
     _raise_callback_return_type,
     _shadows_package_table,
 )
@@ -64,10 +64,10 @@ class CallbackHandler:
         # (record `246`: fifteen askings per ten-decision run, ten of them here).
         self._reads = context.strategy.inputs()
 
-    def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
+    def dispatch(self, event: ScheduledEvent) -> EventTrace:
         with self._context.guard(
             SimulationStage.CALLBACK_STATE,
-            occurrence.evaluation_time,
+            event.evaluation_time,
             owner=self._context.layer.config,
         ):
             current_ref, before, payload_before = self._visible_callback_state()
@@ -79,30 +79,30 @@ class CallbackHandler:
         try:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
             with self._context.guard(
                 SimulationStage.CALLBACK_WINDOW,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=self._context.layer.requirements,
             ):
-                window = self._strategy_window(occurrence)
+                window = self._strategy_window(event)
             state_account = self._context.state.current.account
             if state_account is None:
                 with self._context.guard(
                     SimulationStage.CALLBACK_STATE,
-                    occurrence.evaluation_time,
+                    event.evaluation_time,
                     owner=self._context.layer.config,
                 ):
                     self._raise_callback_account_state_error()
             account = state_account.snapshot
-            with self._callback_intent_boundary(occurrence, self._context.layer.config):
-                recorder = self._callback_recorder(occurrence)
+            with self._callback_intent_boundary(event, self._context.layer.config):
+                recorder = self._callback_recorder(event)
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=recorder,
             ):
                 self._set_callback_recorder(recorder)
@@ -110,11 +110,11 @@ class CallbackHandler:
             # its own kit call, made inside `decide`. Nothing in this callback touches another
             # component's memory, so nothing but the Strategy's is committed with it.
             with self._callback_intent_boundary(
-                occurrence, self._context.layer.config, data_owner=self._context.layer.requirements
+                event, self._context.layer.config, data_owner=self._context.layer.requirements
             ):
                 result = self._context.strategy.decide(
                     StrategyModelContext(
-                        occurrence=occurrence,
+                        event=event,
                         window=window,
                         account=self._callback_account_view(state_account),
                         reads=self._reads,
@@ -125,15 +125,15 @@ class CallbackHandler:
             # adds is one the Flow already had to derive in order to check the author's copy of
             # it, so this replaces a comparison rather than adding a step. Record `125`.
             if not isinstance(result, (Hold, Rebalance)):
-                with self._callback_intent_boundary(occurrence, self._context.layer.config):
+                with self._callback_intent_boundary(event, self._context.layer.config):
                     _raise_callback_return_type(result)
             # What the callback read, framed once (record `246`): the intent's source refs and
             # the evidence's are the same accesses of the same window, and each derived them
             # for itself. Read after `decide`, which is when the window has been read.
-            source_refs = self._callback_actual_source_refs(occurrence, window)
+            source_refs = self._callback_actual_source_refs(event, window)
             if isinstance(result, Rebalance):
-                with self._callback_intent_boundary(occurrence, self._context.layer.config):
-                    result = self._stamp_intent(result, occurrence, account, source_refs)
+                with self._callback_intent_boundary(event, self._context.layer.config):
+                    result = self._stamp_intent(result, event, account, source_refs)
 
             if isinstance(result, Hold):
                 # A Hold reserves nothing (design §3.1): the book is valued at every market-
@@ -141,9 +141,9 @@ class CallbackHandler:
                 # to the venue's next print.
                 accepted: Hold | AcceptedIntent = result
             else:
-                with self._callback_intent_boundary(occurrence, result):
+                with self._callback_intent_boundary(event, result):
                     intent = validate_economic_intent(result)
-                with self._callback_intent_boundary(occurrence, intent):
+                with self._callback_intent_boundary(event, intent):
                     self._validate_intent_authority(intent, account, window)
                 # No limit check here, deliberately. Construction did its best inside whatever box
                 # the strategy built; whether the book actually breached a limit is a question
@@ -152,26 +152,26 @@ class CallbackHandler:
                 # matters most -- rounding a weight into whole shares moves it, and no fills exist
                 # yet.
                 with self._callback_intent_boundary(
-                    occurrence, self._context.frozen_run.execution
+                    event, self._context.frozen_run.execution
                 ):
-                    accepted = self._accept_intent(intent, occurrence)
-            # The package's own account of this occurrence, written without the Strategy asking.
+                    accepted = self._accept_intent(intent, event)
+            # The package's own account of this event, written without the Strategy asking.
             # Both values are package-computed, so recording them is a statement of what the run
             # did rather than a claim the Strategy made.
             self._record_defaults(recorder, accepted, account)
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=self._context.layer.config,
             ):
                 candidate = self._candidate_callback_state(before, payload_before)
-            with self._callback_intent_boundary(occurrence, accepted):
+            with self._callback_intent_boundary(event, accepted):
                 evidence, lifecycle = self._callback_evidence(
-                    occurrence, account, current_ref, candidate.ref, window, accepted, source_refs
+                    event, account, current_ref, candidate.ref, window, accepted, source_refs
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=evidence,
             ):
                 prepared = self._prepare_callback_publication(
@@ -183,14 +183,14 @@ class CallbackHandler:
                 )
             with self._context.guard(
                 SimulationStage.CALLBACK_PUBLICATION,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=prepared,
             ):
                 root = self._context.state.publish(prepared)
         except Exception:
             with self._context.guard(
                 SimulationStage.CALLBACK_STATE,
-                occurrence.evaluation_time,
+                event.evaluation_time,
                 owner=self._context.layer.config,
             ):
                 self._restore_callback_state(before, payload_before)
@@ -198,7 +198,7 @@ class CallbackHandler:
             raise
         finally:
             self._context.strategy.recorder = previous_recorder
-        return OccurrenceTrace(occurrence, result, root.version)
+        return EventTrace(event, result, root.version)
 
     def load_visible_state(self) -> None:
         """Load the Strategy's visible memory pair before any callback mutation (record `181`)."""
@@ -212,7 +212,7 @@ class CallbackHandler:
     @contextmanager
     def _callback_intent_boundary(
         self,
-        occurrence: OperationOccurrence,
+        event: ScheduledEvent,
         owner: object,
         *,
         data_owner: object | None = None,
@@ -234,7 +234,7 @@ class CallbackHandler:
         except VqaprError as error:
             raise self._context.failure(
                 stage=SimulationStage.CALLBACK_WINDOW,
-                cutoff=occurrence.evaluation_time,
+                cutoff=event.evaluation_time,
                 owner=self._context.layer.requirements,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
@@ -242,7 +242,7 @@ class CallbackHandler:
         except OSError as error:
             raise self._context.failure(
                 stage=SimulationStage.CALLBACK_WINDOW,
-                cutoff=occurrence.evaluation_time,
+                cutoff=event.evaluation_time,
                 owner=owner if data_owner is None else data_owner,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
@@ -250,7 +250,7 @@ class CallbackHandler:
         except Exception as error:
             raise self._context.failure(
                 stage=SimulationStage.CALLBACK_INTENT,
-                cutoff=occurrence.evaluation_time,
+                cutoff=event.evaluation_time,
                 owner=owner,
                 cause=error,
                 kind=SimulationFailureKind.PRE_COMMIT,
@@ -296,9 +296,9 @@ class CallbackHandler:
         accepted: object,
         account: AccountSnapshot,
     ) -> None:
-        """Write the package-owned tables for one occurrence.
+        """Write the package-owned tables for one event.
 
-        A declining occurrence still records its account state: that the Strategy chose not to act
+        A declining event still records its account state: that the Strategy chose not to act
         is itself part of what a later run needs to reuse this one.
         """
         intent = getattr(accepted, "intent", accepted)
@@ -343,7 +343,7 @@ class CallbackHandler:
                     "quantity": None,
                     "price": None,
                     # When the nav was MEASURED, which is not when this row was written. Dating
-                    # the series by the occurrence instead puts every value one commit late;
+                    # the series by the event instead puts every value one commit late;
                     # measured once, that mislabelling took a correlation from 0.93 to 0.02.
                     "observed_at": marked_at,
                     "account_version": account.version,
@@ -384,7 +384,7 @@ class CallbackHandler:
     def _callback_account_view(state: AccountState) -> EconomicAccountView:
         """The committed Account as the Strategy sees it: the snapshot, valued at its last mark.
 
-        A callback fires before the occurrence it decides for is executed or valued, so the
+        A callback fires before the event it decides for is executed or valued, so the
         marks it can see are the previous valuation's -- committed, and therefore point-in-time.
         The same builder a Compliance rule's view comes from (record `130`), so `nav` and
         `weights()` mean one thing on both sides of a decision. Before the first valuation there
@@ -418,10 +418,10 @@ class CallbackHandler:
     def _raise_callback_account_state_error() -> NoReturn:
         raise RuntimeError("callback requires an AccountState root")
 
-    def _strategy_window(self, occurrence: OperationOccurrence) -> ModelWindow:
-        return self._context.strategy_window_for_occurrence(occurrence)
+    def _strategy_window(self, event: ScheduledEvent) -> ModelWindow:
+        return self._context.strategy_window_for_event(event)
 
-    def _callback_recorder(self, occurrence: OperationOccurrence) -> InvocationRecorder:
+    def _callback_recorder(self, event: ScheduledEvent) -> InvocationRecorder:
         tables = self._context.strategy.tables()
         if not isinstance(tables, tuple) or not all(
             isinstance(table, TableSpec) for table in tables
@@ -440,7 +440,7 @@ class CallbackHandler:
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
             stage=CALLBACK_STAGE,
-            event_time=occurrence.evaluation_time,
+            event_time=event.evaluation_time,
             sequencer=self._context.next_sequence,
         )
 
@@ -462,7 +462,7 @@ class CallbackHandler:
 
     def _callback_evidence(
         self,
-        occurrence: OperationOccurrence,
+        event: ScheduledEvent,
         account: AccountSnapshot,
         current_ref: ModelStateRef,
         committed_ref: ModelStateRef,
@@ -473,9 +473,9 @@ class CallbackHandler:
         evidence = CallbackEvidence(
             run_identity=self._context.frozen_run.identity,
             strategy=self._context.layer.config,
-            agenda=self._context.layer.agenda,
-            occurrence=occurrence,
-            cutoff=occurrence.evaluation_time,
+            schedule=self._context.layer.schedule,
+            event=event,
+            cutoff=event.evaluation_time,
             root_version=self._context.state.current.version,
             account=account,
             current_model_state_ref=current_ref,
@@ -494,11 +494,11 @@ class CallbackHandler:
         return evidence, lifecycle
 
     def _callback_actual_source_refs(
-        self, occurrence: OperationOccurrence, window: ModelWindow
+        self, event: ScheduledEvent, window: ModelWindow
     ) -> tuple[IntentSourceRef, ...]:
         with self._context.guard(
             SimulationStage.CALLBACK_WINDOW,
-            occurrence.evaluation_time,
+            event.evaluation_time,
             owner=self._context.layer.requirements,
         ):
             return self._actual_source_refs(window)
@@ -529,7 +529,7 @@ class CallbackHandler:
     def _stamp_intent(
         self,
         decision: Rebalance,
-        occurrence: OperationOccurrence,
+        event: ScheduledEvent,
         account: AccountSnapshot,
         source_refs: tuple[IntentSourceRef, ...],
     ) -> EconomicPortfolioIntent:
@@ -541,8 +541,8 @@ class CallbackHandler:
         and can only copy the fifth, so asking for them made every author restate what the Flow
         already knew -- and made a wrong restatement a possible outcome.
 
-        The id is `uuid5` over `(strategy_id, occurrence_id)` rather than random, so the same
-        decision in the same occurrence of the same run mints the same identity. A replayed run
+        The id is `uuid5` over `(strategy_id, event_id)` rather than random, so the same
+        decision in the same event of the same run mints the same identity. A replayed run
         produces byte-identical intents, which is what makes a record comparable to itself.
         """
         strategy_id = str(self._context.layer.config.component.component_id)
@@ -551,7 +551,7 @@ class CallbackHandler:
             for instrument, weight in sorted(decision.target_weights.items())
         )
         return EconomicPortfolioIntent(
-            uuid5(NAMESPACE_URL, f"{strategy_id}/{occurrence.occurrence_id}"),
+            uuid5(NAMESPACE_URL, f"{strategy_id}/{event.event_id}"),
             strategy_id,
             targets,
             Decimal(decision.cash_weight),
@@ -632,13 +632,13 @@ class CallbackHandler:
         return horizon
 
     def _accept_intent(
-        self, intent: EconomicPortfolioIntent, occurrence: OperationOccurrence
+        self, intent: EconomicPortfolioIntent, event: ScheduledEvent
     ) -> AcceptedIntent:
         execution_table = self._context.frozen_run.execution
         if execution_table is None or self._context.frozen_run.end is None:
             raise ValueError("an accepted intent requires frozen execution dataset and run end")
         target = execution_table.select_target(
-            decision_time=occurrence.evaluation_time,
+            decision_time=event.evaluation_time,
             end_time=self._context.frozen_run.end,
             horizon=self.execution_horizon(execution_table),
         )
@@ -646,8 +646,8 @@ class CallbackHandler:
             raise ValueError("no exact execution target exists within the run horizon")
         accepted = AcceptedIntent(
             intent=intent,
-            occurrence=occurrence,
-            decision_time=occurrence.evaluation_time,
+            event=event,
+            decision_time=event.evaluation_time,
             target=target,
         )
         if target.dataset_id != execution_table.dataset_id:

@@ -105,8 +105,8 @@ _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 """libyaml when the installed PyYAML was built with it, the pure-Python classes otherwise.
 
-The workspace holds every agenda occurrence, so the file grows with run length rather than with
-the number of declarations: a three-year daily agenda set is roughly 750 KB. Parsing that with
+The workspace holds every schedule event, so the file grows with run length rather than with
+the number of declarations: a three-year daily schedule set is roughly 750 KB. Parsing that with
 PyYAML's pure-Python loader costs about 1.1 s and emitting it about 0.5 s, against 0.24 s and
 0.14 s through libyaml, and a registration pays both. The emitted bytes are identical between the
 two dumpers for every document this module writes, which `tests/test_workspace.py` pins.
@@ -170,7 +170,7 @@ class Workspace:
         self._source_digests: dict[str, str] = {}
         # The distinct instants of each dataset this workspace object has read, by dataset id:
         # one scan per dataset per command, however many judgments and freezes ask (record
-        # `238`). The judgments derived the run's agenda from them and preflight derived it
+        # `238`). The judgments derived the run's schedule from them and preflight derived it
         # again, each with its own scan of the execution table.
         self._evaluation_times: dict[
             tuple[str, tuple[datetime, datetime] | None], tuple[datetime, ...]
@@ -349,10 +349,10 @@ class Workspace:
     ) -> tuple[datetime, ...]:
         """Every distinct ``available_at`` the registered dataset carries, sorted.
 
-        This is what a caller needs to build an agenda from the sessions a dataset actually has,
+        This is what a caller needs to build an schedule from the sessions a dataset actually has,
         rather than assuming a calendar the data may not match. Read once per dataset and bound
         for the life of this object (record `238`): a command's judgments and its freeze both
-        derive the run's agenda from these, and the execution horizon is cut from them too.
+        derive the run's schedule from these, and the execution horizon is cut from them too.
 
         `between` reads only the instants inside its inclusive bounds (record `247`): a run over
         one year of a ten-year table asks for that year, and the column is scanned for it rather
@@ -551,13 +551,13 @@ class Workspace:
                     ),
                 )
         if (
-            definition.agenda.days_from is not None
-            and dataset_id(definition.agenda.days_from) not in state.datasets
+            definition.schedule.days_from is not None
+            and dataset_id(definition.schedule.days_from) not in state.datasets
         ):
             raise reference_error(
                 f"run {definition.run_id!r} takes its trading days from dataset "
-                f"{definition.agenda.days_from!r}, which must be registered",
-                fix=f"register dataset {definition.agenda.days_from!r} first",
+                f"{definition.schedule.days_from!r}, which must be registered",
+                fix=f"register dataset {definition.schedule.days_from!r} first",
             )
 
     @property
@@ -864,7 +864,7 @@ class Transaction:
     """Several registrations, staged now and written once.
 
     `view` is a `Workspace` holding the snapshot plus everything staged so far, so `_apply` can
-    resolve a config's component or an agenda's dataset declared earlier in the same document
+    resolve a config's component or an schedule's dataset declared earlier in the same document
     exactly as it would resolve one already on disk. Each `register_*` runs the same merge the
     single-item `Workspace.register_*` runs, against that staged state, so a conflict or a missing
     reference is refused where the author can still see which item it was.

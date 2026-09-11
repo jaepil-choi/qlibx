@@ -64,10 +64,10 @@ def _make_available_at_naive(root: Path) -> None:
     ("name", "break_it"),
     [("corrupt_source", _corrupt_the_sessions_dataset), ("naive_available_at", _make_available_at_naive)],
 )
-def test_an_underivable_agenda_blocks_rather_than_passes(
+def test_an_underivable_schedule_blocks_rather_than_passes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, break_it: object
 ) -> None:
-    """The headline. Both causes stop the agenda being derived; neither may read as passed."""
+    """The headline. Both causes stop the schedule being derived; neither may read as passed."""
     _workspace_for_run(tmp_path, capsys)
     break_it(tmp_path)  # type: ignore[operator]
 
@@ -75,18 +75,18 @@ def test_an_underivable_agenda_blocks_rather_than_passes(
 
     assert body["ok"] is False
     assert "judgments" not in body["passed"], (
-        f"[{name}] check reported the judgments as PASSED while the agenda could not be derived: "
+        f"[{name}] check reported the judgments as PASSED while the schedule could not be derived: "
         f"{json.dumps(body)}"
     )
     assert body["blocked"], f"[{name}] nothing was recorded as blocked: {json.dumps(body)}"
 
 
-def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
+def test_both_judgments_that_need_the_schedule_block_with_the_same_reason(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One derivation, one failure, and every judge that asked for it hears the same thing.
 
-    `_agenda_once` derives at most once (`docs/issues/archive/069`) and re-raises the stored exception to
+    `_schedule_once` derives at most once (`docs/issues/archive/069`) and re-raises the stored exception to
     each asker. Blocking one dependent judgment and passing the other would be a report that
     contradicts itself.
     """
@@ -99,7 +99,7 @@ def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
     assert "execution_ordering" in by_check, by_check
     assert "datasets[my-alpha]" in by_check, by_check
     assert by_check["execution_ordering"] == by_check["datasets[my-alpha]"], (
-        f"the two judgments that share one agenda blocked for different reasons: {by_check}"
+        f"the two judgments that share one schedule blocked for different reasons: {by_check}"
     )
 
 

@@ -76,13 +76,13 @@ KRX slice (22 sessions, 21 callbacks, 4 instruments).
 
 | Metric | Value |
 |---|---|
-| alpha occurrences published | 21 |
+| alpha events published | 21 |
 | allocation inputs subscribed | `alpha_allocation` + `benchmark_weight_daily` |
 | shipped compliance registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
 | rebalances | 21 |
 | freezes returned verbatim | 10 |
 | freezes released as out of box | 10 |
-| monitored occurrences | 21 |
+| monitored events | 21 |
 | marked short positions | 0 |
 | cap-drift findings between rebalances | 10 (worst excess 0.0078 over a 0.3212 ceiling) |
 | dealt fills | 67 (whole shares) |

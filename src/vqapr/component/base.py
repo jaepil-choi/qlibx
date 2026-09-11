@@ -41,10 +41,10 @@ class Call:
     `ExecutionCall`; the engine builds them (`run/engine/calls.py`, and the market clock for an
     `ExecutionCall`).
 
-    The base has no member yet. The three abstract calls name the event's time
-    `evaluation_time` and the execution call names it `at`; settling one name is an author-visible
-    rename, so it waits for the release that renames the loop's vocabulary. A marker, then, and not
-    an ABC: the three abstract calls are ABCs themselves.
+    Every Call answers `at`, the time of the event it was handed at: the three abstract calls
+    declare it, and `ExecutionCall` carries it as a field (record `278`). A marker and not an ABC:
+    the three abstract calls are ABCs themselves, and a frozen dataclass field cannot satisfy an
+    abstract property.
     """
 
     __slots__ = ()
@@ -133,8 +133,8 @@ class Component(ABC):
 class Part(Component):
     """A Component that declares its own clock -- one per run (design §4.3).
 
-    **A part is a tool plus a clock.** A run holds exactly one part, and the part's agenda
-    (`RunDefinition.agenda`, design §3.4) is the strategy clock the run is called on. What a part
+    **A part is a tool plus a clock.** A run holds exactly one part, and the part's schedule
+    (`RunDefinition.schedule`, design §3.4) is the schedule clock the run is called on. What a part
     reads and remembers is what every Component reads and remembers; what makes it a part is that
     a run cannot be declared without naming it and its clock.
     """

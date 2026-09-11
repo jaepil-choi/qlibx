@@ -104,11 +104,11 @@ def test_the_sample_journey_runs_end_to_end(tmp_path: Path) -> None:
     result = journey.execute(root, panel)
 
     # One callback and one due item per session (record `148`): the standalone valuation
-    # occurrences the journey used to dispatch are gone, because the book is valued at the
+    # events the journey used to dispatch are gone, because the book is valued at the
     # instant it fills. 734 sessions since record `167` left the first one out of the horizon,
     # so that the first decision has a published close behind it and `vqapr check` accepts
     # what `install` registered.
-    assert result.occurrences == 1468
+    assert result.events == 1468
     # The Account is what the economics live in, and valuing the book at a fill does not add a
     # commit of its own: a mark values the book, it does not trade it. Unchanged by the shorter
     # horizon: the strategy Held through the first session either way.

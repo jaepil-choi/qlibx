@@ -10,8 +10,8 @@ the command that closed that gap. This file previously reached past the CLI into
 all of them, under a docstring admitting the CLI could not register them; the workspace below is
 now reachable by typing `vqapr` commands only, which is the property that matters.
 
-Since the two-clocks campaign a run declares its own strategy clock (`agenda`, `timezone`,
-`at`): there is no agenda to register and no binding to write, so the fixture is one file
+Since the two-clocks campaign a run declares its own schedule clock (`schedule`, `timezone`,
+`at`): there is no schedule to register and no binding to write, so the fixture is one file
 shorter than it was.
 """
 
@@ -33,7 +33,7 @@ OCCURRENCES = 6
 """What the fixture run dispatches: three sessions, so three callbacks, and one execution each.
 
 The book is valued at the instant the venue fills and the declared Compliance rules observe it right
-after each commit (record 148), so neither valuation nor monitoring is an occurrence of its own
+after each commit (record 148), so neither valuation nor monitoring is an event of its own
 any more. Before 148 this was 12: three days times callback, valuation and monitoring, plus the
 three executions.
 """
@@ -207,7 +207,7 @@ def _runs_declaration(root: Path, run_id: str = "r1", **overrides: object) -> Pa
         "strategy": {"component": "my-alpha"},
         **({} if compliance is None else {"compliance": compliance}),
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": "04:00"},
+        "schedule": {"every": "1d", "at": "04:00"},
         "exchange": "venue",
         "execution": {
             "dataset": "venue-daily",
@@ -294,9 +294,9 @@ def test_run_executes_a_registered_run_end_to_end(
     strategy = payload["strategies"]["my-alpha"]
     assert strategy["record"].startswith("my-alpha@")
     # One callback per session (record 148: the run's sessions at its `at`, nothing else is
-    # dispatched) plus the execution occurrences the fills land on. Pinned rather than `> 0`,
+    # dispatched) plus the execution events the fills land on. Pinned rather than `> 0`,
     # which a run that did nothing would also satisfy.
-    assert strategy["occurrences"] == OCCURRENCES
+    assert strategy["events"] == OCCURRENCES
     # The scaffold TRADES. It used to hold throughout -- the old template returned Hold --
     # and this assertion pinned account_version at zero, which meant the end-to-end test proved a
     # run that never bought anything. The authoring-contract scaffold ranks the cross-section and
@@ -1025,7 +1025,7 @@ def test_a_rule_registered_under_the_id_it_answers_to_still_runs(
     # short, so no-short binds nothing and must change no number. A different count here would
     # mean the rule altered the book rather than merely observing it.
     strategy = ran["strategies"]["my-alpha"]
-    assert strategy["occurrences"] == OCCURRENCES
+    assert strategy["events"] == OCCURRENCES
     assert strategy["account_version"] == 2
 
 

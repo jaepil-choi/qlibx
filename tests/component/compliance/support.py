@@ -46,7 +46,7 @@ class _Weightless(ComplianceCall):
     account: EconomicAccountView
 
     @property
-    def evaluation_time(self):
+    def at(self):
         raise AssertionError("a rule that declares no reads has no evaluation time to use")
 
     def read(self, alias: str, field: str):

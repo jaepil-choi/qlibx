@@ -43,7 +43,7 @@ refusal from the argument parser; `source`'s three fields (`file`, `key_path`, `
 `observed` may be `null`, `examples` **may be empty**, and `fix` is always a sentence you can act
 on.
 
-When `ok` is false, read `fix` first. It is the sentence that fixes *this* occurrence, written as
+When `ok` is false, read `fix` first. It is the sentence that fixes *this* event, written as
 an action you can take. `requirement` says what was needed and `observed` says what was found;
 `source` says where — it is an object with `file`, `key_path` and `line`, any of which may be
 `null` when the failure does not have that kind of location. Read `source` as structure, never by

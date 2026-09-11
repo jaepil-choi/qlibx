@@ -1,6 +1,6 @@
 """What compliance measured reaches the record, one row per rule per commit.
 
-Before record `140` a monitoring occurrence's findings lived on its trace and nowhere else. The
+Before record `140` a monitoring event's findings lived on its trace and nowhere else. The
 strategy record's `contract` block counted them (`held` / `checked`), so a run could say THAT a
 limit was breached and never WHICH name, against WHAT bound, by HOW MUCH -- the three things PRD
 7.1 says a breach must leave behind. `vqapr.monitoring` is where they go now, through the same
@@ -46,12 +46,12 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
 from vqapr.run.engine.loop import DueExecutionTrace, RunLoop, strategy_loop
 from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
@@ -118,10 +118,10 @@ def _sessions(count: int) -> tuple[date, ...]:
     return tuple(FIRST_SESSION + timedelta(days=number) for number in range(count))
 
 
-def _callbacks(sessions: tuple[date, ...]) -> tuple[OperationOccurrence, ...]:
-    """One strategy callback per session, before the open: the run's one agenda (record `148`)."""
+def _callbacks(sessions: tuple[date, ...]) -> tuple[ScheduledEvent, ...]:
+    """One strategy callback per session, before the open: the run's one schedule (record `148`)."""
     return tuple(
-        OperationOccurrence(
+        ScheduledEvent(
             f"strategy-{session.isoformat()}",
             LocalInstantDeclaration(session, time(8, 0), "Asia/Seoul", 0, "+09:00"),
         )
@@ -170,7 +170,7 @@ def _flow(
     sessions: tuple[date, ...],
     rules: tuple[Compliance, ...] = RULES,
 ) -> RunLoop:
-    occurrences = _callbacks(sessions)
+    events = _callbacks(sessions)
     frozen = FrozenRun(
         run_id="monitored",
         strategy=FrozenStrategy(
@@ -181,13 +181,13 @@ def _flow(
                 compliance=ComplianceSet(
                     tuple(_component(rule.compliance_id, Role.COMPLIANCE) for rule in rules)
                 ),
-                agenda=FrozenAgenda(
-                    "strategy", occurrences, timezone="Asia/Seoul"
+                schedule=FrozenSchedule(
+                    "strategy", events, timezone="Asia/Seoul"
                 ),
             ),
         exchange=_component("exchange", Role.EXCHANGE),
         execution=_execution_input(root, sessions),
-        start=occurrences[0].evaluation_time,
+        start=events[0].evaluation_time,
         end=_fill_instant(sessions[-1]) + timedelta(hours=1),
         initial_account_snapshot=AccountSnapshot(0, Decimal(100), {"A": Decimal(1)}),
         initial_account_mode=AccountMode.LONG_ONLY,
@@ -195,9 +195,9 @@ def _flow(
         writes="monitored-weights",
     )
 
-    def window_for_occurrence(occurrence: object) -> ModelWindow:
+    def window_for_event(event: object) -> ModelWindow:
         return ModelWindow(
-            evaluation_time=occurrence.evaluation_time,  # type: ignore[attr-defined]
+            evaluation_time=event.evaluation_time,  # type: ignore[attr-defined]
             instruments=("A", "B"),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(),
@@ -216,7 +216,7 @@ def _flow(
         frozen,
         _Holds(),
         state,
-        strategy_window_for_occurrence=window_for_occurrence,
+        strategy_window_for_event=window_for_event,
         compliance_window_at=window_at,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
@@ -268,7 +268,7 @@ def test_each_finding_reaches_the_record_typed_and_the_roots_keep_none(tmp_path:
         entry.kind for entry in result.final_state.lifecycle_trace
     ].count(LifecycleKind.MONITORED) == 2
     # And what the due path returned carries the same findings the record does.
-    due = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
+    due = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]
     assert len(due) == 2
     assert all(
         [finding.rule_id for finding in trace.result.report.findings]
@@ -306,7 +306,7 @@ def test_a_run_that_declared_no_rule_writes_no_monitoring_table(tmp_path: Path) 
     assert all(
         entry.kind is not LifecycleKind.MONITORED for entry in result.final_state.lifecycle_trace
     )
-    due = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
+    due = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]
     assert len(due) == 2 and all(trace.result.monitoring is None for trace in due), (
         "nothing to judge, so the due path reports no monitoring rather than an empty report"
     )

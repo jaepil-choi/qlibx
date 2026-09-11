@@ -51,7 +51,7 @@ def _write(root: str, run_id: str, rows: int) -> None:
             "tables": {"vqapr.account": {"rows": rows, "instants": rows}},
             "contract": {"accepted_intents": rows},
             "source_digest": f"digest-{run_id}",
-            "period": {"start": "2024-01-01", "end": "2024-12-31", "occurrences": rows},
+            "period": {"start": "2024-01-01", "end": "2024-12-31", "events": rows},
         }
     )
 
@@ -304,14 +304,14 @@ def test_replace_is_off_by_default_so_a_retry_cannot_clobber(tmp_path: Path) -> 
     assert read_record(tmp_path, "precious")["account"]["version"] == 7
 
 
-def test_the_run_loop_signals_progress_once_per_occurrence(tmp_path: Path) -> None:
+def test_the_run_loop_signals_progress_once_per_event(tmp_path: Path) -> None:
     """The heartbeat's wiring, pinned deterministically rather than by a timing test.
 
     The end-to-end proof lives in `test_run_freezes_its_record.py` and drives `public.run`, which
     is what makes it trustworthy -- but it depends on a real run outlasting a sleep, and it is
     currently the only thing standing between the product and a silent regression of a defect that
     let a peer delete a live run's tables. This pins the same wiring in milliseconds: the callback
-    fires once per occurrence, so a run that records no rows still proves it is alive.
+    fires once per event, so a run that records no rows still proves it is alive.
     """
     from vqapr.run.engine.loop import RunLoop, strategy_loop
 

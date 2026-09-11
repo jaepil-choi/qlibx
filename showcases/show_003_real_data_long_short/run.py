@@ -36,7 +36,7 @@ from vqapr.public import (
     AccountSnapshot,
     DataModelEntry,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -188,7 +188,7 @@ class ReversalLongShort(StrategyModel):
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
-        history["last_occurrence"] = context.occurrence.occurrence_id
+        history["last_event"] = context.event.event_id
         self.memory = history
 
         return Rebalance(
@@ -408,7 +408,7 @@ def main() -> None:
         instruments=tuple(universe),
         datamodel=DataModelEntry("showcase-model", ("score",)),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="price_daily"),
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
         writes="reversal_score",
@@ -430,7 +430,7 @@ def main() -> None:
         strategy=StrategyEntry("showcase-strategy"),
         compliance=("showcase-cap",),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         exchange="showcase-exchange",
         execution=RunExecution(
             dataset="krx-daily",
@@ -519,9 +519,9 @@ def main() -> None:
             "first_session": fixture["first_session"],
             "last_session": fixture["last_session"],
             "materialized_score_rows": materialization.rows,
-            "materialized_evaluations": len(materialization.occurrences),
+            "materialized_evaluations": len(materialization.events),
             "strategy_callbacks": len(callback_days),
-            "occurrences_dispatched": len(result.occurrences),
+            "events_dispatched": len(result.events),
             "dealt_fills": len(dealt),
             "final_nav": None if nav is None else str(nav),
             "final_cash": str(account.snapshot.cash),

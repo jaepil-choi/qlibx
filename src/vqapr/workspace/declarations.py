@@ -13,7 +13,7 @@ legacy document shapes a released workspace can still carry (an old fill schema,
 strategy config, the two retired sections) are all declared in this one file, so a later release
 that retires one discards a region rather than hunting for it. Where the stored shape and the domain
 dataclass coincide, `to_domain` is a one-liner; where they differ (a dataset's measured span, an
-agenda's occurrences, a run's initial account) the model is the one place the mapping is written.
+schedule's events, a run's initial account) the model is the one place the mapping is written.
 """
 
 from __future__ import annotations
@@ -266,8 +266,8 @@ _YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 _YAML_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
 """libyaml when the installed PyYAML was built with it, the pure-Python classes otherwise.
 
-The workspace holds every agenda occurrence, so the file grows with run length rather than with
-the number of declarations: a three-year daily agenda set is roughly 750 KB. Parsing that with
+The workspace holds every schedule event, so the file grows with run length rather than with
+the number of declarations: a three-year daily schedule set is roughly 750 KB. Parsing that with
 PyYAML's pure-Python loader costs about 1.1 s and emitting it about 0.5 s, against 0.24 s and
 0.14 s through libyaml, and a registration pays both. The emitted bytes are identical between the
 two dumpers for every document this module writes, which `tests/test_workspace.py` pins.
@@ -289,7 +289,7 @@ class WorkspaceDocument(Document):
     """`workspace.yaml` whole: nine sections, two of them required, and four read and dropped.
 
     Four sections are read and dropped, so a document written by 0.3.0 opens: `valuation_configs`
-    and `monitoring_policies` (record `144`, each restated an agenda's own role) and `agendas` and
+    and `monitoring_policies` (record `144`, each restated an schedule's own role) and `agendas` and
     `strategy_configs` (record `148`: a run declares its sessions and wall times itself, and the
     model is called every session). A 0.3.0 `runs:` entry, which named agendas instead, is
     refused at open naming the run and the keys it now needs.
@@ -348,7 +348,7 @@ def read_workspace(text: str) -> tuple[dict, ...]:
 def _linked(raw: object) -> tuple[dict, ...]:
     """Every section through its model, then every forward reference checked.
 
-    A document naming an absent source, component or agenda is refused at read time rather than
+    A document naming an absent source, component or schedule is refused at read time rather than
     at the first command that needs the missing declaration, which is also what lets `remove`
     check references against one snapshot and never leave a dangling one behind.
     """
@@ -411,8 +411,8 @@ def _linked(raw: object) -> tuple[dict, ...]:
                     "which declares no execution role"
                 )
         if (
-            definition.agenda.days_from is not None
-            and dataset_id(definition.agenda.days_from) not in datasets
+            definition.schedule.days_from is not None
+            and dataset_id(definition.schedule.days_from) not in datasets
         ):
             raise ValueError(f"run {raw_id!r} takes its trading days from an unregistered dataset")
         runs[raw_id] = definition

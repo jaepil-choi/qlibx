@@ -31,11 +31,11 @@ from vqapr.domain.fill import ExecutionHorizon
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.listing import TradeRule
 from vqapr.domain.memory import ModelMemory
-from vqapr.domain.schedule import OperationAgenda
+from vqapr.domain.schedule import Schedule
 from vqapr.domain.wiring import Role
 from vqapr.run.preflight.checks import require_declared_roster
 from vqapr.run.preflight.facts import RunFacts, unresolved_target_failures, unresolved_targets
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
     ComplianceSet,
@@ -50,19 +50,19 @@ __all__ = [
 ]
 
 
-def _freeze_agenda(agenda: OperationAgenda, *, start: datetime, end: datetime) -> FrozenAgenda:
-    """The run's agenda, sliced to `[start, end]`, with its identity carried over.
+def _freeze_schedule(schedule: Schedule, *, start: datetime, end: datetime) -> FrozenSchedule:
+    """The run's schedule, sliced to `[start, end]`, with its identity carried over.
 
-    The agenda is derived by `derived_agenda` above and nowhere else, and `OperationAgenda.daily`
+    The schedule is derived by `derived_schedule` above and nowhere else, and `Schedule.daily`
     already refuses a session whose wall time does not exist or happens twice; the role check
     and the offset re-proof this used to make guarded an external supply path that does not
     exist (record `182`).
     """
-    return FrozenAgenda(
-        agenda_id=agenda.agenda_id,
-        occurrences=agenda.inclusive_slice(start, end),
-        timezone=agenda.timezone,
-        content_identity=agenda.content_identity,
+    return FrozenSchedule(
+        schedule_id=schedule.schedule_id,
+        events=schedule.inclusive_slice(start, end),
+        timezone=schedule.timezone,
+        content_identity=schedule.content_identity,
     )
 
 
@@ -415,7 +415,7 @@ def _require_execution_authority(definition: RunDefinition) -> None:
 
 def _validate_execution_targets(
     execution_table: ExecutionTable,
-    strategy_agenda: FrozenAgenda,
+    strategy_schedule: FrozenSchedule,
     *,
     horizon: ExecutionHorizon,
     end: datetime,
@@ -423,17 +423,17 @@ def _validate_execution_targets(
     """Prove every strategy callback can bind an accepted intent before the run starts.
 
     A callback may return ``Hold``, but preflight cannot assume that it will. If an
-    occurrence has no exact target under the fill rule, an intent accepted there would fail only
+    event has no exact target under the fill rule, an intent accepted there would fail only
     after every earlier callback had already mutated account state. The horizon, the rule and
     the callback instants are all frozen facts, so that refusal belongs here.
 
     The horizon is handed in, cut once per command from the instants the workspace read for the
-    agenda (`bound_execution_horizon`). Calling ``select_target`` without it would rescan the
-    execution table once per occurrence -- both slower and vulnerable to observing different
+    schedule (`bound_execution_horizon`). Calling ``select_target`` without it would rescan the
+    execution table once per event -- both slower and vulnerable to observing different
     bytes while preflight is supposed to be proving one run.
     """
     unresolved = unresolved_targets(
-        execution_table, strategy_agenda.occurrences, end=end, horizon=horizon
+        execution_table, strategy_schedule.events, end=end, horizon=horizon
     )
     if not unresolved:
         return
@@ -445,7 +445,7 @@ def _validate_execution_targets(
             execution_table.fill,
             code="execution.target_outside_horizon",
             requirement=(
-                "every strategy occurrence must have an execution instant after it that the "
+                "every strategy event must have an execution instant after it that the "
                 "fill rule admits, inside the run horizon"
             ),
             subject=f"fill={execution_table.fill.describe()}, end={end.isoformat()}",
@@ -464,14 +464,14 @@ def _freeze_strategy(
     entry: StrategyEntry,
     *,
     compliance: tuple[str, ...],
-    decide: OperationAgenda,
+    decide: Schedule,
     execution_table: ExecutionTable,
     horizon: ExecutionHorizon,
     facts: RunFacts,
     start: datetime,
     end: datetime,
 ) -> FrozenStrategy:
-    """One strategy's layer: its component, the run's Compliance rules, and the decide agenda.
+    """One strategy's layer: its component, the run's Compliance rules, and the decide schedule.
 
     Every strategy of a run is called on the run's sessions at `at` (record `148`); the
     binding that used to be registered per strategy is derived here. The strategy is the
@@ -484,7 +484,7 @@ def _freeze_strategy(
             f"strategy {entry.component_id!r} is registered as {registered.kind.value}, not as "
             "a strategy"
         )
-    config = StrategyConfig(registered, decide.agenda_id)
+    config = StrategyConfig(registered, decide.schedule_id)
     loaded_strategy = facts.component(entry.component_id, load_strategy_model)
     initial_payload = _validate_initial_model_state(
         workspace, config.component, loaded_strategy, entry.initial_model_memory
@@ -497,12 +497,12 @@ def _freeze_strategy(
     compliance_requirements = tuple(
         requirement for rule in loaded_rules for requirement in rule.requirements()
     )
-    agenda = _freeze_agenda(decide, start=start, end=end)
-    _validate_execution_targets(execution_table, agenda, horizon=horizon, end=end)
+    schedule = _freeze_schedule(decide, start=start, end=end)
+    _validate_execution_targets(execution_table, schedule, horizon=horizon, end=end)
     return FrozenStrategy(
         config=config,
         compliance=ComplianceSet(rules),
-        agenda=agenda,
+        schedule=schedule,
         requirements=strategy_requirements,
         compliance_requirements=compliance_requirements,
         initial_model_memory=entry.initial_model_memory,
@@ -547,7 +547,7 @@ def _freeze_datamodel(
     workspace: Workspace,
     entry: DataModelEntry,
     *,
-    decide: OperationAgenda,
+    decide: Schedule,
     facts: RunFacts,
     start: datetime,
     end: datetime,
@@ -565,10 +565,10 @@ def _freeze_datamodel(
             "a datamodel"
         )
     model = facts.component(entry.component_id, load_data_model)
-    agenda = _freeze_agenda(decide, start=start, end=end)
+    schedule = _freeze_schedule(decide, start=start, end=end)
     return FrozenDataModel(
         component=registered,
-        agenda=agenda,
+        schedule=schedule,
         value_fields=entry.value_fields,
         requirements=tuple(model.requirements()),
         initial_model_memory=entry.initial_model_memory,
@@ -630,8 +630,8 @@ def preflight_run(
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
 
-    # The one agenda the run declares by its sessions and wall time (record `148`).
-    decide = facts.agenda()
+    # The one schedule the run declares by its sessions and wall time (record `148`).
+    decide = facts.schedule()
 
     # Unconditional: `_require_execution_authority` has already refused a definition without
     # them, so the universe and account checks below can no longer be skipped by omission.
@@ -714,7 +714,7 @@ def _preflight_datamodel_run(
     end = require_tz_aware(definition.end, name="end")
     if start.astimezone(UTC) > end.astimezone(UTC):
         raise ValueError("start must not be after end")
-    decide = facts.agenda()
+    decide = facts.schedule()
     if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
         raise ValueError("a datamodel run declares no datamodel")
     _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)

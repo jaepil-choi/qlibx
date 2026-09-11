@@ -181,7 +181,7 @@ def _component_states(
 ) -> tuple[dict[str, ModelStateRef], frozenset[ModelStateRef]]:
     """Detach what each stateful component's callback left, into the maps the next root carries.
 
-    `None` means the occurrence did not run these components, so their refs are carried over
+    `None` means the event did not run these components, so their refs are carried over
     unchanged. A mapping must name exactly the components the root already knows: one that
     appears from nowhere, or one that vanished, is an assembly error rather than a state change.
     """
@@ -214,7 +214,7 @@ class PreparedRunState:
 
     Empty when the repository has no sink: the chunks are then inside `root` as before.
     With a sink they are here instead, handed over at publish and never retained by a root, so a
-    run's heap holds one occurrence's rows rather than the run's.
+    run's heap holds one event's rows rather than the run's.
     """
 
 
@@ -250,7 +250,7 @@ def _fill_rows(
     fill takes its place in the run's one order beside every other recorded row; without one,
     a batch counts for itself.
 
-    The parameter is optional because a caller with no occurrence in hand -- the direct
+    The parameter is optional because a caller with no event in hand -- the direct
     `AccountState` constructors in the test suite -- has nothing truthful to stamp, and inventing
     an `event_time` would be worse than omitting it. Production always supplies it.
 
@@ -398,7 +398,7 @@ class RunStateRepository:
         chunks: dict[str, tuple[RecordChunk, ...]],
         staged: Sequence[RecordChunk],
     ) -> tuple[RecordChunk, ...]:
-        """One occurrence's recorder chunks: into the root, or out to the sink at publish.
+        """One event's recorder chunks: into the root, or out to the sink at publish.
 
         A chunk is detached and validated where it was staged. Without a sink it is appended to
         the root's chunks as before -- O(new rows), so total cost stays linear in run length.
@@ -417,8 +417,8 @@ class RunStateRepository:
         """Hand an accepted candidate's chunks to the sink, before the swap makes it current.
 
         Before, not after: a sink that cannot take the rows -- a full disk -- fails the
-        occurrence rather than accepting a root whose rows were lost, and everything up to the
-        previous occurrence is already on disk.
+        event rather than accepting a root whose rows were lost, and everything up to the
+        previous event is already on disk.
         """
         if self._sink is None:
             return

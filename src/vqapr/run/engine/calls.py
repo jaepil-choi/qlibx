@@ -37,7 +37,7 @@ from vqapr.data.dataset import Grain
 from vqapr.data.observation import Observation
 from vqapr.data.panel import PanelWindow
 from vqapr.data.window import ModelWindow
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 
 
 def observations(
@@ -179,7 +179,7 @@ class ComplianceContext(_DeclaredReads, ComplianceCall):
             raise ValueError("instruments must be non-empty strings")
 
     @property
-    def evaluation_time(self):
+    def at(self):
         """The market-clock instant this observation is bounded to."""
         return self.window.evaluation_time
 
@@ -188,7 +188,7 @@ class ComplianceContext(_DeclaredReads, ComplianceCall):
 class DataModelContext(_DeclaredReads, DataCall):
     """What a DataModel may reach: a cutoff and its declared reads, and nothing else.
 
-    No account, no venue, no occurrence -- the absence is the definition of the role (architecture
+    No account, no venue, no event -- the absence is the definition of the role (architecture
     4.4). The one implementation of `authoring.DataCall`, the way `ComplianceContext` is of
     `ComplianceCall`.
     """
@@ -197,7 +197,7 @@ class DataModelContext(_DeclaredReads, DataCall):
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
 
     @property
-    def evaluation_time(self):
+    def at(self):
         """The single frozen point-in-time cutoff this invocation computes at."""
         return self.window.evaluation_time
 
@@ -213,7 +213,7 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     intent, and `_ENVELOPE_RESERVED_FIELDS` keeps it off every authored value.
     """
 
-    occurrence: OperationOccurrence
+    event: ScheduledEvent
     window: ModelWindow
     account: EconomicAccountView
     reads: Mapping[str, DatasetInput] = field(default_factory=dict)
@@ -226,11 +226,11 @@ class StrategyModelContext(_DeclaredReads, StrategyCall):
     """
 
     @property
-    def occurrence_id(self) -> str:
-        return str(self.occurrence.occurrence_id)
+    def event_id(self) -> str:
+        return str(self.event.event_id)
 
     @property
-    def evaluation_time(self):
+    def at(self):
         """The single frozen point-in-time cutoff this callback decides at."""
         return self.window.evaluation_time
 

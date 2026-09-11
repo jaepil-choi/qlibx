@@ -92,7 +92,7 @@ def test_carrying_a_mark_forward_does_not_restamp_when_it_was_observed() -> None
     """The gap has to survive being carried.
 
     If a carried mark took the current instant as its own, a name halted for a year would look
-    freshly priced at every occurrence and the halt would be invisible in the evidence.
+    freshly priced at every event and the halt would be invisible in the evidence.
     """
     once = select_prices(
         _snapshot(LATER),

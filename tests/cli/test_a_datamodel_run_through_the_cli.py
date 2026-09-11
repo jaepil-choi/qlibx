@@ -116,7 +116,7 @@ runs:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
     datamodels:
       reversal:
         dataset_id: reversal_2d
@@ -126,7 +126,7 @@ runs:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
     datamodels:
       momentum:
         dataset_id: momentum_2d
@@ -296,7 +296,7 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     assert row["fingerprint"].startswith(fp8), "the ref's fp8 is the fingerprint's head"
     assert row["dataset_id"] == "reversal_2d"
     assert row["rows"] == 4
-    assert row["period"]["occurrences"] == 2
+    assert row["period"]["events"] == 2
 
     # The filters are the strategy list's: by model id, by fingerprint prefix, by period end.
     code, by_id = _cli(
@@ -446,7 +446,7 @@ runs:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
     datamodels:
       echo:
         dataset_id: echo_2d

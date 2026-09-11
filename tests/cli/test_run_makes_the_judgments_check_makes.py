@@ -43,7 +43,7 @@ def _lookahead_run(
     run names is registered and a wall time is not a reference it can check.
     """
     code, payload = _register_run(
-        root, capsys, run_id, agenda={"every": "1d", "at": "15:30"}, **overrides
+        root, capsys, run_id, schedule={"every": "1d", "at": "15:30"}, **overrides
     )
     assert code == 0, payload
 

@@ -201,7 +201,7 @@ class _FakeDataCall(authoring.DataCall):
     """A minimal concrete DataCall used only to exercise the abstract contract shape."""
 
     @property
-    def evaluation_time(self) -> datetime:
+    def at(self) -> datetime:
         return UTC_NOW
 
     def read(self, alias: str, field: str) -> authoring.PanelWindow:
@@ -215,7 +215,7 @@ def test_data_call_is_abstract() -> None:
     with pytest.raises(TypeError):
         authoring.DataCall()  # type: ignore[abstract]
     call = _FakeDataCall()
-    assert call.evaluation_time == UTC_NOW
+    assert call.at == UTC_NOW
     assert call.rows("px")[0].instrument_id == "A"
 
 
@@ -348,11 +348,11 @@ class _FakeStrategyCall(authoring.StrategyCall):
     """A minimal concrete StrategyCall used only to exercise the abstract contract shape."""
 
     @property
-    def occurrence_id(self) -> str:
+    def event_id(self) -> str:
         return "occ-1"
 
     @property
-    def evaluation_time(self) -> datetime:
+    def at(self) -> datetime:
         return UTC_NOW
 
     @property
@@ -376,9 +376,9 @@ def test_strategy_call_is_abstract() -> None:
     with pytest.raises(TypeError):
         authoring.StrategyCall()  # type: ignore[abstract]
     call = _FakeStrategyCall()
-    assert call.evaluation_time == UTC_NOW
+    assert call.at == UTC_NOW
     assert call.account.cash == Decimal("100")
-    assert call.occurrence_id == "occ-1"
+    assert call.event_id == "occ-1"
     assert call.rows("px") == ()
 
 
@@ -390,7 +390,7 @@ def test_strategy_model_is_a_model_and_requires_only_decide() -> None:
 
     class Model(authoring.StrategyModel):
         def decide(self, call: authoring.StrategyCall) -> authoring.Hold:
-            self.memory = {"seen": [call.occurrence_id]}
+            self.memory = {"seen": [call.event_id]}
             return authoring.Hold(reason="x")
 
     model = Model()
@@ -418,7 +418,7 @@ def test_compliance_call_is_a_contract_and_carries_the_account() -> None:
         authoring.ComplianceCall()  # type: ignore[abstract]
 
     members = set(authoring.ComplianceCall.__abstractmethods__)
-    assert members == {"account", "evaluation_time", "instruments", "read", "rows"}, members
+    assert members == {"account", "at", "instruments", "read", "rows"}, members
 
 
 def test_compliance_finding_bounds_details_to_32_keys() -> None:
@@ -480,7 +480,7 @@ def test_compliance_is_abstract_and_declares_its_identity_once() -> None:
     )
 
     class _Call(authoring.ComplianceCall):
-        evaluation_time = UTC_NOW
+        at = UTC_NOW
         instruments = ("A",)
         account = view
 

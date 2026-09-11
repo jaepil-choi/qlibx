@@ -59,7 +59,7 @@ def _run_block(run_id: str, dataset_id: str) -> str:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
     datamodels:
       ratio:
         dataset_id: {dataset_id}

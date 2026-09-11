@@ -45,7 +45,7 @@ STALE_OBSERVE = GOOD_RULE.replace(
 
 This is not hypothetical: three fixtures in this repository were written this way and registered
 without complaint, because loading only constructs the object. They would have failed at the first
-monitoring occurrence.
+monitoring event.
 """
 
 

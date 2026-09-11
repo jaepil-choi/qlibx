@@ -55,7 +55,7 @@ def test_a_run_freezes_records_a_later_process_could_read(tmp_path: Path) -> Non
     assert record["account"]["version"] == result.final_state.account.snapshot.version
     assert record["tables"], "a run that recorded nothing would make the record pointless"
     assert record["source_digest"][journey.STRATEGY_ID]
-    assert record["period"]["occurrences"] == len(result.occurrences)
+    assert record["period"]["events"] == len(result.events)
     assert "contract" in record
     assert table_ids(store, journey.RUN_ID, ref), "the recorded tables sit beside the record"
 
@@ -128,7 +128,7 @@ def test_the_records_and_show_cannot_drift_apart(tmp_path: Path) -> None:
         if field not in ("contract", "roster"):
             assert record[field] is not None, field
     assert record["roster"]["by_kind"] == {"stock": 10}, "the sample declares its ten names"
-    assert record["period"]["occurrences"] > 0
+    assert record["period"]["events"] > 0
     # The pre-139 run record's field set is still what `show` projects for a record.json run.
     assert "declared_digest" in RECORD_FIELDS
 

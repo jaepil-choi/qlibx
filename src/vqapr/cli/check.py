@@ -5,7 +5,7 @@ Two properties make this verb worth having, and both are about what it does NOT 
 **It collects.** `preflight_run` raises on the first thing it finds, which is right for a
 gate standing in front of a run: the first refusal is the reason the run must not start, and
 proving the rest costs time the caller did not ask for. But it makes preparing a declaration a
-sequence of round trips -- fix the dataset, re-run, learn the agenda is missing, re-run, learn the
+sequence of round trips -- fix the dataset, re-run, learn the schedule is missing, re-run, learn the
 account holds an unlisted name. `check` runs the same judgments and reports every INDEPENDENT one
 together, so an agent repairing its own setup receives the whole list.
 
@@ -161,7 +161,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
             refused = list(error.failures)
             if phase.name == "preflight":
                 # The freeze proves again what the judgments already answered, for callers that
-                # freeze without judging. Occurrences the judgments listed are not listed a second
+                # freeze without judging. Events the judgments listed are not listed a second
                 # time under the freeze's code (record `259`: 403 of them were, and the second
                 # listing's repair was wrong for 402).
                 listed = {tuple(entry["examples"]) for entry in failures if entry["examples"]}

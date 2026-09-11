@@ -148,7 +148,7 @@ def judgments(
     registered = {str(item.dataset_id): item for item in workspace.datasets}
     # The run's facts, each read at most ONCE for every judge that reads it -- and for the
     # freeze that follows, when the caller hands the same `facts` to both (`verify.verify_run`).
-    # `docs/issues/archive/069` made the agenda one derivation rather than one per judge; record
+    # `docs/issues/archive/069` made the schedule one derivation rather than one per judge; record
     # `241` makes every fact so. Reached through a CALL rather than handed over as a value: a
     # failure to read it has to land inside the per-judge wrapper below, where it becomes a
     # blocked entry for each judge that needed it. Flattening it to `None` here was
@@ -324,28 +324,28 @@ def _judge_execution_ordering(
     wall time: a decision AT the last instant of the day, with `at` set to that instant, has no
     fill until the next day, and `within: 1d` may forbid that.
 
-    An execution dataset that does not resolve, and an agenda that cannot be derived, both raise
+    An execution dataset that does not resolve, and an schedule that cannot be derived, both raise
     out of here on purpose (`docs/issues/archive/077`).
 
-    Asked of the occurrences INSIDE `[start, end]`, the same slice preflight freezes and the run
-    walks. `derived_agenda` cuts on venue-local dates and keeps a superset
+    Asked of the events INSIDE `[start, end]`, the same slice preflight freezes and the run
+    walks. `derived_schedule` cuts on venue-local dates and keeps a superset
     (`docs/issues/archive/069`), so an `end` between a day's fill and that day's decision -- the one
     for a decide-after-close, fill-next-close run -- leaves that day's decision in the derived
-    agenda and after `end`. Handed to `select_target`, that occurrence broke its contract and
+    schedule and after `end`. Handed to `select_target`, that event broke its contract and
     the judgment blocked as a 500 instead of answering (`docs/issues/099`).
     """
     if definition.execution is None or definition.start is None or definition.end is None:
         return []
-    # The agenda first: an execution table that cannot be read blocks this judge and the
+    # The schedule first: an execution table that cannot be read blocks this judge and the
     # dataset judge for the SAME reason (`docs/issues/archive/077`), rather than this one
-    # naming the horizon scan and the other the agenda derivation.
-    occurrences = facts.agenda().inclusive_slice(definition.start, definition.end)
+    # naming the horizon scan and the other the schedule derivation.
+    events = facts.schedule().inclusive_slice(definition.start, definition.end)
     table = facts.execution_table()
-    # Cut from the instants the agenda was derived from, not scanned again (record `238`).
+    # Cut from the instants the schedule was derived from, not scanned again (record `238`).
     horizon = facts.horizon()
     # Told apart by cause -- a `within` too short for a weekend, or an end nothing is served
     # before -- by the same classifier the freeze uses, so each gets its own repair (record `259`).
-    unresolved = unresolved_targets(table, occurrences, end=definition.end, horizon=horizon)
+    unresolved = unresolved_targets(table, events, end=definition.end, horizon=horizon)
     if not unresolved or definition.strategy is None:
         return []
     return unresolved_target_failures(
@@ -404,7 +404,7 @@ def _judge_member_datasets(
     # loaded once, the freeze takes the same instance (record `241`).
     component = facts.component(entry.component_id, loader)
 
-    first_read = _first_decision(definition, facts.agenda)
+    first_read = _first_decision(definition, facts.schedule)
     # One unregistered dataset is ONE problem however many fields the component reads from
     # it (`docs/issues/archive/056`): `requirements()` fans a `DatasetInput` out to one requirement
     # per field, and reporting per requirement printed eight identical failures for one
@@ -447,7 +447,7 @@ def _judge_member_datasets(
         span = getattr(registration, "span", None)
         # Measured against the first instant that actually READS, not against the run's
         # `start`. Nothing reads at `start`: it bounds the horizon, and the strategy reads at
-        # the occurrences its agenda generates inside that horizon (issue 012).
+        # the events its schedule generates inside that horizon (issue 012).
         begins = _instant(span[0]) if span is not None else None
         if (
             rows
@@ -589,25 +589,25 @@ def _judge_output_freshness(
     ]
 
 
-def _first_decision(definition: RunDefinition, agenda: Callable[[], object]) -> datetime | None:
+def _first_decision(definition: RunDefinition, schedule: Callable[[], object]) -> datetime | None:
     """When the run's models first read, or `None` when the run declared no horizon.
 
-    The earliest occurrence the run's agenda generates inside the declared horizon. Every model
-    of a run shares the one agenda (record `148`), so this is a fact about the run rather than
+    The earliest event the run's schedule generates inside the declared horizon. Every model
+    of a run shares the one schedule (record `148`), so this is a fact about the run rather than
     about one member.
 
     `None` means the run declared no `start` or no `end` -- which the period judgment reports, and
-    which leaves nothing here to measure against. An agenda that cannot be DERIVED is a different
-    thing entirely and is no longer flattened into the same `None`: `agenda()` raises, and the
+    which leaves nothing here to measure against. An schedule that cannot be DERIVED is a different
+    thing entirely and is no longer flattened into the same `None`: `schedule()` raises, and the
     judgment that asked blocks (`docs/issues/archive/077`).
     """
     start, end = definition.start, definition.end
     if start is None or end is None:
         return None
-    occurrences = agenda().occurrences  # type: ignore[attr-defined]
+    events = schedule().events  # type: ignore[attr-defined]
     inside = [
         moment
-        for moment in (occurrence.local_instant.instant for occurrence in occurrences)
+        for moment in (event.local_instant.instant for event in events)
         if start <= moment <= end
     ]
     return min(inside) if inside else None

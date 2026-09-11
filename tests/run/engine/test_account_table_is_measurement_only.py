@@ -1,13 +1,13 @@
 """`vqapr.account` carries measurements only, so a naive read of it cannot be wrong.
 
-Issue 010. The table had two writers: a valuation occurrence recording what the book was worth,
+Issue 010. The table had two writers: a valuation event recording what the book was worth,
 and a strategy callback recording the account it saw before deciding. The second wrote `nav=None`,
 so a consumer reading a NAV series had to know to filter -- and one who forgot paired every real
 value with a spurious null. That is the shape `implementations/056` measured as HML correlation
 0.9726 -> 0.6877.
 
 What must not be lost is the property 056 bought with its guard: a valuation clock sparser than the
-decision clock leaves sessions its own occurrences never reach, and on those the mark a callback
+decision clock leaves sessions its own events never reach, and on those the mark a callback
 replays is the only record of the book's value there is. That case lives in
 `test_valuation_clock.py`; this file pins the shape of the table itself.
 """
@@ -47,7 +47,7 @@ def test_the_package_owns_exactly_four_default_tables() -> None:
 def test_the_account_table_carries_what_dates_a_measurement() -> None:
     """`observed_at` is when the nav was MEASURED, which is not when the row was written.
 
-    Dating the series by the occurrence instead puts every value one commit late; measured once,
+    Dating the series by the event instead puts every value one commit late; measured once,
     that mislabelling took a factor correlation from 0.93 to 0.02.
     """
     fields = set(_spec(ACCOUNT).fields)

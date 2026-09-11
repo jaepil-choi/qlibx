@@ -56,7 +56,7 @@ class ValuationHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=at,
-            owner=self._context.layer.agenda,
+            owner=self._context.layer.schedule,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             selected_marks = select_prices(
@@ -68,7 +68,7 @@ class ValuationHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=at,
-            owner=self._context.layer.agenda,
+            owner=self._context.layer.schedule,
             kind=SimulationFailureKind.FAILED_AFTER_COMMIT,
         ):
             prices = prices_of(selected_marks, account_version=prepared_fill.next_snapshot.version)
@@ -92,8 +92,8 @@ class ValuationHandler:
         mark = prepared_account.mark.marks
         mark_evidence = MarkEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=pending.occurrence,
+            schedule=self._context.layer.schedule,
+            event=pending.event,
             cutoff=at,
             selected=len(selected_marks),
             marks=mark.summary(),
@@ -167,7 +167,7 @@ class ValuationHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_SELECTION,
             cutoff=instant,
-            owner=self._context.layer.agenda,
+            owner=self._context.layer.schedule,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             selected_marks = select_prices(
@@ -179,7 +179,7 @@ class ValuationHandler:
         with self._context.due_boundary(
             stage=SimulationStage.DUE_VALUATION_MARK,
             cutoff=instant,
-            owner=self._context.layer.agenda,
+            owner=self._context.layer.schedule,
             kind=SimulationFailureKind.PRE_COMMIT,
         ):
             prices = prices_of(selected_marks, account_version=before.version)
@@ -200,8 +200,8 @@ class ValuationHandler:
         mark = prepared_account.mark.marks
         evidence = ValuationEvidence(
             run_identity=self._context.frozen_run.identity,
-            agenda=self._context.layer.agenda,
-            occurrence=None,
+            schedule=self._context.layer.schedule,
+            event=None,
             cutoff=instant,
             account=before,
             marks=mark.summary(),
@@ -267,7 +267,7 @@ class ValuationHandler:
             run_id=self._context.frozen_run.identity,
             producer_id=str(self._context.layer.config.component.component_id),
             stage=VALUATION_STAGE,
-            event_time=self._context.in_agenda_zone(cutoff),
+            event_time=self._context.in_schedule_zone(cutoff),
             sequencer=self._context.next_sequence,
         )
         priced = {selection.instrument_id: selection for selection in selected}

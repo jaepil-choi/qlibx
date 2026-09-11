@@ -1,4 +1,4 @@
-"""One loop walks both kinds of run: a part on the strategy clock, tools on the market clock.
+"""One loop walks both kinds of run: a part on the schedule clock, tools on the market clock.
 
 Design §3 leaves one difference between a strategy run and a datamodel run -- how many clocks it
 walks -- and until record `227` that difference was two loop classes side by side (record `214`
@@ -7,7 +7,7 @@ spine was that each loop stood on its own receiver, `RunStateRepository` for a s
 `RunOutput` for a datamodel. `RunLoop` does not stand on either. It walks the merged clocks and
 hands each event to one of two things:
 
-    the part      `Part.dispatch(occurrence)`   the strategy clock: `StrategyModel.decide` or
+    the part      `Part.dispatch(event)`   the schedule clock: `StrategyModel.decide` or
                                                 `DataModel.compute`, and what follows the answer
     the market    `MarketClock.at(event)`        the market clock: ACCRUE -> EXECUTE -> VALUATION ->
                                                 COMPLIANCE -> close, the fold of record `226`
@@ -20,7 +20,7 @@ subclass was this class (`docs/issues/097`). The two kinds are assembled by two 
 other and its handlers built, and what they return is a `RunLoop` and nothing more specific.
 
 The handlers are the other modules of this package, one per wiring-table row (design §4,
-`domain/wiring.py`): on the strategy clock `callback.py` (decide) and `compute.py` (compute); on
+`domain/wiring.py`): on the schedule clock `callback.py` (decide) and `compute.py` (compute); on
 the market clock, in the order §3.1 fixes, `accrual.py`, `execution.py`, `valuation.py` (the
 framework's own step) and `compliance.py`. `context.py` is what a strategy run's handlers share;
 `output.py` is the warehouse door a datamodel run writes through.
@@ -48,24 +48,24 @@ from vqapr.domain.account import Account
 from vqapr.domain.fill import ExecutionHorizon
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.instrument import InstrumentRoster
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.record.schema import DEFAULT_TABLE_PREFIX
 from vqapr.run.engine.context import (
     DEFAULT_TABLES,
     AcceptedIntent,
     DueExecutionResult,
     DueExecutionTrace,
+    EventTrace,
     FailedAfterCommit,
     FlowContext,
     MarketInstant,
     MonitoringResult,
-    OccurrenceTrace,
     SimulationResult,
     ValuationResult,
     _require_compliance_identity,
     callback_evidence,
 )
-from vqapr.run.engine.events import MarketEvent, OccurrenceEvent
+from vqapr.run.engine.events import MarketEvent
 from vqapr.run.engine.evidence import FinalizationEvidence
 from vqapr.run.engine.failure import SimulationStage
 from vqapr.run.engine.output import RunOutput
@@ -86,10 +86,10 @@ __all__ = [
     "DataModelResult",
     "DueExecutionResult",
     "DueExecutionTrace",
+    "EventTrace",
     "FailedAfterCommit",
     "MarketClock",
     "MonitoringResult",
-    "OccurrenceTrace",
     "Part",
     "RunLoop",
     "SimulationResult",
@@ -106,16 +106,16 @@ def _no_compliance_window(instant: datetime) -> ModelWindow:
 
 
 class Part[TraceT, ResultT](Protocol):
-    """What the strategy clock calls, and what opens and closes the run: the part's own side.
+    """What the schedule clock calls, and what opens and closes the run: the part's own side.
 
     A part declares the run's clock (design §4.3) and owns the receiver its answers go to -- the
     run state for a strategy, the warehouse door for a datamodel. The loop knows neither; it
-    knows that a part starts, is dispatched once per occurrence, and finishes with the traces.
+    knows that a part starts, is dispatched once per event, and finishes with the traces.
     """
 
     def start(self, cutoff: datetime) -> None: ...
 
-    def dispatch(self, occurrence: OperationOccurrence) -> TraceT: ...
+    def dispatch(self, event: ScheduledEvent) -> TraceT: ...
 
     def finish(
         self, traces: tuple[TraceT | DueExecutionTrace, ...], *, elapsed: float
@@ -202,7 +202,7 @@ class MarketClock:
 
 
 class RunLoop[TraceT, ResultT]:
-    """The one loop: a part on the strategy clock, and a market clock when the run has one.
+    """The one loop: a part on the schedule clock, and a market clock when the run has one.
 
     Three sentences say all of it. The walk is `run`: start, the events sorted by clock, one
     `handle` each, finish -- written once and not overridable, because the merge order is what
@@ -216,7 +216,7 @@ class RunLoop[TraceT, ResultT]:
     def __init__(
         self,
         *,
-        schedule: Sequence[OperationOccurrence],
+        schedule: Sequence[ScheduledEvent],
         start_cutoff: datetime,
         part: Part[TraceT, ResultT],
         market: MarketClock | None = None,
@@ -233,7 +233,7 @@ class RunLoop[TraceT, ResultT]:
         self._started = 0.0
 
     @property
-    def schedule(self) -> tuple[OperationOccurrence, ...]:
+    def schedule(self) -> tuple[ScheduledEvent, ...]:
         """The strategy-clock events, in dispatch order."""
         return self._schedule
 
@@ -259,23 +259,20 @@ class RunLoop[TraceT, ResultT]:
         self._started = time.perf_counter()
         self._part.start(cutoff)
 
-    def events(self) -> tuple[OccurrenceEvent | MarketEvent, ...]:
-        """The strategy clock, merged with the market clock when the run has one (design §3)."""
-        occurrences: tuple[OccurrenceEvent | MarketEvent, ...] = tuple(
-            OccurrenceEvent(item) for item in self._schedule
-        )
+    def events(self) -> tuple[ScheduledEvent | MarketEvent, ...]:
+        """The schedule clock, merged with the market clock when the run has one (design §3)."""
         if self._market is None:
-            return occurrences
-        return (*occurrences, *(MarketEvent(instant) for instant in self._market.instants()))
+            return self._schedule
+        return (*self._schedule, *(MarketEvent(instant) for instant in self._market.instants()))
 
-    def handle(self, event: OccurrenceEvent | MarketEvent) -> TraceT | DueExecutionTrace:
+    def handle(self, event: ScheduledEvent | MarketEvent) -> TraceT | DueExecutionTrace:
         if isinstance(event, MarketEvent):
             if self._market is None:
                 raise RuntimeError("a market-clock event reached a run without a market clock")
             return self._market.at(event)
-        # A scheduled event is the part's, always (record `182`: an occurrence carries no role to
+        # A scheduled event is the part's, always (record `182`: an event carries no role to
         # branch on).
-        return self._part.dispatch(event.occurrence)
+        return self._part.dispatch(event)
 
     def finish(self, traces: tuple[TraceT | DueExecutionTrace, ...]) -> ResultT:
         # `elapsed` covers the loop itself; the panel build and the record freeze happen outside
@@ -284,7 +281,7 @@ class RunLoop[TraceT, ResultT]:
 
 
 class StrategyPart:
-    """The strategy clock's side of a strategy run: the callback and the state it publishes to."""
+    """The schedule clock's side of a strategy run: the callback and the state it publishes to."""
 
     def __init__(self, context: FlowContext, callback: CallbackHandler) -> None:
         self._context = context
@@ -299,15 +296,15 @@ class StrategyPart:
         ):
             self.callback.load_visible_state()
 
-    def dispatch(self, occurrence: OperationOccurrence) -> OccurrenceTrace:
+    def dispatch(self, event: ScheduledEvent) -> EventTrace:
         # `callback` is the whole scheduled side: the window built for the model and the model's
         # own `decide` (`docs/issues/archive/068`: a user learns their strategy is 5% of the wall
         # clock from the record, not from cProfile).
         with self._context.timed("callback"):
-            return self.callback.dispatch(occurrence)
+            return self.callback.dispatch(event)
 
     def finish(
-        self, traces: tuple[OccurrenceTrace | DueExecutionTrace, ...], *, elapsed: float
+        self, traces: tuple[EventTrace | DueExecutionTrace, ...], *, elapsed: float
     ) -> SimulationResult:
         if self._context.state.current.pending_accepted_intent is not None:
             raise RuntimeError("simulation finalized with a pending accepted intent")
@@ -316,7 +313,7 @@ class StrategyPart:
         account = self._context.state.current.account
         finalization = FinalizationEvidence(
             run_identity=self._context.frozen_run.identity,
-            strategy_agenda=self._context.layer.agenda,
+            strategy_schedule=self._context.layer.schedule,
             root_version=self._context.state.current.version,
             cutoff=self._context.frozen_run.end,
             account=None if account is None else account.snapshot,
@@ -338,7 +335,7 @@ def strategy_loop(
     state: RunStateRepository,
     *,
     layer: FrozenStrategy | None = None,
-    strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+    strategy_window_for_event: Callable[[ScheduledEvent], ModelWindow],
     account: Account,
     compliance_window_at: Callable[[datetime], ModelWindow] | None = None,
     exchange: Exchange,
@@ -348,8 +345,8 @@ def strategy_loop(
     registry: InstrumentRoster | None = None,
     record_account_positions: bool = True,
     horizon: ExecutionHorizon | None = None,
-) -> RunLoop[OccurrenceTrace, SimulationResult]:
-    """A strategy run, assembled: two clocks -- the strategy's agenda and the market's instants.
+) -> RunLoop[EventTrace, SimulationResult]:
+    """A strategy run, assembled: two clocks -- the strategy's schedule and the market's instants.
 
     The Flow owns timestamp stamping, exact execution, account mutation, and marking. This is
     where a strategy run's authorities are checked against each other and its handlers built;
@@ -363,8 +360,8 @@ def strategy_loop(
         layer = frozen_run.strategy
     if layer is None or layer is not frozen_run.strategy:
         raise ValueError("layer must be the frozen run's strategy")
-    if not callable(strategy_window_for_occurrence):
-        raise TypeError("strategy_window_for_occurrence must be callable")
+    if not callable(strategy_window_for_event):
+        raise TypeError("strategy_window_for_event must be callable")
     if compliance and not callable(compliance_window_at):
         raise TypeError("compliance_window_at must be callable when rules are loaded")
     if not callable(getattr(exchange, "execute", None)):
@@ -409,7 +406,7 @@ def strategy_loop(
         exchange=exchange,
         strategy=strategy,
         compliance=compliance,
-        strategy_window_for_occurrence=strategy_window_for_occurrence,
+        strategy_window_for_event=strategy_window_for_event,
         compliance_window_at=compliance_window_at or _no_compliance_window,
         scan_session=scan_session,
         registry=registry,
@@ -443,7 +440,7 @@ def strategy_loop(
 class DataModelResult:
     """A finished datamodel run: one trace per session, and the dataset it registered."""
 
-    occurrences: tuple[DataModelTrace, ...]
+    events: tuple[DataModelTrace, ...]
     rows: int
     output_path: Path
     registration: DatasetRegistration | None = None
@@ -459,15 +456,15 @@ class DataModelPart:
     def start(self, cutoff: datetime) -> None:
         self._output.open()
 
-    def dispatch(self, occurrence: OperationOccurrence) -> DataModelTrace:
-        return self._compute.dispatch(occurrence)
+    def dispatch(self, event: ScheduledEvent) -> DataModelTrace:
+        return self._compute.dispatch(event)
 
     def finish(
         self, traces: tuple[DataModelTrace | DueExecutionTrace, ...], *, elapsed: float
     ) -> DataModelResult:
         sessions = tuple(trace for trace in traces if isinstance(trace, DataModelTrace))
         return DataModelResult(
-            occurrences=sessions,
+            events=sessions,
             rows=self._output.rows,
             output_path=self._output.directory,
         )
@@ -478,20 +475,20 @@ def datamodel_loop(
     layer: FrozenDataModel,
     model: DataModel,
     *,
-    window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+    window_for_event: Callable[[ScheduledEvent], ModelWindow],
     output: RunOutput,
     on_progress: Callable[[], None] | None = None,
 ) -> RunLoop[DataModelTrace, DataModelResult]:
-    """A datamodel run, assembled: one clock, the agenda where its `DataModel` computes.
+    """A datamodel run, assembled: one clock, the schedule where its `DataModel` computes.
 
     No market clock: a datamodel sees no account and passes through no venue (architecture
     4.4), so nothing happens between two sessions and the walk is the plain sequence of
-    occurrences. What it shares with a strategy run is everything else -- the same `RunLoop`.
+    events. What it shares with a strategy run is everything else -- the same `RunLoop`.
     """
     if layer is not frozen_run.datamodel:
         raise ValueError("layer must be the frozen run's datamodel")
-    if not callable(window_for_occurrence):
-        raise TypeError("window_for_occurrence must be callable")
+    if not callable(window_for_event):
+        raise TypeError("window_for_event must be callable")
     cutoff = frozen_run.start or frozen_run.end
     if cutoff is None:
         raise RuntimeError("a datamodel run requires a frozen boundary")
@@ -499,7 +496,7 @@ def datamodel_loop(
         frozen_run=frozen_run,
         layer=layer,
         model=model,
-        window_for_occurrence=window_for_occurrence,
+        window_for_event=window_for_event,
         output=output,
     )
     return RunLoop(

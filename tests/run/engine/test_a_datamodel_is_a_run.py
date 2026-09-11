@@ -42,7 +42,7 @@ from vqapr.run.engine.output import output_directory, output_source_id
 from vqapr.run.preflight.checks import judgments
 from vqapr.run.preflight.freeze import preflight_run
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
-from vqapr.workspace.run_definition import DataModelEntry, RunAgenda, RunDefinition
+from vqapr.workspace.run_definition import DataModelEntry, RunSchedule, RunDefinition
 
 KST = ZoneInfo("Asia/Seoul")
 START = datetime(2024, 3, 6, tzinfo=KST)
@@ -93,11 +93,11 @@ class MomentumModel(ReversalModel):
 class ForgingModel(ReversalModel):
     def compute(self, context):
         rows = super().compute(context)
-        return tuple({**row, "available_at": context.evaluation_time} for row in rows)
+        return tuple({**row, "available_at": context.at} for row in rows)
 
 class FailingSecondModel(ReversalModel):
     def compute(self, context):
-        if context.evaluation_time.day == 7:
+        if context.at.day == 7:
             raise RuntimeError("intentional second-session failure")
         return super().compute(context)
 
@@ -199,7 +199,7 @@ def _definition(
         datamodel=entry,
         instruments=instruments,
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(at,), days_from=sessions_from),
+        schedule=RunSchedule(every="1d", at=(at,), days_from=sessions_from),
         start=START,
         end=END,
     )
@@ -272,7 +272,7 @@ def test_a_datamodel_run_publishes_the_rows_materialize_published(
     result = outcome.result("reversal")
     assert isinstance(result, DataModelResult)
     assert result.rows == 4
-    assert [trace.evaluation_time for trace in result.occurrences] == list(SESSIONS)
+    assert [trace.evaluation_time for trace in result.events] == list(SESSIONS)
     workspace = Workspace.open(tmp_path)
     registration = workspace.dataset("reversal_2d")
     assert registration == result.registration
@@ -460,7 +460,7 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
     assert record["value_fields"] == ["score"]
     assert record["rows"] == 4
     assert record["source_digest"] == {"reversal": record["fingerprint"]}
-    assert record["period"]["occurrences"] == 2
+    assert record["period"]["events"] == 2
     assert len(record["sessions"]) == 2
     for session in record["sessions"]:
         assert set(session) == {"evaluation_time", "output_available_at", "row_count"}

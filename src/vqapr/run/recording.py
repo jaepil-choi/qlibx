@@ -28,7 +28,7 @@ from vqapr.record import (
 )
 from vqapr.run.engine.loop import DataModelResult, SimulationResult
 from vqapr.run.engine.run_state import LifecycleKind
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun, FrozenSchedule, FrozenStrategy
 
 
 def freeze_run_record(root: Path, frozen: FrozenRun, *, source_digests: Mapping[str, str]) -> Path:
@@ -124,12 +124,12 @@ def _component_block(component_id: str, component: ComponentRef) -> dict[str, ob
     }
 
 
-def _agenda_block(agenda: FrozenAgenda) -> dict[str, object]:
-    """The member's frozen agenda as both records state it."""
+def _schedule_block(schedule: FrozenSchedule) -> dict[str, object]:
+    """The member's frozen schedule as both records state it."""
     return {
-        "agenda_id": str(agenda.agenda_id),
-        "content_identity": agenda.content_identity,
-        "occurrences": len(agenda.occurrences),
+        "schedule_id": str(schedule.schedule_id),
+        "content_identity": schedule.content_identity,
+        "events": len(schedule.events),
     }
 
 
@@ -151,7 +151,7 @@ def freeze_strategy_record(
     record complete. A reader that finds one knows the strategy reached its end; one killed midway
     leaves its rows and no record, which `strategy_refs` correctly declines to list as finished.
     """
-    # A run with a store streams its rows to this writer as each occurrence is accepted, so
+    # A run with a store streams its rows to this writer as each event is accepted, so
     # `recorder_rows` is empty here and everything is already on disk. A result assembled without
     # a sink still carries its rows, and they are appended now. Either way the writer counted what
     # it wrote, which is what the `tables` block below reports.
@@ -173,7 +173,7 @@ def freeze_strategy_record(
         # The registered fingerprint, in full; the directory name carries its first eight.
         fingerprint=component.fingerprint,
         component=_component_block(layer.component_id, component),
-        agenda=_agenda_block(layer.agenda),
+        schedule=_schedule_block(layer.schedule),
         compliance=[
             {"component_id": str(rule.component_id), "fingerprint": rule.fingerprint}
             for rule in layer.compliance.rules
@@ -209,7 +209,7 @@ def freeze_strategy_record(
         period={
             "start": frozen.start,
             "end": frozen.end,
-            "occurrences": len(result.occurrences),
+            "events": len(result.events),
         },
         # Where the wall clock went, by phase (`docs/issues/archive/068`): the loop's `total`, the
         # `callback` side (window and decide), the `due` side, and each due stage by name.
@@ -235,14 +235,14 @@ def freeze_datamodel_record(
     per-instrument lineage `059` measured at 478 MB.
     """
     component = layer.component
-    times = [trace.evaluation_time for trace in result.occurrences]
+    times = [trace.evaluation_time for trace in result.events]
     record = DatamodelRecord(
         run_id=writer.run_id,
         datamodel_ref=str(writer.strategy_ref),
         datamodel_id=layer.component_id,
         fingerprint=component.fingerprint,
         component=_component_block(layer.component_id, component),
-        agenda=_agenda_block(layer.agenda),
+        schedule=_schedule_block(layer.schedule),
         dataset_id=frozen.writes,
         value_fields=list(layer.value_fields),
         rows=result.rows,
@@ -252,14 +252,14 @@ def freeze_datamodel_record(
                 "output_available_at": trace.output_available_at,
                 "row_count": trace.row_count,
             }
-            for trace in result.occurrences
+            for trace in result.events
         ],
         source_digest=dict(as_loaded),
         declared_digest=str(layer.identity),
         period={
             "start": frozen.start,
             "end": frozen.end,
-            "occurrences": len(result.occurrences),
+            "events": len(result.events),
             "first": min(times) if times else None,
             "last": max(times) if times else None,
         },
@@ -296,9 +296,9 @@ def contract_report(result: SimulationResult) -> dict[str, object]:
     # and `held 42/82` reported them as one fact. `ok` turns on `breached` alone; the other two
     # counts and their worst excesses are filed beside it so a generous tolerance hides nothing.
     findings: dict[str, dict[str, object]] = {}
-    for trace in getattr(result, "occurrences", ()):
-        occurrence_report = getattr(getattr(trace, "result", None), "report", None)
-        for stamped in getattr(occurrence_report, "findings", ()) or ():
+    for trace in getattr(result, "events", ()):
+        event_report = getattr(getattr(trace, "result", None), "report", None)
+        for stamped in getattr(event_report, "findings", ()) or ():
             rule_id = str(getattr(stamped, "rule_id", "") or "")
             if not rule_id:
                 continue

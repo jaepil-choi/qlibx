@@ -50,7 +50,7 @@ from vqapr.domain.fill import ExactExecutionTarget, ExecutionHorizon
 from vqapr.domain.instrument import InstrumentRoster
 from vqapr.domain.intent import EconomicPortfolioIntent
 from vqapr.domain.memory import ModelMemory, normalize_memory
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.valuation import SelectedMark
 from vqapr.record.schema import (
     ACCOUNT_TABLE,
@@ -84,13 +84,13 @@ class AcceptedIntent:
     """A timestamp-free Strategy payload bound to one Flow-selected target."""
 
     intent: EconomicPortfolioIntent
-    occurrence: OperationOccurrence
+    event: ScheduledEvent
     decision_time: datetime
     target: ExactExecutionTarget
 
     def __post_init__(self) -> None:
-        if self.decision_time != self.occurrence.evaluation_time:
-            raise ValueError("decision_time must be the current occurrence evaluation_time")
+        if self.decision_time != self.event.evaluation_time:
+            raise ValueError("decision_time must be the current event evaluation_time")
         if self.decision_time.tzinfo is None:
             raise ValueError("decision_time must be timezone-aware")
         target_at = self.target.target_at
@@ -159,8 +159,8 @@ class MarketInstant:
 
 
 @dataclass(frozen=True, slots=True)
-class OccurrenceTrace:
-    occurrence: OperationOccurrence
+class EventTrace:
+    event: ScheduledEvent
     result: Hold | EconomicPortfolioIntent
     """The decision as the callback left it: a `Hold`, or a `Rebalance` stamped into the intent
     the run accepted."""
@@ -185,11 +185,11 @@ class DueExecutionTrace:
 
 @dataclass(frozen=True, slots=True)
 class SimulationResult:
-    occurrences: tuple[OccurrenceTrace | DueExecutionTrace, ...]
+    events: tuple[EventTrace | DueExecutionTrace, ...]
     final_state: AcceptedRunState
     timing: Mapping[str, float] = field(default_factory=dict)
     """Seconds spent, by phase, over the whole run (`docs/issues/archive/068`): `total`, `callback`
-    (window and decide, every static occurrence), `due` (every fill-side item), and one entry
+    (window and decide, every static event), `due` (every fill-side item), and one entry
     per due stage -- `simulation.due.snapshot`, `simulation.due.order_planning`, ... -- so a
     reader learns where a run's wall clock went without a profiler. Wall-clock, not CPU."""
 
@@ -198,7 +198,7 @@ def callback_evidence(result: SimulationResult) -> tuple[CallbackEvidence, ...]:
     """Every Strategy callback evidence a finished run published, in lifecycle order.
 
     A run's decisions are reachable only through its state root, and reconstructing them from
-    ``occurrences`` would mean re-deriving what the Flow already stamped. Read by tests and
+    ``events`` would mean re-deriving what the Flow already stamped. Read by tests and
     showcases that want the decisions in-process; a later run that wants them reads the run's
     recorded ``vqapr.weight`` table, registered as a dataset (one-shape campaign Step 4).
     Declining callbacks are included, because whether a decline counts is the reader's rule to
@@ -337,7 +337,7 @@ CALLBACK_STAGE = "STRATEGY_CALLBACK"
 VALUATION_STAGE = "VALUATION"
 MONITORING_STAGE = "MONITORING"
 """The `stage` label every package row carries: which handler wrote it. These were the values
-of an `OperationRole` an occurrence used to carry (record `182` removed it: the one agenda has
+of an `OperationRole` an event used to carry (record `182` removed it: the one schedule has
 no role); the labels stay so a record written before reads the same as one written after."""
 
 DEFAULT_TABLES = (
@@ -523,7 +523,7 @@ class FlowContext:
     exchange: Exchange
     strategy: StrategyModel
     compliance: tuple[Compliance, ...]
-    strategy_window_for_occurrence: Callable[[OperationOccurrence], ModelWindow]
+    strategy_window_for_event: Callable[[ScheduledEvent], ModelWindow]
     compliance_window_at: Callable[[datetime], ModelWindow]
     """The window the Compliance rules read at a market-clock instant (design §7.2): what they
     subscribed to, as of the instant the book was marked."""
@@ -589,14 +589,14 @@ class FlowContext:
         """The run's next row position, for every recorder a handler builds (record `225`)."""
         return self.state.next_sequence()
 
-    def in_agenda_zone(self, instant: datetime) -> datetime:
-        """An instant expressed in the strategy agenda's zone; the same instant.
+    def in_schedule_zone(self, instant: datetime) -> datetime:
+        """An instant expressed in the strategy schedule's zone; the same instant.
 
         Every package table stamps `event_time` in that zone (`docs/issues/archive/058`): the
         execution table normalises targets to UTC, and a reader lining a fill up against the NAV or
         the monitoring row that followed it was converting by hand.
         """
-        zone = self.layer.agenda.timezone
+        zone = self.layer.schedule.timezone
         return instant.astimezone(ZoneInfo(zone)) if zone else instant
 
     def execution_snapshot(

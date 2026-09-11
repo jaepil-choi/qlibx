@@ -33,7 +33,7 @@ def _member(root: Path, run_id: str, ref: str, rows: int) -> None:
             "strategy_id": ref.split("@")[0],
             "fingerprint": ref.split("@")[1] * 8,
             "component": {},
-            "agenda": {},
+            "schedule": {},
             "compliance": [],
             "exchange": None,
             "account": {"version": rows, "cash": "1000", "positions": {}},
@@ -42,7 +42,7 @@ def _member(root: Path, run_id: str, ref: str, rows: int) -> None:
             "source_digest": {},
             "declared_digest": "d",
             "roster": None,
-            "period": {"start": "2024-01-01", "end": "2024-12-31", "occurrences": rows},
+            "period": {"start": "2024-01-01", "end": "2024-12-31", "events": rows},
         },
         kind="strategy",
     )

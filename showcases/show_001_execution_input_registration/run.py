@@ -26,7 +26,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -172,9 +172,9 @@ count is the table's density -- exactly what `UC-TIME-002` lets vary."""
 def _signature(result: Any) -> dict[str, Any]:
     """What a run is, reduced to values two runs can be compared on.
 
-    `SimulationResult` carries object identity - occurrence ids minted per run, trace objects -
+    `SimulationResult` carries object identity - event ids minted per run, trace objects -
     so comparing the results themselves would report a difference that means nothing. Two
-    halves (design §3): `outcome` is what the STRATEGY clock and the account say -- how the
+    halves (design §3): `outcome` is what the SCHEDULE clock and the account say -- how the
     account ended, how many decisions were made and settled -- and must not move with the
     execution table's density (`UC-TIME-002`); `market_clock` is how many instants the book was
     valued at, which IS the table's density and moves with it on purpose (record `206`).
@@ -184,7 +184,7 @@ def _signature(result: Any) -> dict[str, Any]:
     lifecycle: dict[str, int] = {}
     for entry in final_state.lifecycle_trace:
         lifecycle[entry.kind.value] = lifecycle.get(entry.kind.value, 0) + 1
-    decisions = sum(1 for trace in result.occurrences if type(trace).__name__ == "OccurrenceTrace")
+    decisions = sum(1 for trace in result.events if type(trace).__name__ == "EventTrace")
     return {
         "outcome": {
             "account_version": snapshot.version,
@@ -201,7 +201,7 @@ def _signature(result: Any) -> dict[str, Any]:
         },
         "market_clock": {
             "valuations": lifecycle.get("MARKED", 0),
-            "instants": len(result.occurrences) - decisions,
+            "instants": len(result.events) - decisions,
         },
     }
 
@@ -289,7 +289,7 @@ def main() -> None:
         # non-empty. See README.
         strategy=StrategyEntry("showcase-strategy"),
         timezone=KST,
-        agenda=RunAgenda(every="1d", at=(time(4, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(4, 0),)),
         exchange="showcase-exchange",
         execution=_fill("krx-daily"),
         start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),

@@ -1,7 +1,7 @@
 """AC-1 of the two-clocks campaign: a strategy that decides every minute fills every minute --
 and the book is valued at every minute the market clock has (design §3, §3.1).
 
-§3.4 gives the agenda `every: 1m` with `from`/`to`; §3.5 gives the fill its default, "the first
+§3.4 gives the schedule `every: 1m` with `from`/`to`; §3.5 gives the fill its default, "the first
 market-clock instant after the decision" -- on a minute table, the next minute; §3.1 makes
 VALUATION and COMPLIANCE stages of the market clock, so the NAV series has the table's
 resolution whether or not a decision was made at an instant. Through the CLI, the way a user
@@ -140,7 +140,7 @@ def _run(
                         "strategy": {"component": "always-long"},
                         "timezone": "Asia/Seoul",
                         # Six decisions, 09:00 to 09:05, one a minute.
-                        "agenda": {"every": "1m", "from": "09:00", "to": "09:05"},
+                        "schedule": {"every": "1m", "from": "09:00", "to": "09:05"},
                         "exchange": "venue",
                         "execution": execution,
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
@@ -180,7 +180,7 @@ def _minutes(rows: list[tuple]) -> list[int]:
 
 
 @pytest.mark.slow
-def test_a_minute_agenda_with_the_default_fill_trades_at_the_next_minute(
+def test_a_minute_schedule_with_the_default_fill_trades_at_the_next_minute(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """No fill block: each decision fills at the next minute. And the market clock values the
@@ -192,7 +192,7 @@ def test_a_minute_agenda_with_the_default_fill_trades_at_the_next_minute(
     first = datetime(2024, 3, 5, 9, 0, tzinfo=_ZONE)
     assert [moment.astimezone(_ZONE).replace(tzinfo=_ZONE) for (moment,) in decisions] == [
         first + timedelta(minutes=k) for k in range(6)
-    ], "six decisions, one a minute, on the strategy clock"
+    ], "six decisions, one a minute, on the schedule clock"
 
     fills = _rows(tmp_path, "minutely", "vqapr.fill", "event_time, dealt_quantity")
     assert _minutes(fills) == [1, 2, 3, 4, 5, 6], "each decision filled at the NEXT minute"

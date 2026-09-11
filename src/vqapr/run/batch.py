@@ -166,7 +166,7 @@ def require_independent_batch(
     same door with their own code.
 
     What a run reads is what preflight would freeze as its `requirements` (the model's and its
-    Compliance rules'), plus the two datasets the run layer itself names -- `agenda.days_from`
+    Compliance rules'), plus the two datasets the run layer itself names -- `schedule.days_from`
     and `execution.dataset`. A component that does not load contributes nothing here: its own
     worker refuses it by name, and a run that cannot start cannot race anything. `reads` is
     `batch_reads` already asked; absent, it is asked here.
@@ -224,12 +224,12 @@ def require_independent_batch(
 def _reads(workspace: Workspace, definition: RunDefinition) -> dict[str, set[str]]:
     """What a run would read: each dataset id with the field ids its components declare on it.
 
-    The two datasets the run layer itself names -- `agenda.days_from`, `execution.dataset` --
+    The two datasets the run layer itself names -- `schedule.days_from`, `execution.dataset` --
     are read whole by the framework and carry no field set here.
     """
     read: dict[str, set[str]] = {}
-    if definition.agenda.days_from is not None:
-        read.setdefault(definition.agenda.days_from, set())
+    if definition.schedule.days_from is not None:
+        read.setdefault(definition.schedule.days_from, set())
     if definition.execution is not None:
         read.setdefault(definition.execution.dataset, set())
     loaders: list[tuple[str, Callable[..., Component]]] = []

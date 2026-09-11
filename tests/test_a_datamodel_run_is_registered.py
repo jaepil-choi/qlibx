@@ -41,7 +41,7 @@ _RUN_READY: dict[str, object] = {
     "start": "2024-03-06T00:00:00+09:00",
     "end": "2024-03-08T00:00:00+09:00",
     "timezone": "Asia/Seoul",
-    "agenda": {"every": "1d", "at": "16:00", "days_from": "prices"},
+    "schedule": {"every": "1d", "at": "16:00", "days_from": "prices"},
     "writes": "reversal_2d",
 }
 """A `runs.<id>` body with everything but its models, for each test to add one kind to."""
@@ -55,7 +55,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "datamodel": ENTRY,
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": time(16, 0), "days_from": "prices"},
+        "schedule": {"every": "1d", "at": time(16, 0), "days_from": "prices"},
         "start": datetime(2024, 3, 6, tzinfo=KST),
         "end": datetime(2024, 3, 8, tzinfo=KST),
     }
@@ -235,7 +235,7 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
         (
             {
                 **_RUN_READY,
-                "agenda": {"every": "1d", "at": "16:00"},
+                "schedule": {"every": "1d", "at": "16:00"},
                 "strategies": {"ou-k0": None},
                 "execution": {
                     "dataset": "venue-daily",

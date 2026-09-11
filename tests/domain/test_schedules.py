@@ -4,10 +4,10 @@ from datetime import UTC, date, datetime, time
 
 import pytest
 
-from vqapr.domain.identifiers import agenda_id, occurrence_id
+from vqapr.domain.identifiers import schedule_id, event_id
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationAgenda, OperationOccurrence
-from vqapr.run.engine.events import MarketEvent, OccurrenceEvent
+from vqapr.domain.schedule import Schedule, ScheduledEvent
+from vqapr.run.engine.events import MarketEvent
 
 
 def _local(
@@ -21,15 +21,15 @@ def _local(
     return LocalInstantDeclaration(day, wall_time, timezone, fold, offset)
 
 
-def _occurrence(identifier: str) -> OperationOccurrence:
-    return OperationOccurrence(occurrence_id(identifier), _local())
+def _event(identifier: str) -> ScheduledEvent:
+    return ScheduledEvent(event_id(identifier), _local())
 
 
-def _agenda(*occurrences: OperationOccurrence) -> OperationAgenda:
-    return OperationAgenda(
-        agenda_id=agenda_id("strategy"),
+def _schedule(*events: ScheduledEvent) -> Schedule:
+    return Schedule(
+        schedule_id=schedule_id("strategy"),
         timezone="Asia/Seoul",
-        occurrences=occurrences,
+        events=events,
     )
 
 
@@ -70,33 +70,33 @@ def test_local_instant_rejects_gap_or_inconsistent_resolution_proof(declaration:
         declaration()  # type: ignore[operator]
 
 
-def test_agenda_uses_stable_ids_to_order_same_instant() -> None:
-    agenda = _agenda(_occurrence("z"), _occurrence("a"))
+def test_schedule_uses_stable_ids_to_order_same_instant() -> None:
+    schedule = _schedule(_event("z"), _event("a"))
 
-    assert [occurrence.occurrence_id for occurrence in agenda.occurrences] == ["a", "z"]
-    assert agenda.occurrences[0].utc_evaluation_time == agenda.occurrences[1].utc_evaluation_time
+    assert [event.event_id for event in schedule.events] == ["a", "z"]
+    assert schedule.events[0].utc_evaluation_time == schedule.events[1].utc_evaluation_time
 
 
-def test_agenda_rejects_duplicate_occurrence_ids() -> None:
+def test_schedule_rejects_duplicate_event_ids() -> None:
     with pytest.raises(ValueError, match="unique"):
-        _agenda(_occurrence("same"), _occurrence("same"))
+        _schedule(_event("same"), _event("same"))
 
 
-def test_agenda_slice_is_inclusive_and_can_be_empty() -> None:
-    agenda = _agenda(_occurrence("one"))
-    instant = agenda.occurrences[0].utc_evaluation_time
+def test_schedule_slice_is_inclusive_and_can_be_empty() -> None:
+    schedule = _schedule(_event("one"))
+    instant = schedule.events[0].utc_evaluation_time
 
-    assert agenda.inclusive_slice(instant, instant) == agenda.occurrences
+    assert schedule.inclusive_slice(instant, instant) == schedule.events
     assert (
-        agenda.inclusive_slice(datetime(2024, 3, 7, tzinfo=UTC), datetime(2024, 3, 8, tzinfo=UTC))
+        schedule.inclusive_slice(datetime(2024, 3, 7, tzinfo=UTC), datetime(2024, 3, 8, tzinfo=UTC))
         == ()
     )
 
 
-def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
-    seoul = OperationOccurrence(occurrence_id("seoul"), _local())
-    new_york = OperationOccurrence(
-        occurrence_id("new-york"),
+def test_cross_zone_events_share_the_same_canonical_utc_instant() -> None:
+    seoul = ScheduledEvent(event_id("seoul"), _local())
+    new_york = ScheduledEvent(
+        event_id("new-york"),
         _local(
             day=date(2024, 3, 5),
             wall_time=time(14, 0),
@@ -111,8 +111,8 @@ def test_cross_zone_occurrences_share_the_same_canonical_utc_instant() -> None:
 
 def test_a_market_instant_sorts_before_a_same_time_decision() -> None:
     """Design §3.1: what was decided earlier fills and is valued before anything new decides."""
-    occurrence = _occurrence("callback")
-    operation = OccurrenceEvent(occurrence)
-    market = MarketEvent(occurrence.evaluation_time)
+    event = _event("callback")
+    operation = event  # the scheduled event orders itself
+    market = MarketEvent(event.evaluation_time)
 
     assert sorted((operation, market), key=lambda item: item.sort_key()) == [market, operation]

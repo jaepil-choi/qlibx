@@ -21,8 +21,9 @@ import pytest
 from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _workspace
 from tests.cli.test_commands import _cli
 from vqapr.public import Workspace, preflight_run, run
-from vqapr.run.engine.events import MarketEvent, OccurrenceEvent
-from vqapr.run.engine.loop import DueExecutionTrace, MarketClock, OccurrenceTrace
+from vqapr.domain.schedule import ScheduledEvent
+from vqapr.run.engine.events import MarketEvent
+from vqapr.run.engine.loop import DueExecutionTrace, MarketClock, EventTrace
 from vqapr.run.engine.run_state import LifecycleKind
 
 _ZONE = ZoneInfo("Asia/Seoul")
@@ -45,8 +46,9 @@ def test_the_dispatcher_writes_the_stage_order_down_once() -> None:
     # A decision at the same instant is sorted AFTER the market instant by the event keys.
     at = datetime(2024, 3, 5, 9, 1, tzinfo=_ZONE)
     market = MarketEvent(at)
-    assert market.sort_key()[1] < 0, "a market instant sorts before a same-time occurrence"
-    assert OccurrenceEvent.__name__  # the other event kind exists; its key carries priority 0
+    assert market.sort_key()[1] < 0, "a market instant sorts before a same-time event"
+    # The other event kind is the scheduled event itself, whose key carries priority 0.
+    assert callable(getattr(ScheduledEvent, "sort_key", None))
 
 
 @pytest.mark.slow
@@ -65,7 +67,7 @@ def test_a_fill_and_a_decision_at_one_instant_settle_then_decide(
                         "writes": "ordered-weights",
                         "strategy": {"component": "always-long"},
                         "timezone": "Asia/Seoul",
-                        "agenda": {"every": "1m", "from": "09:00", "to": "09:02"},
+                        "schedule": {"every": "1m", "from": "09:00", "to": "09:02"},
                         "exchange": "venue",
                         "execution": {"dataset": "venue-minute", "trade_price": "close"},
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
@@ -87,13 +89,13 @@ def test_a_fill_and_a_decision_at_one_instant_settle_then_decide(
     at_0901 = datetime(2024, 3, 5, 9, 1, tzinfo=_ZONE)
     traces_at = [
         trace
-        for trace in result.occurrences
+        for trace in result.events
         if (
-            trace.due.instant if isinstance(trace, DueExecutionTrace) else trace.occurrence.evaluation_time
+            trace.due.instant if isinstance(trace, DueExecutionTrace) else trace.event.evaluation_time
         )
         == at_0901
     ]
-    assert [type(trace) for trace in traces_at] == [DueExecutionTrace, OccurrenceTrace], (
+    assert [type(trace) for trace in traces_at] == [DueExecutionTrace, EventTrace], (
         "the market instant is handled before the decision at the same instant"
     )
     kinds = [entry.kind for entry in result.final_state.lifecycle_trace]

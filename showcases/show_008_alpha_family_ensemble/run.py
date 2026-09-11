@@ -65,7 +65,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -111,7 +111,7 @@ LOWVOL_LOOKBACK = 11
 """Eleven closes span ten simple returns, whose sample spread is the realised volatility.
 
 Deliberately equal to the momentum window so the family's warm-up is set by one number: the three
-members become visible on the same occurrence, and the netting measurement is never comparing a
+members become visible on the same event, and the netting measurement is never comparing a
 member that has history against one that does not.
 """
 
@@ -270,7 +270,7 @@ class {class_name}(StrategyModel):
 
     def decide(self, context):
         history = dict(self.memory or {{}})
-        history["occurrences"] = int(history.get("occurrences", 0)) + 1
+        history["events"] = int(history.get("events", 0)) + 1
         self.memory = history
 
         rows = context.window.observations(self.requirements()[0]).rows
@@ -380,7 +380,7 @@ class LowVolMember(StrategyModel):
 
     def decide(self, context):
         history = dict(self.memory or {{}})
-        history["occurrences"] = int(history.get("occurrences", 0)) + 1
+        history["events"] = int(history.get("events", 0)) + 1
         self.memory = history
 
         rows = context.window.observations(self.requirements()[0]).rows
@@ -771,7 +771,7 @@ class _Registered:
     dataset_id: str
     directory: Path
     row_count: int
-    occurrences: int
+    events: int
     first_day: date
     """The venue-local day of the first row, which is the first day a reader can read it."""
 
@@ -818,7 +818,7 @@ def _register_run_table(
     )
     con = duckdb.connect()
     try:
-        rows, occurrences, first = con.execute(
+        rows, events, first = con.execute(
             f"SELECT count(*), count(DISTINCT event_time), min(event_time) "
             f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
         ).fetchone()
@@ -827,7 +827,7 @@ def _register_run_table(
     first_day = (
         first.astimezone(ZoneInfo(VENUE)) if first.tzinfo is not None else first
     ).date()
-    return _Registered(dataset_id, directory, int(rows), int(occurrences), first_day)
+    return _Registered(dataset_id, directory, int(rows), int(events), first_day)
 
 
 def _measure_published_signal(
@@ -837,7 +837,7 @@ def _measure_published_signal(
 
     This is the `analysis/` half record 016 left open. The signal is read back from the *published
     artifact* — not from the run's in-memory objects — and scored against the next session's return
-    computed from the committed close panel. Only occurrences where a forward return exists are
+    computed from the committed close panel. Only events where a forward return exists are
     scored; a missing outcome is skipped rather than filled, because filling it would be an
     invention this package refuses elsewhere.
     """
@@ -885,11 +885,11 @@ def _measure_published_signal(
 
     if not scored:
         raise AssertionError(
-            "no published occurrence could be scored against a forward return; "
+            "no published event could be scored against a forward return; "
             "the measurement half of this showcase proved nothing"
         )
 
-    # An independent oracle on the first scored occurrence. Record 016's first defect was a
+    # An independent oracle on the first scored event. Record 016's first defect was a
     # headline test that reimplemented the product in pandas and then compared the reimplementation
     # against itself; the difference here is that `information_coefficient` is what produced every
     # number in the trace, and this recomputation only checks it. The oracle runs in exact
@@ -923,10 +923,10 @@ def _measure_published_signal(
 
     mean_ic = sum(Decimal(entry["ic"]) for entry in scored) / len(scored)
     return {
-        "scored_occurrences": len(scored),
+        "scored_events": len(scored),
         "mean_ic": str(mean_ic),
         "oracle_checked_session": first["session"],
-        "per_occurrence": scored,
+        "per_event": scored,
     }
 
 
@@ -980,7 +980,7 @@ def _check_lowvol_orientation(
         # a member that was correct on every session.
         #
         # What must hold: every name the member is short is at least as volatile as every name it
-        # is long. A member that preferred high volatility inverts this on every occurrence.
+        # is long. A member that preferred high volatility inverts this on every event.
         longs = [name for name in shared if weights[name] > 0]
         shorts = [name for name in shared if weights[name] < 0]
         if not longs or not shorts:
@@ -997,7 +997,7 @@ def _check_lowvol_orientation(
 
     if sessions_checked == 0:
         raise AssertionError(
-            "no published low-vol occurrence could be checked for orientation; "
+            "no published low-vol event could be checked for orientation; "
             "the sign of this member is unproven"
         )
     return {"orientation_sessions_checked": sessions_checked}
@@ -1018,7 +1018,7 @@ def _member_run(
         run_id=str(strategy_ref.component_id),
         strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(at,)),
+        schedule=RunSchedule(every="1d", at=(at,)),
         exchange=academic_ref.component_id,
         execution=RunExecution(
             dataset="krx-daily",
@@ -1047,7 +1047,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # The momentum and low-vol members both need an eleven-close history; the reversal member
     # needs six. All members and the ensemble share one callback calendar, so only sessions where
     # every member has enough history produce an ensemble decision -- the rest decline. This is
-    # asserted below rather than hidden by trimming the agenda to fit the signal.
+    # asserted below rather than hidden by trimming the schedule to fit the signal.
     callback_days = all_days
 
     register_dataset(
@@ -1200,7 +1200,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     # The ensemble reads what its members published, so its horizon opens on the first day EVERY
     # member has a weight on record. A member declines until its lookback fills, and a decline
-    # records no weight, so the allocation datasets begin days after the members' own agenda
+    # records no weight, so the allocation datasets begin days after the members' own schedule
     # does; an ensemble opening with the members would ask its first decision to read an empty
     # window, which `vqapr check` refuses (`check.lookback.uncovered`) -- and since record 168
     # `preflight_run` asks the same judgments, so this script was refused too. The members'
@@ -1213,7 +1213,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         strategy=StrategyEntry("show008-ensemble"),
         compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="show008-krx",
         execution=RunExecution(
             dataset="krx-daily",
@@ -1252,7 +1252,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         if published[label].dataset_id != dataset_id:
             raise AssertionError(f"{label} member's table is not registered as {dataset_id}")
 
-    # Assertion 2: the netting measurement ran on three members and at least one ticker-occurrence
+    # Assertion 2: the netting measurement ran on three members and at least one ticker-event
     # showed a genuine offset.
     netting_rows = ensemble_result.final_state.recorder_rows.get("ensemble.netting", ())
     if not netting_rows:
@@ -1263,7 +1263,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     # `member_count` is self-reported, so on its own it certifies nothing: a netting call that
     # silently dropped a member would still print 3. The gross weight is not self-reported. Every
-    # member is rescaled to MEMBER_BUDGET long and -MEMBER_BUDGET short, so each occurrence must
+    # member is rescaled to MEMBER_BUDGET long and -MEMBER_BUDGET short, so each event must
     # carry sum(long) + sum(|short|) == members * 2 * MEMBER_BUDGET exactly. Two members netted
     # instead of three lands on 0.16 where 0.24 is required, and no self-report can hide it.
     expected_gross = 3 * 2 * MEMBER_BUDGET
@@ -1288,9 +1288,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     max_offset = max(Decimal(row["offset_weight"]) for row in netting_rows)
     if max_offset <= 0:
         raise AssertionError(
-            "no ticker-occurrence showed a non-zero offset_weight; the members never disagreed"
+            "no ticker-event showed a non-zero offset_weight; the members never disagreed"
         )
-    crossing_occurrences = len(
+    crossing_events = len(
         {row["event_time"] for row in netting_rows if Decimal(row["offset_weight"]) > 0}
     )
 
@@ -1314,7 +1314,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             )
 
     # Assertion 4: a name genuinely split the family -- some members long, others short -- on at
-    # least one occurrence. This is what three members buy over two, so it is demanded, not hoped.
+    # least one event. This is what three members buy over two, so it is demanded, not hoped.
     split_rows = [
         row
         for row in netting_rows
@@ -1322,7 +1322,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ]
     if not split_rows:
         raise AssertionError(
-            "no ticker-occurrence had members on both sides; the family never actually split"
+            "no ticker-event had members on both sides; the family never actually split"
         )
 
     # Assertion 5: the fill-journal replay already aborted inside _replay() if it disagreed;
@@ -1347,7 +1347,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # its sign -- netting, gross weight and the information coefficient are all sign-agnostic, so a
     # member that preferred the most volatile name would pass every other gate in this file. The
     # published weights are checked against realised volatility recomputed here from the committed
-    # closes, and the ordering must be strictly inverse on every published occurrence.
+    # closes, and the ordering must be strictly inverse on every published event.
     sign_check = _check_lowvol_orientation(published["lowvol"].directory, closes)
 
     trace = {
@@ -1358,16 +1358,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "sessions": len(sessions),
         "callbacks": len(callback_days),
         "ensemble_callbacks": len(ensemble_days),
-        "crossing_occurrences": crossing_occurrences,
+        "crossing_events": crossing_events,
         "max_offset_weight": str(max_offset),
-        "split_ticker_occurrences": len(split_rows),
+        "split_ticker_events": len(split_rows),
         "members": {
             label: {
                 "exchange": "Academic (fractional, zero cost)",
                 "account_mode": AccountMode.SIGNED.value,
-                "occurrences": memories[label].get("occurrences"),
+                "events": memories[label].get("events"),
                 "published_dataset": published[label].dataset_id,
-                "published_occurrences": published[label].occurrences,
+                "published_events": published[label].events,
                 "published_rows": published[label].row_count,
             }
             for label in ("reversal", "momentum", "lowvol")
@@ -1418,17 +1418,17 @@ def main() -> None:
     for label in ("reversal", "momentum", "lowvol"):
         member = trace["members"][label]
         print(
-            f"{label:<12} published      : {member['published_occurrences']} occurrences, "
+            f"{label:<12} published      : {member['published_events']} events, "
             f"{member['published_rows']} rows -> {member['published_dataset']}"
         )
     print(f"subscribed inputs           : {', '.join(ensemble['subscribed_allocation_inputs'])}")
     print(f"members netted              : {ensemble['member_count']}")
-    print(f"crossing occurrences        : {trace['crossing_occurrences']}")
+    print(f"crossing events        : {trace['crossing_events']}")
     print(f"max ticker offset_weight    : {trace['max_offset_weight']}")
-    print(f"split ticker-occurrences    : {trace['split_ticker_occurrences']}")
+    print(f"split ticker-events    : {trace['split_ticker_events']}")
     print(
         f"low-vol IC                  : mean {measurement['mean_ic']} over "
-        f"{measurement['scored_occurrences']} scored occurrences"
+        f"{measurement['scored_events']} scored events"
     )
     print(f"shipped compliance          : {', '.join(ensemble['shipped_compliance'])}")
     print(f"rebalances                  : {ensemble['rebalances']}")

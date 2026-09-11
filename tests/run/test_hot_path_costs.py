@@ -882,7 +882,7 @@ def test_an_identifier_check_is_one_search_not_one_step_per_character() -> None:
 
 # --------------------------------------------------------------------------------------------
 # Record `225`: `sequence` is the run's one order. It was `len(staged)` inside one table of one
-# recorder, and a recorder is built per callback, so it restarted at zero every occurrence.
+# recorder, and a recorder is built per callback, so it restarted at zero every event.
 # --------------------------------------------------------------------------------------------
 
 

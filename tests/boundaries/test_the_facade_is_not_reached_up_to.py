@@ -2,7 +2,7 @@
 
 `docs/design/agent-first-surface.md` ("The ruling -- 2026-08-28") defines exactly one instrument for
 this boundary: the count of modules under `src/` containing a **real import** of `vqapr.public`,
-excluding occurrences inside string literals. It records a verified value of 12 and names all
+excluding events inside string literals. It records a verified value of 12 and names all
 twelve. It also gives the AST command to re-measure it.
 
 What it did not have was a test. `docs/issues/archive/028` is what that cost: `fix/015a-extract-judgments`

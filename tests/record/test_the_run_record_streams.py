@@ -1,4 +1,4 @@
-"""A run with a store writes its rows as each occurrence is accepted, and keeps none on the heap.
+"""A run with a store writes its rows as each event is accepted, and keeps none on the heap.
 
 Campaign Step 3; the testbed's A4. `freeze_record` used to walk `final_state.recorder_rows`
 after `flow.run()` returned, so a 2.6M-row table was 2.6M dicts on the heap until the end and a
@@ -8,7 +8,7 @@ accepted rows go to the sink at the swap and no root retains them.
 
 Two properties, asserted directly:
 
-- each occurrence's rows leave the roots at publish and the final state retains none; since
+- each event's rows leave the roots at publish and the final state retains none; since
   `docs/issues/archive/087` the writer holds them as Arrow tables and writes once when the run ends,
   so the disk is untouched while the run executes;
 - the peak heap of a streamed run is a fraction of the same run kept in memory -- measured with
@@ -37,19 +37,19 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 from vqapr.run.engine.loop import RunLoop, strategy_loop
 from vqapr.run.engine.run_state import RunStateRepository
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 ROWS_PER_OCCURRENCE = 200
 PADDING = "x" * 100
 
 
-class RecordsEveryOccurrence(StrategyModel):
+class RecordsEveryEvent(StrategyModel):
     """Holds every time, and writes a fat chunk to its own table every time."""
 
     def tables(self) -> tuple[TableSpec, ...]:
@@ -86,10 +86,10 @@ def _component(raw_id: str, kind: Role) -> ComponentRef:
     return ComponentRef.of(raw_id, kind, Path("component.py"), "Component", fingerprint="0" * 64)
 
 
-def _occurrences(count: int) -> tuple[OperationOccurrence, ...]:
+def _events(count: int) -> tuple[ScheduledEvent, ...]:
     first = date(2024, 1, 1)
     return tuple(
-        OperationOccurrence(
+        ScheduledEvent(
             f"strategy-{number}",
             LocalInstantDeclaration(
                 first + timedelta(days=number), time(4, 0), "Asia/Seoul", 0, "+09:00"
@@ -107,7 +107,7 @@ def _state(sink=None) -> RunStateRepository:
 
 
 def _flow(
-    state: RunStateRepository, occurrences: tuple[OperationOccurrence, ...], on_progress=None
+    state: RunStateRepository, events: tuple[ScheduledEvent, ...], on_progress=None
 ) -> RunLoop:
     requirement = DataRequirement.of("prices", "close", lookback=RowsLookback(1))
     frozen = FrozenRun(
@@ -118,19 +118,19 @@ def _flow(
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),
-                agenda=FrozenAgenda("strategy", occurrences),
+                schedule=FrozenSchedule("strategy", events),
             ),
-        start=occurrences[0].evaluation_time,
-        end=occurrences[-1].evaluation_time,
+        start=events[0].evaluation_time,
+        end=events[-1].evaluation_time,
         initial_account_snapshot=AccountSnapshot(0, Decimal(1), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
         writes="test-weights",
     )
 
-    def window_for_occurrence(occurrence: OperationOccurrence) -> ModelWindow:
+    def window_for_event(event: ScheduledEvent) -> ModelWindow:
         return ModelWindow(
-            evaluation_time=occurrence.evaluation_time,
+            evaluation_time=event.evaluation_time,
             instruments=("A",),
             store=DuckDbObservationStore(_Catalog()),
             allowed_requirements=(requirement,),
@@ -139,21 +139,21 @@ def _flow(
 
     return strategy_loop(
         frozen,
-        RecordsEveryOccurrence(),
+        RecordsEveryEvent(),
         state,
-        strategy_window_for_occurrence=window_for_occurrence,
+        strategy_window_for_event=window_for_event,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
         on_progress=on_progress,
     )
 
 
-def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_end(
+def test_rows_leave_the_roots_at_each_accepted_event_and_land_once_at_the_end(
     tmp_path: Path,
 ) -> None:
-    """The sink takes each occurrence's rows at publish and the roots keep none; the writer
+    """The sink takes each event's rows at publish and the roots keep none; the writer
     holds them typed in memory and writes one file per table when the run ends
-    (`docs/issues/archive/087` -- record `146` wrote one file per occurrence, a physical write per loop)."""
+    (`docs/issues/archive/087` -- record `146` wrote one file per event, a physical write per loop)."""
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
     table = writer.directory / TABLES_DIRECTORY / "probe"
@@ -163,7 +163,7 @@ def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_e
         sizes.append(len(list(table.glob("*.parquet"))) if table.exists() else 0)
 
     state = _state(sink=writer.append_chunk)
-    result = _flow(state, _occurrences(3), on_progress=observe).run()
+    result = _flow(state, _events(3), on_progress=observe).run()
 
     assert len(sizes) == 3
     assert sizes == [0, 0, 0], "nothing reaches the disk while the run is executing"
@@ -177,7 +177,7 @@ def test_rows_leave_the_roots_at_each_accepted_occurrence_and_land_once_at_the_e
 
 
 def test_without_a_sink_rows_stay_on_the_roots_as_before() -> None:
-    result = _flow(_state(), _occurrences(3)).run()
+    result = _flow(_state(), _events(3)).run()
 
     assert len(result.final_state.recorder_rows["probe"]) == 3 * ROWS_PER_OCCURRENCE
 
@@ -195,13 +195,13 @@ def test_a_streamed_run_s_peak_heap_is_a_fraction_of_the_same_run_kept_in_memory
     tmp_path: Path,
 ) -> None:
     """Measured, not inferred. Ratio, not a number: the floor is whatever the roots cost."""
-    occurrences = _occurrences(40)
+    events = _events(40)
 
-    in_memory = _peak_bytes(lambda: _flow(_state(), occurrences).run())
+    in_memory = _peak_bytes(lambda: _flow(_state(), events).run())
 
     writer = RunRecordWriter(tmp_path, "streamed")
     writer.open()
-    streamed = _peak_bytes(lambda: _flow(_state(sink=writer.append_chunk), occurrences).run())
+    streamed = _peak_bytes(lambda: _flow(_state(sink=writer.append_chunk), events).run())
 
     assert streamed * 2 < in_memory, (
         f"streaming should remove the rows from the heap: {streamed} bytes streamed vs "

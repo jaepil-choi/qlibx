@@ -159,7 +159,7 @@ runs:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "16:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
     datamodels:
       reads:
         dataset_id: alpha_values
@@ -169,7 +169,7 @@ runs:
     start: "2024-03-06T00:00:00+09:00"
     end: "2024-03-08T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "09:00"}}
+    schedule: {{every: 1d, at: "09:00"}}
     exchange: venue
     execution:
       dataset: krx-daily

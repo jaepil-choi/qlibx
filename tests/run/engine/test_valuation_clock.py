@@ -1,6 +1,6 @@
 """The book is valued at the instant the venue fills, and the NAV row is written there.
 
-Record `148` retired the independent valuation clock. A run used to declare a valuation agenda
+Record `148` retired the independent valuation clock. A run used to declare a valuation schedule
 of its own (AC-M7: value every session the venue printed, even when the strategy decided
 monthly); now every strategy is asked on every session at the run's `at`, a `Hold` still
 reaches the venue's execution instant, and the book is valued there from the prices it would
@@ -37,11 +37,11 @@ from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnapshot, AccountState
 from vqapr.domain.instants import LocalInstantDeclaration
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.run.engine.loop import strategy_loop
 from vqapr.run.engine.run_state import RunStateRepository
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
@@ -125,7 +125,7 @@ RUNNER = textwrap.dedent(
 
     from vqapr.public import (
         AccountMode, AccountSnapshot, DatasetRegistration,
-        RunAgenda, RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
+        RunSchedule, RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
         register_dataset, register_exchange, register_instruments, register_strategy_model, run,
     )
 
@@ -180,7 +180,7 @@ RUNNER = textwrap.dedent(
         strategy=StrategyEntry("clock-strategy"),
         instruments=("A005930",),
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(time(8, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(8, 0),)),
         exchange="clock-exchange",
         execution=RunExecution(
             dataset='krx-daily',
@@ -208,10 +208,10 @@ RUNNER = textwrap.dedent(
     kinds = [entry.kind.value for entry in result.final_state.lifecycle_trace]
     accepted = kinds.count("ACCEPTED_INTENT")
     callbacks = sum(
-        1 for trace in result.occurrences if type(trace).__name__ == "OccurrenceTrace"
+        1 for trace in result.events if type(trace).__name__ == "EventTrace"
     )
     executions = sum(
-        1 for trace in result.occurrences if type(trace).__name__ == "DueExecutionTrace"
+        1 for trace in result.events if type(trace).__name__ == "DueExecutionTrace"
     )
     print(f"SUMMARY|{accepted}|{callbacks}|{executions}")
     '''
@@ -437,7 +437,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     A flow without execution authority never values against venue prices, so the only mark it can
     see is one the account arrived with. Nothing recorded that instant, so the callback's row is
     the only record of the book's value there is, and it is dated by the mark instant rather than
-    by the occurrence that wrote it.
+    by the event that wrote it.
     """
     snapshot = AccountSnapshot(0, Decimal("100"), {"A": Decimal("2")})
     marked_at = datetime(2024, 3, 1, 15, 30, tzinfo=KST)
@@ -450,7 +450,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
             ),
         ),
     )
-    occurrence = OperationOccurrence(
+    event = ScheduledEvent(
         "strategy-1",
         LocalInstantDeclaration(date(2024, 3, 4), time(8, 0), "Asia/Seoul", 0, "+09:00"),
     )
@@ -462,17 +462,17 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
                     "strategy",
                 ),
                 compliance=ComplianceSet(()),
-                agenda=FrozenAgenda("strategy", (occurrence,)),
+                schedule=FrozenSchedule("strategy", (event,)),
             ),
-        start=occurrence.evaluation_time,
-        end=occurrence.evaluation_time,
+        start=event.evaluation_time,
+        end=event.evaluation_time,
         initial_account_snapshot=snapshot,
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
         writes="fallback-weights",
     )
 
-    def window_for_occurrence(item: OperationOccurrence) -> ModelWindow:
+    def window_for_event(item: ScheduledEvent) -> ModelWindow:
         return ModelWindow(
             evaluation_time=item.evaluation_time,
             instruments=("A",),
@@ -486,7 +486,7 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
         frozen,
         _Holds(),
         state,
-        strategy_window_for_occurrence=window_for_occurrence,
+        strategy_window_for_event=window_for_event,
         account=Account(mode=AccountMode.LONG_ONLY),
         exchange=_Exchange(),
         compliance=(),
@@ -500,6 +500,6 @@ def test_the_callback_writes_a_nav_row_only_for_a_mark_nothing_recorded() -> Non
     assert len(rows) == 1
     (row,) = rows
     assert row["stage"] == "STRATEGY_CALLBACK"
-    assert row["event_time"] == occurrence.evaluation_time
+    assert row["event_time"] == event.evaluation_time
     assert row["observed_at"] == marked_at, "dated by when the nav was measured, not written"
     assert row["nav"] == Decimal("120")

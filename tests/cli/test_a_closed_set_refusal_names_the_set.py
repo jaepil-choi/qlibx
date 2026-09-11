@@ -49,7 +49,7 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-01-03T00:00:00+09:00",
                 "timezone": "Asia/Seoul",
-                "agenda": {"every": "1d", "at": "15:29"},
+                "schedule": {"every": "1d", "at": "15:29"},
                 "exchange": "venue",
                 "execution": {
                     "dataset": "venue-daily",
@@ -99,7 +99,7 @@ def test_the_suggestion_names_the_nearest_member(tmp_path: Path) -> None:
     ("enum", "written", "key_path", "expected"),
     [
         (AccountMode, "LONG_SHORT", "initial_account.mode", "long_only, signed"),
-        (_Unit, "week", "agenda.unit", "d, h, m"),
+        (_Unit, "week", "schedule.unit", "d, h, m"),
     ],
 )
 def test_the_refusal_is_the_same_shape_on_two_different_keys(

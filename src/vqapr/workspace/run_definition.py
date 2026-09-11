@@ -40,10 +40,10 @@ from vqapr.component.reference import ComponentRef
 from vqapr.data.requirement import DataRequirement
 from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.fill import FillRule
-from vqapr.domain.identifiers import AgendaId, ModelStateRef
+from vqapr.domain.identifiers import ModelStateRef, ScheduleId
 from vqapr.domain.instants import require_tz_aware
 from vqapr.domain.memory import ModelMemory, opening_memory, prepare_model_state
-from vqapr.domain.schedule import AgendaRule
+from vqapr.domain.schedule import ScheduleRule
 from vqapr.domain.wiring import Role
 
 FINGERPRINT_PREFIX = 8
@@ -157,18 +157,18 @@ class ComplianceSet:
 
 @dataclass(frozen=True, slots=True)
 class StrategyConfig:
-    """Strategy component and its independently owned callback agenda."""
+    """Strategy component and its independently owned callback schedule."""
 
     component: ComponentRef
-    agenda_id: AgendaId
+    schedule_id: ScheduleId
 
     def __post_init__(self) -> None:
         if not isinstance(self.component, ComponentRef):
             raise TypeError("component must be a ComponentRef")
         if self.component.kind is not Role.STRATEGY_MODEL:
             raise ValueError("component must identify a STRATEGY_MODEL")
-        if not isinstance(self.agenda_id, str) or not self.agenda_id:
-            raise TypeError("agenda_id must be an AgendaId")
+        if not isinstance(self.schedule_id, str) or not self.schedule_id:
+            raise TypeError("schedule_id must be an ScheduleId")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -323,7 +323,7 @@ class RunFill(BaseModel):
     Absent, a decision fills at the first market-clock instant after it. `at` keeps only the
     instants whose venue-local wall time (the run's zone) is this one; `after` is a minimum
     elapsed time; `within` a maximum gap -- a decision with no candidate inside it has no target,
-    which preflight refuses. Durations share `agenda.every`'s grammar: `10m`, `2h`, `1d`, and are
+    which preflight refuses. Durations share `schedule.every`'s grammar: `10m`, `2h`, `1d`, and are
     wall-clock time, not sessions: a weekend counts (record `259`).
     """
 
@@ -364,14 +364,14 @@ class RunFill(BaseModel):
         return body
 
 
-class RunAgenda(BaseModel):
-    """`runs.<id>.agenda`: the strategy clock, as a trading-day filter and a within-day rule.
+class RunSchedule(BaseModel):
+    """`runs.<id>.schedule`: the schedule clock, as a trading-day filter and a within-day rule.
 
     Design §3.4: `every` (`1d`, `2d`, `1w`, `1M` select days and pair with `at`; `1m`, `5m`,
     `1h` select instants inside each day between `from` and `to`). Which days are trading days
     comes from data (§3.3): for a strategy run, the days its execution table has rows for --
     nothing to declare; for a datamodel run, which has no venue, the dataset named by
-    `days_from`. The rule is validated by the domain's `AgendaRule`, which is also what
+    `days_from`. The rule is validated by the domain's `ScheduleRule`, which is also what
     preflight expands.
 
     `on: last` fires a `w` or `M` rule on the last trading day of each week or month instead of
@@ -415,13 +415,13 @@ class RunAgenda(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _a_rule(self) -> RunAgenda:
+    def _a_rule(self) -> RunSchedule:
         self.rule  # noqa: B018 -- the domain refuses an inconsistent every/at/from/to here
         return self
 
     @property
-    def rule(self) -> AgendaRule:
-        return AgendaRule(self.every, self.at, self.from_, self.to, self.on)
+    def rule(self) -> ScheduleRule:
+        return ScheduleRule(self.every, self.at, self.from_, self.to, self.on)
 
     @model_serializer(mode="plain")
     def _stored(self) -> dict[str, Any]:
@@ -581,8 +581,8 @@ class RunDefinition(BaseModel):
     timezone: str
     """The venue zone every wall time below is expressed in. Required: a run without one is not
     run-ready, and the dataclass's `""` default only deferred that refusal to the zone check."""
-    agenda: RunAgenda
-    """When the model is called: the strategy clock (design §3.4). The trading days it is
+    schedule: RunSchedule
+    """When the model is called: the schedule clock (design §3.4). The trading days it is
     expanded over come from the execution table for a strategy run and from `days_from` for a
     datamodel run; the book is valued at the instant the venue fills and monitored right after
     each commit, so this is the one clock a run declares."""
@@ -608,12 +608,18 @@ class RunDefinition(BaseModel):
         if not isinstance(raw, Mapping):
             return raw
         body = dict(raw)
+        if "agenda" in body:
+            raise ValueError(
+                "`agenda:` is `schedule:` since vqapr 0.16.0 -- the loop's vocabulary is "
+                "discrete-event simulation's, and a schedule produces the events a model is "
+                "called at. Declare `schedule: {every: 1d, at: HH:MM}` and register the run again"
+            )
         retired = [key for key in ("at", "sessions", "sessions_from") if key in body]
         if retired:
             raise ValueError(
-                f"{', '.join(retired)} moved into `agenda:` (design §3.4): declare "
-                "`agenda: {every: 1d, at: HH:MM}`; a strategy run takes its trading days from "
-                "its execution table, a datamodel run names them with `agenda.days_from`"
+                f"{', '.join(retired)} moved into `schedule:` (design §3.4): declare "
+                "`schedule: {every: 1d, at: HH:MM}`; a strategy run takes its trading days from "
+                "its execution table, a datamodel run names them with `schedule.days_from`"
             )
         strategy = _singular_block(body, "strategy", "strategies")
         if isinstance(strategy, Mapping):
@@ -688,7 +694,7 @@ class RunDefinition(BaseModel):
             "start": None if self.start is None else self.start.isoformat(),
             "end": None if self.end is None else self.end.isoformat(),
             "timezone": self.timezone,
-            "agenda": self.agenda.model_dump(mode="json"),
+            "schedule": self.schedule.model_dump(mode="json"),
             "writes": self.writes,
             "exchange": self.exchange,
             "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
@@ -739,19 +745,19 @@ class RunDefinition(BaseModel):
                 "run runs one strategy or one datamodel, not both and not neither "
                 "(record 148: a run holds one kind; a run is one arrow of the graph)"
             )
-        if self.agenda.days_from is not None and self.writes == self.agenda.days_from:
+        if self.schedule.days_from is not None and self.writes == self.schedule.days_from:
             raise ValueError(
-                f"writes {self.writes!r} is also agenda.days_from: a run cannot take its trading "
+                f"writes {self.writes!r} is also schedule.days_from: a run cannot take its trading "
                 "days from the dataset it is about to write"
             )
-        if self.strategy is not None and self.agenda.days_from is not None:
+        if self.strategy is not None and self.schedule.days_from is not None:
             raise ValueError(
-                "a strategy run declares no agenda.days_from: its trading days are the days its "
+                "a strategy run declares no schedule.days_from: its trading days are the days its "
                 "execution table has rows for (design §3.3)"
             )
-        if self.datamodel is not None and self.agenda.days_from is None:
+        if self.datamodel is not None and self.schedule.days_from is None:
             raise ValueError(
-                "a datamodel run declares agenda.days_from: it has no execution table, so it "
+                "a datamodel run declares schedule.days_from: it has no execution table, so it "
                 "names the dataset whose days are its trading days (design §3.3)"
             )
         if self.execution is not None:
@@ -798,7 +804,7 @@ class RunDefinition(BaseModel):
         """The point-in-time meaning of this declaration, in one sentence
         (`docs/issues/archive/027`).
         """
-        when = f" {self.agenda.rule.describe()} {self.timezone}"
+        when = f" {self.schedule.rule.describe()} {self.timezone}"
         sentences: list[str] = []
         if self.execution is not None:
             rule = self.execution.rule(self.timezone)
@@ -808,8 +814,8 @@ class RunDefinition(BaseModel):
             )
         days = (
             "the days its execution table has rows for"
-            if self.agenda.days_from is None
-            else f"the days dataset {self.agenda.days_from!r} has rows for"
+            if self.schedule.days_from is None
+            else f"the days dataset {self.schedule.days_from!r} has rows for"
         )
         sentences.append(
             f"run {self.run_id!r}: the model is called{when}, over {days}, and sees only rows "
@@ -830,9 +836,9 @@ class RunDefinition(BaseModel):
         return type(self).model_validate({**fields, **changes})
 
     @property
-    def agenda_id(self) -> str:
-        """The id of the one agenda preflight derives from `agenda:` (design §3.4)."""
-        return f"{self.run_id}.agenda"
+    def schedule_id(self) -> str:
+        """The id of the one schedule preflight derives from `schedule:` (design §3.4)."""
+        return f"{self.run_id}.schedule"
 
     @property
     def kind(self) -> str:

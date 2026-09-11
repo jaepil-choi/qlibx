@@ -25,12 +25,9 @@ import pytest
 from vqapr.cli.main import main
 
 BASELINE = Path(__file__).with_name("check_and_run_envelopes.baseline.json")
-DECLARATIONS = (
-    Path(__file__).resolve().parents[2]
-    / "experiments"
-    / "exp_235_the_scenario_trace"
-    / "declarations"
-)
+DECLARATIONS = Path(__file__).with_name("declarations")
+"""Copied from `experiments/exp_235_the_scenario_trace/declarations` in record `278`: an
+experiment is pinned to the version it measured, and this test must not follow it there."""
 
 _BAD_RUNS = """\
 runs:
@@ -39,7 +36,7 @@ runs:
     start: '2022-01-04T00:00:00+09:00'
     end: '2022-01-14T23:59:59+09:00'
     timezone: Asia/Seoul
-    agenda: {every: 1d, at: '15:30'}
+    schedule: {every: 1d, at: '15:30'}
     exchange: sample-exchange
     execution: {dataset: sample-execution, trade_price: close, fill: {at: '15:30'}}
     initial_account: {cash: '100000000', mode: SIGNED, positions: {}}
@@ -50,7 +47,7 @@ runs:
     start: '2022-01-04T00:00:00+09:00'
     end: '2022-01-14T23:59:59+09:00'
     timezone: Asia/Seoul
-    agenda: {every: 1d, at: '08:00'}
+    schedule: {every: 1d, at: '08:00'}
     exchange: sample-exchange
     execution: {dataset: sample-execution, trade_price: open, fill: {at: '15:30'}}
     initial_account: {cash: '100000000', mode: LONG_ONLY, positions: {}}

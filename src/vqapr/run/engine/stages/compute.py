@@ -16,7 +16,7 @@ from vqapr.data.store import AccessRecord
 from vqapr.data.window import ModelWindow
 from vqapr.domain.errors import Stage, Status, VqaprError
 from vqapr.domain.rows import Row
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.run.engine.calls import DataModelContext
 from vqapr.run.engine.output import RunOutput, derived_available_at, refusal, validated_output
 from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun
@@ -26,7 +26,7 @@ from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun
 class DataModelTrace:
     """What one session's compute did: when it ran, what it read, what it produced."""
 
-    occurrence: OperationOccurrence
+    event: ScheduledEvent
     evaluation_time: datetime
     output_available_at: datetime
     row_count: int
@@ -42,20 +42,20 @@ class ComputeHandler:
         frozen_run: FrozenRun,
         layer: FrozenDataModel,
         model: DataModel,
-        window_for_occurrence: Callable[[OperationOccurrence], ModelWindow],
+        window_for_event: Callable[[ScheduledEvent], ModelWindow],
         output: RunOutput,
     ) -> None:
         self._frozen_run = frozen_run
         self._layer = layer
         self._model = model
-        self._window_for_occurrence = window_for_occurrence
+        self._window_for_event = window_for_event
         self._output = output
         # Resolved once for the whole run: `inputs()` is a declaration, not a per-session
         # decision, and re-resolving it each time would let it differ between sessions.
         self._reads = model.inputs()
 
-    def dispatch(self, occurrence: OperationOccurrence) -> DataModelTrace:
-        window = self._window_for_occurrence(occurrence)
+    def dispatch(self, event: ScheduledEvent) -> DataModelTrace:
+        window = self._window_for_event(event)
         evaluation_time = window.evaluation_time
         try:
             raw = self._model.compute(DataModelContext(window, self._reads))
@@ -66,7 +66,7 @@ class ComputeHandler:
                 Stage.RUN,
                 "datamodel.compute_failed",
                 "DataModel.compute must complete for every session",
-                f"{occurrence.occurrence_id}: {type(error).__name__}: {error}",
+                f"{event.event_id}: {type(error).__name__}: {error}",
                 status=Status.CRASHED,
                 fix=(
                     "fix the exception raised inside DataModel.compute for this session; the "
@@ -88,7 +88,7 @@ class ComputeHandler:
             stamped.append(record)
         self._output.append(stamped)
         return DataModelTrace(
-            occurrence=occurrence,
+            event=event,
             evaluation_time=evaluation_time,
             output_available_at=available_at,
             row_count=len(rows),

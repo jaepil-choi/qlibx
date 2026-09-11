@@ -23,7 +23,7 @@ fires on, the venue-local wall time it fires at, the venue, the execution datase
 account, and the one model it runs — and it is registered like everything else, so a result can
 always name the declaration that produced it.
 
-**The strategy is called at every instant of the run's `agenda` and decides for itself whether
+**The strategy is called at every instant of the run's `schedule` and decides for itself whether
 to act.** `every: 1d` with `at` is one decision a day; `every: 1M` the first trading day of each
 month, and with `on: last` the last; `every: 12M` once a year (the count is free: `3M`, `2w`, `5d`; there is no year unit);
 `every: 5m` with `from`/`to` every five minutes inside each day. The days come from the
@@ -57,7 +57,7 @@ vqapr new run --out runs.yaml
 The template carries every required key with its meaning. Fill it with **registered** ids: an
 unregistered component, dataset or exchange is refused at step 3, by name.
 
-The strategy clock is the `agenda:` block — `every` with `at`, or with `from`/`to` — expanded
+The schedule clock is the `schedule:` block — `every` with `at`, or with `from`/`to` — expanded
 over the trading days the execution dataset has rows for; `timezone` is the zone it is read in. See
 [references/run-declaration.md](references/run-declaration.md) for what a run needs and what it
 must not carry.
@@ -114,7 +114,7 @@ A YAML path handed to `run` or `check` is refused by name — both take a regist
 
 ### 6. Confirm
 
-`ok: true` with a `strategies` map where every entry carries `status: completed`, an `occurrences`
+`ok: true` with a `strategies` map where every entry carries `status: completed`, an `events`
 count, an `account_version` and a `record` (`<strategy-id>@<fp8>`). For a datamodel run, a
 `datamodels` map with `dataset_id`, `rows`, `sessions` and its record.
 

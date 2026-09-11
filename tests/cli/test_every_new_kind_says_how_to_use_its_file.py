@@ -176,7 +176,7 @@ def test_new_datamodel_emits_the_run_that_computes_it(tmp_path: Path) -> None:
     assert list(document["components"]) == ["dm"]
     assert list(document["runs"]) == ["dm-run"]
     run = document["runs"]["dm-run"]
-    assert run["agenda"] == {"every": "1d", "at": "16:00", "days_from": "prices"}, (
+    assert run["schedule"] == {"every": "1d", "at": "16:00", "days_from": "prices"}, (
         "a datamodel run names the dataset whose days are its trading days"
     )
     assert run["timezone"] == "Asia/Seoul"

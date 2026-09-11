@@ -1,7 +1,7 @@
 """A run is configuration: its universe, its period, its venue, and when it asks its strategies.
 
-Record `148`: an agenda is no longer a user declaration. A run says when it fires with its
-`agenda:` block (design §3.4) and in which venue-local zone; the days come from data
+Record `148`: an schedule is no longer a user declaration. A run says when it fires with its
+`schedule:` block (design §3.4) and in which venue-local zone; the days come from data
 (`at`, in `timezone`); every strategy is called on every session and decides for itself. The
 book is valued at the instant the venue fills and monitored right after each commit, so `at` is
 the one wall time a run declares, and the valuation and monitoring declarations are gone.
@@ -22,7 +22,7 @@ from vqapr.domain.wiring import EXTENSION_POINTS, Role
 from vqapr.workspace.run_definition import (
     ComplianceSet,
     DataModelEntry,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     StrategyConfig,
     StrategyEntry,
@@ -49,24 +49,24 @@ def _definition(**overrides: object) -> RunDefinition:
         "compliance": ("no-short",),
         "instruments": ("ABC",),
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": time(15, 29)},
+        "schedule": {"every": "1d", "at": time(15, 29)},
     }
     declared.update(overrides)
     return RunDefinition(**declared)  # type: ignore[arg-type]
 
 
-def test_a_strategy_config_binds_a_strategy_to_the_run_agenda() -> None:
+def test_a_strategy_config_binds_a_strategy_to_the_run_schedule() -> None:
     """Preflight's product, not a user declaration; it carries no role (record `182`)."""
     strategy = _component(Role.STRATEGY_MODEL, "strategy")
 
-    config = StrategyConfig(strategy, "r.agenda")
+    config = StrategyConfig(strategy, "r.schedule")
 
-    assert config.agenda_id == "r.agenda"
-    assert not hasattr(config, "agenda_role")
+    assert config.schedule_id == "r.schedule"
+    assert not hasattr(config, "schedule_role")
     with pytest.raises(ValueError, match="STRATEGY_MODEL"):
         StrategyConfig(
             _component(Role.COMPLIANCE, "limit"),
-            "r.agenda",
+            "r.schedule",
         )
 
 
@@ -86,7 +86,7 @@ def test_a_run_names_one_strategy_and_its_own_compliance_rules() -> None:
         _definition(
             strategy=None,
             datamodel={"component": "d", "value_fields": ["v"]},
-            agenda={"every": "1d", "at": time(15, 29), "days_from": "prices"},
+            schedule={"every": "1d", "at": time(15, 29), "days_from": "prices"},
         )
     assert "strategies" not in set(RunDefinition.model_fields)
 
@@ -142,73 +142,73 @@ def test_the_run_layer_pairs_its_declarations() -> None:
 
 
 def test_a_run_declares_its_zone_and_naive_wall_times() -> None:
-    """`at` is a wall time on the venue's clock; the zone is declared once, beside the agenda.
+    """`at` is a wall time on the venue's clock; the zone is declared once, beside the schedule.
 
     A tz-aware `time` would carry a second zone that could disagree with `timezone`, and a
     string would let "15:29" and "3:29 PM" name the same instant under two spellings.
     """
-    assert _definition().agenda.rule.at == (time(15, 29),)
+    assert _definition().schedule.rule.at == (time(15, 29),)
     assert _definition().timezone == "Asia/Seoul"
     with pytest.raises(ValueError, match="timezone must be a non-empty IANA timezone name"):
         _definition(timezone="")
     with pytest.raises(ValueError, match="unknown IANA timezone"):
         _definition(timezone="Mars/Olympus_Mons")
-    with pytest.raises(ValidationError, match="agenda"):
-        _definition(agenda=None)
+    with pytest.raises(ValidationError, match="schedule"):
+        _definition(schedule=None)
     # A string is coerced by pydantic ("15:29" is a valid time); a non-time is a shape error.
-    assert _definition(agenda={"every": "1d", "at": "15:29"}).agenda.at == (time(15, 29),)
+    assert _definition(schedule={"every": "1d", "at": "15:29"}).schedule.at == (time(15, 29),)
     with pytest.raises(ValidationError, match="at"):
-        _definition(agenda={"every": "1d", "at": object()})
+        _definition(schedule={"every": "1d", "at": object()})
     with pytest.raises(ValueError, match="timezone-naive wall time"):
-        _definition(agenda={"every": "1d", "at": time(15, 29, tzinfo=KST)})
+        _definition(schedule={"every": "1d", "at": time(15, 29, tzinfo=KST)})
 
 
-def test_an_agenda_is_a_day_filter_and_a_within_day_rule() -> None:
+def test_an_schedule_is_a_day_filter_and_a_within_day_rule() -> None:
     """Design §3.4: `every` picks days (`1d`, `1w`, `1M`) with `at`, or instants (`5m`, `1h`)
     with `from`/`to`; the two halves must agree, and a strategy run names no day source -- its
     trading days are its execution table's."""
-    agenda = RunAgenda(every="5m", **{"from": time(9, 0)}, to=time(9, 10))
-    assert agenda.rule.times() == (time(9, 0), time(9, 5), time(9, 10))
-    assert agenda.model_dump(mode="json") == {"every": "5m", "from": "09:00:00", "to": "09:10:00"}
-    assert RunAgenda(every="1d", at=(time(9),)).model_dump(mode="json") == {
+    schedule = RunSchedule(every="5m", **{"from": time(9, 0)}, to=time(9, 10))
+    assert schedule.rule.times() == (time(9, 0), time(9, 5), time(9, 10))
+    assert schedule.model_dump(mode="json") == {"every": "5m", "from": "09:00:00", "to": "09:10:00"}
+    assert RunSchedule(every="1d", at=(time(9),)).model_dump(mode="json") == {
         "every": "1d",
         "at": ["09:00:00"],
     }
 
     with pytest.raises(ValueError, match="needs at"):
-        RunAgenda(every="1d")
+        RunSchedule(every="1d")
     with pytest.raises(ValueError, match="declare from/to, not at"):
-        RunAgenda(every="5m", at=(time(9),))
+        RunSchedule(every="5m", at=(time(9),))
     with pytest.raises(ValueError, match="declare at, not from/to"):
-        RunAgenda(every="1w", at=(time(9),), to=time(10))
+        RunSchedule(every="1w", at=(time(9),), to=time(10))
     with pytest.raises(ValueError, match="count and a unit"):
-        RunAgenda(every="daily", at=(time(9),))
-    with pytest.raises(ValueError, match="declares no agenda.days_from"):
-        _definition(agenda={"every": "1d", "at": "15:29", "days_from": "prices"})
+        RunSchedule(every="daily", at=(time(9),))
+    with pytest.raises(ValueError, match="declares no schedule.days_from"):
+        _definition(schedule={"every": "1d", "at": "15:29", "days_from": "prices"})
 
 
 def test_on_last_is_stored_only_when_it_is_last() -> None:
     """Record `253`. `on: first` is what every run before it meant, so a run that says nothing and
     one that says `first` store the same body -- and keep the identity they had."""
-    last = RunAgenda(every="1M", at=(time(15, 29),), on="last")
+    last = RunSchedule(every="1M", at=(time(15, 29),), on="last")
     assert last.rule.on == "last"
     assert last.model_dump(mode="json") == {"every": "1M", "at": ["15:29:00"], "on": "last"}
-    assert RunAgenda(every="1M", at=(time(9),), on="first").model_dump(mode="json") == {
+    assert RunSchedule(every="1M", at=(time(9),), on="first").model_dump(mode="json") == {
         "every": "1M",
         "at": ["09:00:00"],
     }
-    assert _definition(agenda={"every": "1M", "at": "15:29", "on": "first"}).model_dump(
+    assert _definition(schedule={"every": "1M", "at": "15:29", "on": "first"}).model_dump(
         mode="json"
-    ) == _definition(agenda={"every": "1M", "at": "15:29"}).model_dump(mode="json")
+    ) == _definition(schedule={"every": "1M", "at": "15:29"}).model_dump(mode="json")
     with pytest.raises(ValueError, match="pairs with a w or M rule"):
-        RunAgenda(every="1d", at=(time(9),), on="last")
+        RunSchedule(every="1d", at=(time(9),), on="last")
 
 
-def test_the_agenda_a_run_derives_is_named_after_the_run_and_is_not_a_field() -> None:
-    """The one agenda is preflight's to build; the definition only knows what it will be called."""
-    assert _definition(run_id="alpha").agenda_id == "alpha.agenda"
-    assert "agenda_id" not in set(RunDefinition.model_fields)
-    assert "agenda_role" not in set(RunDefinition.model_fields)
+def test_the_schedule_a_run_derives_is_named_after_the_run_and_is_not_a_field() -> None:
+    """The one schedule is preflight's to build; the definition only knows what it will be called."""
+    assert _definition(run_id="alpha").schedule_id == "alpha.schedule"
+    assert "schedule_id" not in set(RunDefinition.model_fields)
+    assert "schedule_role" not in set(RunDefinition.model_fields)
 
 
 def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
@@ -220,7 +220,7 @@ def test_a_run_declares_no_valuation_and_no_monitoring() -> None:
         "instruments",
         "datamodel",
         "timezone",
-        "agenda",
+        "schedule",
         "exchange",
         "execution",
         "compliance",

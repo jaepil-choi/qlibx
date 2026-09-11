@@ -11,7 +11,7 @@ a missing reference somewhere unrelated.
 These tests use real processes. Threads would share an interpreter and could pass while the
 cross-process case still lost writes.
 
-The declaration each writer adds is a component: since record `148` an agenda is derived from
+The declaration each writer adds is a component: since record `148` an schedule is derived from
 the run rather than registered, so a component is the smallest declaration a process registers.
 """
 

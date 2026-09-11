@@ -34,7 +34,7 @@ from vqapr.run.preflight.checks import ROSTER_ABSENT, require_declared_roster
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
     DataModelEntry,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -85,7 +85,7 @@ def _strategy_run(run_id: str = "alpha") -> RunDefinition:
         strategy=StrategyEntry("model"),
         instruments=("A005930",),
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="venue",
         execution=RunExecution(
             dataset="fills",
@@ -106,7 +106,7 @@ def _datamodel_run() -> RunDefinition:
         datamodel=DataModelEntry("model", ("score",)),
         instruments=("A005930",),
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(time(16, 0),), days_from="prices"),
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="prices"),
         start=datetime(2024, 3, 5, tzinfo=KST),
         end=datetime(2024, 3, 6, tzinfo=KST),
     )

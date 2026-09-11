@@ -60,6 +60,6 @@ class ForgingModel(ReversalFeatureModel):
 
     def compute(self, context):
         return tuple(
-            {**row, "available_at": context.evaluation_time}
+            {**row, "available_at": context.at}
             for row in super().compute(context)
         )

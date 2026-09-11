@@ -5,7 +5,7 @@ to running: once by the judgments (`judgments.py`, which answer every question i
 `check` can report every defect at once) and once by the freeze (`preflight.py`, which resolves
 names to values and refuses at the first). The two grew apart historically (records `087`, `168`
 bolted them in sequence after `run` executed what `check` refused) and each derived the same facts
--- the agenda, the execution table and its horizon, the loaded components, the digests -- so one
+-- the schedule, the execution table and its horizon, the loaded components, the digests -- so one
 `vqapr run` read the execution table five times (`experiments/exp_238`).
 
 This module is the door both verbs and both doors (`cli` and `public.execute`) pass through, and

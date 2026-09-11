@@ -203,9 +203,9 @@ def _merge_declaration(
 ) -> tuple[_State, bool]:
     """One keyed declaration folded into its section: idempotent, conflict, or new.
 
-    `noun` is what the key IS -- `agenda_id` for the agenda-keyed sections, `component_id`
+    `noun` is what the key IS -- `schedule_id` for the agenda-keyed sections, `component_id`
     for strategy configs -- so a refusal names the thing the author wrote (`docs/issues/archive/040`
-    measured a refusal that named an agenda the author never touched).
+    measured a refusal that named an schedule the author never touched).
     """
     declarations: Mapping[str, object] = getattr(state, section)
     existing = declarations.get(key)
@@ -215,8 +215,8 @@ def _merge_declaration(
         observed = "a different declaration is already registered"
         if noun == "component_id":
             observed = (
-                f"strategy {key!r} is already bound to agenda "
-                f"{getattr(existing, 'agenda_id', '?')!r}"
+                f"strategy {key!r} is already bound to schedule "
+                f"{getattr(existing, 'schedule_id', '?')!r}"
             )
         fix = (
             f"keep the registered declaration for {key!r} unchanged, or choose a new {noun}"

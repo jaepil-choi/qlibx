@@ -38,7 +38,7 @@ how a throw-away output is dropped.
 On a dataset registered from **the user's own path**, it withdraws the registration and **does not
 touch their file.** vqapr deletes only what vqapr wrote.
 
-It refuses while a registered run takes its trading days from that dataset (`agenda.days_from`), naming
+It refuses while a registered run takes its trading days from that dataset (`schedule.days_from`), naming
 the run.
 
 ## `--cascade`

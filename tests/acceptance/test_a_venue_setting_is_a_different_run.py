@@ -38,7 +38,7 @@ def _run(run_id: str, exchange: str) -> dict[str, object]:
         "writes": f"{run_id}-weights",
         "strategy": {"component": "rotate"},
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": "04:00"},
+        "schedule": {"every": "1d", "at": "04:00"},
         "exchange": exchange,
         "execution": {"dataset": "venue-daily", "trade_price": "close", "fill": {"at": "15:30"}},
         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),

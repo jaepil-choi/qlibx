@@ -14,10 +14,10 @@ Two modes:
 ## Every declaration kind a run needs has a template
 
 `register` understands four sections, and a run needs three of them: a dataset (the venue table a
-run fills against is a dataset with an `execution:` role), an exchange and the run itself. There
-is no agenda artifact to register (record `148`, then `204`): the run declares its own `agenda` --
-a trading-day filter and a within-day rule -- and its one model is called at every instant of it
-and decides for itself; the book is valued at every instant of the market clock, and the declared
+run fills against is a dataset with an `execution:` role), an exchange and the run itself. There is
+no schedule artifact to register (record `148`, then `204`): the run declares its own `schedule` --
+a trading-day filter and a within-day rule -- and its one model is called at every instant of it and
+decides for itself; the book is valued at every instant of the market clock, and the declared
 Compliance rules observe it right after.
 """
 
@@ -137,8 +137,8 @@ again: adding or renaming a member updates the template in the same edit.
 _RUN_TEMPLATE = f"""\
 # Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# A run is configuration (record 139): the universe, the period, the strategy clock it decides
-# on (`agenda`), the venue, the execution dataset, the initial account, and the one strategy it
+# A run is configuration (record 139): the universe, the period, the schedule clock it decides
+# on (`schedule`), the venue, the execution dataset, the initial account, and the one strategy it
 # runs. The clock is expanded over the trading days the execution dataset has rows for -- a
 # denser table adds fill instants, never decision days -- and the strategy is called at every
 # instant of it, deciding for itself whether to act. The book is valued at every instant of the
@@ -154,7 +154,7 @@ runs:
     start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
     end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
     timezone: Asia/Seoul             # the zone every wall time below is expressed in
-    agenda:                          # the strategy clock: a day filter and a within-day rule
+    schedule:                          # the schedule clock: a day filter and a within-day rule
       every: 1d                      # 1d | 2d | 1w | 1M select trading days and pair with `at`;
       at: "15:29"                    #   1m | 5m | 1h select instants and pair with `from`/`to`
       # on: last                     # 1w | 1M only: the LAST trading day of each week or month
@@ -192,7 +192,7 @@ runs:
 def _emitted_class_name(source: str) -> str:
     """The class a template emitted, found by parsing rather than by splitting on `"class "`.
 
-    The string split this replaces took the first occurrence of `"class "` anywhere in the file,
+    The string split this replaces took the first event of `"class "` anywhere in the file,
     including inside a docstring: a template whose prose contained "subclass and" yielded an
     `object_name` of half a paragraph, which registered and then failed at import with an
     `AttributeError` naming that paragraph. `register.py` already parses its equivalent with `ast`
@@ -240,7 +240,7 @@ def _declaration(
                 "timezone": "Asia/Seoul",
                 # A datamodel run has no execution table, so it names the dataset whose days
                 # are its trading days (design §3.3).
-                "agenda": {"every": "1d", "at": "16:00", "days_from": dataset_id},
+                "schedule": {"every": "1d", "at": "16:00", "days_from": dataset_id},
                 "writes": f"{component_id}-values",
                 "datamodel": {
                     "component": component_id,

@@ -26,7 +26,7 @@ from vqapr.data.source import SourceSpec
 from vqapr.public import preflight_run, register_data_model, register_dataset, run
 from vqapr.run.engine.loop import DataModelResult
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY
-from vqapr.workspace.run_definition import DataModelEntry, RunAgenda, RunDefinition
+from vqapr.workspace.run_definition import DataModelEntry, RunSchedule, RunDefinition
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -138,7 +138,7 @@ def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datase
             instruments=("A", "B", "C"),
             timezone="Asia/Seoul",
             # A datamodel run names the dataset whose days are its trading days (design §3.3).
-            agenda=RunAgenda(every="2d", at=(time(16, 0),), days_from=reads),
+            schedule=RunSchedule(every="2d", at=(time(16, 0),), days_from=reads),
             start=datetime(2024, 3, 4, tzinfo=KST),
             end=datetime(2024, 3, 9, tzinfo=KST),
             writes=dataset,

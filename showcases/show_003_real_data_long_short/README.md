@@ -20,7 +20,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
    `AcademicExchange` fills it at the exact selected close.
 5. **Full lifecycle per rebalance.** Each session runs
    `ACCEPTED_INTENT → ACCOUNT_COMMITTED → MARKED → FEEDBACK_PUBLISHED`, then independent
-   valuation and monitoring occurrences, and the run finalizes with no pending intent.
+   valuation and monitoring events, and the run finalizes with no pending intent.
 6. **Independent accounting proof.** The run replays cash, positions and NAV from the published
    fill journal alone and asserts an exact match with the committed Account. A mismatch aborts.
 

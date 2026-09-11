@@ -9,7 +9,7 @@ nothing about the code that actually ships.
 Three things are asserted beyond what `run.py` itself already asserts before returning:
 
 * the recorded tables exist with the shape the assignment requires,
-* the neutralised signal is exactly orthogonal to a market column on every occurrence, recomputed
+* the neutralised signal is exactly orthogonal to a market column on every event, recomputed
   from the published artifact rather than trusted from the transform, and
 * the re-hydrated marks equal the committed ones, field for field.
 """
@@ -71,13 +71,13 @@ def test_the_recorded_tables_exist_with_the_expected_shape(pipeline_result) -> N
     assert trace["account_run_record"]["rows"] > 0
     assert trace["account_run_record"]["rows"] == trace["account_run_record"]["read_back"]
 
-    assert trace["signal_occurrences"] > 0
-    assert trace["signal_occurrences"] <= trace["callbacks"]
+    assert trace["signal_events"] > 0
+    assert trace["signal_events"] <= trace["callbacks"]
 
     assert set(digests) == {"signal_measurement", "run_account"}
 
 
-def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
+def test_the_neutralised_signal_is_exactly_orthogonal_on_every_event(
     showcase, tmp_path
 ) -> None:
     """Recomputed from the published artifact alone, not from the transform's own contract."""
@@ -99,18 +99,18 @@ def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
 
     assert rows, "the published signal table must not be empty"
 
-    by_occurrence: dict[object, list[Decimal]] = {}
+    by_event: dict[object, list[Decimal]] = {}
     for available_at, neutralized_signal in rows:
-        by_occurrence.setdefault(available_at, []).append(Decimal(neutralized_signal))
+        by_event.setdefault(available_at, []).append(Decimal(neutralized_signal))
 
-    assert len(by_occurrence) == trace["signal_occurrences"]
-    for available_at, values in by_occurrence.items():
+    assert len(by_event) == trace["signal_events"]
+    for available_at, values in by_event.items():
         assert sum(values) == 0, (
             f"neutralised signal at {available_at} is not orthogonal to the market column: "
             f"sum={sum(values)}"
         )
 
-    assert any(value != 0 for values in by_occurrence.values() for value in values), (
+    assert any(value != 0 for values in by_event.values() for value in values), (
         "at least one recorded signal must be genuinely non-flat"
     )
 

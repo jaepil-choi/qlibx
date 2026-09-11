@@ -56,7 +56,7 @@ Running one again is refused while its output dataset is registered (`run.output
 (`record.exists`, 409). **`vqapr run <run-id> --force` is the retry**: it replaces the record and
 rewrites the dataset in one command. `vqapr rm dataset <id>` withdraws the registration and deletes
 the materialized files, which is how a throw-away output is dropped, not how a run is retried — and
-it refuses while a registered run takes its trading days from that dataset (`agenda.days_from`),
+it refuses while a registered run takes its trading days from that dataset (`schedule.days_from`),
 naming the run.
 
 A dataset registered from the user's own path is withdrawn **without touching their file**.

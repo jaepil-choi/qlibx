@@ -236,7 +236,7 @@ _UNIT = {"m": timedelta(minutes=1), "h": timedelta(hours=1), "d": timedelta(days
 
 
 def parse_duration(text: str, *, name: str) -> timedelta:
-    """`10m`, `2h`, `1d` -- a count and one of three units, the grammar `agenda.every` shares."""
+    """`10m`, `2h`, `1d` -- a count and one of three units, the grammar `schedule.every` shares."""
     match = _DURATION.match(text) if isinstance(text, str) else None
     if match is None:
         raise ValueError(f"{name} must be a count and a unit such as 10m, 2h or 1d; got {text!r}")
@@ -302,7 +302,7 @@ class ExecutionHorizon:
 
         `scan.candidate_instants` answers `trade_at > start AND trade_at <= end`, distinct and
         ascending; this is the same cut over the table's distinct instants when a caller already
-        holds them (the workspace reads them once per command to derive the run's agenda, record
+        holds them (the workspace reads them once per command to derive the run's schedule, record
         `238`), so preflight and the judgments build the horizon without a second and third scan.
         """
         start_utc = start_time.astimezone(UTC)
@@ -381,7 +381,7 @@ class FillRule:
 
         `None` is a fact about the table and the rule -- no instant after this decision passes
         `at`/`after` inside `within` and the run's end -- and preflight proves it never happens
-        for a frozen agenda (`_validate_execution_targets`). `horizon` is the
+        for a frozen schedule (`_validate_execution_targets`). `horizon` is the
         execution table's candidate instants, read by `data/execution_table.py`, and `dataset_id`
         the dataset the target is stamped with.
         """

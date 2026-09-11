@@ -12,7 +12,7 @@ planning and the declared execution profile. The enhanced-index Strategy reads *
 inputs** — the committed benchmark and the published alpha — through ordinary `DataRequirement`
 subscriptions inside its point-in-time window, so the combination is proved on the subscription
 path rather than by reading parquet beside it. Its bounds are the ones the registered shipped
-box the strategy builds for that occurrence, not a second copy of the same rule.
+box the strategy builds for that event, not a second copy of the same rule.
 
 The fill journal the second run committed is replayed independently against the committed
 `Account`, the monitoring findings over every marked account version are read back rather than
@@ -48,7 +48,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -367,7 +367,7 @@ class EnhancedIndex(StrategyModel):
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
-        history["frozen_occurrences"] = int(history.get("frozen_occurrences", 0)) + len(frozen)
+        history["frozen_events"] = int(history.get("frozen_events", 0)) + len(frozen)
         history["frozen_outside_box"] = int(history.get("frozen_outside_box", 0)) + reported
         # Monitoring only, recorded after the decision and never fed back into it.
         history["active_norm"] = str(self._active_norm(result.weights, benchmark))
@@ -561,9 +561,9 @@ def _monitoring(result: Any) -> dict[str, Any]:
     account would mean the account authority itself failed, so that one aborts.
     """
     reports = [
-        occurrence.result.report
-        for occurrence in result.occurrences
-        if getattr(getattr(occurrence, "result", None), "report", None) is not None
+        event.result.report
+        for event in result.events
+        if getattr(getattr(event, "result", None), "report", None) is not None
     ]
     if not reports:
         raise AssertionError("the run produced no monitoring evidence")
@@ -584,7 +584,7 @@ def _monitoring(result: Any) -> dict[str, Any]:
             if seen is None or finding.excess > seen[0]:
                 drift[finding.rule_id] = (finding.excess, finding.measured, finding.bound)
     return {
-        "monitoring_occurrences": len(reports),
+        "monitoring_events": len(reports),
         "monitoring_drift_findings": drift_findings,
         "worst_drift": {
             name: f"{measured} against {bound}, excess {excess}"
@@ -651,7 +651,7 @@ class _Registered:
     dataset_id: str
     directory: Path
     row_count: int
-    occurrences: int
+    events: int
 
 
 def _register_run_table(
@@ -696,13 +696,13 @@ def _register_run_table(
     )
     con = duckdb.connect()
     try:
-        rows, occurrences = con.execute(
+        rows, events = con.execute(
             f"SELECT count(*), count(DISTINCT event_time) "
             f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
         ).fetchone()
     finally:
         con.close()
-    return _Registered(dataset_id, directory, int(rows), int(occurrences))
+    return _Registered(dataset_id, directory, int(rows), int(events))
 
 
 def _inject_halt(source: Path, target: Path, instrument: str, days: list[date]) -> tuple[str, ...]:
@@ -793,7 +793,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # A halt the Strategy could not have predicted. Tradability is only knowable at execution
     # time, so the Strategy never freezes for it: it keeps targeting the weight it wants, the
     # Exchange refuses the fill while the halt lasts, the position stays put, monitoring keeps
-    # reporting, and the next occurrence tries again. That loop is asserted below.
+    # reporting, and the next event tries again. That loop is asserted below.
     # Written once and shared by both replicates: a fresh parquet per run would change the
     # registered source digest and make the determinism check fail on our own scaffolding.
     halted_path = OUTPUTS / "execution_with_halt.parquet"
@@ -885,7 +885,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         run_id="show005-alpha",
         strategy=StrategyEntry("show005-alpha"),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         exchange="show005-academic",
         execution=RunExecution(
             dataset="krx-daily",
@@ -922,7 +922,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         strategy=StrategyEntry("show005-index"),
         compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="show005-krx",
         execution=RunExecution(
             dataset="krx-daily",
@@ -946,9 +946,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if not index_replay["whole_shares_only"]:
         raise AssertionError("the KRX profile must hold whole shares only")
     # Both frozen outcomes are claimed in the README, so both are checked here rather than merely
-    # reported: the pinned holding is returned verbatim every occurrence, and it never drifts
+    # reported: the pinned holding is returned verbatim every event, and it never drifts
     # outside its own box, which is what keeps this run clear of the known intent-boundary gap.
-    if int(index_memory.get("frozen_occurrences", 0)) == 0:
+    if int(index_memory.get("frozen_events", 0)) == 0:
         raise AssertionError("no freeze survived, so frozen invariance was never demonstrated")
     # The recorder's first real-spine evidence: rows that a run() actually produced, not rows a
     # test constructed against the state object. Nothing in this repository had proved this before.
@@ -983,9 +983,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     )
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    # ONE account-level row per occurrence, and every one of them carries a nav.
+    # ONE account-level row per event, and every one of them carries a nav.
     #
-    # This pinned two rows per occurrence while `vqapr.account` had two writers -- a measurement
+    # This pinned two rows per event while `vqapr.account` had two writers -- a measurement
     # and a null-nav restatement from the callback path. Issue 010 separated the two facts into
     # two tables, so the naive read of this one is now correct: no filter, no nulls, one value
     # per date. A null appearing here again would mean a non-measuring writer came back.
@@ -995,7 +995,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     account_level = [row for row in default_account if row["instrument"] == "_ACCOUNT"]
     if len(account_level) != len(callback_days):
         raise AssertionError(
-            f"expected one account-level row per occurrence, saw {len(account_level)}"
+            f"expected one account-level row per event, saw {len(account_level)}"
         )
     unmeasured = [row for row in account_level if row["nav"] is None]
     if unmeasured:
@@ -1055,7 +1055,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "account_mode": AccountMode.SIGNED.value,
             "views": alpha_memory.get("views"),
             "published_dataset": published.dataset_id,
-            "published_occurrences": published.occurrences,
+            "published_events": published.events,
             "published_rows": published.row_count,
             "publication": "vqapr.weight, registered from the alpha run's record",
         },
@@ -1066,7 +1066,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "rebalances": index_memory.get("rebalances"),
-            "frozen_occurrences": index_memory.get("frozen_occurrences"),
+            "frozen_events": index_memory.get("frozen_events"),
             "frozen_outside_box": index_memory.get("frozen_outside_box"),
             "final_active_norm": index_memory.get("active_norm"),
             **index_monitoring,
@@ -1099,16 +1099,16 @@ def main() -> None:
 
     index = trace["index_run"]
     print(f"sessions / callbacks    : {trace['sessions']} / {trace['callbacks']}")
-    print(f"alpha views published   : {trace['alpha_run']['published_occurrences']} occurrences")
+    print(f"alpha views published   : {trace['alpha_run']['published_events']} events")
     print(f"recorded signal rows    : {trace['recorder']['rows']} (first real-spine recorder use)")
     print(f"subscribed inputs       : {', '.join(index['subscribed_allocation_inputs'])}")
     print(f"shipped compliance      : {', '.join(index['shipped_compliance'])}")
     print(f"rebalances              : {index['rebalances']}")
     print(
-        f"frozen / drifted out    : {index['frozen_occurrences']} / {index['frozen_outside_box']}"
+        f"frozen / drifted out    : {index['frozen_events']} / {index['frozen_outside_box']}"
     )
     print(
-        f"monitored occurrences   : {index['monitoring_occurrences']} "
+        f"monitored events   : {index['monitoring_events']} "
         f"({index['monitoring_drift_findings']} cap-drift findings, 0 short positions)"
     )
     print(f"worst drift             : {json.dumps(index['worst_drift'], sort_keys=True)}")

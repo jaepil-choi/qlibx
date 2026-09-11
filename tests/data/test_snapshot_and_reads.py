@@ -92,7 +92,7 @@ def test_a_dataset_reports_its_instruments_without_naming_a_file(workspace: Work
 
 
 def test_a_dataset_reports_its_evaluation_times(workspace: Workspace) -> None:
-    """What an agenda should be built from: the sessions the data actually has."""
+    """What an schedule should be built from: the sessions the data actually has."""
     assert workspace.evaluation_times("benchmark") == SESSIONS
 
 

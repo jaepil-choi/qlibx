@@ -1,7 +1,7 @@
 """The events of a run's one walk, and the order they take at a shared instant.
 
 A run walks two static clocks merged into one ordered sequence (design §3, record `206`): the
-STRATEGY clock -- the occurrences frozen at preflight, where a model decides -- and the MARKET
+SCHEDULE clock -- the events frozen at preflight, where a model decides -- and the MARKET
 clock -- every instant the execution table has inside the run, where a pending decision fills,
 the book is valued and the declared Compliance rules observe it. Both are known in full before
 the first step, so nothing is minted while the run walks and two runs of the same frozen inputs
@@ -21,30 +21,21 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from vqapr.domain.instants import require_tz_aware
-from vqapr.domain.schedule import OperationOccurrence
 
 
 class Event(Protocol):
-    """Anything the loop can order: it has a place on the one clock."""
+    """Anything the loop can order: it has a place on the one clock. A scheduled event is the
+    domain's `ScheduledEvent` itself, which already knows its place; a market instant is a
+    `MarketEvent`."""
 
     def sort_key(self) -> tuple[datetime, int, str]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class OccurrenceEvent:
-    """A scheduled occurrence: one entry of the frozen agenda, known before the loop starts."""
-
-    occurrence: OperationOccurrence
-
-    def sort_key(self) -> tuple[datetime, int, str]:
-        return self.occurrence.sort_key()
 
 
 @dataclass(frozen=True, slots=True)
 class MarketEvent:
     """One instant of the market clock: the execution table has a row here.
 
-    The negative priority orders it before every scheduled occurrence at the same UTC instant
+    The negative priority orders it before every scheduled event at the same UTC instant
     (design §3.1): the pending intent whose target this is fills, the book is valued and judged,
     and only then does a model decide at this instant.
     """
@@ -58,4 +49,4 @@ class MarketEvent:
         return (self.instant.astimezone(UTC), -1, "")
 
 
-__all__ = ["Event", "MarketEvent", "OccurrenceEvent"]
+__all__ = ["Event", "MarketEvent"]

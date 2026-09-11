@@ -571,14 +571,14 @@ def _run_datamodel(
             frozen,
             layer,
             model,
-            window_for_occurrence=lambda occurrence: window_at(occurrence.evaluation_time),
+            window_for_event=lambda event: window_at(event.evaluation_time),
             output=output,
             on_progress=writer.heartbeat if writer is not None else None,
         )
         result = flow.run()
         registration = output.register(Workspace.open(root_path))
         result = DataModelResult(
-            occurrences=result.occurrences,
+            events=result.events,
             rows=result.rows,
             output_path=result.output_path,
             registration=registration,
@@ -776,8 +776,8 @@ def _run_strategy(
             strategy,
             state,
             layer=layer,
-            strategy_window_for_occurrence=lambda occurrence: strategy_window_at(
-                occurrence.evaluation_time
+            strategy_window_for_event=lambda event: strategy_window_at(
+                event.evaluation_time
             ),
             compliance_window_at=compliance_window_at,
             # Each strategy has its own Account (design §7-4): the run shares the initial

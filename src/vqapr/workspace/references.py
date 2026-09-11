@@ -38,15 +38,15 @@ def _references_in(state: _State, kind: str, identity: str) -> tuple[str, ...]:
                 blockers.append(f"run {run_id!r}")
     elif kind == "dataset":
         # What the DOCUMENT knows names a dataset: a registered datamodel run whose
-        # trading days come from it (`agenda.days_from`). A component's reads are declared in
+        # trading days come from it (`schedule.days_from`). A component's reads are declared in
         # its code, not here, so a strategy that reads a withdrawn dataset is refused by
         # `check` and `run` at its next preflight (`check.dataset.unregistered`), which is the
         # same place it would be refused had the dataset never been registered. A datamodel
         # run that WRITES this dataset is not a blocker: withdrawing the output is how that
         # run is run again (`docs/issues/archive/060`).
         for run_id, definition in runs.items():
-            if definition.agenda.days_from == identity:
-                blockers.append(f"run {run_id!r} (agenda.days_from)")
+            if definition.schedule.days_from == identity:
+                blockers.append(f"run {run_id!r} (schedule.days_from)")
             # The venue table is a dataset too (record 185): a run that fills against
             # it holds it by name in the document.
             if definition.execution is not None and definition.execution.dataset == identity:
@@ -90,7 +90,7 @@ def _config_lookup[T](
     try:
         return declarations[key]
     except KeyError as error:
-        what = {"component_id": "strategy", "run_id": "run"}.get(noun, "agenda")
+        what = {"component_id": "strategy", "run_id": "run"}.get(noun, "schedule")
         raise _workspace_error(
             stage=Stage.LOOKUP,
             code="run.unregistered",

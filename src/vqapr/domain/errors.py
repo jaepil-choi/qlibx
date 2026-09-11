@@ -695,13 +695,13 @@ class _DeclarationLoader(yaml.SafeLoader):
     """PyYAML's safe loader with YAML 1.2's booleans: only `true` and `false` are booleans.
 
     PyYAML resolves YAML 1.1, where `on`, `off`, `yes`, `no`, `y` and `n` are booleans too. So
-    `agenda.on: last` -- the key the `vqapr new run` template, the run-backtest skill and the
+    `schedule.on: last` -- the key the `vqapr new run` template, the run-backtest skill and the
     0.14.4 notes all write unquoted -- arrived as `{True: "last"}` and was refused as "Keys should
     be strings" (report 2026-09-11, record `262`). No declaration key or value means a YAML 1.1
     boolean, so the word is read as the word, wherever it appears.
 
     The pure-Python loader: a declaration is a few dozen lines, so libyaml buys nothing here (the
-    workspace document, which grows with every agenda occurrence, is read through it elsewhere).
+    workspace document, which grows with every schedule event, is read through it elsewhere).
     """
 
 

@@ -87,7 +87,7 @@ runs:
     start: "2024-03-05T00:00:00+09:00"
     end: "2024-03-07T00:00:00+09:00"
     timezone: Asia/Seoul
-    agenda: {{every: 1d, at: "09:00", days_from: price_daily}}
+    schedule: {{every: 1d, at: "09:00", days_from: price_daily}}
     writes: daily-values
     datamodels:
       never: {{value_fields: [value]}}
@@ -105,7 +105,7 @@ def test_a_dataset_a_run_takes_its_trading_days_from_is_refused_naming_the_run(
     code, refused = _cli(capsys, "--project-root", str(project), "rm", "dataset", "price_daily")
     assert code == 1, refused
     assert refused["failures"][0]["code"] == "remove.referenced"
-    assert "run 'daily' (agenda.days_from)" in refused["failures"][0]["observed"]
+    assert "run 'daily' (schedule.days_from)" in refused["failures"][0]["observed"]
     code, listed = _cli(capsys, "--project-root", str(project), "list", "datasets")
     assert {row["dataset_id"] for row in listed["items"]} == {"price_daily", "derived"}
 

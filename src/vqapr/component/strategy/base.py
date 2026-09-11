@@ -27,7 +27,7 @@ __all__ = [
 
 
 class StrategyCall(Call, ABC):
-    """The complete, bounded capability surface for one Strategy occurrence.
+    """The complete, bounded capability surface for one Strategy event.
 
     `StrategyModelContext` is its one implementation, the way `DataModelContext` is of
     `DataCall`. What a Strategy receives beyond a DataModel is what its role needs and nothing
@@ -39,13 +39,13 @@ class StrategyCall(Call, ABC):
 
     @property
     @abstractmethod
-    def occurrence_id(self) -> str:
-        """Which occurrence this is. Kept in `memory`, it is how a cadence rule counts."""
+    def event_id(self) -> str:
+        """Which event this is. Kept in `memory`, it is how a cadence rule counts."""
 
     @property
     @abstractmethod
-    def evaluation_time(self) -> datetime:
-        """The single frozen PIT cutoff this occurrence decides at."""
+    def at(self) -> datetime:
+        """The single frozen PIT cutoff this event decides at."""
 
     @property
     @abstractmethod
@@ -127,7 +127,7 @@ class StrategyModel(Part):
 
     @abstractmethod
     def decide(self, call: StrategyCall) -> Hold | Rebalance:
-        """Return the economic decision for this occurrence, and nothing else.
+        """Return the economic decision for this event, and nothing else.
 
         `Hold` declines. `Rebalance` names one complete desired portfolio: weights, cash, and the
         budget they must satisfy. Everything an intent additionally carries -- its id, this

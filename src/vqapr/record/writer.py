@@ -139,7 +139,7 @@ class _Buffer:
     last_event_time: datetime | None = None
     progress_written_at: float | None = None
     lock_touched_at: float | None = None
-    occurrences: set[str] = field(default_factory=set)
+    events: set[str] = field(default_factory=set)
 
 
 def _unified_schema(schemas: Sequence[pa.Schema]) -> pa.Schema:
@@ -228,7 +228,7 @@ class RunRecordWriter:
     """What this writer has appended so far, per table: rows, and the distinct `event_time`s.
 
     Counted as chunks pass through `append`, so the record's `tables` block is right whether the
-    run streamed its rows occurrence by occurrence or handed them over once at the end -- and so
+    run streamed its rows event by event or handed them over once at the end -- and so
     nothing has to hold the rows to count them. A set of instants is bounded by the run's
     instants, not its rows.
     """
@@ -407,8 +407,8 @@ class RunRecordWriter:
         """Mark this run as still alive, and every `PROGRESS_EVERY` seconds say how far it got.
 
         Never raises: a lock that cannot be touched right now -- a peer reading it, a filesystem
-        with coarse timestamps -- must not fail a run that is otherwise fine. The next occurrence
-        tries again, and occurrences arrive far more often than the stale window.
+        with coarse timestamps -- must not fail a run that is otherwise fine. The next event
+        tries again, and events arrive far more often than the stale window.
         """
         now = _time.monotonic()
         touched = self._buffer.lock_touched_at
@@ -430,7 +430,7 @@ class RunRecordWriter:
         last = self._buffer.last_event_time
         payload = json.dumps(
             {
-                "occurrences": len(self._buffer.occurrences),
+                "events": len(self._buffer.events),
                 "rows": dict(sorted(self._rows.items())),
                 "last_event_time": None if last is None else last.isoformat(),
             },
@@ -519,8 +519,8 @@ class RunRecordWriter:
         """Take one chunk of one table into memory, typed; it reaches the disk when the run ends.
 
         Takes a chunk at a time so a caller CAN stream as it produces rows, and a run with a
-        store does: each accepted occurrence's rows arrive here at publish. The chunk is turned
-        into an Arrow table at once -- a column of two kinds is refused at the occurrence that
+        store does: each accepted event's rows arrive here at publish. The chunk is turned
+        into an Arrow table at once -- a column of two kinds is refused at the event that
         wrote it, by name, and a columnar buffer is a fraction of the rows' size as Python
         objects -- and written only by `release`, or by `_spill` above `spill_bytes`.
 
@@ -554,7 +554,7 @@ class RunRecordWriter:
         for at in set(chunk.columns.get("event_time", (None,))):
             instants.add(str(at))
             if isinstance(at, datetime):
-                self._buffer.occurrences.add(str(at))
+                self._buffer.events.add(str(at))
                 last = self._buffer.last_event_time
                 if last is None or at > last:
                     self._buffer.last_event_time = at

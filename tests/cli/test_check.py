@@ -18,8 +18,8 @@ exercised here are the ones a registrable run can still fail -- a look-ahead, a 
 a long-only book, a field the dataset does not expose, a first decision before the data begins.
 
 **The run carries its own sessions and wall time since record `148`.** A look-ahead or an early
-decision is therefore declared on the run (`sessions`, `at`) rather than through an agenda and a
-binding, and the judgments derive the one agenda the run fires on from exactly those keys.
+decision is therefore declared on the run (`sessions`, `at`) rather than through an schedule and a
+binding, and the judgments derive the one schedule the run fires on from exactly those keys.
 """
 
 from __future__ import annotations
@@ -179,7 +179,7 @@ def _definition(**overrides: object) -> RunDefinition:
         "writes": f"{RUN}-weights",
         "strategies": (StrategyEntry("model"),),
         "timezone": "UTC",
-        "agenda": {"every": "1d", "at": time(15, 30)},
+        "schedule": {"every": "1d", "at": time(15, 30)},
         "instruments": ("A",),
         "exchange": "venue",
         "execution": _fill(),
@@ -412,7 +412,7 @@ def _judge(root: Path, definition: RunDefinition) -> list[str]:
     """Every dataset code the run's members produce, the way `judgments` dispatches them.
 
     One judge per member since `docs/issues/archive/077`, so this loops where it used to make one call.
-    A fact of `RunFacts` is a CALL, not a value: an agenda that cannot be derived raises to the
+    A fact of `RunFacts` is a CALL, not a value: an schedule that cannot be derived raises to the
     judge that asked, which is what makes the judgment block instead of reading as passed.
     """
     from vqapr.run.preflight.checks import _judge_member_datasets, _members
@@ -551,7 +551,7 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     start = datetime.combine(early, time(0), tzinfo=UTC)
     _venue_dataset(tmp_path, days=(early,))
     at_four = {"every": "1d", "at": time(4, 0)}
-    assert _judge(tmp_path, _definition(start=start, agenda=at_four)) == ["lookback.uncovered"]
+    assert _judge(tmp_path, _definition(start=start, schedule=at_four)) == ["lookback.uncovered"]
 
     # The same run, deciding on a day the data covers, is not refused -- even though `start` is
     # still earlier than the dataset's first observation. That difference is the whole fix.
@@ -560,7 +560,7 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     assert (
         _judge(
             tmp_path,
-            _definition(start=start, agenda=at_four, execution=_fill(dataset="my-exec-covered")),
+            _definition(start=start, schedule=at_four, execution=_fill(dataset="my-exec-covered")),
         )
         == []
     )
@@ -581,10 +581,10 @@ def _order(root: Path, definition: RunDefinition) -> list[str]:
 
 
 def test_an_end_between_the_last_fill_and_the_last_decision_is_answered(tmp_path: Path) -> None:
-    """The ordering judgment asks about the occurrences inside `[start, end]`, not the superset.
+    """The ordering judgment asks about the events inside `[start, end]`, not the superset.
 
     A decide-after-close, fill-next-close run (`at: 16:30`, `fill.at: 15:30`) has exactly one
-    correct kind of `end`: between the last day's fill and that day's decision. `derived_agenda`
+    correct kind of `end`: between the last day's fill and that day's decision. `derived_schedule`
     cuts on dates and keeps that day's 16:30 (`docs/issues/archive/069`); handed to
     `select_target` it broke the "decision not after end" contract, and `check` reported a 500
     `judgment.blocked` where a reader looks for problems -- for the one `end` that was right
@@ -597,7 +597,7 @@ def test_an_end_between_the_last_fill_and_the_last_decision_is_answered(tmp_path
     start = datetime.combine(first, time(0), tzinfo=UTC)
 
     def judged(end: datetime) -> list[str]:
-        return _order(tmp_path, _definition(start=start, end=end, agenda=after_close))
+        return _order(tmp_path, _definition(start=start, end=end, schedule=after_close))
 
     # `end` between the last fill and the last decision: the 12-01 decision fills at 12-04
     # 15:30, inside the run; the 12-04 decision lies after `end` and is not the run's.
@@ -611,7 +611,7 @@ def test_an_end_between_the_last_fill_and_the_last_decision_is_answered(tmp_path
 
 
 def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> None:
-    """No trading days, no agenda, no answer -- and it SAYS so. No guess either.
+    """No trading days, no schedule, no answer -- and it SAYS so. No guess either.
 
     This test used to assert the opposite half of the same fact: that the judgment stayed silent,
     on the reasoning that registration and preflight both refuse a day source naming an
@@ -644,7 +644,7 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
     _strategy_reading(tmp_path, "model", "prices", "close")
 
     # The trading days come from the execution table (design §3.3), and no `my-exec` dataset is
-    # registered here: the agenda cannot be built. Nothing is guessed, and nothing is silently
+    # registered here: the schedule cannot be built. Nothing is guessed, and nothing is silently
     # returned either -- it raises, and `judgments` turns that into a blocked entry.
     unanswerable = _definition()
     with pytest.raises(Exception) as refused:

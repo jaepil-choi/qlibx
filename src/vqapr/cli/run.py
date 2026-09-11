@@ -479,7 +479,7 @@ def _datamodel_envelope(record: Any) -> dict[str, Any]:
         "fingerprint": record.get("fingerprint"),
         "dataset_id": record.get("dataset_id"),
         "rows": record.get("rows"),
-        "sessions": period.get("occurrences"),
+        "sessions": period.get("events"),
     }
 
 
@@ -495,7 +495,7 @@ def _strategy_envelope(store_root: Path, run_id: str, record: Any) -> dict[str, 
     return {
         "record": strategy_ref,
         "fingerprint": record.get("fingerprint"),
-        "occurrences": period.get("occurrences"),
+        "events": period.get("events"),
         "account_version": account.get("version"),
         "tables": sorted(record.get("tables") or {}),
         # What the orders did, not only that they were placed. `ok: true` means the simulation

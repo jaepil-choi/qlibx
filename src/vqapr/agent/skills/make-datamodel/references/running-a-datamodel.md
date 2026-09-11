@@ -10,8 +10,8 @@ runs:
     start: "2024-01-02T00:00:00+09:00"
     end:   "2024-12-31T23:00:00+09:00"
     timezone: Asia/Seoul
-    agenda:
-      every: 1d                      # the strategy clock (design §3.4); <count><unit>: `1w`, `3M`, `12M` also pick days
+    schedule:
+      every: 1d                      # the schedule clock (design §3.4); <count><unit>: `1w`, `3M`, `12M` also pick days
       at: "16:00"                    # when compute() is called on each selected day
       days_from: prices              # the dataset whose days are the trading days (no venue here)
     writes: my-derived-values        # the dataset it makes; must NOT already be registered
@@ -81,7 +81,7 @@ dataset at all in between. In a tuning loop that gap is where a restored file an
 part ways (see `vqapr check`'s `run.output_stale`).
 
 `rm dataset` refuses while a registered run takes its trading days from that dataset
-(`agenda.days_from`), naming the run — so a dataset that other runs are pinned to cannot be removed
+(`schedule.days_from`), naming the run — so a dataset that other runs are pinned to cannot be removed
 out from under them.
 
 A dataset registered from the user's **own path** is withdrawn without touching their file. Only a

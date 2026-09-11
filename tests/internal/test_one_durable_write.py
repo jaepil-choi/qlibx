@@ -121,7 +121,7 @@ def test_a_finished_record_is_valid_json_with_the_newline_it_was_given(tmp_path:
     writer = RunRecordWriter(tmp_path, "complete")
     writer.open()
 
-    path = writer.finish({"period": {"occurrences": 3}})
+    path = writer.finish({"period": {"events": 3}})
     raw = path.read_bytes()
 
     assert json.loads(raw.decode("utf-8"))["run_id"] == "complete"

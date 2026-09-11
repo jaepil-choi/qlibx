@@ -17,7 +17,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -277,7 +277,7 @@ def member_progress(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str
     `status` is `running` or `unfinished` (see `STATUS_*`). `lock` is the holder's pid and how
     many seconds ago the run last touched its lock, or `None`. The rest comes from
     `progress.json`, which the heartbeat rewrites every `PROGRESS_EVERY` seconds while the rows
-    are still in memory (`087`): `chunks` is the accepted occurrences so far (the name it had when
+    are still in memory (`087`): `chunks` is the accepted events so far (the name it had when
     it counted part files, kept for the CLI), `tables` names the tables with rows, and
     `last_event_time` is the last instant the run accepted. A directory with no progress file --
     a member that ended before its first heartbeat, or one hard-killed after a spill -- falls back
@@ -300,7 +300,7 @@ def member_progress(root: Path, run_id: str, ref: str, *, kind: str) -> dict[str
                     if claim is None
                     else {"pid": claim.pid, "refreshed_ago": round(claim.age, 1)}
                 ),
-                "chunks": int(said.get("occurrences") or 0),
+                "chunks": int(said.get("events") or 0),
                 "tables": sorted(rows) if isinstance(rows, dict) else [],
                 "last_event_time": said.get("last_event_time"),
             }
@@ -350,9 +350,7 @@ def read_run_record(root: Path | str, run_id: str) -> dict[str, Any]:
     record = _mapping_at(path)
     written = record.get("schema")
     if written != RUN_SCHEMA:
-        raise ValueError(
-            f"run record at {path} declares schema {written!r}; this version reads {RUN_SCHEMA!r}"
-        )
+        _refuse_schema("run", path, written, RUN_SCHEMA)
     return record
 
 
@@ -405,10 +403,40 @@ def read_member_record(root: Path, run_id: str, ref: str, *, kind: str) -> dict[
     record = _mapping_at(path)
     written = record.get("schema")
     if written != schema:
-        raise ValueError(
-            f"{kind} record at {path} declares schema {written!r}; this version reads {schema!r}"
-        )
+        _refuse_schema(kind, path, written, schema)
     return record
+
+
+def _refuse_schema(kind: str, path: Path, written: object, expected: str) -> NoReturn:
+    """Refuse a record this version does not read, and say which way to go.
+
+    A record of an older version of the same schema was written before vqapr 0.16.0 renamed the
+    loop's vocabulary -- `agenda` is `schedule`, `occurrence` is `event` -- and is not translated on
+    the way in (owner ruling 2026-09-12, record `278`): the run is re-run to record it again. A
+    newer one was written by a later vqapr, which is the one to read it with.
+    """
+    family, _, version = str(written or "").rpartition("/")
+    expected_family, _, expected_version = expected.rpartition("/")
+    if family == expected_family and version and _major(version) < _major(expected_version):
+        raise ValueError(
+            f"{kind} record at {path} declares schema {written!r}: it was written before vqapr "
+            "0.16.0 renamed `agenda` to `schedule` and `occurrence` to `event`, and this version "
+            f"reads {expected!r} only. Re-run the run to record it again (`vqapr run`); "
+            "`vqapr rm` removes the old record"
+        )
+    if family == expected_family and version:
+        raise ValueError(
+            f"{kind} record at {path} declares schema {written!r}, written by a newer vqapr; "
+            f"this version reads {expected!r}. Upgrade vqapr to read it"
+        )
+    raise ValueError(
+        f"{kind} record at {path} declares schema {written!r}; this version reads {expected!r}"
+    )
+
+
+def _major(version: str) -> int:
+    digits = version.lstrip("v").split(".")[0]
+    return int(digits) if digits.isdigit() else 0
 
 
 def _mapping_at(path: Path) -> dict[str, Any]:

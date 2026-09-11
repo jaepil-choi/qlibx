@@ -70,7 +70,7 @@ from vqapr.domain.listing import (
     TradeTerms,
     trade_rules_by_kind,
 )
-from vqapr.domain.schedule import OperationOccurrence
+from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
 from vqapr.portfolio.allocation import (
     AllocationInvariants,
@@ -103,7 +103,7 @@ from vqapr.run.assemble import RunResult, StrategyOutcome, preflight_run, run
 from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
 from vqapr.run.engine.failure import SimulationFailure
 from vqapr.run.engine.loop import DataModelResult, SimulationResult, callback_evidence
-from vqapr.run.preflight.frozen import FrozenAgenda, FrozenDataModel, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun, FrozenSchedule, FrozenStrategy
 
 # Orchestration, evidence and roster reading moved to their owning layers by record `111`.
 # Re-exported unchanged so every caller and every emitted scaffold keeps working. The `as` form is
@@ -150,10 +150,10 @@ from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
     ComplianceSet,
     DataModelEntry,
-    RunAgenda,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     StrategyEntry,
 )
 
@@ -196,9 +196,9 @@ __all__ = (
     "FactorInstrument",
     "FillCost",
     "FillRule",
-    "FrozenAgenda",
     "FrozenDataModel",
     "FrozenRun",
+    "FrozenSchedule",
     "FrozenStrategy",
     "Grain",
     "Hold",
@@ -223,7 +223,6 @@ __all__ = (
     # ordering (`docs/issues/archive/031`). `ModelWindow` was importable but undeclared, while the
     # component scaffolds have always emitted `from vqapr.public import ... ModelWindow`.
     "ObservationBatch",
-    "OperationOccurrence",
     "OptimizeRefusal",
     "OptimizeResult",
     "PanelWindow",
@@ -233,13 +232,14 @@ __all__ = (
     "Rebalance",
     "Role",
     "RowsLookback",
-    "RunAgenda",
     "RunDefinition",
     "RunExecution",
     "RunFill",
     "RunRecordMissing",
     "RunReport",
     "RunResult",
+    "RunSchedule",
+    "ScheduledEvent",
     "Series",
     "Side",
     "SideCost",

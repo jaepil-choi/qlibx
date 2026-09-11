@@ -32,8 +32,8 @@ class CallbackEvidence:
 
     run_identity: str
     strategy: object
-    agenda: object
-    occurrence: object
+    schedule: object
+    event: object
     cutoff: datetime
     root_version: int
     account: AccountSnapshot
@@ -56,8 +56,8 @@ class AccountCommitEvidence:
     """All exact inputs and committed values for the irreversible Account fill."""
 
     run_identity: str
-    agenda: object
-    occurrence: object
+    schedule: object
+    event: object
     cutoff: datetime
     pending: object
     target: object
@@ -90,8 +90,8 @@ class MarkEvidence:
     """
 
     run_identity: str
-    agenda: object
-    occurrence: object
+    schedule: object
+    event: object
     cutoff: datetime
     selected: int
     marks: MarkSummary
@@ -107,8 +107,8 @@ class FeedbackEvidence:
     """Published feedback transition; no fallible work follows Account commit."""
 
     run_identity: str
-    agenda: object
-    occurrence: object
+    schedule: object
+    event: object
     cutoff: datetime
     pending: object
     candidates: tuple[object, ...]
@@ -132,8 +132,8 @@ class ValuationEvidence:
     summary (record `224`; the marks are `vqapr.account` rows)."""
 
     run_identity: str
-    agenda: object
-    occurrence: object
+    schedule: object
+    event: object
     cutoff: datetime
     account: AccountSnapshot
     marks: MarkSummary
@@ -145,10 +145,10 @@ class ValuationEvidence:
 @dataclass(frozen=True, slots=True)
 class MonitoringEvidence:
     """What the declared Compliance rules found on the committed, marked book at one market-clock
-    instant (design §7.2). No occurrence: the observer has no decision of its own to point at."""
+    instant (design §7.2). No event: the observer has no decision of its own to point at."""
 
     run_identity: str
-    agenda: object
+    schedule: object
     cutoff: datetime
     account: AccountSnapshot
     valuation: ValuationEvidence
@@ -160,7 +160,7 @@ class MonitoringEvidence:
 @dataclass(frozen=True, slots=True)
 class FinalizationEvidence:
     run_identity: str
-    strategy_agenda: object
+    strategy_schedule: object
     cutoff: datetime
     account: AccountSnapshot | None
     root_version: int

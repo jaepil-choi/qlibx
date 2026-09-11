@@ -1,18 +1,18 @@
-"""Finite operation agenda declarations.
+"""Finite operation schedule declarations.
 
-Moved from `runtime/agendas.py` (one-shape Step 7, record 162): an occurrence is a value a Model
+Moved from `runtime/agendas.py` (one-shape Step 7, record 162): an event is a value a Model
 is handed (`calls.py` imports it), so it lives with the other values, below `flow/`.
 
 Agendas are resolved input, never a recurrence or calendar source.  Their local
-clock proof is retained with each occurrence so the canonical UTC ordering is
+clock proof is retained with each event so the canonical UTC ordering is
 reproducible across timezone transitions.
 
-**An occurrence has no role and an agenda no provenance** (record `182`). Both were the clothes
-of the time an agenda was a registered declaration one of three roles could own; since record
-`148` the one agenda is derived from the run, every run kind walks the same occurrences, and
-what an occurrence dispatches to is decided by the loop that handles it (`flow/loop.py`), not
-by a field on the occurrence. The role priority that ordered occurrences of different roles at
-one instant had no reachable input -- an agenda is single-role by construction -- and
+**An event has no role and an schedule no provenance** (record `182`). Both were the clothes
+of the time an schedule was a registered declaration one of three roles could own; since record
+`148` the one schedule is derived from the run, every run kind walks the same events, and
+what an event dispatches to is decided by the loop that handles it (`flow/loop.py`), not
+by a field on the event. The role priority that ordered events of different roles at
+one instant had no reachable input -- an schedule is single-role by construction -- and
 `provenance` was computed, verified and carried with no reader
 (`docs/code-review/2026-09-08-the-agenda-carries-a-role-nobody-chose.md`).
 """
@@ -27,12 +27,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from vqapr.domain.identifiers import AgendaId, OccurrenceId, occurrence_id
+from vqapr.domain.identifiers import EventId, ScheduleId, event_id
 from vqapr.domain.instants import LocalInstantDeclaration, declare_local_instant, require_tz_aware
 
 SCHEDULED_PRIORITY = 0
-"""The second term of a scheduled occurrence's sort key. A due event (`flow/loop.py`) sorts at
-`-1`, ahead of every occurrence at the same instant: what was decided earlier is settled before
+"""The second term of a scheduled event's sort key. A due event (`flow/loop.py`) sorts at
+`-1`, ahead of every event at the same instant: what was decided earlier is settled before
 anything new is decided there."""
 
 
@@ -73,8 +73,8 @@ ANCHORS = ("first", "last")
 
 
 @dataclass(frozen=True, slots=True)
-class AgendaRule:
-    """The strategy clock as a person writes it: a trading-day filter and a within-day rule.
+class ScheduleRule:
+    """The schedule clock as a person writes it: a trading-day filter and a within-day rule.
 
     Design §3.4. `every` is a count and a unit -- `1d`, `2d`, `1w`, `1M` select trading DAYS
     (every Nth trading day; the first trading day of every Nth ISO week; of every Nth calendar
@@ -89,7 +89,7 @@ class AgendaRule:
     given "rebalance on the last trading day of each month" declared it three different ways,
     moving the fill between month-end close, next-day open and next-day close
     (`docs/issues/report-2026-09-11-an-agenda-cannot-fire-on-the-last-trading-day-of-a-month.md`).
-    The trading days are the table's, known before the run as every agenda's are, so `last` asks
+    The trading days are the table's, known before the run as every schedule's are, so `last` asks
     nothing of the future that `1d` does not.
     """
 
@@ -128,7 +128,7 @@ class AgendaRule:
         at = tuple(self.at)
         for value in (*at, self.from_time, self.to_time):
             if value is not None and (not isinstance(value, time) or value.tzinfo is not None):
-                raise ValueError("agenda wall times must be timezone-naive datetime.time values")
+                raise ValueError("schedule wall times must be timezone-naive datetime.time values")
         if self.intraday:
             if at:
                 raise ValueError(
@@ -173,7 +173,7 @@ class AgendaRule:
         mid-month does not say whether that month had more sessions, so its final group does not
         fire rather than firing on a day that may not be the last (record `253`). A caller that
         wants every month inside a run hands days past the run's end and cuts after
-        (`OperationAgenda.expand(through=...)`).
+        (`Schedule.expand(through=...)`).
         """
         if self.unit in ("d", "m", "h"):
             return tuple(days[:: self.count]) if self.unit == "d" else tuple(days)
@@ -223,21 +223,21 @@ class AgendaRule:
 
 
 @dataclass(frozen=True, slots=True)
-class OperationOccurrence:
-    occurrence_id: OccurrenceId
+class ScheduledEvent:
+    event_id: EventId
     local_instant: LocalInstantDeclaration
     _content_identity: str = field(default="", init=False, repr=False, compare=False)
     """Memo for `content_identity`, which is derived from frozen fields and cannot change.
 
     Deriving it costs a json encode and a sha256. `FrozenRun.identity` re-derives it for every
-    occurrence of every agenda on each access, and a run reads that identity about sixteen times
+    event of every schedule on each access, and a run reads that identity about sixteen times
     per callback, so recomputing made the run quadratic in its own length. Kept lazy rather than
-    computed in `__post_init__` because decoding a workspace builds every occurrence and never
+    computed in `__post_init__` because decoding a workspace builds every event and never
     asks any of them for an identity.
     """
 
     def __post_init__(self) -> None:
-        _require_identifier(self.occurrence_id, name="occurrence_id")
+        _require_identifier(self.event_id, name="event_id")
 
     @property
     def evaluation_time(self) -> datetime:
@@ -255,7 +255,7 @@ class OperationOccurrence:
                 "_content_identity",
                 _identity(
                     {
-                        "occurrence_id": self.occurrence_id,
+                        "event_id": self.event_id,
                         "local_instant": self.local_instant.identity(),
                     }
                 ),
@@ -263,30 +263,30 @@ class OperationOccurrence:
         return self._content_identity
 
     def sort_key(self) -> tuple[datetime, int, str]:
-        return (self.utc_evaluation_time, SCHEDULED_PRIORITY, self.occurrence_id)
+        return (self.utc_evaluation_time, SCHEDULED_PRIORITY, self.event_id)
 
 
 @dataclass(frozen=True, slots=True)
-class OperationAgenda:
-    agenda_id: AgendaId
+class Schedule:
+    schedule_id: ScheduleId
     timezone: str
-    occurrences: tuple[OperationOccurrence, ...]
+    events: tuple[ScheduledEvent, ...]
     _content_identity: str = field(default="", init=False, repr=False, compare=False)
-    """Memo for the derived identity. See `OperationOccurrence._content_identity`."""
+    """Memo for the derived identity. See `ScheduledEvent._content_identity`."""
 
     def __post_init__(self) -> None:
-        _require_identifier(self.agenda_id, name="agenda_id")
+        _require_identifier(self.schedule_id, name="schedule_id")
         _require_timezone(self.timezone)
-        occurrences = tuple(self.occurrences)
-        if any(occurrence.local_instant.timezone != self.timezone for occurrence in occurrences):
-            raise ValueError("every occurrence timezone must match the agenda timezone")
-        occurrence_ids = [occurrence.occurrence_id for occurrence in occurrences]
-        if len(set(occurrence_ids)) != len(occurrence_ids):
-            raise ValueError("occurrence_id values must be unique within an agenda")
+        events = tuple(self.events)
+        if any(event.local_instant.timezone != self.timezone for event in events):
+            raise ValueError("every event timezone must match the schedule timezone")
+        event_ids = [event.event_id for event in events]
+        if len(set(event_ids)) != len(event_ids):
+            raise ValueError("event_id values must be unique within an schedule")
         object.__setattr__(
             self,
-            "occurrences",
-            tuple(sorted(occurrences, key=OperationOccurrence.sort_key)),
+            "events",
+            tuple(sorted(events, key=ScheduledEvent.sort_key)),
         )
 
     @property
@@ -298,15 +298,15 @@ class OperationAgenda:
                 _identity(
                     {
                         "timezone": self.timezone,
-                        "occurrences": [
-                            occurrence.content_identity for occurrence in self.occurrences
+                        "events": [
+                            event.content_identity for event in self.events
                         ],
                     }
                 ),
             )
         return self._content_identity
 
-    def inclusive_slice(self, start: datetime, end: datetime) -> tuple[OperationOccurrence, ...]:
+    def inclusive_slice(self, start: datetime, end: datetime) -> tuple[ScheduledEvent, ...]:
         require_tz_aware(start, name="start")
         require_tz_aware(end, name="end")
         start_utc = start.astimezone(UTC)
@@ -314,28 +314,28 @@ class OperationAgenda:
         if start_utc > end_utc:
             raise ValueError("start must not be after end")
         return tuple(
-            occurrence
-            for occurrence in self.occurrences
-            if start_utc <= occurrence.utc_evaluation_time <= end_utc
+            event
+            for event in self.events
+            if start_utc <= event.utc_evaluation_time <= end_utc
         )
 
     @classmethod
     def expand(
         cls,
         *,
-        agenda_id: AgendaId,
+        schedule_id: ScheduleId,
         days: Iterable[datetime | date],
-        rule: AgendaRule,
+        rule: ScheduleRule,
         timezone: str,
         through: date | None = None,
-    ) -> OperationAgenda:
-        """Resolve a rule over the trading days it is handed into a finite, ordered agenda.
+    ) -> Schedule:
+        """Resolve a rule over the trading days it is handed into a finite, ordered schedule.
 
         Design §3.4: the declaration is a trading-day filter plus a within-day rule, preflight
         expands it over the days the execution table has rows for, and the result is what the
         run consumes from then on. `days` accepts the instants `Workspace.evaluation_times`
-        returns; only their venue-local date is used, each day once. The occurrence id is
-        `{agenda_id}-{date}T{HHMM}` -- one scheme for one and for many instants a day. A wall
+        returns; only their venue-local date is used, each day once. The event id is
+        `{schedule_id}-{date}T{HHMM}` -- one scheme for one and for many instants a day. A wall
         time that does not exist, or happens twice, on any selected day is refused rather than
         resolved by guess (`declare_local_instant`).
 
@@ -361,41 +361,41 @@ class OperationAgenda:
                 ordered.append(day)
         ordered.sort()
         times = rule.times()
-        occurrences = tuple(
-            OperationOccurrence(
-                occurrence_id(f"{agenda_id}-{day.isoformat()}T{at.strftime('%H%M')}"),
+        events = tuple(
+            ScheduledEvent(
+                event_id(f"{schedule_id}-{day.isoformat()}T{at.strftime('%H%M')}"),
                 declare_local_instant(day, at, timezone),
             )
             for day in rule.select_days(ordered)
             if through is None or day <= through
             for at in times
         )
-        return cls(agenda_id=agenda_id, timezone=timezone, occurrences=occurrences)
+        return cls(schedule_id=schedule_id, timezone=timezone, events=events)
 
     @classmethod
     def daily(
         cls,
         *,
-        agenda_id: AgendaId,
+        schedule_id: ScheduleId,
         sessions: Iterable[datetime | date],
         at: time,
         timezone: str,
-    ) -> OperationAgenda:
-        """One occurrence per session, at the same venue-local wall time: `expand` with `1d`.
+    ) -> Schedule:
+        """One event per session, at the same venue-local wall time: `expand` with `1d`.
 
-        The constructor takes occurrences that are already known. The common case is not a list --
+        The constructor takes events that are already known. The common case is not a list --
         it is "every session this registered dataset has, at 08:00 local", and turning one into
         the other is mechanical work that was being written by hand at every call site.
 
         Three things stop being the caller's to get right:
 
-        - **The occurrence id.** Derived as ``{agenda_id}-{date}``. Two call sites inventing
+        - **The event id.** Derived as ``{schedule_id}-{date}``. Two call sites inventing
           slightly different id schemes produce different identities for the same session, and a
           replay stops being comparable to the run it replays.
         - **fold and offset.** Derived from the zone rather than typed as constants. A hand-written
           ``0`` and ``"+09:00"`` is correct until the venue observes DST, after which it is wrong
           twice a year and right on every day anyone tests.
-        - **Duplicate sessions.** A dataset can carry several rows for one day; the agenda takes
+        - **Duplicate sessions.** A dataset can carry several rows for one day; the schedule takes
           the day once.
 
         `sessions` accepts datetimes, so the sessions a dataset actually has can be passed
@@ -409,5 +409,8 @@ class OperationAgenda:
         different `at`, or sessions that avoid the day.
         """
         return cls.expand(
-            agenda_id=agenda_id, days=sessions, rule=AgendaRule("1d", (at,)), timezone=timezone
+            schedule_id=schedule_id,
+            days=sessions,
+            rule=ScheduleRule("1d", (at,)),
+            timezone=timezone,
         )

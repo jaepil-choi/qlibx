@@ -265,7 +265,7 @@ class AccountMark:
     """The complete valuation published for one Account snapshot at one instant.
 
     A mark is identified by **when it was taken**, not by the account version it values. An
-    occurrence that trades nothing still values the book, so several marks can belong to one
+    event that trades nothing still values the book, so several marks can belong to one
     account version, and their order is the order they were taken in.
     """
 

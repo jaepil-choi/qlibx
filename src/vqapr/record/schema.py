@@ -50,9 +50,9 @@ and a weight of one third has twenty-eight places -- and the column's field meta
 (`vqapr.type: decimal`), so `read_table` restores it and a duckdb reader casts it knowingly.
 
 **Written once, at the end (`docs/issues/archive/087`).** Record `146` wrote one complete file per
-accepted occurrence, because a parquet file is readable only once its footer is written and a
+accepted event, because a parquet file is readable only once its footer is written and a
 killed run was to leave every chunk that landed (record `135`). Measured, that was a physical
-write per occurrence per table -- about a fifth of a real strategy's wall clock -- and a
+write per event per table -- about a fifth of a real strategy's wall clock -- and a
 finished table of six hundred 8 KB files whose framing outweighed their data a hundredfold.
 The owner's ruling (2026-09-07): rows stay in memory as Arrow batches and land as one file
 per table when the run ENDS -- normally, or through an exception or an interrupt, since the
@@ -86,7 +86,7 @@ touch a second says "alive" a hundred times over; touching on every record chunk
 network share each is a round trip."""
 PROGRESS_EVERY = 5.0
 """What a running member says about itself while its rows are still in memory: accepted
-occurrences, rows per table and the last `event_time`, rewritten by the heartbeat at most every
+events, rows per table and the last `event_time`, rewritten by the heartbeat at most every
 `PROGRESS_EVERY` seconds. `list strategies --run` reads it (`member_progress`); before `087`
 it counted part files, and there are none to count now."""
 
@@ -119,11 +119,15 @@ RUN_KIND = "run"
 STRATEGY_KIND = "strategy"
 """One strategy's output inside a run: `strategies/<id>@<fp8>/strategy.json` (record `139`)."""
 
-RUN_SCHEMA = "vqapr-run/v1"
-"""The schema of `run.json`: configuration, written by `write_run_record`."""
+RUN_SCHEMA = "vqapr-run/v2"
+"""The schema of `run.json`: configuration, written by `write_run_record`.
 
-STRATEGY_SCHEMA = "vqapr-strategy-record/v1"
-DATAMODEL_SCHEMA = "vqapr-datamodel-record/v1"
+v2 since vqapr 0.16.0 (record `278`), with the strategy and datamodel schemas: `agenda` is
+`schedule` and `occurrence` is `event`. A v1 record is refused with a re-run fix, not translated.
+"""
+
+STRATEGY_SCHEMA = "vqapr-strategy-record/v2"
+DATAMODEL_SCHEMA = "vqapr-datamodel-record/v2"
 """The schema of `strategy.json`, written by `RunRecordWriter.finish(kind=STRATEGY_KIND)`."""
 
 DATAMODEL_KIND = "datamodel"
@@ -219,7 +223,7 @@ class StrategyRecord(_Record):
     strategy_id: str
     fingerprint: str
     component: dict[str, Any]
-    agenda: dict[str, Any]
+    schedule: dict[str, Any]
     compliance: list[dict[str, Any]]
     exchange: dict[str, Any] | None
     """The venue this strategy filled on: its component id, its registered fingerprint and its
@@ -245,7 +249,7 @@ class DatamodelRecord(_Record):
     datamodel_id: str
     fingerprint: str
     component: dict[str, Any]
-    agenda: dict[str, Any]
+    schedule: dict[str, Any]
     dataset_id: str
     value_fields: list[str]
     rows: int

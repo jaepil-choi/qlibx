@@ -70,10 +70,11 @@ or a fingerprint made before the fold reads unchanged (record `272`)."""
 
 
 class Clock(StrEnum):
-    """The two clocks of a run (design §3): the strategy's own agenda, and the market's instants
-    -- every instant the execution table has inside the run."""
+    """The two clocks of a run (design §3): the schedule a run declares -- a strategy decides and a
+    DataModel computes on it -- and the market's instants, every instant the execution table has
+    inside the run."""
 
-    STRATEGY = "strategy"
+    SCHEDULE = "schedule"
     MARKET = "market"
 
 
@@ -124,11 +125,11 @@ class Wiring:
 WIRING: Mapping[Role, Wiring] = MappingProxyType(
     {
         Role.DATA_MODEL: Wiring(
-            Role.DATA_MODEL, Clock.STRATEGY, (View.WINDOW,), Receiver.WAREHOUSE, True
+            Role.DATA_MODEL, Clock.SCHEDULE, (View.WINDOW,), Receiver.WAREHOUSE, True
         ),
         Role.STRATEGY_MODEL: Wiring(
             Role.STRATEGY_MODEL,
-            Clock.STRATEGY,
+            Clock.SCHEDULE,
             (View.WINDOW, View.ACCOUNT, View.HISTORY),
             Receiver.EXCHANGE,
             True,
@@ -164,7 +165,7 @@ WIRING: Mapping[Role, Wiring] = MappingProxyType(
 
 MARKET_CLOCK_ORDER: tuple[Role, ...] = (Role.ACCRUAL, Role.EXCHANGE, Role.COMPLIANCE)
 """The roles a market-clock instant calls, in the order §3.1 fixes: ACCRUE, EXECUTE, then --
-after the framework's own VALUATION -- COMPLIANCE. A decision (DECIDE) is the strategy clock's,
+after the framework's own VALUATION -- COMPLIANCE. A decision (DECIDE) is the schedule clock's,
 sorted after the market instant it coincides with. `run/engine/loop.py::MarketClock.at` is the one
 place this order is written as calls, and the wiring test holds the two together."""
 

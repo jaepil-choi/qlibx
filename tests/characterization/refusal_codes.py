@@ -1142,7 +1142,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
     from vqapr.component.fingerprint import fingerprint_component
     from vqapr.component.reference import ComponentRef
     from vqapr.domain.wiring import Role
-    from vqapr.workspace.run_definition import RunAgenda, RunDefinition, StrategyEntry
+    from vqapr.workspace.run_definition import RunSchedule, RunDefinition, StrategyEntry
 
     strategy = tmp_path / "strategy.py"
     strategy.write_text(
@@ -1172,7 +1172,7 @@ def _runtime_workspace(tmp_path: Path) -> list[str]:
                     strategy=StrategyEntry("strategy"),
                     instruments=("A",),
                     timezone="Asia/Seoul",
-                    agenda=RunAgenda(every="1d", at=(time(15, 30),)),
+                    schedule=RunSchedule(every="1d", at=(time(15, 30),)),
                     writes="unsourced-weights",
                 )
             )
@@ -1238,7 +1238,7 @@ def _runtime_datamodel_output(tmp_path: Path) -> list[str]:
     `docs/issues/archive/088`: a value field pyarrow types as decimal is one no dataset can declare, so
     the output refuses it at the first append rather than after every session has run. The
     layer is stood in for by the two attributes the output reads from it -- constructing a
-    `FrozenDataModel` needs a fingerprinted component and a frozen agenda, none of which
+    `FrozenDataModel` needs a fingerprinted component and a frozen schedule, none of which
     bears on the refusal.
     """
     from datetime import UTC, datetime

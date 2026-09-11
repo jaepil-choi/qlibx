@@ -169,7 +169,7 @@ def _run(root: Path, capsys: pytest.CaptureFixture[str], run_id: str, strategy: 
         "writes": f"{run_id}-weights",
         "strategy": {"component": strategy},
         "timezone": "Asia/Seoul",
-        "agenda": {"every": "1d", "at": "04:00"},
+        "schedule": {"every": "1d", "at": "04:00"},
         "exchange": "venue",
         "execution": {
             "dataset": "venue-daily",

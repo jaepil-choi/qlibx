@@ -96,7 +96,7 @@ def _strategy_record(strategy_ref: str, compliance: list[dict[str, str]]) -> dic
             "strategy_id": strategy_id,
             "fingerprint": strategy_ref.split("@")[1] * 8,
             "component": {"component_id": strategy_id},
-            "agenda": {},
+            "schedule": {},
             "compliance": compliance,
             "account": {},
             "tables": {},
@@ -104,7 +104,7 @@ def _strategy_record(strategy_ref: str, compliance: list[dict[str, str]]) -> dic
             "source_digest": {},
             "declared_digest": "d",
             "roster": None,
-            "period": {"start": T0.isoformat(), "end": T3.isoformat(), "occurrences": 3},
+            "period": {"start": T0.isoformat(), "end": T3.isoformat(), "events": 3},
             "timing": {},
         }
     )

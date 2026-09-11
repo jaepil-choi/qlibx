@@ -85,7 +85,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
     # the strategy has one: `install` already registered the sample's run, and executing that
     # would run the sample while the result was read as proof of the scaffold. It declares its
     # own sessions and wall time (record 148): every day the sample panel has, at the callback,
-    # sliced to the period below -- no agenda or config is registered beside it.
+    # sliced to the period below -- no schedule or config is registered beside it.
     runs = tmp_path / "runs.yaml"
     runs.write_text(
         yaml.safe_dump(
@@ -95,7 +95,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
                         "writes": "scaffold-weights",
                         "strategies": {"alpha": {}},
                         "timezone": journey.VENUE,
-                        "agenda": {"every": "1d", "at": journey.CALLBACK.strftime("%H:%M")},
+                        "schedule": {"every": "1d", "at": journey.CALLBACK.strftime("%H:%M")},
                         "instruments": list(panel.instruments),
                         "start": f"{sessions[2].isoformat()}T00:00:00{journey.OFFSET}",
                         "end": f"{sessions[-1].isoformat()}T23:59:59{journey.OFFSET}",
@@ -132,7 +132,7 @@ def test_the_scaffold_registers_checks_and_runs_without_a_single_edit(tmp_path: 
     # It TRADED. A scaffold that runs but never decides would satisfy `ok: true` while proving
     # nothing about the intent, execution or account-commit paths -- which is exactly what the old
     # Hold template did.
-    assert scaffolded["occurrences"] > 0
+    assert scaffolded["events"] > 0
     assert scaffolded["account_version"] > 0, (
         "the scaffold ran without ever committing a fill, so the authoring contract's decision "
         "path is unexercised"

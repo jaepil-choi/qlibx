@@ -23,11 +23,11 @@ from vqapr.domain.fill import FillRule
 from vqapr.domain.memory import prepare_model_state
 from vqapr.domain.wiring import Role
 from vqapr.public import register_dataset, register_instruments
-from vqapr.run.preflight.facts import derived_agenda
+from vqapr.run.preflight.facts import derived_schedule
 from vqapr.run.preflight.freeze import preflight_run
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -94,7 +94,7 @@ def _setup(
     Tests that assert the refusal itself pass False.
 
     The run's trading days are the execution table's (design §3.3): `days`, one by default, and
-    the strategy clock is `every: 1d` at `at`.
+    the schedule clock is `every: 1d` at `at`.
     """
     workspace = Workspace.create(root)
     strategy_component = _component(root, "strategy", Role.STRATEGY_MODEL)
@@ -138,7 +138,7 @@ def _setup(
         strategy=StrategyEntry("strategy", {"cadence": [1]}),
         compliance=("limit",),
         timezone="Asia/Seoul",
-        agenda=RunAgenda(every="1d", at=(at,)),
+        schedule=RunSchedule(every="1d", at=(at,)),
         exchange=None if exchange_component is None else str(exchange_component.component_id),
         execution=(
             RunExecution(
@@ -201,7 +201,7 @@ def _execution_exchange(
         connection = duckdb.connect()
         try:
             # Two prints per trading day, 09:30 and 15:30 KST: the days are what the run's
-            # agenda is expanded over (design §3.3), the instants what it fills against.
+            # schedule is expanded over (design §3.3), the instants what it fills against.
             rows = ",\n".join(
                 f"(TIMESTAMPTZ '{day.isoformat()} 09:30:00+09', 'ABC', true, 9.0::DOUBLE),\n"
                 f"(TIMESTAMPTZ '{day.isoformat()} 15:30:00+09', 'ABC', true, 10.0::DOUBLE)"
@@ -240,12 +240,12 @@ def _execution_exchange(
     return component
 
 
-def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
+def test_preflight_freezes_the_run_s_sessions_as_its_one_schedule(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Record `148`: the strategy's agenda is derived from the run, and it is the only one.
+    """Record `148`: the strategy's schedule is derived from the run, and it is the only one.
 
-    There is no valuation agenda and no monitoring agenda to merge in: the book is valued at
+    There is no valuation schedule and no monitoring schedule to merge in: the book is valued at
     the instant the venue fills and judged right after each commit, so the dispatch order is
     the sessions at `at`, and nothing else.
     """
@@ -254,16 +254,16 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     frozen = preflight_run(workspace, definition)
 
     layer = frozen.strategy
-    assert layer.config.agenda_id == definition.agenda_id == "preflight.agenda"
-    assert layer.agenda.agenda_id == definition.agenda_id
-    assert layer.agenda.timezone == "Asia/Seoul"
-    assert [item.occurrence_id for item in layer.agenda.occurrences] == [
-        "preflight.agenda-2024-03-05T0900"
+    assert layer.config.schedule_id == definition.schedule_id == "preflight.schedule"
+    assert layer.schedule.schedule_id == definition.schedule_id
+    assert layer.schedule.timezone == "Asia/Seoul"
+    assert [item.event_id for item in layer.schedule.events] == [
+        "preflight.schedule-2024-03-05T0900"
     ]
-    (occurrence,) = layer.agenda.occurrences
-    assert occurrence.evaluation_time == datetime(2024, 3, 5, 9, tzinfo=_ZONE)
-    assert frozen.dispatch_order(layer) == layer.agenda.occurrences
-    assert not hasattr(frozen, "valuation_agenda") and not hasattr(frozen, "monitoring_agenda")
+    (event,) = layer.schedule.events
+    assert event.evaluation_time == datetime(2024, 3, 5, 9, tzinfo=_ZONE)
+    assert frozen.dispatch_order(layer) == layer.schedule.events
+    assert not hasattr(frozen, "valuation_schedule") and not hasattr(frozen, "monitoring_schedule")
     assert layer.compliance.rules[0].component_id == "limit"
     assert frozen.instruments == definition.instruments
     assert layer.requirements == ()
@@ -312,7 +312,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_agenda(
     assert changed_fill.identity != frozen_execution.identity
 
 
-def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
+def test_preflight_refuses_a_last_strategy_event_with_no_execution_target(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     """A finite `next_eligible` run must not fail only after earlier callbacks mutate state.
@@ -334,7 +334,7 @@ def test_preflight_refuses_a_last_strategy_occurrence_with_no_execution_target(
     failure = error.failures[0]
     assert failure.code == "execution.target_outside_horizon"
     assert failure.example_total == 1
-    assert failure.examples == ("preflight.agenda-2024-03-05T1530",)
+    assert failure.examples == ("preflight.schedule-2024-03-05T1530",)
     assert "fill=the first execution instant after the decision" in (failure.observed or "")
     assert "end=2024-03-05T15:30:00+09:00" in (failure.observed or "")
     assert "extend the run end" in failure.fix
@@ -494,7 +494,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # The definition holds ids (record `139`); the registered component is what the frozen
     # strategy carries, detached from the registration object. Since record `148` there is no
     # separately registered binding that could drift from it: the strategy's config is built by
-    # preflight from the registration and the run's own agenda.
+    # preflight from the registration and the run's own schedule.
     # The registration's config cannot be edited at all: it is read-only, which is what keeps
     # a frozen run detached from the workspace without copying on every read (record `145`).
     with pytest.raises(TypeError):
@@ -753,14 +753,14 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
         StrategyEntry("strategy", ("not-json",))  # type: ignore[arg-type]
 
 
-def test_the_derived_agenda_fires_once_per_trading_day_at_the_declared_wall_time(
+def test_the_derived_schedule_fires_once_per_trading_day_at_the_declared_wall_time(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """Design §3.3-3.4: the DAYS come from the execution table, the INSTANTS from `agenda`.
+    """Design §3.3-3.4: the DAYS come from the execution table, the INSTANTS from `schedule`.
 
-    Three trading days, written out of order and one of them twice; one occurrence per day, in
-    the run's zone, at `at`; the ids and the fold/offset proof are `OperationAgenda.expand`'s, so
-    two runs over the same days name the same occurrences.
+    Three trading days, written out of order and one of them twice; one event per day, in
+    the run's zone, at `at`; the ids and the fold/offset proof are `Schedule.expand`'s, so
+    two runs over the same days name the same events.
     """
     workspace, definition = _setup(
         tmp_path,
@@ -768,20 +768,20 @@ def test_the_derived_agenda_fires_once_per_trading_day_at_the_declared_wall_time
         days=(date(2024, 3, 7), date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 6)),
     )
     listed = definition.replace(
-        agenda=RunAgenda(every="1d", at=(time(8, 30),)),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         end=datetime(2024, 3, 8, 15, 30, tzinfo=_ZONE),
     )
 
-    agenda = derived_agenda(workspace, listed)
+    schedule = derived_schedule(workspace, listed)
 
-    assert agenda.agenda_id == listed.agenda_id == "preflight.agenda"
-    assert agenda.timezone == "Asia/Seoul"
-    assert [occurrence.occurrence_id for occurrence in agenda.occurrences] == [
-        "preflight.agenda-2024-03-05T0830",
-        "preflight.agenda-2024-03-06T0830",
-        "preflight.agenda-2024-03-07T0830",
+    assert schedule.schedule_id == listed.schedule_id == "preflight.schedule"
+    assert schedule.timezone == "Asia/Seoul"
+    assert [event.event_id for event in schedule.events] == [
+        "preflight.schedule-2024-03-05T0830",
+        "preflight.schedule-2024-03-06T0830",
+        "preflight.schedule-2024-03-07T0830",
     ]
-    assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
+    assert [event.evaluation_time for event in schedule.events] == [
         datetime(2024, 3, day, 8, 30, tzinfo=_ZONE) for day in (5, 6, 7)
     ]
 
@@ -792,7 +792,7 @@ def test_the_execution_tables_instants_collapse_to_venue_local_days(
     """`UC-TIME-002`, kept by date derivation (design §3.3): a denser table adds fill instants
     and never a decision day.
 
-    The execution fixture prints twice a day, 09:30 and 15:30 KST; the agenda takes only their
+    The execution fixture prints twice a day, 09:30 and 15:30 KST; the schedule takes only their
     DATE in the run's zone, at `at`. The zone is the run's, not the table's: the same instants
     are the evening BEFORE in Honolulu, so a run declared there fires on those days. A table the
     run cannot find is a refusal, not a guess.
@@ -804,34 +804,34 @@ def test_the_execution_tables_instants_collapse_to_venue_local_days(
     )
     from_table = definition.replace(end=datetime(2024, 3, 9, 15, 30, tzinfo=_ZONE))
 
-    agenda = derived_agenda(workspace, from_table)
+    schedule = derived_schedule(workspace, from_table)
 
-    assert [occurrence.evaluation_time for occurrence in agenda.occurrences] == [
+    assert [event.evaluation_time for event in schedule.events] == [
         datetime(2024, 3, day, 9, tzinfo=_ZONE) for day in (5, 6, 7, 8)
     ], "eight prints became four 09:00 decisions on the four venue days"
 
     honolulu = from_table.replace(
-        timezone="Pacific/Honolulu", agenda=RunAgenda(every="1d", at=(time(7),))
+        timezone="Pacific/Honolulu", schedule=RunSchedule(every="1d", at=(time(7),))
     )
     assert [
-        occurrence.local_instant.local_date
-        for occurrence in derived_agenda(workspace, honolulu).occurrences
+        event.local_instant.local_date
+        for event in derived_schedule(workspace, honolulu).events
     ] == [date(2024, 3, day) for day in (4, 5, 6, 7)]
 
     absent = from_table.replace(
         execution=RunExecution(dataset="absent", trade_price="close")
     )
     with pytest.raises(VqaprError):
-        derived_agenda(workspace, absent)
+        derived_schedule(workspace, absent)
 
 
-def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
+def test_the_schedule_is_cut_on_dates_before_it_is_built_and_derived_once_per_command(
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`docs/issues/archive/069`: 735 occurrences were built three times per command and 15 kept.
+    """`docs/issues/archive/069`: 735 events were built three times per command and 15 kept.
 
-    Two facts. The derived agenda holds only the sessions inside `[start, end]` -- the cut is on
-    dates, before an occurrence and its offset proof exist -- and one `check` derives it once,
+    Two facts. The derived schedule holds only the sessions inside `[start, end]` -- the cut is on
+    dates, before an event and its offset proof exist -- and one `check` derives it once,
     one `preflight` once, rather than once per strategy inside two judges and again in preflight.
     """
     from vqapr.run.preflight.checks import judgments
@@ -845,10 +845,10 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     # 09:00 to 15:30) admits one.
     two_days = definition
 
-    agenda = derived_agenda(workspace, two_days)
-    assert [occurrence.local_instant.local_date for occurrence in agenda.occurrences] == [
+    schedule = derived_schedule(workspace, two_days)
+    assert [event.local_instant.local_date for event in schedule.events] == [
         date(2024, 3, 5)
-    ], "the agenda is the run's period, not the table's whole span"
+    ], "the schedule is the run's period, not the table's whole span"
 
     from vqapr.workspace import registry as store_module
 
@@ -862,7 +862,7 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
         return original(spec, field, **kwargs)
 
     monkeypatch.setattr(store_module.scan, "distinct_values", counted)
-    # A fresh snapshot: the one above already holds the instants `derived_agenda` read.
+    # A fresh snapshot: the one above already holds the instants `derived_schedule` read.
     failures, blocked = judgments(two_days, Workspace.open(tmp_path))
     assert blocked == [] and failures == [], (failures, blocked)
     assert calls == ["trade_at"], f"check read the sessions {len(calls)} times"
@@ -870,14 +870,14 @@ def test_the_agenda_is_cut_on_dates_before_it_is_built_and_derived_once_per_comm
     calls.clear()
     frozen = preflight_run(tmp_path, two_days)
     assert calls == ["trade_at"], f"preflight read the sessions {len(calls)} times"
-    assert len(frozen.strategy.agenda.occurrences) == 1
+    assert len(frozen.strategy.schedule.events) == 1
 
 
-def test_an_on_last_agenda_reads_past_end_to_know_its_last_month_is_over(
+def test_an_on_last_schedule_reads_past_end_to_know_its_last_month_is_over(
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Record `253`. Whether 29 March is March's last session is the next session's to say, and
-    that session lies past `end`: the agenda reads on, fires on nothing it read past `end`, and
+    that session lies past `end`: the schedule reads on, fires on nothing it read past `end`, and
     shares its one read of the table with the horizon as before (record `238`)."""
     from vqapr.run.preflight.facts import bound_execution_horizon
     from vqapr.workspace import registry as store_module
@@ -894,16 +894,16 @@ def test_an_on_last_agenda_reads_past_end_to_know_its_last_month_is_over(
         ),
     )
     month_end = definition.replace(
-        agenda=RunAgenda(every="1M", at=(time(15, 20),), on="last"),
+        schedule=RunSchedule(every="1M", at=(time(15, 20),), on="last"),
         start=datetime(2024, 3, 1, tzinfo=_ZONE),
         end=datetime(2024, 3, 29, 15, 30, tzinfo=_ZONE),
     )
 
-    assert [o.evaluation_time for o in derived_agenda(workspace, month_end).occurrences] == [
+    assert [o.evaluation_time for o in derived_schedule(workspace, month_end).events] == [
         datetime(2024, 3, 29, 15, 20, tzinfo=_ZONE)
     ], "April's sessions say March is over, and fire nothing themselves"
     before = month_end.replace(end=datetime(2024, 3, 28, 15, 30, tzinfo=_ZONE))
-    assert derived_agenda(workspace, before).occurrences == (), (
+    assert derived_schedule(workspace, before).events == (), (
         "March's last session is after this `end`, so the run holds no month-end"
     )
 
@@ -916,9 +916,9 @@ def test_an_on_last_agenda_reads_past_end_to_know_its_last_month_is_over(
 
     monkeypatch.setattr(store_module.scan, "distinct_values", counted)
     fresh = Workspace.open(tmp_path)
-    derived_agenda(fresh, month_end)
+    derived_schedule(fresh, month_end)
     bound_execution_horizon(fresh, month_end)
-    assert calls == ["trade_at"], f"the agenda and the horizon read the sessions {len(calls)} times"
+    assert calls == ["trade_at"], f"the schedule and the horizon read the sessions {len(calls)} times"
 
 
 def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
@@ -928,13 +928,13 @@ def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
     workspace, definition = _setup(tmp_path, model_price_parquet, days=(date(2024, 3, 10),))
     skipped = definition.replace(
         timezone="America/New_York",
-        agenda=RunAgenda(every="1d", at=(time(2, 30),)),
+        schedule=RunSchedule(every="1d", at=(time(2, 30),)),
         start=datetime(2024, 3, 9, tzinfo=_ZONE),
         end=datetime(2024, 3, 11, tzinfo=_ZONE),
     )
 
     with pytest.raises(ValueError, match="does not exist"):
-        derived_agenda(workspace, skipped)
+        derived_schedule(workspace, skipped)
     with pytest.raises(ValueError, match="does not exist"):
         preflight_run(workspace, skipped)
 
@@ -994,7 +994,7 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
     tmp_path: Path, model_price_parquet: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Record `238`. One `vqapr run` read the execution table's instant column five times: the
-    judgments and preflight each derived the agenda from its distinct instants, and the
+    judgments and preflight each derived the schedule from its distinct instants, and the
     ordering judgment, preflight's target proof and the run each scanned the candidate instants
     for the horizon (`experiments/exp_238`, `08_run_factor`: `distinct_values` x2,
     `candidate_instants` x3). The horizon is the same column cut to `(start, end]`, so the
@@ -1039,9 +1039,9 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
     failures, blocked = judgments(definition, fresh)
     assert failures == [] and blocked == [], (failures, blocked)
     frozen = preflight_run(fresh, definition)
-    assert len(frozen.strategy.agenda.occurrences) == 1
+    assert len(frozen.strategy.schedule.events) == 1
     assert candidates == [], f"the horizon was scanned {len(candidates)} times"
-    # Asked four times of one workspace object -- twice for the agenda, twice for the horizon
+    # Asked four times of one workspace object -- twice for the schedule, twice for the horizon
     # -- and the column was read once: the memo is the workspace's, not the callers'.
     assert instants == ["execution"] * 4
 
@@ -1051,7 +1051,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
 ) -> None:
     """Record `241`: the judgments and the freeze read one `RunFacts`.
 
-    `experiments/exp_238` counted, in one `vqapr run`, the agenda derived twice, the execution
+    `experiments/exp_238` counted, in one `vqapr run`, the schedule derived twice, the execution
     table bound twice, the strategy imported three times before the run's own instance and the
     venue twice. Through `verify_run` each is read once: the strategy twice in all, because its
     initial state is still proved on a second fresh instance (`docs/issues/archive/076`).
@@ -1083,7 +1083,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
         return original_load(ref, kind=kind, project_root=project_root)
 
     monkeypatch.setattr(loading, "_load", counted_load)
-    for name in ("derived_agenda", "bound_execution_table", "bound_execution_horizon"):
+    for name in ("derived_schedule", "bound_execution_table", "bound_execution_horizon"):
         monkeypatch.setattr(
             preflight_module, name, counting(name, getattr(preflight_module, name))
         )
@@ -1100,7 +1100,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
         verdict.refusal,
     )
     assert counts == {
-        "derived_agenda": 1,
+        "derived_schedule": 1,
         "bound_execution_table": 1,
         "bound_execution_horizon": 1,
         "scan": 1,
@@ -1212,10 +1212,10 @@ def test_a_run_frames_what_each_callback_read_once(
     from vqapr.authoring import Hold
 
     (simulation,) = outcome.results.values()
-    assert any(not isinstance(trace.result, Hold) for trace in simulation.occurrences), (
+    assert any(not isinstance(trace.result, Hold) for trace in simulation.events), (
         "the run must take the intent path"
     )
-    callbacks = len(frozen.strategy.agenda.occurrences)
+    callbacks = len(frozen.strategy.schedule.events)
     assert callbacks == 1
     assert framed == ["refs"] * callbacks, f"{len(framed)} framings for {callbacks} callbacks"
     assert asked == ["inputs"], f"inputs() asked {len(asked)} times for one run"
@@ -1228,7 +1228,7 @@ def test_the_sessions_are_read_for_the_run_period_not_the_table(
     still the table's whole column: a ten-session run over a three-year table read 735 instants
     to keep ten (`experiments/exp_246`, `08_run_factor` #752). The workspace now reads the
     instants inside the run's period widened by a day each side -- enough for every venue-local
-    date the agenda keeps and every instant the horizon keeps -- and both cuts are unchanged."""
+    date the schedule keeps and every instant the horizon keeps -- and both cuts are unchanged."""
     from datetime import timedelta
 
     from vqapr.run.preflight.checks import judgments
@@ -1260,8 +1260,8 @@ def test_the_sessions_are_read_for_the_run_period_not_the_table(
         (definition.start - timedelta(days=1), definition.end + timedelta(days=1))
     ], f"the sessions were read {len(bounds)} times, bounded {bounds}"
     assert [
-        occurrence.local_instant.local_date for occurrence in frozen.strategy.agenda.occurrences
-    ] == [date(2024, 3, 5)], "the agenda is the run's period, as before"
+        event.local_instant.local_date for event in frozen.strategy.schedule.events
+    ] == [date(2024, 3, 5)], "the schedule is the run's period, as before"
     assert bound_execution_horizon(fresh, definition).instants == scanned.instants, (
         "the horizon is what the unbounded scan answered"
     )

@@ -305,7 +305,7 @@ _RUN_KEYS = (
     "start",
     "end",
     "timezone",
-    "agenda",
+    "schedule",
     "exchange",
     "execution",
     "initial_account",
@@ -314,7 +314,7 @@ _RUN_KEYS = (
 
 `RunDefinition` tolerates an absent period, venue, execution dataset and account because other
 callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
-The strategy clock is the run's own `agenda:` block since the two-clocks campaign (`every`
+The schedule clock is the run's own `schedule:` block since the two-clocks campaign (`every`
 with `at`, or with `from`/`to`), expanded over the execution dataset's trading days -- there is
 no day list to declare. Pinned as a literal rather than imported: the template is judged
 against what the reader needs to type, and a constant that moved with the code would make this
@@ -376,7 +376,7 @@ def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
     read the file would answer a `strategy:` file, a `datamodel:` file and a typo three ways.
     """
     spec = tmp_path / "thin.yaml"
-    spec.write_text("strategy:\n  component: a\n  agenda_id: b\n", encoding="utf-8")
+    spec.write_text("strategy:\n  component: a\n  schedule_id: b\n", encoding="utf-8")
 
     code, payload = _envelope(capsys, "--project-root", str(tmp_path), "run", str(spec))
 
@@ -546,7 +546,7 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     spec.write_text(
         "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
         "    end: \"2024-03-06T23:00:00+09:00\"\n"
-        "    timezone: Asia/Seoul\n    agenda: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
+        "    timezone: Asia/Seoul\n    schedule: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
         "    execution:\n      dataset: krx\n      trade_price: close\n"
         "      fill:\n        at: \"15:30\"\n"
         "    initial_account: {cash: \"1000\", mode: long_short}\n    strategies: {alpha: {}}\n",
@@ -594,7 +594,7 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
     """The template's own header must say what running the file needs, not only what it declares.
 
     It once read "every required key is shown" while omitting that the components it names had to
-    be bound to an agenda elsewhere -- true about the file, false about what running it needs,
+    be bound to an schedule elsewhere -- true about the file, false about what running it needs,
     which is the harder kind of wrong to catch because nothing about the emitted file looks
     incomplete. There is no elsewhere since record 148: the run carries its own sessions and wall
     time, every strategy is called on every session and decides for itself, and the template has
@@ -606,7 +606,7 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
 
     text = target.read_text(encoding="utf-8")
 
-    assert "agenda:" in text and "every:" in text, "the strategy clock is the agenda block"
+    assert "schedule:" in text and "every:" in text, "the schedule clock is the schedule block"
     assert "trading days" in text, "the template does not say where the days come from"
     assert "from" in text and "to" in text, "the template does not show the intraday form"
     assert "nothing here registers them" in text
@@ -624,7 +624,7 @@ def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
 
     (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
-    decide_at = time.fromisoformat(run["agenda"]["at"])
+    decide_at = time.fromisoformat(run["schedule"]["at"])
     fill_at = time.fromisoformat(run["execution"]["fill"]["at"])
 
     assert decide_at < fill_at

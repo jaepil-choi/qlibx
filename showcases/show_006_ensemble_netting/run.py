@@ -14,7 +14,7 @@
 
 All three runs are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real
 order planning and the declared execution profile. `reversal` mutates `self.memory` every
-occurrence, exactly as show_005's alpha does; `momentum` never assigns `self.memory` at all, so its
+event, exactly as show_005's alpha does; `momentum` never assigns `self.memory` at all, so its
 published lineage carries `state_path == ["constant"]` while `reversal`'s carries `["moved"]` — the
 package-computed, unforgeable proof that one callback body actually moved state and the other did
 not.
@@ -60,7 +60,7 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunAgenda,
+    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
@@ -261,7 +261,7 @@ _REVERSAL_SOURCE = _member_source(
     horizon_sign="A five-day price reversal",
     memory_write=(
         "history = dict(self.memory or {})\n"
-        '        history["occurrences"] = int(history.get("occurrences", 0)) + 1\n'
+        '        history["events"] = int(history.get("events", 0)) + 1\n'
         "        self.memory = history"
     ),
 )
@@ -645,7 +645,7 @@ class _Registered:
     dataset_id: str
     directory: Path
     row_count: int
-    occurrences: int
+    events: int
     first_day: date
     """The venue-local day of the first row, which is the first day a reader can read it."""
 
@@ -692,7 +692,7 @@ def _register_run_table(
     )
     con = duckdb.connect()
     try:
-        rows, occurrences, first = con.execute(
+        rows, events, first = con.execute(
             f"SELECT count(*), count(DISTINCT event_time), min(event_time) "
             f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
         ).fetchone()
@@ -701,7 +701,7 @@ def _register_run_table(
     first_day = (
         first.astimezone(ZoneInfo(VENUE)) if first.tzinfo is not None else first
     ).date()
-    return _Registered(dataset_id, directory, int(rows), int(occurrences), first_day)
+    return _Registered(dataset_id, directory, int(rows), int(events), first_day)
 
 
 def _member_run(
@@ -719,7 +719,7 @@ def _member_run(
         run_id=str(strategy_ref.component_id),
         strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(at,)),
+        schedule=RunSchedule(every="1d", at=(at,)),
         exchange=academic_ref.component_id,
         execution=RunExecution(
             dataset="krx-daily",
@@ -748,7 +748,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # The momentum member needs an eleven-close history (ten-session return); the reversal
     # member needs six. Both members and the ensemble share one callback calendar, so only
     # sessions where both members have enough history produce a decision -- the rest decline.
-    # This is asserted below rather than hidden by trimming the agenda to fit the signal.
+    # This is asserted below rather than hidden by trimming the schedule to fit the signal.
     callback_days = all_days
 
     register_dataset(
@@ -955,7 +955,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     # The ensemble reads what its members published, so its horizon opens on the first day EVERY
     # member has a weight on record. A member declines until its lookback fills, and a decline
-    # records no weight, so the allocation datasets begin days after the members' own agenda
+    # records no weight, so the allocation datasets begin days after the members' own schedule
     # does; an ensemble opening with the members would ask its first decision to read an empty
     # window, which `vqapr check` refuses (`check.lookback.uncovered`) -- and since record 168
     # `preflight_run` asks the same judgments, so this script was refused too. The members'
@@ -968,7 +968,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         strategy=StrategyEntry("show006-ensemble"),
         compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        agenda=RunAgenda(every="1d", at=(time(9, 0),)),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="show006-krx",
         execution=RunExecution(
             dataset="krx-daily",
@@ -1014,16 +1014,16 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if momentum_published.dataset_id != "momentum_allocation":
         raise AssertionError("momentum member's table is not registered as momentum_allocation")
 
-    # Assertion 2: at least one ticker on at least one occurrence disagreed (non-zero offset).
+    # Assertion 2: at least one ticker on at least one event disagreed (non-zero offset).
     netting_rows = ensemble_result.final_state.recorder_rows.get("ensemble.netting", ())
     if not netting_rows:
         raise AssertionError("the ensemble never recorded a netting measurement")
     max_offset = max(Decimal(row["offset_weight"]) for row in netting_rows)
     if max_offset <= 0:
         raise AssertionError(
-            "no ticker-occurrence showed a non-zero offset_weight; the members never disagreed"
+            "no ticker-event showed a non-zero offset_weight; the members never disagreed"
         )
-    crossing_occurrences = len(
+    crossing_events = len(
         {row["event_time"] for row in netting_rows if Decimal(row["offset_weight"]) > 0}
     )
 
@@ -1064,21 +1064,21 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "rows": account_published.row_count,
             "read_back": len(replayed_account),
         },
-        "crossing_occurrences": crossing_occurrences,
+        "crossing_events": crossing_events,
         "max_offset_weight": str(max_offset),
         "reversal_member": {
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
-            "occurrences": reversal_memory.get("occurrences"),
+            "events": reversal_memory.get("events"),
             "published_dataset": reversal_published.dataset_id,
-            "published_occurrences": reversal_published.occurrences,
+            "published_events": reversal_published.events,
             "published_rows": reversal_published.row_count,
         },
         "momentum_member": {
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
             "published_dataset": momentum_published.dataset_id,
-            "published_occurrences": momentum_published.occurrences,
+            "published_events": momentum_published.events,
             "published_rows": momentum_published.row_count,
         },
         "ensemble_run": {
@@ -1123,12 +1123,12 @@ def main() -> None:
     print(f"sessions / callbacks       : {trace['sessions']} / {trace['callbacks']}")
     print(
         f"reversal registered         : "
-        f"{trace['reversal_member']['published_occurrences']} occurrences as "
+        f"{trace['reversal_member']['published_events']} events as "
         f"{trace['reversal_member']['published_dataset']} (from the member run's own record)"
     )
     print(
         f"momentum registered         : "
-        f"{trace['momentum_member']['published_occurrences']} occurrences as "
+        f"{trace['momentum_member']['published_events']} events as "
         f"{trace['momentum_member']['published_dataset']} (from the member run's own record)"
     )
     print(
@@ -1136,7 +1136,7 @@ def main() -> None:
         f"and read back from a real run"
     )
     print(f"subscribed inputs           : {', '.join(ensemble['subscribed_allocation_inputs'])}")
-    print(f"crossing occurrences        : {trace['crossing_occurrences']}")
+    print(f"crossing events        : {trace['crossing_events']}")
     print(f"max ticker offset_weight    : {trace['max_offset_weight']}")
     print(f"shipped compliance          : {', '.join(ensemble['shipped_compliance'])}")
     print(f"rebalances                  : {ensemble['rebalances']}")

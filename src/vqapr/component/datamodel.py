@@ -28,7 +28,7 @@ class DataCall(Call, ABC):
 
     @property
     @abstractmethod
-    def evaluation_time(self) -> datetime:
+    def at(self) -> datetime:
         """The single frozen PIT cutoff this invocation computes for."""
 
     @abstractmethod

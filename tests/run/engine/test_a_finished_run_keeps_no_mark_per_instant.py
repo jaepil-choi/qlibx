@@ -46,7 +46,7 @@ def test_a_finished_run_keeps_a_summary_per_instant_and_not_a_mark_per_name(
                         "writes": "kept-weights",
                         "strategy": {"component": "always-long"},
                         "timezone": "Asia/Seoul",
-                        "agenda": {"every": "1m", "from": "09:00", "to": "09:05"},
+                        "schedule": {"every": "1m", "from": "09:00", "to": "09:05"},
                         "exchange": "venue",
                         "execution": {"dataset": "venue-minute", "trade_price": "close"},
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
@@ -66,7 +66,7 @@ def test_a_finished_run_keeps_a_summary_per_instant_and_not_a_mark_per_name(
     result = run(tmp_path, preflight_run(workspace, workspace.run_definition("kept"))).result()
     gc.collect()
 
-    market = [trace for trace in result.occurrences if isinstance(trace, DueExecutionTrace)]
+    market = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]
     assert len(market) == 11, "eleven market-clock instants were valued"
     kept = sum(1 for item in gc.get_objects() if isinstance(item, Mark))
     assert kept <= 2, f"{kept} Mark objects survive a run of eleven valuations of one name"

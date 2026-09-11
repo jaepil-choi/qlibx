@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, time
 from typing import Self
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
 
-from vqapr.domain.values import at_local, require_tz_aware, shift_calendar
+from vqapr.domain.values import at_local, iana_zone, require_tz_aware, shift_calendar
 
 
 class _Lookback(BaseModel):
@@ -132,12 +132,7 @@ class CalendarLookback(_Lookback):
     @field_validator("timezone")
     @classmethod
     def _iana(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("timezone must be a non-empty IANA timezone name")
-        try:
-            ZoneInfo(value)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError(f"unknown IANA timezone: {value!r}") from error
+        iana_zone(value)
         return value
 
     @model_validator(mode="after")

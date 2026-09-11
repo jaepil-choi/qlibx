@@ -1,6 +1,6 @@
 # On Windows, a strategy naming `Asia/Seoul` fails registration as a 502 blamed on user code, until `tzdata` is installed
 
-**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop`: `pyproject.toml` does not depend on `tzdata`, and `CalendarLookback` (`src/vqapr/data/lookback.py`) and `domain/values.py` raise a bare `ValueError("unknown IANA timezone")` that the loader attributes to the user's frame. Being fixed on `develop`.**
+**Status: RECEIVED 2026-09-11 (접수) — confirmed against `develop`: `pyproject.toml` does not depend on `tzdata`, and `CalendarLookback` (`src/vqapr/data/lookback.py`) and `domain/values.py` raise a bare `ValueError("unknown IANA timezone")` that the loader attributes to the user's frame. Being fixed on `develop`.** **CLOSED 2026-09-11 by record `263` — vqapr depends on `tzdata` on Windows, and the three places that name a zone refuse through one door (`domain/values.py::iana_zone`) that says `uv add tzdata` when this Python finds no IANA database at all.**
 
 | | |
 |---|---|

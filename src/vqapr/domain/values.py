@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 # ------------------------------------------------------------------------------------------
 # timestamps.py, folded in (one-shape Step 7, record 162)
@@ -51,12 +51,24 @@ def _require_wall_time(value: time, *, name: str) -> time:
     return value
 
 
-def _zone(timezone_name: str) -> ZoneInfo:
+def iana_zone(timezone_name: str) -> ZoneInfo:
+    """The zone named, or a `ValueError` that says whether the name or the machine lacks it.
+
+    Windows ships no IANA database, and without the `tzdata` package `zoneinfo` knows no zone at
+    all there -- `Asia/Seoul` included. vqapr depends on `tzdata` on Windows since record `263`;
+    an environment that still has no database is told so, rather than that its zone is unknown.
+    """
     if not isinstance(timezone_name, str) or not timezone_name.strip():
         raise ValueError("timezone must be a non-empty IANA timezone name")
     try:
         return ZoneInfo(timezone_name)
-    except ZoneInfoNotFoundError as exc:
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        if not available_timezones():
+            raise ValueError(
+                f"unknown IANA timezone: {timezone_name!r} -- this Python finds no IANA time "
+                "zone database at all (Windows ships none); install the `tzdata` package "
+                "(`uv add tzdata`)"
+            ) from exc
         raise ValueError(f"unknown IANA timezone: {timezone_name!r}") from exc
 
 
@@ -68,7 +80,7 @@ def at_local(day: date, wall_time: time, timezone_name: str) -> datetime:
     """
     _require_date(day, name="day")
     _require_wall_time(wall_time, name="wall_time")
-    zone = _zone(timezone_name)
+    zone = iana_zone(timezone_name)
     naive = datetime.combine(day, wall_time)
 
     candidates: list[datetime] = []
@@ -128,7 +140,7 @@ class LocalInstantDeclaration:
         if not isinstance(self.fold, int) or isinstance(self.fold, bool) or self.fold not in (0, 1):
             raise ValueError("fold must be 0 or 1")
         declared_offset = _parse_offset(self.offset)
-        zone = _zone(self.timezone)
+        zone = iana_zone(self.timezone)
         naive = datetime.combine(self.local_date, self.local_time)
         candidate = naive.replace(tzinfo=zone, fold=self.fold)
         round_trip = candidate.astimezone(UTC).astimezone(zone)
@@ -147,7 +159,7 @@ class LocalInstantDeclaration:
     @property
     def instant(self) -> datetime:
         return datetime.combine(self.local_date, self.local_time).replace(
-            tzinfo=_zone(self.timezone),
+            tzinfo=iana_zone(self.timezone),
             fold=self.fold,
         )
 
@@ -185,7 +197,7 @@ def declare_local_instant(
     - a wall time that happens **twice** (fall back) needs the caller to say which, because
       guessing would silently pick one
     """
-    zone = _zone(timezone)
+    zone = iana_zone(timezone)
     naive = datetime.combine(local_date, local_time)
     resolved = []
     for fold in (0, 1):

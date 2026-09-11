@@ -28,11 +28,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid5
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
 from vqapr.data import scan
 from vqapr.data.sources import SourceSpec
 from vqapr.domain.identifiers import DatasetId
+from vqapr.domain.values import iana_zone
 
 _IDENTITY_NAMESPACE = UUID("b560775c-9356-4be2-856f-85c8a85e1f15")
 _DURATION = re.compile(r"^(?P<count>[1-9]\d*)(?P<unit>[mhd])$")
@@ -132,10 +133,7 @@ class FillRule:
             raise ValueError("trade_price must be a non-empty semantic price field")
         if not isinstance(self.timezone, str) or not self.timezone.strip():
             raise ValueError("timezone must be a non-empty IANA timezone name")
-        try:
-            ZoneInfo(self.timezone)
-        except (ZoneInfoNotFoundError, ValueError) as error:
-            raise ValueError(f"unknown IANA timezone: {self.timezone!r}") from error
+        iana_zone(self.timezone)
         if self.at is not None:
             if not isinstance(self.at, time):
                 raise TypeError("at must be a datetime.time")

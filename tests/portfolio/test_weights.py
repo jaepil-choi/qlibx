@@ -10,7 +10,7 @@ import duckdb
 import pytest
 
 from vqapr.portfolio.optimize import QUANTUM
-from vqapr.portfolio.weighting import (
+from vqapr.portfolio.weights import (
     WeightingRefusal,
     equal_weight,
     proportional_weight,

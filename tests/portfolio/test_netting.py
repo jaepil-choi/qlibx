@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.portfolio.diagnostics import TickerNetting, net_members
+from vqapr.portfolio.netting import TickerNetting, net_members
 
 
 def test_the_offset_recovers_what_the_net_hides() -> None:

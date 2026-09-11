@@ -27,7 +27,6 @@ from itertools import pairwise
 from vqapr.analysis.execution import fill_summary
 from vqapr.analysis.performance import drawdown as running_drawdown
 from vqapr.analysis.performance import returns as period_returns
-from vqapr.analysis.signal import correlation as pearson_correlation
 from vqapr.report.document import (
     Attribution,
     Book,
@@ -47,6 +46,7 @@ from vqapr.report.document import (
     StrategyReport,
     Trading,
 )
+from vqapr.signals.evaluation import correlation as pearson_correlation
 
 ACCOUNT_ROW = "_ACCOUNT"
 """The cash-and-NAV row's `instrument` in `vqapr.account`

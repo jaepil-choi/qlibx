@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
+from vqapr.signals.transform import fama_french_assign, fama_french_cut_points
 
 
 def _values(**pairs: str) -> dict[str, Decimal]:

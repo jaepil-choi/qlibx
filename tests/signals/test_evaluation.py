@@ -15,7 +15,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.analysis.signal import (
+from vqapr.signals.evaluation import (
     correlation,
     decay,
     hit_rate,

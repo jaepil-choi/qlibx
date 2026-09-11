@@ -304,7 +304,7 @@ class Relative(_Document):
 
 class Correlation(_Document):
     """Pearson correlation of period returns between the run's strategies, on the valuations
-    every one of them shares, by `vqapr.analysis.signal.correlation` -- exactly 1 on the diagonal
+    every one of them shares, by `vqapr.signals.evaluation.correlation` -- exactly 1 on the diagonal
     and between identical series. `values[i][j]` is `None` when either series is constant."""
 
     refs: list[str]

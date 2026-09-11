@@ -27,7 +27,9 @@ import pytest
 # `InvocationRecorder` are the authoring contract's, and the failure envelope moved into `flow`
 # (already listed), so one name covers what two did.
 FORBIDDEN = (
-    "vqapr.account",
+    # `vqapr.account` was listed until record `268` folded the package into `domain/account.py`,
+    # where the mark values `analysis.performance` reads live beside the Account authority, so the
+    # module can no longer separate them; the leaves still take no account as an argument.
     "vqapr.data",
     "vqapr.authoring.records",
     "vqapr.exchange",
@@ -43,10 +45,8 @@ FORBIDDEN = (
 # import and the boundary suite would stay green. The alphas of the next milestone import all of
 # them, so the coverage has to precede the code that leans on it.
 LEAF_MODULES = (
-    "vqapr.transforms.cross_section",
-    "vqapr.transforms.fama_french",
-    "vqapr.transforms.neutralize",
-    "vqapr.analysis.signal",
+    "vqapr.signals.transform",
+    "vqapr.signals.evaluation",
     "vqapr.analysis.performance",
 )
 

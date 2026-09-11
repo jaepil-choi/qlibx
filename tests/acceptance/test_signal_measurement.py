@@ -118,7 +118,7 @@ def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
 def test_an_identity_signal_would_fail_the_orthogonality_check() -> None:
     """The falsifier has to kill a no-op: an un-neutralised ranked signal is not orthogonal."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
-    from vqapr.transforms.cross_section import rank
+    from vqapr.signals.transform import rank
 
     raw = {"A": Decimal("10"), "B": Decimal("20"), "C": Decimal("30"), "D": Decimal("47")}
     ranked = rank(raw)

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.transforms.cross_section import rank
+from vqapr.signals.transform import rank
 
 
 def _values(**pairs: str) -> dict[str, Decimal]:

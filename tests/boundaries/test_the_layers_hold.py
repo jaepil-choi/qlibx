@@ -57,7 +57,7 @@ LAYERS: dict[str, int] = {
     # 10 -- one subject each, reached by everything above and depending only on the vocabulary.
     "data": 10,
     "portfolio": 10,
-    "transforms": 10,
+    "signals": 10,
     "record": 10,
     "analysis": 10,
     # 20 -- the extension contract: everything a Component sees, and nothing above it.

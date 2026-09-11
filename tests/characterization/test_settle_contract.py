@@ -9,7 +9,7 @@ This test is the value-level oracle for that inverted failure mode.
 THE CONTRACT UNDER TEST, stated before it is measured
 =====================================================
 
-Read from `vqapr/portfolio/weighting.py` (`rescale` at :162, `_settle` at :68) and fixed here so
+Read from `vqapr/portfolio/weights.py` (`rescale` at :162, `_settle` at :68) and fixed here so
 the measurement is not circular:
 
 1. Scale each side to its own target: `w * target / side_gross`.

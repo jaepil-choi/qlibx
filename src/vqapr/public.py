@@ -9,12 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from vqapr.analysis.performance import drawdown, nav_series, returns
-from vqapr.analysis.signal import (
-    decay,
-    hit_rate,
-    information_coefficient,
-    rank_information_coefficient,
-)
 from vqapr.authoring import (
     Compliance,
     ComplianceCall,
@@ -105,9 +99,9 @@ from vqapr.portfolio.allocation import (
     validate_allocation,
 )
 from vqapr.portfolio.bounds import intersect, no_short, single_name_cap
-from vqapr.portfolio.diagnostics import TickerNetting, net_members
+from vqapr.portfolio.netting import TickerNetting, net_members
 from vqapr.portfolio.optimize import QUANTUM, OptimizeRefusal, OptimizeResult, optimize
-from vqapr.portfolio.weighting import (
+from vqapr.portfolio.weights import (
     WeightingRefusal,
     equal_weight,
     proportional_weight,
@@ -154,9 +148,19 @@ from vqapr.record import (
 from vqapr.record import read_typed_table as read_strategy_table
 from vqapr.report.document import RunReport, StrategyReport
 from vqapr.report.record import run_report, strategy_report
-from vqapr.transforms.cross_section import rank
-from vqapr.transforms.fama_french import fama_french_assign, fama_french_cut_points
-from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
+from vqapr.signals.evaluation import (
+    decay,
+    hit_rate,
+    information_coefficient,
+    rank_information_coefficient,
+)
+from vqapr.signals.transform import (
+    NeutralizationRefusal,
+    fama_french_assign,
+    fama_french_cut_points,
+    neutralize,
+    rank,
+)
 
 __all__ = (
     "QUANTUM",

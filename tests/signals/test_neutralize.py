@@ -19,7 +19,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.transforms.neutralize import NeutralizationRefusal, neutralize
+from vqapr.signals.transform import NeutralizationRefusal, neutralize
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real_k200"
 
@@ -229,8 +229,14 @@ def test_a_dependent_exposure_set_from_real_classifications_is_refused_by_name()
 
 def test_neutralisation_never_grows_a_constraint_shape() -> None:
     """A transform takes values and returns values. A constraint is a different thing entirely."""
-    import vqapr.transforms.neutralize as module
+    import vqapr.signals.transform as module
 
     for forbidden in ("constraint_id", "requirements", "project", "measure", "ConstraintFinding"):
         assert not hasattr(module, forbidden)
-    assert set(module.__all__) == {"NeutralizationRefusal", "neutralize"}
+    assert set(module.__all__) == {
+        "NeutralizationRefusal",
+        "fama_french_assign",
+        "fama_french_cut_points",
+        "neutralize",
+        "rank",
+    }, "the transform module holds transforms and nothing a constraint would carry"

@@ -28,7 +28,7 @@ from vqapr.authoring._validation import (
 from vqapr.data.panel import CrossSection
 from vqapr.domain.intent import Budget, PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
-from vqapr.portfolio.weighting import rescale
+from vqapr.portfolio.weights import rescale
 
 
 class Hold(BaseModel):
@@ -130,7 +130,7 @@ class Rebalance(BaseModel):
     Weights are validated **to the last digit**: `sum(target_weights) + cash_weight` must equal
     one exactly, and a value off by a single ulp is refused by the same invariant that catches a
     real mistake. That is why the two constructors exist, and why anyone building this directly
-    should quantise and settle through `vqapr.portfolio.weighting.rescale` on the canonical grid
+    should quantise and settle through `vqapr.portfolio.weights.rescale` on the canonical grid
     `vqapr.portfolio.optimize.QUANTUM` rather than by hand (`docs/issues/archive/075`).
 
     `target_weights` takes any `Mapping[str, Decimal]` and is held as the read-only
@@ -201,7 +201,7 @@ class Rebalance(BaseModel):
         in `[0, 1]`; a signed book gets targets in `[-1, 1]` and cash in `[-1, 2]`, the upper bound
         being 2 because selling short raises cash.
 
-        Quantising and settling belong to `vqapr.portfolio.weighting.rescale`, which this calls
+        Quantising and settling belong to `vqapr.portfolio.weights.rescale`, which this calls
         (`docs/issues/archive/075`). Each side lands EXACTLY on its target, on the canonical grid
         `QUANTUM`, with the rounding residual on that side's largest position.
 
@@ -358,7 +358,7 @@ class Rebalance(BaseModel):
         scores a name at zero has said something about it, and silently removing the name would
         make the returned book disagree with the mapping the author passed.
 
-        Quantising and settling are `vqapr.portfolio.weighting.rescale`'s, on the canonical grid,
+        Quantising and settling are `vqapr.portfolio.weights.rescale`'s, on the canonical grid,
         each side landing exactly on its own target.
         """
         if not isinstance(weights, Mapping) or not weights:

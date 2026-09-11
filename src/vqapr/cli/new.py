@@ -333,9 +333,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "scaffold a datamodel or strategy that reads a CALENDAR window of this many days "
-            "instead of --lookback rows per name. Use it for anything cross-sectional: a rows lookback "
-            "gives each name its own last N observations, so on an unbalanced panel the batch "
-            "spans whatever the sparsest name reaches back to"
+            "instead of --lookback rows per name. Use it for anything cross-sectional: a rows "
+            "lookback gives each name its own last N observations, so on an unbalanced panel the "
+            "batch spans whatever the sparsest name reaches back to"
         ),
     )
     parser.add_argument(

@@ -23,25 +23,25 @@ import duckdb
 
 from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.source import SourceSpec
-from vqapr.public import preflight_run, register_data_model, register_dataset, run
+from vqapr.public import freeze, register_data_model, register_dataset, run
 from vqapr.run.engine.loop import DataModelResult
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY
-from vqapr.workspace.run_definition import DataModelEntry, RunSchedule, RunDefinition
+from vqapr.workspace.run_definition import DataModelEntry, RunDefinition, RunSchedule
 
 KST = ZoneInfo("Asia/Seoul")
 
 _MODELS = """
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
 def _score(values):
     return -(values[-1] / values[0] - 1.0)
 
 
-class ReversalOnPanel(va.DataModel):
+class ReversalOnPanel(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id="px_panel", fields=("close",), lookback=va.RowsLookback(rows=3)
+        return {"prices": vq.DatasetInput(
+            dataset_id="px_panel", fields=("close",), lookback=vq.RowsLookback(rows=3)
         )}
 
     def compute(self, context):
@@ -57,10 +57,10 @@ class ReversalOnPanel(va.DataModel):
         )
 
 
-class ReversalOnRows(va.DataModel):
+class ReversalOnRows(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id="px_rows", fields=("close",), lookback=va.InstantsLookback(instants=3)
+        return {"prices": vq.DatasetInput(
+            dataset_id="px_rows", fields=("close",), lookback=vq.InstantsLookback(instants=3)
         )}
 
     def compute(self, context):
@@ -152,7 +152,7 @@ def test_a_panel_read_and_a_rows_read_of_one_table_publish_byte_identical_datase
     outcomes = [
         run(
             tmp_path,
-            preflight_run(tmp_path, definition),
+            freeze(tmp_path, definition),
             store_root=tmp_path / WORKSPACE_DIRECTORY,
         )
         for definition in definitions

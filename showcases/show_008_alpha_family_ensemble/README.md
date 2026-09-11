@@ -55,7 +55,7 @@ Both members with an eleven-close lookback publish 11 events; reversal, needing 
 16. The members' schedule is not trimmed to fit the signal: sessions without enough history decline,
 and that is asserted rather than hidden. The ensemble's horizon opens on the first day all three
 members have a weight on record, because a decision that reads an empty window is what
-`vqapr check` refuses (`check.lookback.uncovered`) and, since record 168, what `preflight_run`
+`vqapr check` refuses (`check.lookback.uncovered`) and, since record 168, what `freeze`
 refuses as well.
 
 ## What is checked, and what each check would catch

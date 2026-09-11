@@ -27,19 +27,19 @@ _ALWAYS_LONG = '''"""Wants to be fully invested in A at every decision; only the
 
 from decimal import Decimal
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class AlwaysLong(va.StrategyModel):
+class AlwaysLong(vq.StrategyModel):
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=1)
+            "prices": vq.DatasetInput(
+                dataset_id="prices", fields=("close",), lookback=vq.RowsLookback(rows=1)
             )
         }
 
     def decide(self, call):
-        return va.Rebalance.of(long={"A": Decimal(1)}, invested="1.0")
+        return vq.Rebalance.of(long={"A": Decimal(1)}, invested="1.0")
 '''
 
 

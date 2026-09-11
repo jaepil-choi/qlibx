@@ -31,7 +31,6 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.authoring import Hold, StrategyModel
 from vqapr.component.reference import ComponentRef
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
@@ -39,9 +38,10 @@ from vqapr.domain.account import Account, AccountMark, AccountMode, AccountSnaps
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
+from vqapr.public import Hold, StrategyModel
 from vqapr.run.engine.loop import strategy_loop
 from vqapr.run.engine.run_state import RunStateRepository
-from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")
@@ -56,7 +56,7 @@ STRATEGIES = textwrap.dedent(
     '''
     from decimal import Decimal
 
-    from vqapr.authoring import (
+    from vqapr.public import (
         DatasetInput, Hold, Rebalance, RowsLookback, StrategyModel,
     )
     from vqapr.public import Budget, PortfolioDirection
@@ -125,7 +125,7 @@ RUNNER = textwrap.dedent(
 
     from vqapr.public import (
         AccountMode, AccountSnapshot, DatasetRegistration,
-        RunSchedule, RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, preflight_run,
+        RunSchedule, RunDefinition, RunExecution, RunFill, SourceSpec, StrategyEntry, freeze,
         register_dataset, register_exchange, register_instruments, register_strategy_model, run,
     )
 
@@ -194,7 +194,7 @@ RUNNER = textwrap.dedent(
         writes="clock-weights",
     )
 
-    result = run(root, preflight_run(root, definition)).result()
+    result = run(root, freeze(root, definition)).result()
 
     # `vqapr.account` is the framework's own NAV table. Each row is one committed mark, so the
     # distinct observed instants ARE the NAV series resolution.

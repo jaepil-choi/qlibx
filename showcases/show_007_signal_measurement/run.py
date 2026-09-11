@@ -58,14 +58,14 @@ from vqapr.public import (
     DatasetRegistration,
     Mark,
     MarkBatch,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
-    preflight_run,
+    freeze,
     register_dataset,
     register_exchange,
     register_instruments,
@@ -592,7 +592,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         instruments=universe,
         writes="show007-weights",
     )
-    run_result = run(project, preflight_run(project, definition), store_root=project / ".vqapr")
+    run_result = run(project, freeze(project, definition), store_root=project / ".vqapr")
     result = run_result.result()
 
     evidence = callback_evidence(result)

@@ -30,7 +30,10 @@ import inspect
 
 import pytest
 
-from vqapr.authoring import (
+from vqapr.component.base import Call
+from vqapr.component.exchange.base import Exchange, ExecutionCall
+from vqapr.domain.wiring import WIRING, Role
+from vqapr.public import (
     Compliance,
     ComplianceCall,
     Component,
@@ -39,9 +42,6 @@ from vqapr.authoring import (
     StrategyCall,
     StrategyModel,
 )
-from vqapr.component.base import Call
-from vqapr.component.exchange.base import Exchange, ExecutionCall
-from vqapr.domain.wiring import WIRING, Role
 
 ROLES: dict[type, tuple[str, type]] = {
     DataModel: ("compute", DataCall),

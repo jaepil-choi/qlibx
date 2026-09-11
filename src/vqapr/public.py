@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from vqapr.component.account_view import EconomicAccountView
 from vqapr.component.base import Call, Component, Part, Tool
 from vqapr.component.compliance.base import Compliance, ComplianceCall, ComplianceFinding
 from vqapr.component.compliance.report import ComplianceReport
 from vqapr.component.compliance.shipped import SHIPPED_COMPLIANCE, shipped_compliance_path
 from vqapr.component.conformance import conformance
-from vqapr.component.datamodel import DataModel
+from vqapr.component.datamodel import DataCall, DataModel
 from vqapr.component.exchange.academic import AcademicExchange
 from vqapr.component.exchange.base import ExecutionCall
 from vqapr.component.exchange.krx import (
@@ -23,14 +24,16 @@ from vqapr.component.exchange.krx import (
     krx_listings,
     krx_rules,
 )
-from vqapr.component.reads import DatasetInput
+from vqapr.component.reads import DatasetInput, requirements_for
 from vqapr.component.reference import ComponentRef
-from vqapr.component.strategy.base import StrategyModel
+from vqapr.component.strategy.base import StrategyCall, StrategyModel
 from vqapr.component.strategy.decision import Hold, Rebalance
+from vqapr.component.strategy.history import AccountHistory, AccountHistoryInput
 from vqapr.component.strategy.recorder import TableSpec
 from vqapr.data.dataset import DatasetRegistration, ExecutionRole, Grain
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
+from vqapr.data.observation import Observation
 from vqapr.data.panel import CrossSection, PanelWindow, Series
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.source import SourceSpec
@@ -99,7 +102,7 @@ from vqapr.record import read_typed_table as read_strategy_table
 from vqapr.report.compose import run_report, strategy_report
 from vqapr.report.document import RunReport, StrategyReport
 from vqapr.report.metrics import drawdown, nav_series, returns
-from vqapr.run.assemble import RunResult, StrategyOutcome, preflight_run, run
+from vqapr.run.assemble import RunResult, StrategyOutcome, freeze, run
 from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
 from vqapr.run.engine.failure import SimulationFailure
 from vqapr.run.engine.loop import DataModelResult, SimulationResult, callback_evidence
@@ -161,6 +164,8 @@ __all__ = (
     "QUANTUM",
     "SHIPPED_COMPLIANCE",
     "AcademicExchange",
+    "AccountHistory",
+    "AccountHistoryInput",
     "AccountMode",
     "AccountSnapshot",
     "AllocationInvariants",
@@ -177,6 +182,7 @@ __all__ = (
     "Component",
     "ComponentRef",
     "CrossSection",
+    "DataCall",
     "DataModel",
     "DataModelContext",
     "DataModelEntry",
@@ -184,6 +190,7 @@ __all__ = (
     "DataRequirement",
     "DatasetInput",
     "DatasetRegistration",
+    "EconomicAccountView",
     "EconomicPortfolioIntent",
     "EtfInstrument",
     "ExactExecutionTarget",
@@ -217,6 +224,7 @@ __all__ = (
     "MarkBatch",
     "ModelWindow",
     "NeutralizationRefusal",
+    "Observation",
     # The two halves of what a Model is handed. `ObservationBatch` is the return type of the one
     # method a DataModel author can call, and it was reachable only by opening installed source:
     # not in `__all__`, absent from the skill, and with no docstring naming its row keys or
@@ -249,6 +257,7 @@ __all__ = (
     "Stage",
     "Status",
     "StockInstrument",
+    "StrategyCall",
     "StrategyEntry",
     "StrategyModel",
     "StrategyModelContext",
@@ -272,6 +281,7 @@ __all__ = (
     "export_roster",
     "fama_french_assign",
     "fama_french_cut_points",
+    "freeze",
     "hit_rate",
     "information_coefficient",
     "instrument",
@@ -284,7 +294,6 @@ __all__ = (
     "neutralize",
     "no_short",
     "optimize",
-    "preflight_run",
     "proportional_weight",
     "rank",
     "rank_information_coefficient",
@@ -298,6 +307,7 @@ __all__ = (
     "register_instruments",
     "register_run",
     "register_strategy_model",
+    "requirements_for",
     "rescale",
     "returns",
     "run",

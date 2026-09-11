@@ -46,7 +46,7 @@ from vqapr.workspace.run_definition import (
 )
 
 __all__ = [
-    "preflight_run",
+    "freeze",
 ]
 
 
@@ -401,7 +401,7 @@ def _require_execution_authority(definition: RunDefinition) -> None:
                 observed=(f"exchange={definition.exchange!r}, execution={definition.execution!r}"),
                 fix=(
                     "declare both an Exchange and `execution: {dataset, fill}` on the "
-                    "RunDefinition before calling preflight_run"
+                    "RunDefinition before calling freeze"
                 ),
             )
         ],
@@ -594,7 +594,7 @@ def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRe
     return ref
 
 
-def preflight_run(
+def freeze(
     workspace_or_root: Workspace | str,
     definition: RunDefinition,
     facts: RunFacts | None = None,
@@ -617,7 +617,7 @@ def preflight_run(
     )
     if not isinstance(definition, RunDefinition):
         raise TypeError("definition must be a RunDefinition")
-    # The facts the judgments read, when they were asked first (`verify.verify_run`); otherwise
+    # The facts the judgments read, when they were asked first (`verify.preflight`); otherwise
     # this freeze reads them for itself, once.
     facts = facts if facts is not None else RunFacts(workspace, definition)
     if definition.datamodel is not None:

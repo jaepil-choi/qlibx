@@ -3,7 +3,7 @@
 Record `148` (campaign Step 7, M2) closes `docs/issues/archive/059`. `materialize()` ran a DataModel through
 a loop of its own -- every row of every evaluation in memory until the end, one parquet and a
 per-instrument lineage file at once, a record of its own kind that `show run` projected through a
-special case. A datamodel run now goes through `preflight_run` and `orchestration.run` like a
+special case. A datamodel run now goes through `freeze` and `orchestration.run` like a
 strategy run: the sessions are the run's, each session's rows leave the process as one chunk, the
 dataset registers once after the last session, and `runs/<run-id>/datamodels/<id>@<fp8>/` holds
 the record.
@@ -40,9 +40,9 @@ from vqapr.run.batch import in_workers, require_independent_batch
 from vqapr.run.engine.loop import DataModelResult
 from vqapr.run.engine.output import output_directory, output_source_id
 from vqapr.run.preflight.checks import judgments
-from vqapr.run.preflight.freeze import preflight_run
+from vqapr.run.preflight.freeze import freeze
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
-from vqapr.workspace.run_definition import DataModelEntry, RunSchedule, RunDefinition
+from vqapr.workspace.run_definition import DataModelEntry, RunDefinition, RunSchedule
 
 KST = ZoneInfo("Asia/Seoul")
 START = datetime(2024, 3, 6, tzinfo=KST)
@@ -62,14 +62,14 @@ EXPECTED_ROWS = (
 3/8 row (close 999) is after both sessions; a score that used it would be nowhere near these."""
 
 _MODELS = '''from pathlib import Path
-from vqapr import authoring as va
+from vqapr import public as vq
 
 WATCHED = Path(__WATCHED__)
 
-class ReversalModel(va.DataModel):
+class ReversalModel(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=2)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=2)
         )}
 
     def compute(self, context):
@@ -115,12 +115,12 @@ class RepeatedNameModel(ReversalModel):
         rows = tuple({"instrument": name, "score": 0.0} for name in REPEATED)
         return rows + rows
 
-class ChunkWatcherModel(va.DataModel):
+class ChunkWatcherModel(vq.DataModel):
     """Reports how many chunks the output directory held when this session was computed."""
 
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=1)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):
@@ -128,12 +128,12 @@ class ChunkWatcherModel(va.DataModel):
         window = context.read("prices", "close")
         return [{"instrument": name, "chunks": landed} for name in sorted(window.instruments)]
 
-class CountingModel(va.DataModel):
+class CountingModel(vq.DataModel):
     """Counts its own calls in `memory` and emits the count, so the rows say what it remembered."""
 
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=1)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):
@@ -142,12 +142,12 @@ class CountingModel(va.DataModel):
         window = context.read("prices", "close")
         return [{"instrument": name, "calls": calls} for name in sorted(window.instruments)]
 
-class EchoModel(va.DataModel):
+class EchoModel(vq.DataModel):
     """Reads the dataset the reversal run wrote, the way any next model would."""
 
     def inputs(self):
-        return {"scores": va.DatasetInput(
-            dataset_id='reversal_2d', fields=('score',), lookback=va.RowsLookback(rows=1)
+        return {"scores": vq.DatasetInput(
+            dataset_id='reversal_2d', fields=('score',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):
@@ -211,7 +211,7 @@ def _store(project: Path) -> Path:
 
 def _run(project: Path, definition: RunDefinition) -> RunResult:
     """Preflight and run one definition against the project, recording under the store."""
-    frozen = preflight_run(project, definition)
+    frozen = freeze(project, definition)
     return run(project, frozen, store_root=_store(project))
 
 
@@ -442,7 +442,7 @@ def test_the_record_is_one_line_per_session_and_no_lineage(
     """
     _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
     definition = _definition("factors", DataModelEntry("reversal", ("score",)), writes="reversal_2d")
-    ref = preflight_run(tmp_path, definition).datamodel.record_ref
+    ref = freeze(tmp_path, definition).datamodel.record_ref
 
     outcome = _run(tmp_path, definition)
 
@@ -493,7 +493,7 @@ def test_a_second_run_is_refused_before_it_computes(
     _run(tmp_path, definition)
     chunks_before = _chunks(tmp_path, "reversal_2d")
 
-    frozen = preflight_run(tmp_path, definition)
+    frozen = freeze(tmp_path, definition)
     found, blocked = judgments(definition, Workspace.open(tmp_path))
     assert blocked == [] and found == [], "the run's own output is not a defect of its declaration"
 

@@ -63,19 +63,19 @@ covers the strategy's own file only, so keep what you tune in that file.
 ## The shape
 
 ```python
-from vqapr import authoring as va
+from vqapr import public as vq
 
-class Momentum(va.StrategyModel):
+class Momentum(vq.StrategyModel):
     def inputs(self):
-        read = va.DatasetInput(
-            dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=20)
+        read = vq.DatasetInput(
+            dataset_id="prices", fields=("close",), lookback=vq.RowsLookback(rows=20)
         )
         return {"prices": read}
 
     def decide(self, call):
         window = call.read("prices", "close")   # instants x instruments
         ...
-        return va.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
+        return vq.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
 ```
 
 The author declares what it reads and returns what it wants. **Identity, provenance and the
@@ -114,7 +114,7 @@ reference exists to prevent.
 ## Declining is a decision
 
 ```python
-return va.Hold(reason="no name scored above zero")
+return vq.Hold(reason="no name scored above zero")
 ```
 
 The reason is prose a human reads. Spaces are fine; only an empty string is refused. A warm-up

@@ -18,7 +18,6 @@ import duckdb
 import pytest
 
 from tests.component.compliance.support import reading_call, weightless_call
-from vqapr.authoring import Compliance, EconomicAccountView
 from vqapr.component.compliance.no_short import NoShort
 from vqapr.component.compliance.shipped import SHIPPED_COMPLIANCE, shipped_compliance_path
 from vqapr.component.compliance.single_name_cap import SingleNameCap
@@ -32,6 +31,7 @@ from vqapr.domain.account import AccountSnapshot, Mark, MarkBatch
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.portfolio.allocation import AllocationViolation
 from vqapr.portfolio.bounds import single_name_cap
+from vqapr.public import Compliance, EconomicAccountView
 from vqapr.run.engine.stages.observe import build_account_view
 
 FIXTURE = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "real"
@@ -314,7 +314,7 @@ def test_a_project_local_rule_still_loads_alongside_a_builtin(tmp_path: Path) ->
 
 from decimal import Decimal
 
-from vqapr.authoring import Compliance, ComplianceFinding
+from vqapr.public import Compliance, ComplianceFinding
 
 
 class LocalCap(Compliance):

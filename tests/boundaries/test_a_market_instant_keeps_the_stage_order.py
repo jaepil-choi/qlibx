@@ -20,10 +20,10 @@ import pytest
 
 from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _workspace
 from tests.cli.test_commands import _cli
-from vqapr.public import Workspace, preflight_run, run
 from vqapr.domain.schedule import ScheduledEvent
+from vqapr.public import Workspace, freeze, run
 from vqapr.run.engine.events import MarketEvent
-from vqapr.run.engine.loop import DueExecutionTrace, MarketClock, EventTrace
+from vqapr.run.engine.loop import DueExecutionTrace, EventTrace, MarketClock
 from vqapr.run.engine.run_state import LifecycleKind
 
 _ZONE = ZoneInfo("Asia/Seoul")
@@ -84,7 +84,7 @@ def test_a_fill_and_a_decision_at_one_instant_settle_then_decide(
     assert code == 0, payload
 
     workspace = Workspace.open(tmp_path)
-    result = run(tmp_path, preflight_run(workspace, workspace.run_definition("ordered"))).result()
+    result = run(tmp_path, freeze(workspace, workspace.run_definition("ordered"))).result()
 
     at_0901 = datetime(2024, 3, 5, 9, 1, tzinfo=_ZONE)
     traces_at = [

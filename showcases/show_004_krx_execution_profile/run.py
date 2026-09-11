@@ -52,14 +52,14 @@ from vqapr.public import (
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     export_roster,
-    preflight_run,
+    freeze,
     register_data_model,
     register_dataset,
     register_exchange,
@@ -74,7 +74,7 @@ ROOT = Path(__file__).resolve().parent
 MODELS = Path(models.__file__).resolve()
 """Resolved through the imported module, not by name.
 
-`MomentumLongOnly` is authored against `vqapr.authoring`, so the loader adapts it and the
+`MomentumLongOnly` is authored against `vqapr.public`, so the loader adapts it and the
 adapter re-imports the authored class by module name. Importing it here is what gives that
 name something to resolve to.
 """
@@ -389,7 +389,7 @@ def main() -> None:
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
         writes="momentum_score",
     )
-    run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
+    run(PROJECT, freeze(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 
     # The project declares what each id IS, once, before anything trades. KrxExchange resolves
     # what a fill COSTS from this roster rather than from the venue, which is why the KRX profile
@@ -423,7 +423,7 @@ def main() -> None:
             strategy_ref=strategy_ref,
             callback_days=callback_days,
         )
-        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)).result())
+        return _profile_outcome(run(PROJECT, freeze(PROJECT, definition)).result())
 
     academic = _outcome(academic_ref)
     krx = _outcome(krx_ref)

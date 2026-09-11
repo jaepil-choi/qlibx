@@ -224,7 +224,7 @@ def test_a_strategy_scaffolds_a_calendar_window_with_the_guard_it_implies(tmp_pa
 
     emitted = Path(envelope["path"]).read_text(encoding="utf-8")
     assert "LOOKBACK_DAYS = 400" in emitted
-    assert "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)" in emitted
+    assert "vq.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)" in emitted
     assert "RowsLookback" not in emitted
     assert "finite.sum(axis=0) >= 2" in emitted
     assert "closes.shape[0] < LOOKBACK" not in emitted, "no row count against a day count"
@@ -236,7 +236,7 @@ def test_the_rows_strategy_scaffold_is_what_it_always_was() -> None:
     source = render(Role.STRATEGY_MODEL, "alpha", dataset_id="price_daily", lookback=6)
 
     assert "LOOKBACK = 6  # rows of the window" in source
-    assert "lookback=va.RowsLookback(rows=LOOKBACK)" in source
+    assert "lookback=vq.RowsLookback(rows=LOOKBACK)" in source
     assert "if closes.shape[0] < LOOKBACK:" in source
     assert "scores = closes[-1] / closes[0] - 1.0" in source
 

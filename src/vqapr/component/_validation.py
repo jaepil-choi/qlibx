@@ -6,7 +6,7 @@ the same across the roles -- a finite `Decimal`, a tz-aware instant, a non-empty
 read-only copy of a mapping -- so they are written once here and imported by the modules that
 declare the values.
 
-Nothing in this module is exported by `vqapr.authoring`. It is named with a leading underscore for
+Nothing in this module is exported by `vqapr.public`. It is named with a leading underscore for
 that reason: a reader looking for the contract will not find it here, and a caller outside the
 package has no reason to.
 """

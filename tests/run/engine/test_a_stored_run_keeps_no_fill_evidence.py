@@ -22,7 +22,7 @@ import tests.sample.journey as journey
 from vqapr.public import (
     StrategyEntry,
     Workspace,
-    preflight_run,
+    freeze,
     register_run,
     register_strategy_model,
 )
@@ -52,7 +52,7 @@ def _run(tmp_path: Path, *, store: Path | None) -> SimulationResult:
             strategy=StrategyEntry("reversal"), writes="kept-weights"
         ),
     )
-    frozen = preflight_run(project, Workspace.open(project).run_definition("kept"))
+    frozen = freeze(project, Workspace.open(project).run_definition("kept"))
     return execute_run(project, frozen, store_root=store).result("reversal")
 
 

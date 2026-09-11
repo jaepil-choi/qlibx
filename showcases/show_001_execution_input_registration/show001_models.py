@@ -19,14 +19,15 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.authoring import (
+from vqapr.public import (
+    Budget,
     DatasetInput,
     Hold,
+    PortfolioDirection,
     Rebalance,
     RowsLookback,
     StrategyModel,
 )
-from vqapr.public import Budget, PortfolioDirection
 
 BUDGET = Budget(
     direction=PortfolioDirection.LONG_ONLY,

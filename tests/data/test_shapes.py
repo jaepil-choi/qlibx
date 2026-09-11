@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr import authoring, public
+from vqapr import public
 from vqapr.data.dataset import Grain
 from vqapr.data.observation import Observation
 from vqapr.data.panel import CrossSection, Series
@@ -74,7 +74,7 @@ def test_a_series_is_a_column_with_nulls_where_the_name_had_nothing() -> None:
 
 def test_the_grain_and_the_observation_have_one_home() -> None:
     assert public.Grain is Grain, "the public door keeps the one enum"
-    assert authoring.Observation is Observation, "the author surface re-exports the long row"
+    assert public.Observation is Observation, "the author surface re-exports the long row"
     assert {member.value for member in Grain} == {"instrument_instant", "instant", "rows"}
     assert not hasattr(Grain, "POINT"), "a point read is a way of reading, not a grain"
 

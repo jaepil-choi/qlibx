@@ -9,7 +9,7 @@ callback, and two things about that were invisible to the author who tripped it:
   `_from_python` rendered `f"{type(e).__name__}: {e}"` and dropped `__cause__`, so the `EOFError:
   Ran out of input` that was the actual reason never reached the reader at all.
 - **Two doors.** `check` caught the `ValueError` and rendered a bounded refusal;
-  `cli/run.py::run` called `preflight_run` OUTSIDE its `try`, so the same judgment left the same
+  `cli/run.py::run` called `freeze` OUTSIDE its `try`, so the same judgment left the same
   package as `stage: "unhandled"` -- which tells an agent the framework broke when the truth is
   the strategy was wrong.
 

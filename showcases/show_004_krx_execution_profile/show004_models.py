@@ -10,7 +10,7 @@ refs, or an account version; the framework stamps all of that identity. Cross-ca
 (the rebalance count) lives in ``self.memory``, which the framework restores before every
 callback and snapshots after it.
 
-Both models are written against ``vqapr.authoring``. They used to be written against two
+Both models are written against ``vqapr.public``. They used to be written against two
 contracts -- the loader adapted an authored StrategyModel and refused an authored DataModel --
 and this docstring recorded that as the framework's split, not the showcase's. Record ``131``
 closed it.
@@ -20,15 +20,16 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.authoring import (
+from vqapr.public import (
+    Budget,
     DataModel,
     DatasetInput,
     Hold,
+    PortfolioDirection,
     Rebalance,
     RowsLookback,
     StrategyModel,
 )
-from vqapr.public import Budget, PortfolioDirection
 
 LOOKBACK = 6
 """Five-session momentum needs six closes."""

@@ -26,7 +26,7 @@ from vqapr.public import (
     StrategyEntry,
     StrategyOutcome,
     Workspace,
-    preflight_run,
+    freeze,
     register_run,
     register_strategy_model,
 )
@@ -38,7 +38,7 @@ from vqapr.run.engine.failure import SimulationFailure
 
 RAISING_SOURCE = '''"""A strategy whose signal is never ready; it raises from a helper in this file."""
 
-from vqapr.authoring import DatasetInput, RowsLookback, StrategyModel
+from vqapr.public import DatasetInput, RowsLookback, StrategyModel
 
 
 def not_ready(names: int) -> None:
@@ -110,7 +110,7 @@ def test_one_runs_refusal_is_its_outcome_and_the_other_runs_still_run(tmp_path: 
     project, store = _project(tmp_path)
     statuses: dict[str, str] = {}
     for name in STRATEGIES:
-        frozen = preflight_run(project, Workspace.open(project).run_definition(name))
+        frozen = freeze(project, Workspace.open(project).run_definition(name))
         outcome = execute_run(project, frozen, store_root=store)
         statuses[name] = "completed" if outcome.ok else "failed"
 
@@ -123,7 +123,7 @@ def test_one_runs_refusal_is_its_outcome_and_the_other_runs_still_run(tmp_path: 
     assert len(strategy_refs(store, "ou-last")) == 1
     assert strategy_refs(store, "never-ready") == (), "the refused run left no record"
 
-    frozen = preflight_run(project, Workspace.open(project).run_definition("never-ready"))
+    frozen = freeze(project, Workspace.open(project).run_definition("never-ready"))
     refused = execute_run(project, frozen, store_root=store)
     failed = refused.errors["never-ready"]
     assert isinstance(failed, SimulationFailure)

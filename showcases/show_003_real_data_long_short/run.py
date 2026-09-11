@@ -36,13 +36,13 @@ from vqapr.public import (
     AccountSnapshot,
     DataModelEntry,
     DatasetRegistration,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
-    preflight_run,
+    freeze,
     register_compliance,
     register_data_model,
     register_dataset,
@@ -96,18 +96,18 @@ def _write_components() -> dict[str, Path]:
     model.write_text(
         '''from __future__ import annotations
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 LOOKBACK = 6
 
 
-class ReversalModel(va.DataModel):
+class ReversalModel(vq.DataModel):
     """Cross-sectionally demeaned 5-session reversal on real closes."""
 
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=LOOKBACK)
+            "prices": vq.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=vq.RowsLookback(rows=LOOKBACK)
             )
         }
 
@@ -414,7 +414,7 @@ def main() -> None:
         writes="reversal_score",
     )
     materialization = run(
-        PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
+        PROJECT, freeze(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
     ).result()
 
     register_strategy_model(PROJECT, "showcase-strategy", paths["strategy"], "ReversalLongShort")
@@ -445,7 +445,7 @@ def main() -> None:
         writes="show003-weights",
     )
 
-    frozen = preflight_run(PROJECT, definition)
+    frozen = freeze(PROJECT, definition)
     result = run(PROJECT, frozen).result()
 
     final_state = result.final_state

@@ -8,7 +8,7 @@ acceptance root publishes what was staged. Both were `evidence/tables.py` and
 rather than by what they are, and these two are one thing -- a declaration and the buffer that
 enforces it -- so they are one module.
 
-`vqapr.authoring` re-exports both, which is how an author imports them.
+`vqapr.public` exports both, which is how an author imports them.
 """
 
 from __future__ import annotations

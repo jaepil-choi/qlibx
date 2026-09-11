@@ -313,7 +313,7 @@ _RUN_KEYS = (
 """Every key a `runs:` entry declares before `vqapr run` can execute it.
 
 `RunDefinition` tolerates an absent period, venue, execution dataset and account because other
-callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
+callers supply them another way; `run` continues into `freeze`, which refuses without them.
 The schedule clock is the run's own `schedule:` block since the two-clocks campaign (`every`
 with `at`, or with `from`/`to`), expanded over the execution dataset's trading days -- there is
 no day list to declare. Pinned as a literal rather than imported: the template is judged

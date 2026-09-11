@@ -15,8 +15,8 @@ _HEAD = """from __future__ import annotations
 
 from vqapr.data.lookback import RowsLookback
 from vqapr.public import DataRequirement
-from vqapr.authoring import Hold
-from vqapr.authoring import StrategyModel
+from vqapr.public import Hold
+from vqapr.public import StrategyModel
 
 
 class S(StrategyModel):
@@ -125,8 +125,8 @@ def test_a_requirements_declaration_of_the_wrong_shape_is_refused(tmp_path: Path
     """Declaring requirements is optional, but declaring them wrongly is not."""
     path = tmp_path / "badreq.py"
     path.write_text(
-        "from vqapr.authoring import Hold\n"
-        "from vqapr.authoring import StrategyModel\n\n\n"
+        "from vqapr.public import Hold\n"
+        "from vqapr.public import StrategyModel\n\n\n"
         "class S(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ['not-a-requirement']\n\n"

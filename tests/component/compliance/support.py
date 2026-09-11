@@ -16,8 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from vqapr.authoring import ComplianceCall, EconomicAccountView
 from vqapr.data.window import ModelWindow
+from vqapr.public import ComplianceCall, EconomicAccountView
 from vqapr.run.engine.calls import ComplianceContext
 
 

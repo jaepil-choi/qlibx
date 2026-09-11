@@ -127,14 +127,14 @@ def test_the_installed_sample_is_accepted_by_the_products_own_check(tmp_path: Pa
     The 0.6.0 call-flow review (record `167`) ran the installed sample through the CLI and was
     refused with `check.lookback.uncovered`: the horizon opened on the first session, whose close
     is published at 15:30, after the 08:00 decision, while `execute` reached the freeze without
-    asking. The horizon moved (record `167`) and the judgments moved into `preflight_run`
+    asking. The horizon moved (record `167`) and the judgments moved into `freeze`
     (record `168`), so this asks the public door the journey itself uses.
     """
-    from vqapr.public import Workspace, preflight_run
+    from vqapr.public import Workspace, freeze
 
     root = tmp_path / "proj"
     root.mkdir()
     journey.install(root)
     workspace = Workspace.open(root)
-    frozen = preflight_run(workspace, workspace.run_definition(journey.RUN_ID))
+    frozen = freeze(workspace, workspace.run_definition(journey.RUN_ID))
     assert frozen.run_id == journey.RUN_ID

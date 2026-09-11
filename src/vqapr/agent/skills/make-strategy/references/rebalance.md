@@ -6,7 +6,7 @@ can. Choosing wrong produces a book that runs, reports, and is not the one the s
 ## `of` — relative conviction, sides declared by mapping
 
 ```python
-va.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
+vq.Rebalance.of(long={"A": 2, "B": 1}, invested="0.9")
 ```
 
 - The numbers are **relative conviction**: A is liked twice as much as B. Normalising, rounding
@@ -26,8 +26,8 @@ override it.
 ## `signed` — the signal decides the split
 
 ```python
-va.Rebalance.signed({"A": 0.8, "B": 0.2, "C": -1.0})   # 0.5 long, 0.5 short
-va.Rebalance.signed(weights, gross=2)                  # the textbook $1/$1 book
+vq.Rebalance.signed({"A": 0.8, "B": 0.2, "C": -1.0})   # 0.5 long, 0.5 short
+vq.Rebalance.signed(weights, gross=2)                  # the textbook $1/$1 book
 ```
 
 - Weights are **signed**: a negative number *is* the short.
@@ -50,7 +50,7 @@ not idle capital to reinvest.
 ## Declining
 
 ```python
-return va.Hold(reason="no name scored above zero")
+return vq.Hold(reason="no name scored above zero")
 ```
 
 Prose a human reads. Spaces are fine; only an empty string is refused. Warm-up callbacks — the

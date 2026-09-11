@@ -13,14 +13,14 @@ from decimal import Decimal
 
 import numpy as np
 
-from vqapr.authoring import (
+from vqapr.domain.intent import Budget, PortfolioDirection
+from vqapr.public import (
     DatasetInput,
     Hold,
     Rebalance,
     RowsLookback,
     StrategyModel,
 )
-from vqapr.domain.intent import Budget, PortfolioDirection
 
 STRATEGY_ID = "sample-reversal-5d"
 DATASET_ID = "sample-prices"

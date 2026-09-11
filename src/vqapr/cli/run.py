@@ -43,7 +43,7 @@ from vqapr.record.schema import FILL_TABLE
 from vqapr.report.metrics import fill_summary
 from vqapr.run.assemble import COMPLETED, FAILED, run_registered_datamodel, run_registered_strategy
 from vqapr.run.batch import batch_cubes, batch_reads, in_workers, require_independent_batch
-from vqapr.run.preflight.verdict import verify_run
+from vqapr.run.preflight.verdict import preflight
 from vqapr.workspace.registry import WORKSPACE_DIRECTORY
 
 
@@ -127,7 +127,7 @@ def preflight_refusal(phase: str, error: Exception, target: str) -> Failure:
     """A bare TypeError or ValueError from a framework invariant, given an envelope.
 
     ONE renderer for both verbs (`docs/issues/archive/076`). `check` caught these per phase and
-    `run` called `preflight_run` outside its own `try`, so the same `ValueError` was a bounded
+    `run` called `freeze` outside its own `try`, so the same `ValueError` was a bounded
     refusal from one verb and `stage: "unhandled"` -- the framework broke -- from the other.
 
     The two codes are written literally rather than selected into a variable so the refusal-code
@@ -187,11 +187,11 @@ def _run_one(target: str, args: argparse.Namespace, *, project_root: Path) -> di
     definition: RunDefinition = workspace.run_definition(target)
     # The ONE workspace this command opened goes to preflight and to the run
     # (`docs/issues/archive/070`): the judgments, the freeze and the roster read all see the same
-    # document. The judgments are asked inside `preflight_run`, in the order `check` asks them, so
+    # document. The judgments are asked inside `freeze`, in the order `check` asks them, so
     # this verb and a Python caller refuse the same run for the same reasons (record `168`); a
     # refusal arrives as the `VqaprError` below deliberately lets through.
     try:
-        frozen, resources = verify_run(workspace, definition).require_ready()
+        frozen, resources = preflight(workspace, definition).require_ready()
     except (TypeError, ValueError) as refused:
         # `check` renders exactly this as a bounded refusal; letting it escape here rendered the
         # SAME judgment as `stage: "unhandled"` (`docs/issues/archive/076`).

@@ -25,11 +25,6 @@ from datetime import date, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.authoring import (
-    Hold,
-    StrategyModel,
-    TableSpec,
-)
 from vqapr.component.reference import ComponentRef
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
@@ -39,10 +34,15 @@ from vqapr.domain.account import Account, AccountMode, AccountSnapshot, AccountS
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
+from vqapr.public import (
+    Hold,
+    StrategyModel,
+    TableSpec,
+)
 from vqapr.record import TABLES_DIRECTORY, RunRecordWriter, read_table
 from vqapr.run.engine.loop import RunLoop, strategy_loop
 from vqapr.run.engine.run_state import RunStateRepository
-from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 ROWS_PER_OCCURRENCE = 200

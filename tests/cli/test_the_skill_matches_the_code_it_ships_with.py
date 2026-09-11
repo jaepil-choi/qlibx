@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from vqapr import authoring as va
+from vqapr import public as vq
 from vqapr.agent.scaffold import render
 from vqapr.agent.skillset import shipped_skills
 from vqapr.cli.main import main
@@ -48,12 +48,12 @@ def test_the_hold_reason_rule_is_the_docstrings_rule() -> None:
     text = _shipped_prose()
     assert "one token" not in text, "the skill still states the stricter rule the code dropped"
 
-    assert va.Hold(reason="no name scored above zero").reason == "no name scored above zero"
+    assert vq.Hold(reason="no name scored above zero").reason == "no name scored above zero"
     with pytest.raises(ValueError):
-        va.Hold(reason="   ")
+        vq.Hold(reason="   ")
 
     source = render(Role.STRATEGY_MODEL, "alpha", dataset_id="prices")
-    reasons = [line for line in source.splitlines() if "va.Hold(reason=" in line]
+    reasons = [line for line in source.splitlines() if "vq.Hold(reason=" in line]
     assert reasons and all(" " in line.split("reason=")[1] for line in reasons), (
         "the scaffold's example reason is the documentation; it should contain a space"
     )

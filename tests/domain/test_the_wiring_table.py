@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import inspect
 
-from vqapr.authoring import Compliance, Component, DataModel, Part, StrategyModel, Tool
 from vqapr.component.exchange.base import Exchange
 from vqapr.domain.wiring import (
     EXTENSION_POINTS,
@@ -25,6 +24,7 @@ from vqapr.domain.wiring import (
     roles_on,
     tools,
 )
+from vqapr.public import Compliance, Component, DataModel, Part, StrategyModel, Tool
 from vqapr.run.engine.loop import MarketClock
 
 

@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.authoring import (
-    Hold,
-    Rebalance,
-    StrategyModel,
-)
 from vqapr.component.reference import ComponentRef
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
@@ -21,10 +16,15 @@ from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.intent import Budget, EconomicPortfolioIntent, IntentSourceRef, PortfolioDirection
 from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
-from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
-from vqapr.run.engine.run_state import RunStateRepository
+from vqapr.public import (
+    Hold,
+    Rebalance,
+    StrategyModel,
+)
 from vqapr.run.engine.calls import StrategyModelContext
 from vqapr.run.engine.loop import RunLoop, strategy_loop
+from vqapr.run.engine.run_state import RunStateRepository
+from vqapr.run.preflight.frozen import FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 _BUDGET = Budget(

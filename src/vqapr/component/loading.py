@@ -385,7 +385,7 @@ def load_data_model(ref: ComponentRef, *, project_root: str | Path | None = None
             "component.wrong_type",
             "registered DataModel object must implement the public DataModel contract",
             type(model).__name__,
-            fix="make the registered object a subclass of vqapr.authoring.DataModel",
+            fix="make the registered object a subclass of vqapr.public.DataModel",
             status=Status.CONTRACT,
         )
     # `requirements()` is derived from `inputs()` and may legitimately be empty -- `Model.inputs()`
@@ -404,7 +404,7 @@ def load_strategy_model(
             "component.wrong_type",
             "registered StrategyModel object must implement the public StrategyModel contract",
             type(strategy).__name__,
-            fix="make the registered object a subclass of vqapr.authoring.StrategyModel",
+            fix="make the registered object a subclass of vqapr.public.StrategyModel",
             status=Status.CONTRACT,
         )
     _validate_callback_signature(strategy, base=StrategyModel, method_name="decide")
@@ -422,7 +422,7 @@ def load_compliance(ref: ComponentRef, *, project_root: str | Path | None = None
             "component.wrong_type",
             "registered Compliance object must implement the public Compliance contract",
             type(rule).__name__,
-            fix="make the registered object a subclass of vqapr.authoring.Compliance",
+            fix="make the registered object a subclass of vqapr.public.Compliance",
             status=Status.CONTRACT,
         )
     # Not `_requirements(...)`: a rule declares its reads with `inputs()` like every other Model

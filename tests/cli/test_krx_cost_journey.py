@@ -92,14 +92,14 @@ _STRATEGY = '''"""Holds whichever name closed highest, so leadership changes for
 
 from decimal import Decimal
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Rotate(va.StrategyModel):
+class Rotate(vq.StrategyModel):
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=1)
+            "prices": vq.DatasetInput(
+                dataset_id="prices", fields=("close",), lookback=vq.RowsLookback(rows=1)
             )
         }
 
@@ -109,9 +109,9 @@ class Rotate(va.StrategyModel):
             for name, value in call.read("prices", "close").latest().items()
         }
         if not latest:
-            return va.Hold(reason="no-observations")
+            return vq.Hold(reason="no-observations")
         winner = max(latest, key=lambda name: latest[name])
-        return va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
+        return vq.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
 '''
 
 

@@ -19,30 +19,30 @@ from vqapr.domain.wiring import Role
 from vqapr.workspace.registry import Workspace
 
 STRATEGY = '''
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Wide(va.StrategyModel):
+class Wide(vq.StrategyModel):
     def inputs(self):
         return {
-            "resid": va.DatasetInput(
+            "resid": vq.DatasetInput(
                 dataset_id="ff6-resid-values",
                 fields=("resid", "beta_mkt", "beta_smb"),
-                lookback=va.RowsLookback(rows=30),
+                lookback=vq.RowsLookback(rows=30),
             ),
-            "px": va.DatasetInput(
-                dataset_id="kr-daily", fields=("close",), lookback=va.RowsLookback(rows=2)
+            "px": vq.DatasetInput(
+                dataset_id="kr-daily", fields=("close",), lookback=vq.RowsLookback(rows=2)
             ),
         }
 
     def tables(self):
-        return (va.TableSpec("ou_summary", ("instrument", "z")),)
+        return (vq.TableSpec("ou_summary", ("instrument", "z")),)
 
     def account_history(self):
-        return va.AccountHistoryInput(fields=("nav",), lookback=va.RowsLookback(rows=5))
+        return vq.AccountHistoryInput(fields=("nav",), lookback=vq.RowsLookback(rows=5))
 
     def decide(self, call):
-        return va.Hold(reason="never called here")
+        return vq.Hold(reason="never called here")
 '''
 
 

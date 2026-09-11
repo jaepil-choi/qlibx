@@ -64,11 +64,11 @@ writes a single-name position cap that registers and runs unedited.
 ## One member: `observe`
 
 ```python
-class Cap(va.Compliance):
+class Cap(vq.Compliance):
     @property
     def compliance_id(self) -> str: ...          # equals the id it is registered under
     def inputs(self): ...                        # what it reads, as of the instant observed
-    def observe(self, call) -> va.ComplianceFinding: ...
+    def observe(self, call) -> vq.ComplianceFinding: ...
 ```
 
 `observe` receives one `call`, and everything the rule may reach is on it — the marked account

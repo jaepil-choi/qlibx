@@ -26,13 +26,13 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
-    preflight_run,
+    freeze,
     register_dataset,
     register_exchange,
     register_instruments,
@@ -237,7 +237,7 @@ td,th{{padding:.4rem;border:1px solid #ddd}}
 <h1>Execution input registration: declare, register, run</h1>
 <p>Every VQAPR import in this entry point comes from <code>vqapr.public</code>, the surface
 the shipped CLI stands on. The authored strategy in <code>show001_models.py</code> implements
-<code>vqapr.authoring.StrategyModel</code> and returns only <code>Hold</code>/<code>Rebalance</code>
+<code>vqapr.public.StrategyModel</code> and returns only <code>Hold</code>/<code>Rebalance</code>
 - the loader adapts it and the framework stamps every identity fact (intent id, strategy id,
 source refs, account version) itself.</p>
 <h2>Execution input rows (10:00 rows are deliberately non-selected)</h2>{execution_rows}
@@ -301,7 +301,7 @@ def main() -> None:
     )
 
     # --- One real run -------------------------------------------------------------------
-    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)).result())
+    dense_summary = _signature(run(PROJECT, freeze(PROJECT, definition)).result())
 
     # --- Density invariance -------------------------------------------------------------
     # Same registered declaration, only the physical execution parquet's non-selected 10:00
@@ -318,7 +318,7 @@ def main() -> None:
         # The same run again, deliberately: its first pass published `show001-weights`, and a
         # run replaces its own output the way it replaces its own record (design §2).
         canonical_summary = _signature(
-            run(PROJECT, preflight_run(PROJECT, definition), replace_record=True).result()
+            run(PROJECT, freeze(PROJECT, definition), replace_record=True).result()
         )
     finally:
         execution_path.write_bytes(dense_bytes)

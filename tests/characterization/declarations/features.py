@@ -9,19 +9,19 @@ from __future__ import annotations
 
 import numpy as np
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 DATASET_ID = "sample-prices"
 FIELD = "close"
 LOOKBACK = 6  # six closes: the newest against the one five sessions earlier
 
 
-class SampleFeatures(va.DataModel):
+class SampleFeatures(vq.DataModel):
     """`momentum_5d` for every name whose six-session window is complete."""
 
     def inputs(self):
-        read = va.DatasetInput(
-            dataset_id=DATASET_ID, fields=(FIELD,), lookback=va.RowsLookback(rows=LOOKBACK)
+        read = vq.DatasetInput(
+            dataset_id=DATASET_ID, fields=(FIELD,), lookback=vq.RowsLookback(rows=LOOKBACK)
         )
         return {"prices": read}
 

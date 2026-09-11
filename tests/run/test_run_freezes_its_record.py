@@ -15,26 +15,24 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.domain.errors import VqaprError
-
 import tests.sample.journey as journey
 from vqapr.cli.show import RECORD_FIELDS, STRATEGY_FIELDS, record_view
+from vqapr.domain.errors import VqaprError
+from vqapr.public import FrozenRun, Workspace, freeze
+from vqapr.public import run as execute_run
 from vqapr.record import (
     RUN_JSON_FIELDS,
-    RunRecordExists,
     read_run_record,
     read_strategy_record,
     run_ids,
     strategy_refs,
     table_ids,
 )
-from vqapr.public import FrozenRun, Workspace, preflight_run
-from vqapr.public import run as execute_run
 
 
 def _frozen(root: Path) -> FrozenRun:
     panel = journey.install(root)
-    return preflight_run(root, journey.definition(panel))
+    return freeze(root, journey.definition(panel))
 
 
 @pytest.mark.slow

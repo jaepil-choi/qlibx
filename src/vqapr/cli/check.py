@@ -2,7 +2,7 @@
 
 Two properties make this verb worth having, and both are about what it does NOT do.
 
-**It collects.** `preflight_run` raises on the first thing it finds, which is right for a
+**It collects.** `freeze` raises on the first thing it finds, which is right for a
 gate standing in front of a run: the first refusal is the reason the run must not start, and
 proving the rest costs time the caller did not ask for. But it makes preparing a declaration a
 sequence of round trips -- fix the dataset, re-run, learn the schedule is missing, re-run, learn the
@@ -37,7 +37,7 @@ from vqapr.cli.run import preflight_refusal, refuse_a_path
 from vqapr.domain.errors import InputError, Stage, VqaprError
 from vqapr.public import Workspace
 from vqapr.run.preflight.checks import JUDGMENT_CODES
-from vqapr.run.preflight.verdict import RunVerdict, verify_run
+from vqapr.run.preflight.verdict import RunVerdict, preflight
 
 STAGE = Stage.CHECK
 
@@ -135,7 +135,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 # reported as passed.
                 assert definition is not None
                 if verdict is None:
-                    verdict = verify_run(workspace, definition)  # type: ignore[arg-type]
+                    verdict = preflight(workspace, definition)  # type: ignore[arg-type]
                 # A blocked judgment is a `Failure` (`judgment.blocked`, status 500/502 by its
                 # cause, `observed` naming the judge, the exception whole in `cause`), rendered
                 # through the one shape -- under `blocked`, not `failures`, because nothing was
@@ -150,7 +150,7 @@ def check(target: str | Path, project_root: Path) -> dict[str, Any]:
                 # the judgments read (`docs/issues/archive/070`).
                 assert workspace is not None and definition is not None
                 if verdict is None:
-                    verdict = verify_run(workspace, definition)  # type: ignore[arg-type]
+                    verdict = preflight(workspace, definition)  # type: ignore[arg-type]
                 if verdict.refusal is not None:
                     raise verdict.refusal
         except VqaprError as error:

@@ -11,7 +11,7 @@ which a calculation over the entire period reaches a single session.
 
 ## Two read verbs, one per grain
 
-`inputs()` maps an alias to `va.DatasetInput(dataset_id=, fields=, lookback=)`. Which verb reads it
+`inputs()` maps an alias to `vq.DatasetInput(dataset_id=, fields=, lookback=)`. Which verb reads it
 follows the dataset's `grain`, and each refuses the other by name.
 
 **`read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a

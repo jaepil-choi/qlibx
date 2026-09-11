@@ -3,9 +3,9 @@
 Status: current
 
 This showcase proves the shipped spine end to end: `vqapr.public` registrations plus one
-authored `vqapr.authoring.StrategyModel` run a real simulation. The dataset, the execution
+authored `vqapr.public.StrategyModel` run a real simulation. The dataset, the execution
 input and its fill convention, the strategy, the exchange, and the two agendas are each
-registered explicitly, then frozen by `preflight_run` and executed by `run` — the same path
+registered explicitly, then frozen by `freeze` and executed by `run` — the same path
 `vqapr register` and `vqapr run` take.
 
 The strategy lives in `show001_models.py`, a real project-local module, because the engine's

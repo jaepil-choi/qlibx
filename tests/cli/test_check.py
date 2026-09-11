@@ -2,7 +2,7 @@
 
 Two claims are worth testing and one is worth being careful about.
 
-**Collecting.** `preflight_run` stops at the first refusal, which is right for a gate in front of a
+**Collecting.** `freeze` stops at the first refusal, which is right for a gate in front of a
 run. `check` was asked a different question -- is this ready -- so it answers about every
 independent judgment at once. The test that matters is not that it reports A failure; it is that it
 reports the SECOND one too, because a verb that collects and a verb that stops look identical

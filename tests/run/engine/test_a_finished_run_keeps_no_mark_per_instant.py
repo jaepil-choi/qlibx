@@ -25,7 +25,7 @@ from tests.acceptance.test_a_minute_strategy_fills_at_the_next_minute import _wo
 from tests.cli.test_commands import _cli
 from vqapr.data.execution_table import ExecutionSnapshotSummary
 from vqapr.domain.account import Mark, MarkSummary
-from vqapr.public import Workspace, preflight_run, run
+from vqapr.public import Workspace, freeze, run
 from vqapr.run.engine.evidence import AccountCommitEvidence, MarkEvidence, ValuationEvidence
 from vqapr.run.engine.loop import DueExecutionTrace
 
@@ -63,7 +63,7 @@ def test_a_finished_run_keeps_a_summary_per_instant_and_not_a_mark_per_name(
     assert code == 0, payload
 
     workspace = Workspace.open(tmp_path)
-    result = run(tmp_path, preflight_run(workspace, workspace.run_definition("kept"))).result()
+    result = run(tmp_path, freeze(workspace, workspace.run_definition("kept"))).result()
     gc.collect()
 
     market = [trace for trace in result.events if isinstance(trace, DueExecutionTrace)]

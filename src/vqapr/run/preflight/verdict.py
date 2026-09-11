@@ -1,4 +1,4 @@
-"""The one door from a registered `RunDefinition` to a `FrozenRun`: `verify_run`.
+"""The one door from a registered `RunDefinition` to a `FrozenRun`: `preflight`.
 
 `docs/design/2026-09-10-one-door-for-a-run.md`. A run declaration used to be read twice on its way
 to running: once by the judgments (`judgments.py`, which answer every question independently so
@@ -32,7 +32,7 @@ from vqapr.domain.errors import Failure, Stage, VqaprError
 from vqapr.domain.fill import ExecutionHorizon
 from vqapr.run.preflight.checks import RUN_OUTPUT_STALE, judgments
 from vqapr.run.preflight.facts import RunFacts
-from vqapr.run.preflight.freeze import preflight_run as _freeze
+from vqapr.run.preflight.freeze import freeze as _freeze
 from vqapr.run.preflight.frozen import FrozenRun
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import RunDefinition
@@ -133,7 +133,7 @@ class RunVerdict:
         return self.frozen
 
 
-def verify_run(workspace: Workspace, definition: RunDefinition) -> RunVerdict:
+def preflight(workspace: Workspace, definition: RunDefinition) -> RunVerdict:
     """Read one run declaration once: every judgment answered, and the run frozen where it can be.
 
     The freeze is attempted whatever the judgments found, because `check` reports what the freeze
@@ -154,4 +154,4 @@ def verify_run(workspace: Workspace, definition: RunDefinition) -> RunVerdict:
     return RunVerdict(tuple(found), tuple(blocked), frozen, refusal, resources)
 
 
-__all__ = ["RunResources", "RunVerdict", "verify_run"]
+__all__ = ["RunResources", "RunVerdict", "preflight"]

@@ -2,7 +2,7 @@
 
 `test_envelope.py` covers the envelope's shape and asserts the parser *mentions* every command.
 Mentioning is not running: before this file, no test invoked `new`, `register`, `list` or `run`,
-so the whole `runs: -> register -> RunDefinition -> preflight_run -> run` path was unexecuted.
+so the whole `runs: -> register -> RunDefinition -> freeze -> run` path was unexecuted.
 These tests call `main(argv)` and read the JSON it emits, which is exactly what an agent gets.
 
 Datasets, execution inputs, components and runs are declared through `vqapr register`, which is
@@ -1219,7 +1219,7 @@ def test_one_run_records_one_clock(tmp_path: Path, capsys: pytest.CaptureFixture
 
 
 _NEVER_READY = '''
-from vqapr.authoring import DatasetInput, RowsLookback, StrategyModel
+from vqapr.public import DatasetInput, RowsLookback, StrategyModel
 
 
 class {object_name}(StrategyModel):

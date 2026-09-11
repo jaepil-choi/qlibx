@@ -56,6 +56,9 @@ PERMANENT: frozenset[str] = frozenset(
         # the sample out of `src/` (nothing reached it); record `172` gave it a door and brought
         # it back.
         "src/vqapr/agent/sample/exchange.py",
+        # The sample strategy `vqapr new sample` copies beside it, for the same reason: since record
+        # `279` it imports the one author surface, as a user's strategy does.
+        "src/vqapr/agent/sample/reversal_5d.py",
         # The CLI itself, which is the product the facade exists for.
         "src/vqapr/cli/check.py",
         # `cli/register.py` left this list in record `112`: its declaration parsing moved to
@@ -139,7 +142,8 @@ def test_the_count_still_matches_the_ruling() -> None:
     **4** after record `125` took the facade import out of `strategy_bridge.py`, **2** after
     record `170` moved the two sample modules out of `src/` into `tests/sample/`, **3** after
     record `172` shipped the sample venue again behind `vqapr new sample`, and **6** after record
-    `277`, when owner ruling AC4 sent three more CLI verbs through the facade.
+    `277`, when owner ruling AC4 sent three more CLI verbs through the facade, and **7** after record
+    `279` removed `vqapr.authoring` and the shipped sample strategy imports `vqapr.public`.
 
     Three is `len(PERMANENT)`, which the ruling called the floor: the two CLI verbs and the one
     shipped sample calling the product's own supported surface. Record `105` wrote that floor as **6** and it is left here
@@ -152,7 +156,7 @@ def test_the_count_still_matches_the_ruling() -> None:
     (`docs/design/agent-first-surface.md`, "For completeness and to stop the earlier error being
     inherited silently"). A facade with no consumers would be a facade with no reason to exist.
     """
-    assert len(_importers()) == 6
+    assert len(_importers()) == 7
 
 
 @pytest.mark.parametrize(
@@ -169,8 +173,7 @@ def test_template_text_is_not_counted_as_an_import(path: str) -> None:
     """
     assert path not in _importers()
     text = pathlib.Path(path).read_text(encoding="utf-8")
-    # Each file must still contain a `vqapr` import inside template text, or this test pins
-    # nothing. `scaffold.py` stopped containing `vqapr.public` in record `131`: all three
-    # templates now emit `from vqapr import authoring as va`, which is the convergence this
-    # tripwire was waiting for, not a regression of it.
-    assert "from vqapr" in text and ("vqapr.public" in text or "authoring as va" in text)
+    # The file must still contain a `vqapr` import inside template text, or this test pins
+    # nothing. Since record `279` every template emits `from vqapr import public as vq`: one
+    # author surface, aliased once, and a `Constant` the AST walk does not count.
+    assert "from vqapr import public as vq" in text

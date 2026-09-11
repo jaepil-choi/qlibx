@@ -10,7 +10,7 @@
 ## Two read verbs, one per grain
 
 `inputs()` returns a mapping from an alias you name to
-`va.DatasetInput(dataset_id=, fields=, lookback=)`. Which verb reads it follows the dataset's
+`vq.DatasetInput(dataset_id=, fields=, lookback=)`. Which verb reads it follows the dataset's
 `grain`, and each verb refuses the other grain by name.
 
 **`call.read(alias, field)` on a panel grain** (`instrument_instant`, `instant`) returns a

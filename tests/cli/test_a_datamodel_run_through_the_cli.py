@@ -30,12 +30,12 @@ from vqapr.run.assemble import run_registered_datamodel
 from vqapr.run.batch import batch_cubes, in_workers
 from vqapr.workspace.registry import Workspace
 
-_MODELS = """from vqapr import authoring as va
+_MODELS = """from vqapr import public as vq
 
-class ReversalModel(va.DataModel):
+class ReversalModel(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=2)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=2)
         )}
 
     def compute(self, context):
@@ -411,12 +411,12 @@ def test_a_datamodel_record_is_listed_shown_and_removed_by_its_own_verbs(
     assert again["failures"][0]["code"] == "argument.value_invalid"
 
 
-_ECHO = """from vqapr import authoring as va
+_ECHO = """from vqapr import public as vq
 
-class EchoModel(va.DataModel):
+class EchoModel(vq.DataModel):
     def inputs(self):
-        return {"scores": va.DatasetInput(
-            dataset_id='reversal_2d', fields=('score',), lookback=va.RowsLookback(rows=1)
+        return {"scores": vq.DatasetInput(
+            dataset_id='reversal_2d', fields=('score',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):

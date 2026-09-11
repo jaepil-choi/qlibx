@@ -120,7 +120,7 @@ JUDGMENT_BLOCKED = "judgment.blocked"
 
 Not in `JUDGMENT_CODES`: it is not a judgment. `judgments` builds one such failure per judge that
 raised, carrying the exception whole in `cause` and its status by whose frame raised; `check`
-reports them AS blocked and `verify.RunVerdict.require_frozen` (`preflight_run`, hence `run`
+reports them AS blocked and `verify.RunVerdict.require_frozen` (`freeze`, hence `run`
 and the sample's `execute`) refuses on them beside the refusals proper.
 """
 
@@ -147,7 +147,7 @@ def judgments(
     at = FailureSource(key_path=f"runs.{definition.run_id}")
     registered = {str(item.dataset_id): item for item in workspace.datasets}
     # The run's facts, each read at most ONCE for every judge that reads it -- and for the
-    # freeze that follows, when the caller hands the same `facts` to both (`verify.verify_run`).
+    # freeze that follows, when the caller hands the same `facts` to both (`verify.preflight`).
     # `docs/issues/archive/069` made the schedule one derivation rather than one per judge; record
     # `241` makes every fact so. Reached through a CALL rather than handed over as a value: a
     # failure to read it has to land inside the per-judge wrapper below, where it becomes a

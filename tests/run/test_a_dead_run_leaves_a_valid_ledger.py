@@ -24,14 +24,14 @@ _DIES = '''"""Rebalances into A twice, then dies on the third decision."""
 
 from decimal import Decimal
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Dies(va.StrategyModel):
+class Dies(vq.StrategyModel):
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=1)
+            "prices": vq.DatasetInput(
+                dataset_id="prices", fields=("close",), lookback=vq.RowsLookback(rows=1)
             )
         }
 
@@ -40,7 +40,7 @@ class Dies(va.StrategyModel):
         self.memory = {"decisions": seen}
         if seen >= 3:
             raise RuntimeError("the strategy died on its third decision")
-        return va.Rebalance.of(long={"A": Decimal(1)}, invested="1.0")
+        return vq.Rebalance.of(long={"A": Decimal(1)}, invested="1.0")
 '''
 
 

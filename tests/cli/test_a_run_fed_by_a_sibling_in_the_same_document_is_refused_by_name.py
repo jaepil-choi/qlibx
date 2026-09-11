@@ -16,12 +16,12 @@ import pytest
 
 from vqapr.cli.main import main
 
-_MODEL = """from vqapr import authoring as va
+_MODEL = """from vqapr import public as vq
 
-class Ratio(va.DataModel):
+class Ratio(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=1)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):

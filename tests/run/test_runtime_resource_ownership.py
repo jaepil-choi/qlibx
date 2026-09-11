@@ -16,11 +16,11 @@ def member(request, tmp_path: Path, model_price_parquet: Path):
     kind = request.param
     if kind == "strategy":
         workspace, definition = _setup(tmp_path, model_price_parquet)
-        frozen = runtime.preflight_run(workspace, definition)
+        frozen = runtime.freeze(workspace, definition)
         layer = frozen.strategy
     else:
         _prepared(tmp_path, model_price_parquet, ("reversal", "ReversalModel"))
-        frozen = runtime.preflight_run(
+        frozen = runtime.freeze(
             tmp_path, _definition("review", DataModelEntry("reversal", ("score",)), writes="scores")
         )
         layer = frozen.datamodel

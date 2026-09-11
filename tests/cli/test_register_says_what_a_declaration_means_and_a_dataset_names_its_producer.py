@@ -22,12 +22,12 @@ import pytest
 
 from vqapr.cli.main import main
 
-_MODELS = """from vqapr import authoring as va
+_MODELS = """from vqapr import public as vq
 
-class Reads(va.DataModel):
+class Reads(vq.DataModel):
     def inputs(self):
-        return {"prices": va.DatasetInput(
-            dataset_id='price_daily', fields=('close',), lookback=va.RowsLookback(rows=2)
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=2)
         )}
 
     def compute(self, context):
@@ -35,22 +35,22 @@ class Reads(va.DataModel):
         return [{"instrument": name, "score": 1.0} for name in window.instruments]
 
 
-class ReadsNothingHere(va.DataModel):
+class ReadsNothingHere(vq.DataModel):
     def inputs(self):
-        return {"other": va.DatasetInput(
-            dataset_id='elsewhere', fields=('x',), lookback=va.RowsLookback(rows=1)
+        return {"other": vq.DatasetInput(
+            dataset_id='elsewhere', fields=('x',), lookback=vq.RowsLookback(rows=1)
         )}
 
     def compute(self, context):
         return []
 
 
-class Holds(va.StrategyModel):
+class Holds(vq.StrategyModel):
     def inputs(self):
         return {}
 
     def decide(self, call):
-        return va.Hold(reason='says')
+        return vq.Hold(reason='says')
 
 
 from decimal import Decimal

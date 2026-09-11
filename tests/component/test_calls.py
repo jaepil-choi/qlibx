@@ -22,7 +22,7 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.authoring import CalendarLookback, DatasetInput, Observation, RowsLookback
+from vqapr.public import CalendarLookback, DatasetInput, Observation, RowsLookback
 from vqapr.run.engine.calls import observations, requirements_for
 
 EVALUATION_TIME = datetime(2024, 3, 15, 16, tzinfo=UTC)

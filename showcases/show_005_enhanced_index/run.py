@@ -7,7 +7,7 @@
                                                                           built inside no_short
                                                                           and single_name_cap
 
-Both halves are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real order
+Both halves are ordinary runs: `RunDefinition`, `freeze`, `run`, a real `Account`, real order
 planning and the declared execution profile. The enhanced-index Strategy reads **two allocation
 inputs** — the committed benchmark and the published alpha — through ordinary `DataRequirement`
 subscriptions inside its point-in-time window, so the combination is proved on the subscription
@@ -48,15 +48,15 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     ZeroDealtReason,
     export_roster,
-    preflight_run,
+    freeze,
     register_compliance,
     register_dataset,
     register_exchange,
@@ -900,7 +900,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         writes="show005-alpha-weights",
     )
     alpha_run = run(
-        project, preflight_run(project, alpha_definition), store_root=project / ".vqapr"
+        project, freeze(project, alpha_definition), store_root=project / ".vqapr"
     )
     alpha_result = alpha_run.result()
 
@@ -936,7 +936,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         instruments=universe,
         writes="show005-index-weights",
     )
-    index_result = run(project, preflight_run(project, index_definition)).result()
+    index_result = run(project, freeze(project, index_definition)).result()
 
     alpha_memory = _memory(alpha_result)
     index_memory = _memory(index_result)

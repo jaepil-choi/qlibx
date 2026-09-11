@@ -62,11 +62,11 @@ def project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Path:
     mine = _panel(tmp_path / "data" / "price_daily.parquet")
     written = _panel(tmp_path / ".vqapr" / "materialized" / "derived" / "part-000.parquet")
     (tmp_path / "models.py").write_text(
-        "from vqapr import authoring as va\n\n"
-        "class Never(va.DataModel):\n"
+        "from vqapr import public as vq\n\n"
+        "class Never(vq.DataModel):\n"
         "    def inputs(self):\n"
-        "        return {'prices': va.DatasetInput(dataset_id='price_daily', fields=('close',),"
-        " lookback=va.RowsLookback(rows=1))}\n"
+        "        return {'prices': vq.DatasetInput(dataset_id='price_daily', fields=('close',),"
+        " lookback=vq.RowsLookback(rows=1))}\n"
         "    def compute(self, context):\n"
         "        return []\n",
         encoding="utf-8",

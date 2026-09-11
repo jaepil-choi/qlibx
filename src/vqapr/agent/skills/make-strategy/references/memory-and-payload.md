@@ -31,7 +31,7 @@ the framework restores it; `inputs()` is called on such an instance and must not
 ## Warm-up is a `Hold`, not a failure
 
 Two strategies with different lookbacks reach their first real decision on different sessions. The
-callbacks before that are ordinary callbacks that return `va.Hold(reason=...)`. Expressing warm-up
+callbacks before that are ordinary callbacks that return `vq.Hold(reason=...)`. Expressing warm-up
 as an exception makes a normal condition look like a defect in the record.
 
 ## `save_payload` / `load_payload` — everything else

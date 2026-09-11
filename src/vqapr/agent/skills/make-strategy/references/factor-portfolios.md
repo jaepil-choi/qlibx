@@ -53,27 +53,27 @@ are six ids:
 
 ```python
 from decimal import Decimal
-from vqapr import authoring as va
+from vqapr import public as vq
 from vqapr.public import fama_french_assign, fama_french_cut_points
 
 SIZE, BM = "S", "1"                     # this file is S1; S2 ... B3 differ only here
 SEOUL = "Asia/Seoul"
 
-class FfLeg(va.StrategyModel):
+class FfLeg(vq.StrategyModel):
     def inputs(self):
         return {
-            "px": va.DatasetInput(dataset_id="prices", fields=("market_cap", "is_trading_halt"),
-                                  lookback=va.CalendarLookback(days=14, timezone=SEOUL)),
-            "ls": va.DatasetInput(dataset_id="listing", fields=("market",),
-                                  lookback=va.CalendarLookback(days=45, timezone=SEOUL)),
-            "fs": va.DatasetInput(dataset_id="financials",
+            "px": vq.DatasetInput(dataset_id="prices", fields=("market_cap", "is_trading_halt"),
+                                  lookback=vq.CalendarLookback(days=14, timezone=SEOUL)),
+            "ls": vq.DatasetInput(dataset_id="listing", fields=("market",),
+                                  lookback=vq.CalendarLookback(days=45, timezone=SEOUL)),
+            "fs": vq.DatasetInput(dataset_id="financials",
                                   fields=("fiscal_yyyymm", "total_equity"),
-                                  lookback=va.CalendarLookback(days=600, timezone=SEOUL)),
+                                  lookback=vq.CalendarLookback(days=600, timezone=SEOUL)),
         }
 
     def decide(self, call):
         if call.at.month != 7:
-            return va.Hold(reason="forms only in July")
+            return vq.Hold(reason="forms only in July")
         caps = call.read("px", "market_cap").current()   # the newest cross-section
         # caps.at is its instant: assert it is June's last close before trusting it
         ...  # eligibility, book equity from call.read("fs", ...).matrix(), bm = be / me
@@ -84,13 +84,13 @@ class FfLeg(va.StrategyModel):
         bucket = fama_french_assign(bm, thresholds=cuts, labels=("1", "2", "3"))
         chosen = {n: me[n] for n in me if size[n] == SIZE and bucket[n] == BM}
         if not chosen:
-            return va.Hold(reason=f"no eligible name in {SIZE}{BM}")
-        return va.Rebalance.of(long=chosen, invested=1)   # conviction in proportion to size
+            return vq.Hold(reason=f"no eligible name in {SIZE}{BM}")
+        return vq.Rebalance.of(long=chosen, invested=1)   # conviction in proportion to size
 ```
 
 - `CalendarLookback`, not `RowsLookback`: a sort is cross-sectional, and every name must see the
   same window. `current()` is the newest cross-section; `.at` says which instant it is.
-- The market leg returns `va.Rebalance.of(long={"KOSPI": 1}, invested=1)` against its own
+- The market leg returns `vq.Rebalance.of(long={"KOSPI": 1}, invested=1)` against its own
   one-instrument execution table.
 - The run: `schedule: {every: 12M, at: "15:29"}` with `start` on the first of July, the fill at the
   close (`15:30`, `trade_price: close`), the `academic` venue, and a large `initial_account`.

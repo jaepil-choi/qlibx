@@ -121,28 +121,28 @@ state across callbacks (`self.memory`), and a table of your own (`tables` and `s
 
 import numpy as np
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 {lookback_declaration}
 DECISIONS = "decisions"  # a table of your own; `vqapr export` writes it as tables/decisions.csv
 
 
-class {class_name}(va.StrategyModel):
+class {class_name}(vq.StrategyModel):
     """`{dataset_id}`.`{field}` over {window_words}; the momentum signal below is a placeholder."""
 
     def inputs(self):
-        read = va.DatasetInput(
+        read = vq.DatasetInput(
             dataset_id="{dataset_id}", fields=("{field}",), lookback={lookback_expression}
         )
         # A second dataset is a second entry under an alias of its own, read the same way. For one
         # value per name at the decision -- an index weight, a bool flag -- use
         # `call.read(alias, field).current()` (name -> value); `matrix()` is for numeric windows.
-        #   "bench": va.DatasetInput(dataset_id="<id>", fields=("weight",), lookback=<as above>),
+        #   "bench": vq.DatasetInput(dataset_id="<id>", fields=("weight",), lookback=<as above>),
         return {{"{alias}": read}}  # the alias is YOUR name for this read; `call.read` takes it
 
     def tables(self):
         # Every table decide() writes, with its exact fields; each row's time is stamped for you.
-        return (va.TableSpec(DECISIONS, ("instrument", "action", "score")),)
+        return (vq.TableSpec(DECISIONS, ("instrument", "action", "score")),)
 
     def decide(self, call):
         # One field as a window: instants x instruments, {window_comment}.
@@ -154,7 +154,7 @@ class {class_name}(va.StrategyModel):
         names = window.instruments
         chosen = {{name: scores[j] for j, name in enumerate(names) if full[j] and scores[j] > 0}}
         if not chosen:
-            return va.Hold(reason="no name scored above zero")  # prose; spaces are fine
+            return vq.Hold(reason="no name scored above zero")  # prose; spaces are fine
         # State across callbacks: `self.memory` is strict JSON, restored before every call and kept
         # after it. One instance serves the whole run, so never keep state anywhere else.
         held = set(self.memory.get("held", []))
@@ -169,13 +169,13 @@ class {class_name}(va.StrategyModel):
             )
         # Relative conviction: the package normalises, rounds and balances against cash. A name
         # left out of `long` is sold.
-        return va.Rebalance.of(long=chosen, invested="{invested}")
+        return vq.Rebalance.of(long=chosen, invested="{invested}")
 '''
 
 
 _STRATEGY_ROWS_SIGNAL = """\
         if closes.shape[0] < LOOKBACK:
-            return va.Hold(reason="fewer than LOOKBACK sessions in the window")
+            return vq.Hold(reason="fewer than LOOKBACK sessions in the window")
         full = np.isfinite(closes).all(axis=0) & (closes[0] > 0)  # a complete window, per name
         with np.errstate(divide="ignore", invalid="ignore"):
             # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
@@ -184,7 +184,7 @@ _STRATEGY_ROWS_SIGNAL = """\
 
 _STRATEGY_CALENDAR_SIGNAL = """\
         if closes.shape[0] < 2:
-            return va.Hold(reason="fewer than two sessions in the window")
+            return vq.Hold(reason="fewer than two sessions in the window")
         # A calendar window promises a date range, not a row count: a name that did not trade on
         # every session has fewer values inside it. So the return runs from each name's first
         # observed value in the window to its newest, and a name needs two of them.
@@ -205,7 +205,7 @@ _STRATEGY_FLAVOURS = {
             "observations, not five"
         ),
         "window_words": "LOOKBACK rows",
-        "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
+        "lookback_expression": "vq.RowsLookback(rows=LOOKBACK)",
         "window_comment": "the same LOOKBACK instants for every name",
         "signal_block": _STRATEGY_ROWS_SIGNAL,
     },
@@ -215,7 +215,7 @@ _STRATEGY_FLAVOURS = {
             'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
         ),
         "window_words": "the last LOOKBACK_DAYS calendar days",
-        "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "lookback_expression": "vq.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
         "window_comment": "every instant of the last LOOKBACK_DAYS days",
         "signal_block": _STRATEGY_CALENDAR_SIGNAL,
     },
@@ -236,14 +236,14 @@ from __future__ import annotations
 
 {imports}
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 DATASET_ID = "{dataset_id}"
 FIELD = "{field}"
 {lookback_declaration}
 
 
-class {class_name}(va.DataModel):
+class {class_name}(vq.DataModel):
     """Derives one value per instrument from `{field}` of `{dataset_id}`, each session.
 
     The example below is a trailing return and is a placeholder: replace the marked block, and
@@ -251,7 +251,7 @@ class {class_name}(va.DataModel):
     """
 
     def inputs(self):
-        read = va.DatasetInput(
+        read = vq.DatasetInput(
             dataset_id=DATASET_ID, fields=(FIELD,), lookback={lookback_expression}
         )
         return {{"{alias}": read}}  # the alias is YOUR name for this read; `context.read` takes it
@@ -369,7 +369,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # rows of the table: the same instants for every name"
         ),
-        "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
+        "lookback_expression": "vq.RowsLookback(rows=LOOKBACK)",
         "completeness_guard": "LOOKBACK rows, every one a number",
         "eligibility": "finite.all(axis=0) & (values.shape[0] == LOOKBACK)",
         "lookback_note": _ROWS_LOOKBACK_NOTE,
@@ -381,7 +381,7 @@ _LOOKBACK_FLAVOURS = {
         "lookback_declaration": (
             "LOOKBACK = {lookback}  # instants per name, per field (grain: rows only)"
         ),
-        "lookback_expression": "va.InstantsLookback(instants=LOOKBACK)",
+        "lookback_expression": "vq.InstantsLookback(instants=LOOKBACK)",
         "completeness_guard": "len(values) == LOOKBACK",
         "eligibility": "",
         "lookback_note": _INSTANTS_LOOKBACK_NOTE,
@@ -394,7 +394,7 @@ _LOOKBACK_FLAVOURS = {
             "LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a week is 7, not 5\n"
             'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
         ),
-        "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "lookback_expression": "vq.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
         "completeness_guard": "at least two observed values",
         "eligibility": "finite.sum(axis=0) >= 2",
         "lookback_note": _CALENDAR_LOOKBACK_NOTE,
@@ -425,7 +425,7 @@ Edit `CAP`. Everything else runs as written.
 
 from decimal import Decimal
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 CAP = Decimal("{cap}")  # THE RULE. No single name may exceed this share of the book.
 FLOOR = Decimal("0")
@@ -435,7 +435,7 @@ FLOOR = Decimal("0")
 # run may declare both under `compliance:`.
 
 
-class {class_name}(va.Compliance):
+class {class_name}(vq.Compliance):
     """No single instrument may exceed `CAP` of the marked book, long or short.
 
     The rule's parameters are its own. It does not inherit the cap the strategy built inside --
@@ -456,13 +456,13 @@ class {class_name}(va.Compliance):
     def inputs(self):
         """What this rule reads. Nothing: the limit is a property of the weight itself.
 
-        A rule comparing against a benchmark would return a `va.DatasetInput` here, and
+        A rule comparing against a benchmark would return a `vq.DatasetInput` here, and
         `call.read("<your alias>", "<field>")` inside `observe` would hand back its window as of
         the instant observed -- `latest()` is the benchmark's newest weight per name.
         """
         return {{}}
 
-    def observe(self, call: va.ComplianceCall) -> va.ComplianceFinding:
+    def observe(self, call: vq.ComplianceCall) -> vq.ComplianceFinding:
         """Judge the book that was actually committed, after it was marked.
 
         Execution does not always fill what was intended, and rounding a weight into whole shares
@@ -475,7 +475,7 @@ class {class_name}(va.Compliance):
         weights = call.account.weights() if call.account.nav else {{}}
         offenders = tuple(sorted(name for name, w in weights.items() if abs(w) > CAP))
         worst = max((abs(w) for w in weights.values()), default=FLOOR)
-        return va.ComplianceFinding(
+        return vq.ComplianceFinding(
             passed=not offenders,
             measured=worst,
             bound=CAP,

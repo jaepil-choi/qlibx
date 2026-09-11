@@ -16,7 +16,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from vqapr.authoring import Compliance, ComplianceFinding
 from vqapr.component.compliance.report import (
     VERDICT_BREACHED,
     VERDICT_HELD,
@@ -24,6 +23,7 @@ from vqapr.component.compliance.report import (
     StampedFinding,
     default_tolerance,
 )
+from vqapr.public import Compliance, ComplianceFinding
 from vqapr.run.engine.stages.observe import _tolerance_override
 from vqapr.run.recording import contract_report
 

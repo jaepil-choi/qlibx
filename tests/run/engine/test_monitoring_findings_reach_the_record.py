@@ -31,13 +31,6 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 
-from vqapr.authoring import (
-    Compliance,
-    ComplianceCall,
-    ComplianceFinding,
-    Hold,
-    StrategyModel,
-)
 from vqapr.component.reference import ComponentRef
 from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec
 from vqapr.data.source import SourceSpec
@@ -48,10 +41,17 @@ from vqapr.domain.fill import FillRule
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
+from vqapr.public import (
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
+    Hold,
+    StrategyModel,
+)
 from vqapr.record import RunRecordWriter, read_typed_table, table_ids
 from vqapr.run.engine.loop import DueExecutionTrace, RunLoop, strategy_loop
 from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 
 KST = ZoneInfo("Asia/Seoul")

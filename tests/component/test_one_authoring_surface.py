@@ -1,5 +1,4 @@
-"""One author surface: the facade and `vqapr.authoring` name the same objects, and the three
-scaffolds teach one grammar.
+"""One author surface, `vqapr.public`, and the three scaffolds teach one grammar.
 
 This began as the characterization suite for `docs/issues/archive/036` -- every assertion stated what the
 package did on 2026-09-02 and named the milestone that would delete it. The milestones landed:
@@ -12,11 +11,12 @@ Design: `docs/design/the-panel-the-surface-and-the-run.md` §3 (명사 2 - 하�
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
 
-import vqapr.authoring as authoring
+import vqapr
 import vqapr.public as public
 from vqapr.agent.scaffold import render
 from vqapr.component.loading import load_compliance, load_data_model, load_strategy_model
@@ -24,33 +24,18 @@ from vqapr.domain.wiring import Role
 from vqapr.public import register_compliance, register_data_model, register_strategy_model
 
 # --------------------------------------------------------------------------------------
-# One name, two classes.
+# One surface.
 # --------------------------------------------------------------------------------------
 
-CONVERGED_NAMES = (
-    "Compliance",
-    "ComplianceFinding",
-    "DataModel",
-    "StrategyModel",
-)
-"""Names the facade and the authoring module export as ONE object.
 
-The goal, asserted so that it cannot quietly come apart again. This list began as
-`DIVERGENT_NAMES` -- five names exported by BOTH `vqapr.public` and `vqapr.authoring` as
-different classes, with an inverse test asserting `is not` for each -- and every name crossed
-over in the milestone that converged it: the two lookbacks in record `126`, the observing role
-with its finding in `130` (`Compliance` since `208`), `DataModel` in `131`, and `StrategyModel`,
-the last, in `132`. The inverse test went with the last entry.
-"""
-
-
-@pytest.mark.parametrize("name", CONVERGED_NAMES)
-def test_the_facade_and_the_authoring_module_are_one_object(name: str) -> None:
-    """An author who imports either name has written against the same contract."""
-    assert getattr(public, name) is getattr(authoring, name), (
-        f"public.{name} and authoring.{name} came apart again; that is the defect "
-        f"docs/issues/archive/036 measured, not a refactor."
-    )
+def test_there_is_no_second_author_surface() -> None:
+    """`vqapr.authoring` was a second name for the classes `vqapr.public` exports, kept one object
+    by records `126`-`132` and removed in 0.16.0 (record `279`, owner ruling D8). An author who
+    imports it now is told at once, rather than writing against a name that can drift again."""
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("vqapr.authoring")
+    assert "authoring" not in vqapr.__all__
+    assert vqapr.public is public
 
 
 # --------------------------------------------------------------------------------------
@@ -65,11 +50,11 @@ _SCAFFOLDED_KINDS = (
 
 
 def test_the_three_scaffolds_emit_one_import_line() -> None:
-    """`from vqapr import authoring as va`, in every kind; nothing imports `vqapr.public`."""
+    """`from vqapr import public as vq`, in every kind: the one author surface, aliased once."""
     for kind in _SCAFFOLDED_KINDS:
         source = render(kind, "sample", dataset_id="px")
-        assert "from vqapr import authoring as va\n" in source, kind
-        assert "vqapr.public" not in source, kind
+        assert "from vqapr import public as vq\n" in source, kind
+        assert "vqapr.authoring" not in source, kind
 
 
 def test_the_three_scaffolds_declare_and_read_the_same_way() -> None:
@@ -97,22 +82,22 @@ def test_each_scaffold_differs_only_in_its_own_verb() -> None:
 # --------------------------------------------------------------------------------------
 
 _AUTHORED_STRATEGY = '''\
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Model(va.StrategyModel):
+class Model(vq.StrategyModel):
     def inputs(self):
         return {}
 
     def decide(self, call):
-        return va.Hold(reason="probe")
+        return vq.Hold(reason="probe")
 '''
 
 _AUTHORED_DATA_MODEL = '''\
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Model(va.DataModel):
+class Model(vq.DataModel):
     def inputs(self):
         return {}
 
@@ -121,10 +106,10 @@ class Model(va.DataModel):
 '''
 
 _AUTHORED_COMPLIANCE = '''\
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Model(va.Compliance):
+class Model(vq.Compliance):
     @property
     def compliance_id(self):
         return "authored-rule"
@@ -165,7 +150,7 @@ def test_load_strategy_model_accepts_an_authored_strategy(tmp_path: Path) -> Non
 
     loaded = load_strategy_model(ref, project_root=tmp_path)
 
-    assert isinstance(loaded, authoring.StrategyModel)
+    assert isinstance(loaded, public.StrategyModel)
     assert type(loaded).__name__ == "Model"
 
 

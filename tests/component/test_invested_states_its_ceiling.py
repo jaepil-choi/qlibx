@@ -18,9 +18,8 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.authoring import Rebalance
 from vqapr.domain.intent import Budget
-from vqapr.public import PortfolioDirection
+from vqapr.public import PortfolioDirection, Rebalance
 
 
 def test_the_refusal_names_the_legal_range_and_the_halving() -> None:

@@ -18,8 +18,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.agent.scaffold import render
-from vqapr.authoring import Rebalance
 from vqapr.domain.wiring import Role
+from vqapr.public import Rebalance
 
 BANNED = ("uuid5", "source_refs", "account_version", "strategy_id")
 """Identity and provenance the FRAMEWORK owns. AC-A2 forbids all four from authored code.
@@ -228,8 +228,8 @@ def test_the_authored_class_is_found_however_it_was_written(
 
     source = tmp_path / f"{label.replace(' ', '_')}.py"
     source.write_text(
-        "from vqapr.authoring import StrategyModel\n"
-        "from vqapr.authoring import StrategyModel as SM\n\n" + body,
+        "from vqapr.public import StrategyModel\n"
+        "from vqapr.public import StrategyModel as SM\n\n" + body,
         encoding="utf-8",
     )
 
@@ -257,7 +257,7 @@ def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
 
     crowded = tmp_path / "two.py"
     crowded.write_text(
-        "from vqapr.authoring import StrategyModel\n\n"
+        "from vqapr.public import StrategyModel\n\n"
         "class First(StrategyModel):\n    pass\n\n"
         "class Second(StrategyModel):\n    pass\n",
         encoding="utf-8",
@@ -272,7 +272,7 @@ def test_a_scaffold_with_two_strategies_names_both(tmp_path: Path) -> None:
 
 
 _SHARED_BASE = (
-    "from vqapr.authoring import StrategyModel\n\n\nclass Portfolio(StrategyModel):\n    pass\n"
+    "from vqapr.public import StrategyModel\n\n\nclass Portfolio(StrategyModel):\n    pass\n"
 )
 
 
@@ -338,7 +338,7 @@ def test_registering_a_component_that_imports_its_neighbour_names_the_rule(tmp_p
     (tmp_path / "helper_252.py").write_text("VALUE = 1\n", encoding="utf-8")
     source = tmp_path / "imp.py"
     source.write_text(
-        "import helper_252\n\nfrom vqapr.authoring import StrategyModel\n\n\n"
+        "import helper_252\n\nfrom vqapr.public import StrategyModel\n\n\n"
         "class Imp(StrategyModel):\n"
         "    def inputs(self):\n        return {}\n\n"
         "    def decide(self, call):\n        return None\n",

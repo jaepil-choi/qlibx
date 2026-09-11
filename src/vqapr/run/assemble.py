@@ -61,7 +61,7 @@ from vqapr.run.engine.stages.observe import (
     compliance_requirements as declared_compliance_requirements,
 )
 from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun, FrozenStrategy
-from vqapr.run.preflight.verdict import RunResources, verify_run
+from vqapr.run.preflight.verdict import RunResources, preflight
 from vqapr.run.recording import freeze_datamodel_record, freeze_run_record, freeze_strategy_record
 from vqapr.run.roster import RegisteredRoster, absent_workspace, registered_roster, roster_report
 from vqapr.workspace.registry import Workspace
@@ -86,14 +86,14 @@ __all__ = [
     "_run_strategy",
     "_source_digests",
     "_window_factory",
-    "preflight_run",
+    "freeze",
     "run",
     "run_registered_datamodel",
     "run_registered_strategy",
 ]
 
 
-def preflight_run(
+def freeze(
     workspace_or_root: Workspace | str | Path, definition: RunDefinition
 ) -> FrozenRun:
     """Judge a run definition against registered declarations, then freeze it, without running it.
@@ -117,7 +117,7 @@ def preflight_run(
         if isinstance(workspace_or_root, Workspace)
         else Workspace.open(workspace_or_root)
     )
-    return verify_run(workspace, definition).require_frozen()
+    return preflight(workspace, definition).require_frozen()
 
 
 class _FrozenCatalog:
@@ -266,7 +266,7 @@ def run(
     2026-09-02).
     """
     if not isinstance(frozen_run, FrozenRun):
-        raise TypeError("frozen_run must be a FrozenRun returned by preflight_run")
+        raise TypeError("frozen_run must be a FrozenRun returned by freeze")
     root_path = Path(project_root)
     frozen = frozen_run
     if resources is not None and resources.run_identity != frozen.identity:
@@ -403,7 +403,7 @@ def run_registered_datamodel(
     # The same door the sequential path passes: the judgments too, not the freeze alone. A
     # batch worker used to freeze without asking them, so `run a b --jobs 2` ran what `check`
     # and `run a` refused (the `docs/issues/archive/015` gap, again, one door over).
-    frozen, resources = verify_run(workspace, workspace.run_definition(run_id)).require_ready()
+    frozen, resources = preflight(workspace, workspace.run_definition(run_id)).require_ready()
     layer = frozen.datamodel
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a datamodel run")
@@ -623,7 +623,7 @@ def run_registered_strategy(
     the strategies that had finished (`docs/issues/archive/073`).
     """
     workspace = Workspace.open(project_root)
-    frozen, resources = verify_run(workspace, workspace.run_definition(run_id)).require_ready()
+    frozen, resources = preflight(workspace, workspace.run_definition(run_id)).require_ready()
     layer = frozen.strategy
     if layer is None:
         raise ValueError(f"run {run_id!r} is not a strategy run")

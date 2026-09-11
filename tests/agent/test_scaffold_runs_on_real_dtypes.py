@@ -36,7 +36,6 @@ import duckdb
 import pytest
 
 from vqapr.agent.scaffold import render
-from vqapr.authoring import EconomicAccountView
 from vqapr.component.loading import load_data_model, load_strategy_model
 from vqapr.component.strategy.recorder import InvocationRecorder
 from vqapr.data.dataset import DatasetRegistration
@@ -48,7 +47,13 @@ from vqapr.data.window import ModelWindow
 from vqapr.domain.instants import LocalInstantDeclaration
 from vqapr.domain.schedule import ScheduledEvent
 from vqapr.domain.wiring import Role
-from vqapr.public import Workspace, register_data_model, register_dataset, register_strategy_model
+from vqapr.public import (
+    EconomicAccountView,
+    Workspace,
+    register_data_model,
+    register_dataset,
+    register_strategy_model,
+)
 from vqapr.run.engine.calls import DataModelContext, StrategyModelContext
 
 KST = ZoneInfo("Asia/Seoul")

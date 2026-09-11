@@ -15,7 +15,7 @@ import pyarrow.parquet as pq
 import pytest
 
 import tests.sample.journey as journey
-from vqapr.public import Workspace, preflight_run, read_strategy_table, run_report
+from vqapr.public import Workspace, freeze, read_strategy_table, run_report
 from vqapr.public import run as execute_run
 from vqapr.record import COMPACT_FILENAME, TABLES_DIRECTORY, record_directory, strategy_refs
 
@@ -25,7 +25,7 @@ def test_the_sample_journeys_report_adds_up(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
     journey.install(project)
-    frozen = preflight_run(project, Workspace.open(project).run_definition(journey.RUN_ID))
+    frozen = freeze(project, Workspace.open(project).run_definition(journey.RUN_ID))
     store = tmp_path / "store"
     execute_run(project, frozen, store_root=store)
 

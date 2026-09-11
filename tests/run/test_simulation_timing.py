@@ -5,17 +5,17 @@ from decimal import Decimal
 
 import pytest
 
-from vqapr.authoring import (
-    Compliance,
-    ComplianceCall,
-    ComplianceFinding,
-)
 from vqapr.data.lookback import RowsLookback
 from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
 from vqapr.data.window import ModelWindow
 from vqapr.domain.account import AccountSnapshot
 from vqapr.domain.intent import PortfolioTarget
+from vqapr.public import (
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
+)
 from vqapr.run.engine.stages.observe import evaluate_compliance
 
 

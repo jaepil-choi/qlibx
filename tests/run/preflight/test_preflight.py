@@ -24,13 +24,13 @@ from vqapr.domain.memory import prepare_model_state
 from vqapr.domain.wiring import Role
 from vqapr.public import register_dataset, register_instruments
 from vqapr.run.preflight.facts import derived_schedule
-from vqapr.run.preflight.freeze import preflight_run
+from vqapr.run.preflight.freeze import freeze
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import (
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     StrategyEntry,
 )
 
@@ -42,15 +42,15 @@ SESSION = date(2024, 3, 5)
 def _component(root: Path, identifier: str, kind: Role) -> ComponentRef:
     path = root / f"{identifier}.py"
     source = (
-        "from vqapr.authoring import Hold\n"
-        "from vqapr.authoring import StrategyModel\n"
+        "from vqapr.public import Hold\n"
+        "from vqapr.public import StrategyModel\n"
         f"class {identifier.title().replace('-', '')}(StrategyModel):\n"
         "    def requirements(self):\n"
         "        return ()\n"
         "    def decide(self, context):\n"
         "        return Hold(reason='fixture')\n"
         if kind is Role.STRATEGY_MODEL
-        else "from vqapr.authoring import Compliance\n"
+        else "from vqapr.public import Compliance\n"
         f"class {identifier.title().replace('-', '')}(Compliance):\n"
         "    @property\n"
         "    def compliance_id(self):\n"
@@ -251,7 +251,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_schedule(
     """
     workspace, definition = _setup(tmp_path, model_price_parquet)
 
-    frozen = preflight_run(workspace, definition)
+    frozen = freeze(workspace, definition)
 
     layer = frozen.strategy
     assert layer.config.schedule_id == definition.schedule_id == "preflight.schedule"
@@ -272,7 +272,7 @@ def test_preflight_freezes_the_run_s_sessions_as_its_one_schedule(
         layer.initial_model_state_ref
         == prepare_model_state(layer.initial_model_memory, layer.initial_payload).ref
     )
-    assert frozen.identity == preflight_run(workspace, definition).identity
+    assert frozen.identity == freeze(workspace, definition).identity
     changed_account = replace(
         frozen,
         initial_account_snapshot=AccountSnapshot(0, Decimal("101"), {}),
@@ -325,7 +325,7 @@ def test_preflight_refuses_a_last_strategy_event_with_no_execution_target(
     workspace, definition = _setup(tmp_path, model_price_parquet, at=time(15, 30))
 
     with pytest.raises(VqaprError) as caught:
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
     error = caught.value
     assert error.stage is Stage.FREEZE
@@ -360,10 +360,10 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     assert isinstance(
         load_exchange(exchange, project_root=workspace.project_root), AcademicExchange
     )
-    assert preflight_run(workspace, compatible).exchange == exchange
+    assert freeze(workspace, compatible).exchange == exchange
     assert isinstance(exchange, ComponentRef)
     with pytest.raises(VqaprError, match="unlisted_instrument"):
-        preflight_run(workspace, compatible.replace(instruments=('ABC', 'MISSING')))
+        freeze(workspace, compatible.replace(instruments=('ABC', 'MISSING')))
 
     duck_path = tmp_path / "duck.py"
     duck_path.write_text(
@@ -387,7 +387,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     with Workspace.transaction(workspace) as t:
         t.register_component(duck)
     with pytest.raises(VqaprError, match="wrong_type"):
-        preflight_run(workspace, compatible.replace(exchange='duck'))
+        freeze(workspace, compatible.replace(exchange='duck'))
 
     cases = (
         (
@@ -408,7 +408,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     )
     for _name, snapshot, code in cases:
         with pytest.raises(VqaprError, match=code):
-            preflight_run(workspace, compatible.replace(initial_account_snapshot=snapshot))
+            freeze(workspace, compatible.replace(initial_account_snapshot=snapshot))
 
     # A holding the venue will never fill, in an instrument the run does not trade -- the
     # money is stuck in something unsellable and preflight says so before the run starts.
@@ -442,7 +442,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
     with Workspace.transaction(workspace) as t:
         t.register_component(no_sell)
     with pytest.raises(VqaprError, match="holding_not_closable"):
-        preflight_run(
+        freeze(
             workspace,
             compatible.replace(
                 exchange='no-sell',
@@ -461,7 +461,7 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
         register_input=False,
     )
     with pytest.raises(VqaprError, match="fractional_quantity"):
-        preflight_run(
+        freeze(
             workspace,
             compatible.replace(
                 exchange='fractional',
@@ -477,9 +477,9 @@ def test_preflight_requires_academic_exchange_and_initial_account_compatibility(
                  ),
              )
     with pytest.raises(VqaprError, match="mode"):
-        preflight_run(workspace, signed)
+        freeze(workspace, signed)
     assert (
-        preflight_run(
+        freeze(
             workspace, signed.replace(initial_account_mode=AccountMode.SIGNED)
         ).initial_account_mode
         is AccountMode.SIGNED
@@ -490,7 +490,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace, definition = _setup(tmp_path, model_price_parquet)
-    frozen = preflight_run(workspace, definition)
+    frozen = freeze(workspace, definition)
     # The definition holds ids (record `139`); the registered component is what the frozen
     # strategy carries, detached from the registration object. Since record `148` there is no
     # separately registered binding that could drift from it: the strategy's config is built by
@@ -505,7 +505,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     memory = {"nested": [1]}
     workspace, definition = _setup(tmp_path / "memory", model_price_parquet)
     definition = definition.replace(strategy=StrategyEntry('strategy', memory))
-    frozen = preflight_run(workspace, definition)
+    frozen = freeze(workspace, definition)
     memory["nested"].append(2)
     assert definition.strategy.initial_model_memory == {"nested": [1]}
     assert frozen.strategy.initial_model_memory == {"nested": [1]}
@@ -519,7 +519,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # changed. The distinction is the point: editing a registered component is the ordinary
     # development loop, and only a component that cannot do its job should stop a run.
     with pytest.raises(VqaprError, match=r"component\.wrong_type"):
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
 
     workspace, definition = _setup(tmp_path / "config-drift", model_price_parquet)
@@ -537,7 +537,7 @@ def test_preflight_is_detached_and_rejects_reference_or_component_drift(
     # cannot construct from a key it does not declare, so the refusal names that instead. Same
     # principle as the source edit above: judged on whether it works, not on whether it moved.
     with pytest.raises(VqaprError, match=r"component\.construction_failed"):
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
 
 def test_preflight_refuses_a_run_that_declares_no_execution_price(
@@ -549,7 +549,7 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
     every run values its book and fills against prices a venue published, so the execution dataset
     is the one registration that is mandatory from the start.
 
-    This was refused only inside `run()`, as a bare `ValueError`, *after* `preflight_run` had
+    This was refused only inside `run()`, as a bare `ValueError`, *after* `freeze` had
     already returned a `FrozenRun` it called run-ready. Two consequences: the CLI reported it as
     `stage: "unhandled"` (the framework looking broken rather than the declaration being
     incomplete), and the universe and account checks below were skipped entirely.
@@ -559,7 +559,7 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
     )
 
     with pytest.raises(VqaprError, match=r"execution\.missing") as failure:
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
     error = failure.value
     assert error.stage is Stage.FREEZE
@@ -575,7 +575,7 @@ def test_preflight_refuses_a_run_that_declares_no_execution_price(
 def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
-    """`preflight_run` promises a *run-ready* declaration, so it must not hand back a reject.
+    """`freeze` promises a *run-ready* declaration, so it must not hand back a reject.
 
     Freezing first and refusing in `run()` meant the two checks below never ran: a definition
     naming an instrument the Exchange does not list could be frozen and only fail later.
@@ -588,12 +588,12 @@ def test_a_run_without_an_execution_price_is_refused_before_it_is_frozen(
     # The execution refusal comes first, and it is the reason the universe check is reachable
     # at all once an execution dataset is supplied.
     with pytest.raises(VqaprError, match=r"execution\.missing"):
-        preflight_run(workspace, unlisted)
+        freeze(workspace, unlisted)
 
     workspace, definition = _setup(tmp_path / "listed", model_price_parquet)
 
     with pytest.raises(VqaprError, match=r"universe\.unlisted_instrument"):
-        preflight_run(workspace, definition.replace(instruments=('NOT-LISTED',)))
+        freeze(workspace, definition.replace(instruments=('NOT-LISTED',)))
 
 
 def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
@@ -629,7 +629,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
         t.register_component(component)
 
     with pytest.raises(VqaprError, match=r"execution\.requirement_missing") as error:
-        preflight_run(workspace, definition.replace(exchange='limited'))
+        freeze(workspace, definition.replace(exchange='limited'))
     failure = error.value.as_dict()["failures"][0]
     assert "price_limit" in failure["observed"], "the message names the feature to switch off"
     assert "switched off" in failure["requirement"]
@@ -655,7 +655,7 @@ def test_a_venue_regime_without_its_execution_price_is_refused_before_the_run(
     )
     with Workspace.transaction(workspace) as t:
         t.register_component(off)
-    assert preflight_run(workspace, definition.replace(exchange='unlimited')).exchange == off
+    assert freeze(workspace, definition.replace(exchange='unlimited')).exchange == off
 
 
 def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
@@ -698,10 +698,10 @@ def test_a_listing_that_permits_no_side_is_refused_as_its_own_problem(
     tracked = definition.replace(exchange='tracked')
 
     # Publishing it is fine; the run simply does not trade it.
-    assert preflight_run(workspace, tracked).exchange == component
+    assert freeze(workspace, tracked).exchange == component
 
     with pytest.raises(VqaprError, match=r"universe\.untradable_listing") as e:
-        preflight_run(workspace, tracked.replace(instruments=("ABC", "KOSPI200")))
+        freeze(workspace, tracked.replace(instruments=("ABC", "KOSPI200")))
     codes = [failure["code"] for failure in e.value.as_dict()["failures"]]
     assert codes == ["universe.untradable_listing"], (
         "a listed instrument must not also be reported as unlisted"
@@ -716,7 +716,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     workspace, definition = _setup(tmp_path / "rule-requirement", model_price_parquet)
     rule_path = tmp_path / "rule-requirement" / "limit.py"
     rule_path.write_text(
-        "from vqapr.authoring import Compliance\n"
+        "from vqapr.public import Compliance\n"
         "from vqapr.data.lookback import RowsLookback\n"
         "from vqapr.public import DataRequirement\n"
         "class Limit(Compliance):\n"
@@ -741,7 +741,7 @@ def test_preflight_rejects_missing_requirement_and_invalid_bounds(
     )
     workspace._components[rule.component_id] = rule
     with pytest.raises(VqaprError):
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
     with pytest.raises(ValueError, match="timezone-aware"):
         definition.replace(start=datetime(2024, 3, 5, 9))
@@ -868,7 +868,7 @@ def test_the_schedule_is_cut_on_dates_before_it_is_built_and_derived_once_per_co
     assert calls == ["trade_at"], f"check read the sessions {len(calls)} times"
 
     calls.clear()
-    frozen = preflight_run(tmp_path, two_days)
+    frozen = freeze(tmp_path, two_days)
     assert calls == ["trade_at"], f"preflight read the sessions {len(calls)} times"
     assert len(frozen.strategy.schedule.events) == 1
 
@@ -936,7 +936,7 @@ def test_a_wall_time_the_clock_skips_is_refused_rather_than_guessed(
     with pytest.raises(ValueError, match="does not exist"):
         derived_schedule(workspace, skipped)
     with pytest.raises(ValueError, match="does not exist"):
-        preflight_run(workspace, skipped)
+        freeze(workspace, skipped)
 
 
 def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
@@ -955,7 +955,7 @@ def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
     workspace, definition = _setup(root, model_price_parquet)
     path = root / "drifted.py"
     path.write_text(
-        "from vqapr.authoring import Compliance\n"
+        "from vqapr.public import Compliance\n"
         "class Drifted(Compliance):\n"
         "    @property\n"
         "    def compliance_id(self):\n"
@@ -979,7 +979,7 @@ def test_a_rule_that_does_not_answer_to_its_id_is_refused_before_the_run(
         t.register_component(drifted)
 
     with pytest.raises(VqaprError) as caught:
-        preflight_run(workspace, definition)
+        freeze(workspace, definition)
 
     error = caught.value
     assert error.stage is Stage.LOAD
@@ -1038,7 +1038,7 @@ def test_the_execution_horizon_is_cut_from_the_sessions_already_read_not_scanned
     fresh = Workspace.open(tmp_path)
     failures, blocked = judgments(definition, fresh)
     assert failures == [] and blocked == [], (failures, blocked)
-    frozen = preflight_run(fresh, definition)
+    frozen = freeze(fresh, definition)
     assert len(frozen.strategy.schedule.events) == 1
     assert candidates == [], f"the horizon was scanned {len(candidates)} times"
     # Asked four times of one workspace object -- twice for the schedule, twice for the horizon
@@ -1053,12 +1053,12 @@ def test_one_door_reads_each_fact_of_a_run_once(
 
     `experiments/exp_238` counted, in one `vqapr run`, the schedule derived twice, the execution
     table bound twice, the strategy imported three times before the run's own instance and the
-    venue twice. Through `verify_run` each is read once: the strategy twice in all, because its
+    venue twice. Through `preflight` each is read once: the strategy twice in all, because its
     initial state is still proved on a second fresh instance (`docs/issues/archive/076`).
     """
     from vqapr.component import loading
     from vqapr.run.preflight import facts as preflight_module
-    from vqapr.run.preflight.verdict import verify_run
+    from vqapr.run.preflight.verdict import preflight
 
     workspace, definition = _setup(
         tmp_path,
@@ -1093,7 +1093,7 @@ def test_one_door_reads_each_fact_of_a_run_once(
         store_module.scan, "distinct_values", counting("scan", store_module.scan.distinct_values)
     )
 
-    verdict = verify_run(Workspace.open(tmp_path), signed)
+    verdict = preflight(Workspace.open(tmp_path), signed)
     assert verdict.failures == () and verdict.blocked == () and verdict.frozen is not None, (
         verdict.failures,
         verdict.blocked,
@@ -1121,14 +1121,14 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     from vqapr.data import scan
     from vqapr.public import run as execute_run
     from vqapr.run.preflight.facts import bound_execution_horizon
-    from vqapr.run.preflight.verdict import verify_run
+    from vqapr.run.preflight.verdict import preflight
 
     workspace, definition = _setup(
         tmp_path,
         model_price_parquet,
         days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
     )
-    verdict = verify_run(workspace, definition)
+    verdict = preflight(workspace, definition)
     frozen, resources = verdict.require_ready()
     assert resources.run_identity == frozen.identity
     assert resources.strategy is not None and resources.exchange is not None
@@ -1139,7 +1139,7 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
     # The fixture's rule is a stub whose `observe` returns nothing, so the run below is the
     # same declaration without it; what is counted is the run's own loading and scanning.
     plain = definition.replace(compliance=())
-    frozen, resources = verify_run(Workspace.open(tmp_path), plain).require_ready()
+    frozen, resources = preflight(Workspace.open(tmp_path), plain).require_ready()
 
     loads: list[str] = []
     original_load = loading._load
@@ -1165,7 +1165,7 @@ def test_the_run_takes_what_the_verification_loaded_and_read(
 
     # Resources frozen for another run are refused rather than trusted.
     other = plain.replace(run_id="other")
-    stranger = verify_run(Workspace.open(tmp_path), other).require_ready()[0]
+    stranger = preflight(Workspace.open(tmp_path), other).require_ready()[0]
     with pytest.raises(ValueError, match="another frozen run"):
         execute_run(tmp_path, stranger, workspace=workspace, resources=resources)
 
@@ -1179,7 +1179,7 @@ def test_a_run_frames_what_each_callback_read_once(
     decision. One framing per callback, one asking per run, and the record is the same."""
     from vqapr.public import run as execute_run
     from vqapr.run.engine.stages.decide import CallbackHandler
-    from vqapr.run.preflight.verdict import verify_run
+    from vqapr.run.preflight.verdict import preflight
 
     workspace, definition = _setup(
         tmp_path,
@@ -1187,7 +1187,7 @@ def test_a_run_frames_what_each_callback_read_once(
         days=(date(2024, 3, 4), date(2024, 3, 5), date(2024, 3, 6)),
     )
     plain = definition.replace(compliance=())
-    frozen, resources = verify_run(workspace, plain).require_ready()
+    frozen, resources = preflight(workspace, plain).require_ready()
     assert resources.strategy is not None
 
     framed: list[str] = []
@@ -1209,7 +1209,7 @@ def test_a_run_frames_what_each_callback_read_once(
 
     outcome = execute_run(tmp_path, frozen, workspace=workspace, resources=resources)
     assert outcome.ok, outcome.errors
-    from vqapr.authoring import Hold
+    from vqapr.public import Hold
 
     (simulation,) = outcome.results.values()
     assert any(not isinstance(trace.result, Hold) for trace in simulation.events), (
@@ -1255,7 +1255,7 @@ def test_the_sessions_are_read_for_the_run_period_not_the_table(
     fresh = Workspace.open(tmp_path)
     failures, blocked = judgments(definition, fresh)
     assert failures == [] and blocked == [], (failures, blocked)
-    frozen = preflight_run(fresh, definition)
+    frozen = freeze(fresh, definition)
     assert bounds == [
         (definition.start - timedelta(days=1), definition.end + timedelta(days=1))
     ], f"the sessions were read {len(bounds)} times, bounded {bounds}"

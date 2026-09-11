@@ -12,14 +12,6 @@ import pytest
 
 import vqapr.run.engine.stages.execute as execution_phase
 import vqapr.run.engine.stages.value as valuation_phase
-from vqapr.authoring import (
-    Compliance,
-    ComplianceCall,
-    ComplianceFinding,
-    Hold,
-    Rebalance,
-    StrategyModel,
-)
 from vqapr.component.exchange.academic import AcademicExchange
 from vqapr.component.reference import ComponentRef
 from vqapr.data.dataset import DatasetRegistration
@@ -45,7 +37,15 @@ from vqapr.domain.intent import (
 from vqapr.domain.listing import ListingAccess, TradeRule
 from vqapr.domain.schedule import Schedule, ScheduledEvent
 from vqapr.domain.wiring import Role
-from vqapr.public import register_dataset
+from vqapr.public import (
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
+    Hold,
+    Rebalance,
+    StrategyModel,
+    register_dataset,
+)
 from vqapr.run.engine.evidence import (
     AccountCommitEvidence,
     CallbackEvidence,
@@ -56,7 +56,7 @@ from vqapr.run.engine.evidence import (
 from vqapr.run.engine.failure import SimulationFailure, SimulationFailureKind, SimulationStage
 from vqapr.run.engine.loop import AcceptedIntent, DueExecutionTrace, RunLoop, strategy_loop
 from vqapr.run.engine.run_state import LifecycleKind, RunStateRepository
-from vqapr.run.preflight.frozen import FrozenSchedule, FrozenRun, FrozenStrategy
+from vqapr.run.preflight.frozen import FrozenRun, FrozenSchedule, FrozenStrategy
 from vqapr.workspace.registry import Workspace
 from vqapr.workspace.run_definition import ComplianceSet, StrategyConfig
 

@@ -65,16 +65,16 @@ from vqapr.public import (
     AccountMode,
     AccountSnapshot,
     DatasetRegistration,
-    RunSchedule,
     RunDefinition,
     RunExecution,
     RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
     export_roster,
+    freeze,
     information_coefficient,
-    preflight_run,
     rank_information_coefficient,
     register_compliance,
     register_dataset,
@@ -1032,7 +1032,7 @@ def _member_run(
         instruments=universe,
         writes=f"{str(strategy_ref.component_id)}-weights",
     )
-    return run(project, preflight_run(project, definition), store_root=project / ".vqapr")
+    return run(project, freeze(project, definition), store_root=project / ".vqapr")
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -1203,7 +1203,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # records no weight, so the allocation datasets begin days after the members' own schedule
     # does; an ensemble opening with the members would ask its first decision to read an empty
     # window, which `vqapr check` refuses (`check.lookback.uncovered`) -- and since record 168
-    # `preflight_run` asks the same judgments, so this script was refused too. The members'
+    # `freeze` asks the same judgments, so this script was refused too. The members'
     # declines above are still asserted, not trimmed; only the ensemble waits for its inputs.
     ensemble_opens = max(member.first_day for member in published.values())
     ensemble_days = [day for day in callback_days if day >= ensemble_opens]
@@ -1227,7 +1227,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         instruments=universe,
         writes="show008-ensemble-weights",
     )
-    ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
+    ensemble_result = run(project, freeze(project, ensemble_definition)).result()
     ensemble_memory = _memory(ensemble_result)
     ensemble_replay = _replay(ensemble_result)
 

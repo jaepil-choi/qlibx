@@ -62,8 +62,6 @@ LAYERS: dict[str, int] = {
     # 20 -- the extension point: every role's contract, its shipped implementations, and the door a
     # component enters by (reference, fingerprint, conformance, loading).
     "component": 20,
-    # 21 -- transitional: `vqapr.authoring` re-exports `component` until the breaking release.
-    "authoring": 21,
     # 30 -- the workspace: what a project keeps between commands, and how a document enters it.
     "workspace": 30,
     # 40-50 -- running one: before it starts (preflight), the loop that reads what preflight froze

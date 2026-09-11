@@ -29,7 +29,7 @@ from vqapr.agent.sample.materialize import (
     materialize,
 )
 from vqapr.cli.register import run as register_cli
-from vqapr.public import RunDefinition, Workspace, preflight_run, run
+from vqapr.public import RunDefinition, Workspace, freeze, run
 
 __all__ = [
     "CALLBACK",
@@ -98,7 +98,7 @@ def execute(project_root: Path, sample: Materialized) -> SampleResult:
     """Freeze the registered run and run it, through the public door."""
     workspace = Workspace.open(project_root)
     definition = workspace.run_definition(sample.run_id)
-    result = run(project_root, preflight_run(workspace, definition)).result()
+    result = run(project_root, freeze(workspace, definition)).result()
     return SampleResult(
         sample,
         len(result.events),

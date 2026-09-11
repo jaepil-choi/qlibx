@@ -51,7 +51,7 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
   callback calendar. The ensemble only nets on events where both members actually published,
   and its own horizon opens on the first day both have a weight on record: before that day its
   first decision would read an empty window, which `vqapr check` refuses
-  (`check.lookback.uncovered`) and which `preflight_run` refuses too since record 168.
+  (`check.lookback.uncovered`) and which `freeze` refuses too since record 168.
 
 ## Reading the netting evidence
 

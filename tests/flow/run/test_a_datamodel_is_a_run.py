@@ -562,6 +562,8 @@ def test_jobs_runs_each_datamodel_in_a_worker_and_both_register(
         assert records[run_id]["dataset_id"] == dataset_id
         assert records[run_id]["rows"] == 4
         assert [path.name for path in _chunks(tmp_path, dataset_id)] == ["all.parquet"]
+        # The run record a single run writes, from the worker too (record `249`).
+        assert read_run_record(_store(tmp_path), run_id)["datamodels"][0]["dataset_id"] == dataset_id
     opposite = _query(
         f"SELECT max(abs(r.score + m.score)) FROM {_parquet(tmp_path, 'reversal_2d')} r "
         f"JOIN {_parquet(tmp_path, 'momentum_2d')} m USING (available_at, instrument)"

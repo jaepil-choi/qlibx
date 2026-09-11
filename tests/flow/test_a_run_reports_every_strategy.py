@@ -24,7 +24,7 @@ import pytest
 import tests.sample.journey as journey
 from vqapr.flow.engine.artifacts import SimulationFailure
 from vqapr.flow.orchestration import in_workers, run_registered_strategy
-from vqapr.record import strategy_refs
+from vqapr.record import read_run_record, strategy_refs
 from vqapr.public import (
     StrategyEntry,
     StrategyOutcome,
@@ -165,3 +165,26 @@ def test_a_workers_refusal_comes_back_as_its_outcome_under_jobs(tmp_path: Path) 
     _assert_failure_names_its_strategy(dict(failed.failure))
     assert len(strategy_refs(store, "ou-first")) == 1
     assert strategy_refs(store, "never-ready") == ()
+    # Every run of the batch has the record a single run has (record `249`).
+    for name in STRATEGIES:
+        assert read_run_record(store, name)["strategies"][0]["component_id"] == name
+
+
+def test_a_batch_worker_writes_the_run_record_a_single_run_writes(tmp_path: Path) -> None:
+    """`docs/issues/report-2026-09-11-a-jobs-batch-writes-no-run-record-...`.
+
+    The `--jobs` worker called the strategy member directly, and `run.json` was written only by
+    `run` before it called in -- so a batch reported every run completed, `list runs` listed them,
+    and `show run` refused each one as unknown. The worker is called in this process here, which
+    is the whole path a pool worker takes minus the pickling (record `249`).
+    """
+    project, store = _project(tmp_path)
+
+    outcome = run_registered_strategy(str(project), "ou-first", str(store), False, True)
+
+    assert outcome.status == "completed"
+    run_json = read_run_record(store, "ou-first")
+    assert run_json["strategies"] == [
+        {"component_id": "ou-first", "record": str(outcome.record["strategy_ref"])}
+    ]
+    assert run_json["writes"] == "ou-first-weights"

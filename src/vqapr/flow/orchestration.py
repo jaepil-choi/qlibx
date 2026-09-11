@@ -291,8 +291,6 @@ def run(
     if layer is None:  # pragma: no cover -- `FrozenRun` refuses this
         raise ValueError("a strategy run froze no strategy")
     store = None if store_root is None else Path(store_root)
-    if store is not None:
-        freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
 
     results: dict[str, SimulationResult] = {}
     records: dict[str, Mapping[str, object]] = {}
@@ -361,8 +359,6 @@ def _run_datamodels(
         raise ValueError("a datamodel run froze no datamodel")
     layers = (one,)
     store = None if store_root is None else Path(store_root)
-    if store is not None:
-        freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
 
     results: dict[str, SimulationResult | DataModelResult] = {}
     records: dict[str, Mapping[str, object]] = {}
@@ -737,6 +733,14 @@ def _run_member[ResultT](
 
     `record_ref` is asked for only when there is a store: a member run in memory (an in-process
     caller, a test with a stand-in component) names no record and needs no fingerprint.
+
+    **`run.json` is written here, not by the callers** (record `249`). `run` and
+    `_run_datamodels` each wrote it before calling in, and the `--jobs` workers
+    (`run_registered_strategy`, `run_registered_datamodel`) call the member functions directly --
+    so every run of a batch finished with its strategy record and no run record, `list runs`
+    listed it and `show run` refused it (`docs/issues/report-2026-09-11-a-jobs-batch-writes-no-
+    run-record-...`). Every path that runs a member with a store comes through this function,
+    so this is the one place that cannot be skipped.
     """
     catalog = _FrozenCatalog(frozen)
     session = ScanSession()
@@ -754,6 +758,9 @@ def _run_member[ResultT](
             cubes=cubes,
         )
         if store is not None:
+            # Before the member's writer claims its directory, so a run killed midway still says
+            # what it attempted; a changed configuration under this id is refused here, by name.
+            freeze_run_record(store, frozen, source_digests=_source_digests(frozen))
             opened_writer = RunRecordWriter(
                 store, frozen.run_id, record_ref(), member_kind=member_kind
             )

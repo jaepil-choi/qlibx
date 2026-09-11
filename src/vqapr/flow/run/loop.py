@@ -198,7 +198,9 @@ class MarketClock:
             at = self._execution.close(at)
             if at.result is None:
                 raise RuntimeError("a market-clock instant closed without a result")
-            return DueExecutionTrace(event, at.result, self._context.state.current.version)
+            # A run with a record keeps the instant's outcome, not its evidence (record `256`).
+            kept = at.result if self._context.state.keeps_evidence else at.result.outcome()
+            return DueExecutionTrace(event, kept, self._context.state.current.version)
 
 
 class RunLoop[TraceT, ResultT]:

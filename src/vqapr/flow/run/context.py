@@ -163,7 +163,9 @@ class DueExecutionTrace:
     pending intent was due here, or a valuation of the held book (and its monitoring)."""
 
     due: MarketEvent
-    result: DueExecutionResult | HeldResult
+    result: DueExecutionResult | HeldResult | InstantOutcome
+    """The whole result for a run without a record; its `InstantOutcome` for one with (record
+    `256`) -- both answer `report` and `monitoring`."""
     root_version: int
     """The version of the root this instant left (record `224`: the root is not kept)."""
 
@@ -216,6 +218,10 @@ class DueExecutionResult:
         """The compliance report, where `contract_report` looks for one."""
         return None if self.monitoring is None else self.monitoring.report
 
+    def outcome(self) -> InstantOutcome:
+        """What a run with a record keeps of this instant (record `256`)."""
+        return InstantOutcome(self.account_version, self.monitoring)
+
     def __post_init__(self) -> None:
         if not self.consumed_pending_id:
             raise ValueError("consumed_pending_id must be a non-empty string")
@@ -244,6 +250,29 @@ class HeldResult:
     there (design §3.1: VALUATION and COMPLIANCE happen at every point of the market clock)."""
 
     valuation: ValuationEvidence
+    monitoring: MonitoringResult | None = None
+
+    @property
+    def report(self) -> ComplianceReport | None:
+        return None if self.monitoring is None else self.monitoring.report
+
+    def outcome(self) -> InstantOutcome:
+        """What a run with a record keeps of this instant (record `256`)."""
+        return InstantOutcome(self.valuation.account_version, self.monitoring)
+
+
+@dataclass(frozen=True, slots=True)
+class InstantOutcome:
+    """What a run with a record keeps of one market-clock instant (record `256`).
+
+    The fill, the mark and the commit are the record's rows the moment they are made, so a run
+    streaming to a record does not also hold their evidence until it ends: the account version the
+    instant left, and what monitoring found there -- which the record's `contract` block and the
+    run's own report read back. A run without a record keeps the whole `DueExecutionResult` or
+    `HeldResult`, for the in-process reader of its evidence.
+    """
+
+    account_version: int
     monitoring: MonitoringResult | None = None
 
     @property

@@ -38,6 +38,14 @@ class LifecycleTrace:
     detail: object = None
 
 
+_DECISION_KINDS = frozenset({LifecycleKind.NO_DECISION, LifecycleKind.ACCEPTED_INTENT})
+"""The lifecycle entries whose detail is a decision's `CallbackEvidence` -- `callback_evidence`
+reads them, and a run with a record keeps them (record `256`)."""
+
+_BARE = {kind: LifecycleTrace(kind) for kind in LifecycleKind}
+"""One detail-less entry per kind, shared: what a run with a record keeps of a fill-side event."""
+
+
 @dataclass(frozen=True, slots=True)
 class RunFinalization:
     """Typed terminal declaration published through the sole state root."""
@@ -341,6 +349,15 @@ class RunStateRepository:
     def current(self) -> AcceptedRunState:
         return self._root
 
+    @property
+    def keeps_evidence(self) -> bool:
+        """Whether this run keeps what its fills produced in memory: only when it has no record.
+
+        A run streaming to a record (`sink`) has its fills, marks and findings as rows there and
+        keeps their kinds, not their evidence (record `256`).
+        """
+        return self._sink is None
+
     def next_sequence(self) -> int:
         """The next position in the run's one order of recorded rows.
 
@@ -413,7 +430,19 @@ class RunStateRepository:
         Every transition used to spell all fourteen fields of the root it was making, so what a
         transition CHANGED was buried in what it carried over (record `212`). Here a transition
         names its changes and nothing else; the root is otherwise the one it extends.
+
+        **A run with a record keeps the kind of a fill-side event, not its evidence** (record
+        `256`). The commit, the mark, the monitoring and the feedback of every fill hung off the
+        roots until the run ended -- beside the same evidence in `feedback` and in the market
+        clock's traces -- about 1.4 KB a fill that nothing in a stored run reads again: its fills
+        are `vqapr.fill` rows the moment they are made (the rule record `221` set for rows). A
+        decision's `CallbackEvidence` stays, because `callback_evidence` is how an in-process
+        caller reads what its strategy decided. A run without a record keeps everything.
         """
+        if lifecycle is not None and not self.keeps_evidence and lifecycle.kind not in (
+            _DECISION_KINDS
+        ):
+            lifecycle = _BARE[lifecycle.kind]
         return AcceptedRunState(
             version=root.version + 1,
             _model_states=root._model_states if states is None else states,
@@ -631,7 +660,8 @@ class RunStateRepository:
                 root,
                 lifecycle=LifecycleTrace(LifecycleKind.FEEDBACK_PUBLISHED, evidence),
                 pending=None,
-                feedback=(*root.feedback, *feedback),
+                # Not accumulated by a run with a record (record `256`): nothing in one reads it.
+                feedback=(*root.feedback, *feedback) if self.keeps_evidence else None,
             ),
         )
 

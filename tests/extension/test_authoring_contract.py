@@ -173,7 +173,7 @@ def test_a_side_is_chosen_by_its_mapping_never_by_a_sign() -> None:
     `short={"A": 2}` means twice as short. Accepting `short={"A": -2}` would make the same wish
     expressible two ways, and the two would cancel rather than agree.
     """
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match="must not be negative"):
         Rebalance.of(short={"A": -2})
 
 

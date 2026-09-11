@@ -75,11 +75,15 @@ def _as_decimal(value: Decimal | int | float | str, *, name: str) -> Decimal:
 def _relative_side(
     declared: Mapping[str, Decimal | int | float | str] | None, *, name: str
 ) -> dict[str, Decimal]:
-    """One side of the book as positive relative convictions.
+    """One side of the book as non-negative relative convictions.
 
     A short is declared by WHICH MAPPING it appears in, never by its sign, so `short={"A": 2}`
     means twice as short rather than half as long. Accepting a negative here would give one
     intention two spellings that disagree.
+
+    A zero is accepted and means "hold none of this name", the flat position `Rebalance.signed`
+    keeps (report 2026-09-11, record `260`): a tilt that floors at zero produced it, and refusing
+    it made every such author filter their own mapping before handing it over.
     """
     if declared is None:
         return {}
@@ -90,10 +94,10 @@ def _relative_side(
         conviction = _as_decimal(raw, name=f"{name}[{instrument!r}]")
         if not conviction.is_finite():
             raise ValueError(f"{name}[{instrument!r}] must be finite")
-        if conviction <= 0:
+        if conviction < 0:
             raise ValueError(
-                f"{name}[{instrument!r}] must be positive: a side is chosen by which mapping the "
-                f"name appears in, not by the sign of its weight"
+                f"{name}[{instrument!r}] must not be negative: a side is chosen by which mapping "
+                f"the name appears in, not by the sign of its weight (a zero holds none of it)"
             )
         side[_identifier(instrument, name="instrument")] = conviction
     return side
@@ -200,11 +204,23 @@ class Rebalance(BaseModel):
         Quantising and settling belong to `vqapr.portfolio.weighting.rescale`, which this calls
         (`docs/issues/archive/075`). Each side lands EXACTLY on its target, on the canonical grid
         `QUANTUM`, with the rounding residual on that side's largest position.
+
+        **A zero holds none of the name.** `long={"A": 0}` keeps A in the book at weight zero --
+        the flat position `signed` keeps -- so the next fill sells whatever is held of it, and a
+        tilt that floors at zero hands its mapping over unfiltered. A side made only of zeros is
+        no side: it takes none of `invested` and does not make the book signed (record `260`).
         """
         longs = _relative_side(long, name="long")
         shorts = _relative_side(short, name="short")
         if not longs and not shorts:
             raise ValueError("a Rebalance needs at least one long or short name")
+        live_longs = {name: value for name, value in longs.items() if value}
+        live_shorts = {name: value for name, value in shorts.items() if value}
+        if not live_longs and not live_shorts:
+            raise ValueError(
+                "a Rebalance needs at least one non-zero weight; every weight given was zero, "
+                "and a book of nothing has no side to size"
+            )
 
         # A name on both sides is a contradiction, not a netting instruction. Silently letting the
         # short overwrite the long drops a leg the author wrote, and the resulting book is not
@@ -230,7 +246,7 @@ class Rebalance(BaseModel):
         # fraction. One side alone takes all of it. Quantised here because it becomes a side
         # TARGET below, and `rescale` refuses a target that is not itself on the grid -- weights
         # on a grid cannot sum to a total that is off it.
-        sides = (bool(longs), bool(shorts))
+        sides = (bool(live_longs), bool(live_shorts))
         per_side = (share / 2 if all(sides) else share).quantize(QUANTUM)
         if per_side == 0:
             raise ValueError(
@@ -239,12 +255,15 @@ class Rebalance(BaseModel):
                 "round to zero. Ask for at least one grid step per side"
             )
         weights: dict[str, Decimal] = {}
-        for names, sign in ((longs, Decimal(1)), (shorts, Decimal(-1))):
-            if not names:
-                continue
-            total = sum(names.values(), Decimal(0))
+        for names, live, sign in (
+            (longs, live_longs, Decimal(1)),
+            (shorts, live_shorts, Decimal(-1)),
+        ):
+            total = sum(live.values(), Decimal(0))
             for instrument, conviction in names.items():
-                weights[instrument] = sign * per_side * conviction / total
+                weights[instrument] = (
+                    sign * per_side * conviction / total if conviction else Decimal(0)
+                )
 
         # `rescale` owns quantising and settling, and this constructor stopped owning a second copy
         # of it (`docs/issues/archive/075`). It quantises onto the grid FIRST and settles each
@@ -262,8 +281,8 @@ class Rebalance(BaseModel):
         quantised = dict(
             rescale(
                 dict(sorted(weights.items())),
-                long=per_side if longs else Decimal(0),
-                short=-per_side if shorts else Decimal(0),
+                long=per_side if live_longs else Decimal(0),
+                short=-per_side if live_shorts else Decimal(0),
                 grid=QUANTUM,
             )
         )
@@ -277,7 +296,7 @@ class Rebalance(BaseModel):
         # Exact by construction now: every side landed on its target, so the sum is on the grid
         # and no second settle is needed here.
         cash = Decimal(1) - sum(quantised.values(), Decimal(0))
-        if shorts:
+        if live_shorts:
             direction = PortfolioDirection.SIGNED
             bounds = (Decimal(-1), Decimal(1))
             # Cash can exceed 1 on a signed book, and pinning the upper bound at 1 made every

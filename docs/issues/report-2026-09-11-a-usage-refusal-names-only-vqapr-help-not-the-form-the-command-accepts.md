@@ -1,6 +1,6 @@
 # A usage refusal's `fix` says only "run `vqapr --help`", not the form the command accepts — two agents drew opposite rules from the same refusal
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-11 — record `250`** (fixed on the owner's instruction, unnumbered). The refusal names the subcommand's usage line and `vqapr <command> --help`, and `observed` carries the refused tokens.
 
 | | |
 |---|---|

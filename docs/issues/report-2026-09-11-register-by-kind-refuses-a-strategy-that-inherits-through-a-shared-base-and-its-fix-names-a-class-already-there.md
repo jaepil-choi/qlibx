@@ -1,6 +1,6 @@
 # `vqapr register strategy <id> <file>` refuses a strategy that inherits `StrategyModel` through a shared base, and its `fix` says to add a class the file already has — the YAML route registers the same file
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-11 — record `252`** (fixed on the owner's instruction, unnumbered). When the parse finds no subclass, the kind route asks the loaded module by the object, as the YAML route does.
 
 | | |
 |---|---|

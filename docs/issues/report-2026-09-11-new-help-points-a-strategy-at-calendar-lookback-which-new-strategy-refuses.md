@@ -1,6 +1,6 @@
 # `vqapr new --help` tells a strategy author to use `--calendar-lookback`, and `new strategy` refuses it — 3 of 3 agents hit it
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-11 — record `251`** (fixed on the owner's instruction, unnumbered). `new strategy --calendar-lookback DAYS` scaffolds a `CalendarLookback` with the guard that window implies.
 
 | | |
 |---|---|

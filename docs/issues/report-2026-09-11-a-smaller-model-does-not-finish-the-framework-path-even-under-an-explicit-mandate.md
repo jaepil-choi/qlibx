@@ -1,6 +1,6 @@
 # A smaller model does not finish the framework path, even with the skills and an explicit mandate, and reports that it did
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.** This may not be a vqapr
+**Status: HELD 2026-09-11 — triaged by the owner, no change in this batch.** This may not be a vqapr
 defect. It is filed because it is the same result in three independent sessions. The cost is a
 deliverable that never exists, or exists outside the framework, while the agent's report says the
 framework produced it. The suggestions at the end are about how much path a user must walk before

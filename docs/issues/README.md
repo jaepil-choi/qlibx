@@ -1,6 +1,6 @@
 # Issue ledger — 상태 한 줄씩
 
-**작성 2026-09-02 · 갱신 2026-09-10.** 98개 중 **93개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
+**작성 2026-09-02 · 갱신 2026-09-11.** 98개 중 **93개가 닫혔고, 닫힌 것은 `archive/`로 옮겼다.**
 이 디렉터리에 평평하게 남는 것은 아직 열린 둘 — `023`(절반)과 `035`(판정만 남음) — 과, 2026-09-10에
 닫혔지만 그 record들이 인용하는 동안 한 릴리스만 여기 두는 `089`–`094`다(0.11.0 릴리스 때 archive로).
 
@@ -42,6 +42,24 @@
 | ~~`095`~~ | 물리 읽기의 검증에 문이 하나가 아니다 — 모듈 셋, 집행표는 세 번 스캔 | **닫힘 2026-09-10 — record `234`.** `data/validation.py` 한 문(`verify_source` · `require_verified` · `verify_roster`); 등록이 `source_digest`와 `execution_prices`를 두고 preflight·run·check는 digest만 대조(`dataset.source_changed` · `dataset.unverified`); `validate_execution_table`과 세 diagnosis 삭제; 같은 선언으로 다시 등록하면 측정만 갈린다; 경계 테스트가 스캔 커널을 한 모듈에 묶는다 | 닫힘 |
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
+
+### 2026-09-11의 번호 없는 보고 아홉 — testbed(`0.14.2` wheel): A/B testbed · FF3 testbed · enhanced-index-3 — 일곱 닫힘, 하나 다른 세션, 하나 보류
+
+오너가 번호 없이 바로 고치게 했다(develop 위, records `249`–`257`). 월말 발화는 `on: last`, 옆 모듈 import는 "한 파일
+원칙 유지 + 거절문과 skill", BLAS 스레드는 "`--jobs` 워커만 1"을 오너가 골랐다. 메모리 보고는 측정
+(`scratchpad/mem`, 합성 300종목)으로 원인을 넷으로 나눴고 넷 다 고쳤다.
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| ~~`report-2026-09-11-a-jobs-batch-writes-no-run-record-...`~~ | `--jobs` 배치가 run record를 쓰지 않아 `show run`이 완료된 run을 거절 | **닫힘 — record `249`.** `run.json`을 `_run_member`(순차 경로와 워커가 모두 지나는 몸체)에서 쓴다 | 코드 |
+| ~~`report-2026-09-11-a-usage-refusal-names-only-vqapr-help-...`~~ | usage 거절의 `fix`가 `vqapr --help`만 댄다 | **닫힘 — record `250`.** 인식 못 한 인자는 그것이 따라온 하위 명령이 거절: `fix`에 그 usage 한 줄과 `vqapr <cmd> --help`, `observed`에 거절된 토큰 | 코드 |
+| ~~`report-2026-09-11-new-help-points-a-strategy-at-calendar-lookback-...`~~ | `new --help`가 strategy에 `--calendar-lookback`을 권하고 `new strategy`는 거절 | **닫힘 — record `251`.** strategy scaffold가 calendar 창과 그 창의 guard를 낸다; `--instants-lookback` strategy는 InputError | 코드 |
+| ~~`report-2026-09-11-register-by-kind-refuses-...-shared-base-...`~~ | `register <kind>`가 공유 base를 상속한 전략을 거절하고, `fix`가 이미 있는 클래스를 요구 | **닫힘 — record `252`.** 파싱이 못 찾으면 로드한 모듈에서 객체로 판정(YAML route와 같은 판정) | 코드 |
+| ~~`report-2026-09-11-a-component-cannot-import-a-module-beside-it-...`~~ | 옆 모듈 import가 502이고 `fix`가 이유를 말하지 않는다 | **닫힘 — record `252`.** 한 파일 원칙은 그대로(fingerprint가 그 파일만 덮는다); 옆에 실제로 있는 모듈이면 `fix`가 이유와 길을 말하고 skill 둘이 같은 말 | 메시지 + skill |
+| ~~`report-2026-09-11-an-agenda-cannot-fire-on-the-last-trading-day-of-a-month`~~ | agenda가 월 마지막 거래일에 발화할 수 없다 | **닫힘 — record `253`.** `agenda.on: last`(`w`·`M`); 끝났다고 보이는 달만, `end` 뒤 세션으로 판정하되 발화는 없음; `first`만 쓰던 run의 identity는 그대로 | 코드 + skill |
+| ~~`report-2026-09-11-a-strategy-runs-memory-grows-...`~~ | 일봉 전략 run의 메모리가 주문 수에 비례해 문서 규칙을 크게 넘는다 | **닫힘 — records `254`–`257`.** envelope·publish가 record를 배치로 흘림(`254`); spill 부분을 한 번에 다시 읽지 않는 seal(`255`); record가 있는 run은 fill 쪽 증거를 루트·trace·`feedback`에 들지 않음(`256`); `--jobs` 워커는 BLAS 1스레드(`257`) | 코드 + skill |
+| `report-2026-09-11-the-skills-lead-agents-to-conclude-a-factor-return-series-...` | skill을 따른 에이전트들이 factor 수익률은 vqapr로 못 만든다고 결론 | **다른 세션이 skill로 다룸** (commit `421316b7` 등, `experiments/exp_250`). 이 묶음에선 코드 변경 없음 | skill |
+| `report-2026-09-11-a-smaller-model-does-not-finish-...` | 작은 모델(haiku)이 framework 경로를 끝내지 못하고 끝냈다고 보고 | **보류 — 2026-09-11 오너 판정.** vqapr 결함인지 불분명; 제안(진행 표시, `list runs`의 started 상태, factor leg의 짧은 경로)은 열려 있다. 참고: record `249` 뒤로 중단된 run도 `run.json`을 남긴다 | — |
 
 ### 2026-09-10의 번호 없는 보고 일곱 — testbed(`0.11.0` wheel) 다섯, 0.12.0 시나리오 트레이스 하나, testbed(`0.13.0` wheel) 하나 — 전부 닫혔다 (남은 셋은 0.14.2 hotfix, records `243`–`245`)
 

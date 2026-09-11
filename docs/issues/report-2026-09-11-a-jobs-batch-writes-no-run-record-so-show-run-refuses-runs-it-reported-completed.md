@@ -1,6 +1,6 @@
 # A `vqapr run` batch under `--jobs` writes no run record, so `show run` refuses the runs it reported completed
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-11 — record `249`** (fixed on the owner's instruction, unnumbered). A `--jobs` worker now writes `run.json` through the same member body a single run takes.
 
 | | |
 |---|---|

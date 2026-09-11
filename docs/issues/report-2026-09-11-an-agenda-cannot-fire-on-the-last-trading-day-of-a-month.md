@@ -1,6 +1,6 @@
 # An agenda cannot fire on the last trading day of a month, so three agents rebalanced a month-end strategy three different ways
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.**
+**Status: CLOSED 2026-09-11 — record `253`.** Owner ruling: add `agenda.on: last` (`w` and `M` rules); a month fires once the execution table shows it over.
 
 | | |
 |---|---|

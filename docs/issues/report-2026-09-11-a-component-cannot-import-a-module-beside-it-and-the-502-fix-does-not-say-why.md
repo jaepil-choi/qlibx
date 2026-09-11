@@ -1,6 +1,6 @@
 # A component cannot import a module in its own directory, and the 502 `fix` does not say why
 
-**Status: UNTRIAGED — reported by testbed, not yet judged by the owner.** The status is 502 with
+**Status: CLOSED 2026-09-11 — record `252`.** Owner ruling: a component stays one file (its fingerprint covers that file alone), so its directory is not put on the import path; the missing sentence is what was wrong. The `fix` now names the rule when the missing module sits beside the component, and make-strategy and make-datamodel say it. The status is 502 with
 `cause.origin: "user"`, which the report-issue-dev skill says is normally the author's to fix. It
 is filed because the author's code is ordinary Python that works outside the loader, and nothing
 on the surface says components cannot import their neighbours. If this is intended, the finding

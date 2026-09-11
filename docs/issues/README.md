@@ -43,6 +43,12 @@
 | ~~`096`~~ | panel 읽기가 종목 순회 Python 루프다 — sample 전략이 for loop을 도는 이유 | **닫힘 2026-09-10 — records `232`·`233`.** 필드마다 name-major Arrow 블록 하나, `PanelWindow.matrix()`, 벡터화된 `counts`/`current`/`latest`, `scan.observation_table`; sample 전략·scaffold 둘·skill reference가 행렬 위에서 계산(`Decimal`은 `Rebalance` 경계에서만). 3,000종목 decide 8.8→1.5 ms, panel build 10.7→1.2 ms | 닫힘 |
 | ~~`097`~~ | `flow/engine/loop.py`의 추상 루프에 서브클래스가 하나뿐 | **닫힘 2026-09-10 — record `231`.** `EventLoop` 삭제, `RunLoop.run`이 걷기; `strategy_loop`/`datamodel_loop`는 `RunLoop`를 돌려주는 함수; `flow/engine/loop.py`는 이벤트 타입만 | 닫힘 |
 
+### 2026-09-11의 번호 없는 보고 하나 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| `report-2026-09-11-skill-install-writes-into-the-enclosing-repositorys-git-root-...` | `skill install`이 프로젝트가 아니라 그것을 감싼 저장소의 `.git` 루트에 쓰고, `--project-root .`로는 바꿀 수 없다 | **접수 2026-09-11.** 세 발견 모두 소스에서 확인; 넷째를 덧붙임 — 다른 모든 명령의 stale 검사(`upgrade_note`)는 workspace root를 읽어 그 설치본을 검사하지 않는다 | — |
+
 ### 2026-09-11의 번호 없는 보고 아홉 — testbed(`0.14.2` wheel): A/B testbed · FF3 testbed · enhanced-index-3 — 일곱 닫힘, 하나 다른 세션, 하나 보류
 
 오너가 번호 없이 바로 고치게 했다(develop 위, records `249`–`257`). 월말 발화는 `on: last`, 옆 모듈 import는 "한 파일
@@ -71,7 +77,7 @@
 |---|---|---|---|
 | ~~`report-2026-09-10-run-jobs-does-not-parallelise-datamodel-runs`~~ | `vqapr run --jobs N`이 datamodel run을 병렬로 돌리지 않는다 — 프로세스 하나, 한 번에 하나 | **닫힘 — record `230`.** 두 종류 모두 풀로; worker의 raise는 그 run의 entry; envelope에 `jobs`; 배치 안에서 남이 쓰는 것을 읽는 run은 통째로 거절(`run.batch_dependent`, 오너 결정) | 코드 + skill |
 | ~~`report-2026-09-10-agenda-has-no-year-unit-and-the-refusal-reads-as-a-closed-set`~~ | `agenda.every`에 `y` 단위가 없고, 거절문이 닫힌 집합처럼 읽힌다 | **닫힘 2026-09-10 — record `244` (0.14.2).** 거절문이 문법을 말한다(count는 자유, 단위는 d·w·M / m·h); `y`면 `12M`을 가리킨다; skill 문서 셋도 같은 말. 연 단위는 더하지 않았다 | 코드 + skill |
-| `report-2026-09-10-check-derives-a-three-year-agenda-twice` | `check`가 run의 agenda를 두 번 유도한다 — 3년 run에서 check 3.6 s 중 3.5 s | **미분류.** 0.12.0 시나리오 트레이스(`exp_235`, `03_check_changed`): `derived_agenda` #362 1,782 ms(judgments) + #44533 1,673 ms(preflight). 집행표 스캔이 사라진 자리에 남은 것 | — |
+| ~~`report-2026-09-10-check-derives-a-three-year-agenda-twice`~~ | `check`가 run의 agenda를 두 번 유도한다 — 3년 run에서 check 3.6 s 중 3.5 s | **닫힘 2026-09-10 — record `238`.** workspace가 dataset의 instant를 명령당 한 번 읽어 preflight의 두 번째 유도가 스캔 없이 끝난다(파일의 `Status` 줄이 authority; 이 행은 2026-09-11에야 따라잡았다) | 코드 |
 | ~~`098`~~ (`report-2026-09-10-a-datamodel-run-holds-memory-...`) | datamodel run의 peak 메모리가 lookback·기간이 아니라 종목 수에 비례한다 — 309종목 0.55 GB, 5종목 0.23 GB; 기간 7배엔 12% | **닫힘 2026-09-10 — records `235`·`236`.** 0.32 GB는 0.11.0 `Panel.from_rows`의 dict 행 877k(record 232가 이미 제거); 남은 절반은 등록 span 전체 스캔 + 필드당 두 벌. 235: panel은 run horizon, 숫자 필드 한 벌, bounds 밖 거절. 236: `--jobs` 배치가 dataset마다 cube를 한 번 굽고 worker가 mmap, 끝나면 삭제. 전 종목 worker peak 0.76 → 0.17 GB | 코드 + skill |
 | ~~`report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source`~~ | `show dataset --limit 0`이 430 MB(8.7M행) 소스에서 5분 넘게 돌아오지 않고 메모리를 소진한다 | **닫힘 2026-09-10 — record `245` (0.14.2).** `--limit 0`은 "전부"(record `077`)였고 모든 행을 dict로 올렸다. 이제 count는 count: 0은 0행, `show dataset`·`--table` 둘 다. 4.2M행에서 100 s·+1.78 GB → 0.86 s. 전부를 원하면 `rows_total`만큼 — 깨지는 변화, 0.14.2 노트에 | 코드 + skill |
 | ~~`report-2026-09-10-unverified-fix-names-no-command-for-a-run-published-dataset`~~ | `dataset.unverified`가 run이 publish한 dataset에게 "register again"을 말하는데 그런 명령이 없다 (testbed, `0.13.0` wheel) | **닫힘 2026-09-10 — record `243` (0.14.2).** 거절이 `produced_by`를 읽어 run과 `vqapr run <run-id> --force`를 말한다; 선언된 dataset은 `vqapr register`를; 0.12.0 마이그레이션 노트에 run-published 한 줄 | 코드 + docs |

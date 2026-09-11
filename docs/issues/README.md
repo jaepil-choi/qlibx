@@ -52,7 +52,14 @@
 | ~~`report-2026-09-11-a-decide-after-close-run-is-refused-on-every-friday-...`~~ | decide-after-close run이 `within: 1d`로 금요일마다 거절되고, 같은 occurrence의 두 번째 거절이 run end를 가리킨다 | **닫힘 — record `259`.** 원인을 한 곳에서 가른다(`within`이 짧다 / end 전에 instant가 없다): 창에는 가장 긴 대기와 통하는 `within`, 끝에는 마지막 체결과 그 결정 사이의 `end`; 두 문이 같은 분류기를 쓰고 `check`는 한 번만 싣는다 | 코드 + skill |
 | `report-2026-09-11-rebalance-of-refuses-a-zero-weight-...` | `Rebalance.of`가 `signed`는 받는 0 비중을 거절하고, 0으로 두는 법을 말하지 않는다 | **접수 — 오너 판정 대기**(0을 받을지, 거절문만 고칠지) | — |
 | `report-2026-09-11-the-krx-settlement-order-is-not-written-...` | KRX 체결 순서(매도 먼저, 큰 매수 먼저)가 agent가 읽는 곳에 없다 | **절반 닫힘.** skill 절반: make-exchange `execution-profiles.md`에 세 단계(0 쪽으로 반올림 · 큰 금액 매수 먼저 · 매도 먼저 결제)와 record에 보이는 것, analyze-result에 같은 말. **열림:** record의 trim 표시 — record 모양이 바뀌어 오너 판정 대기 | skill |
-| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 오너 판정 대기**(측정; 실행 가능한 예제/scaffold 옵션은 제품 방향) | — |
+| `report-2026-09-11-adding-one-strategy-...-costs-agents-more-...` | 기존 workspace에 전략 하나를 더해도 pandas보다 1.3–3.8배 | **접수 — 다른 세션이 맡음**(2026-09-11 오너: "다른 에이전트가 접수해서 처리하고 있어"). 이 세션은 손대지 않는다 | — |
+
+### 2026-09-11의 번호 없는 보고 둘 더 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수
+
+| 파일 | 제목 | 상태 | 닫은 것 |
+|---|---|---|---|
+| `report-2026-09-11-the-run-template-shows-on-last-unquoted-...` | `vqapr new run` 템플릿의 `# on: last`를 풀면 YAML이 키를 `True`로 읽는다 | **접수.** record `253`이 넣은 줄; PyYAML(YAML 1.1)의 `on` = 불리언 | — |
+| `report-2026-09-11-on-windows-a-strategy-naming-asia-seoul-fails-...-tzdata-...` | Windows에서 `tzdata` 없이 `Asia/Seoul`이 502(사용자 코드 탓)로 거절된다 | **접수.** `tzdata` 의존성 없음; 거절이 원인(IANA DB 부재)을 말하지 않는다 | — |
 
 ### 2026-09-11의 번호 없는 보고 하나 — demo testbed(`0.14.4`, `b8b47e6c`) — 접수 후 닫힘
 

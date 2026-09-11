@@ -20,30 +20,25 @@ import numpy as np
 
 from vqapr import authoring as va
 
-LOOKBACK = {lookback}  # rows of the window: a five-day return needs six observations, not five
+{lookback_declaration}
 
 
 class {class_name}(va.StrategyModel):
-    """`{dataset_id}`.`{field}` over LOOKBACK rows; the momentum signal below is a placeholder."""
+    """`{dataset_id}`.`{field}` over {window_words}; the momentum signal below is a placeholder."""
 
     def inputs(self):
         read = va.DatasetInput(
-            dataset_id="{dataset_id}", fields=("{field}",), lookback=va.RowsLookback(rows=LOOKBACK)
+            dataset_id="{dataset_id}", fields=("{field}",), lookback={lookback_expression}
         )
         return {{"{alias}": read}}  # the alias is YOUR name for this read; `call.read` takes it
 
     def decide(self, call):
-        # One field as a window: instants x instruments, the same LOOKBACK instants for every name.
+        # One field as a window: instants x instruments, {window_comment}.
         window = call.read("{alias}", "{field}")
         # The window as one float array (rows: instants, newest last; columns: `window.instruments`;
         # NaN where a name had no value), so the signal is one expression over every name at once.
         closes = window.matrix()
-        if closes.shape[0] < LOOKBACK:
-            return va.Hold(reason="fewer than LOOKBACK sessions in the window")
-        full = np.isfinite(closes).all(axis=0) & (closes[0] > 0)  # a complete window, per name
-        with np.errstate(divide="ignore", invalid="ignore"):
-            # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
-            scores = closes[-1] / closes[0] - 1.0
+{signal_block}
         names = window.instruments
         chosen = {{name: scores[j] for j, name in enumerate(names) if full[j] and scores[j] > 0}}
         if not chosen:
@@ -54,6 +49,60 @@ class {class_name}(va.StrategyModel):
     # State across callbacks lives in `self.memory` (strict JSON, restored before every call).
     # A table of your own is DECLARED in `tables()` as a `va.TableSpec` before decide() writes it.
 '''
+
+_STRATEGY_ROWS_SIGNAL = """\
+        if closes.shape[0] < LOOKBACK:
+            return va.Hold(reason="fewer than LOOKBACK sessions in the window")
+        full = np.isfinite(closes).all(axis=0) & (closes[0] > 0)  # a complete window, per name
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
+            scores = closes[-1] / closes[0] - 1.0"""
+
+_STRATEGY_CALENDAR_SIGNAL = """\
+        if closes.shape[0] < 2:
+            return va.Hold(reason="fewer than two sessions in the window")
+        # A calendar window promises a date range, not a row count: a name that did not trade on
+        # every session has fewer values inside it. So the return runs from each name's first
+        # observed value in the window to its newest, and a name needs two of them.
+        finite = np.isfinite(closes)
+        columns = np.arange(closes.shape[1])
+        first = closes[finite.argmax(axis=0), columns]
+        newest = closes[closes.shape[0] - 1 - finite[::-1].argmax(axis=0), columns]
+        full = (finite.sum(axis=0) >= 2) & (first > 0)  # two observed values, per name
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # THE SIGNAL. Momentum: recent gain wins. Flip the sign for reversal.
+            scores = newest / first - 1.0"""
+
+_STRATEGY_FLAVOURS = {
+    "rows": {
+        "lookback_declaration": (
+            "LOOKBACK = {lookback}  # rows of the window: a five-day return needs six "
+            "observations, not five"
+        ),
+        "window_words": "LOOKBACK rows",
+        "lookback_expression": "va.RowsLookback(rows=LOOKBACK)",
+        "window_comment": "the same LOOKBACK instants for every name",
+        "signal_block": _STRATEGY_ROWS_SIGNAL,
+    },
+    "calendar": {
+        "lookback_declaration": (
+            "LOOKBACK_DAYS = {lookback}  # calendar days, not sessions: a year is 365, not 252\n"
+            'TIMEZONE = "Asia/Seoul"  # where the day boundary falls; use the venue\'s zone'
+        ),
+        "window_words": "the last LOOKBACK_DAYS calendar days",
+        "lookback_expression": "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)",
+        "window_comment": "every instant of the last LOOKBACK_DAYS days",
+        "signal_block": _STRATEGY_CALENDAR_SIGNAL,
+    },
+}
+"""The two windows the strategy scaffold declares (record `251`), and what differs between them.
+
+A rows window is the table's last N instants for every name, so a complete window is N finite
+values and the return runs from the first row to the last. A calendar window is a date range, so
+the guard asks for two observed values and the return runs from each name's first to its newest
+(`docs/issues/archive/033` is why the guard must follow the window). The rows text is what the
+scaffold always emitted, byte for byte.
+"""
 
 _DATA_MODEL_TEMPLATE = '''"""A DataModel that derives one column from declared observations."""
 
@@ -361,8 +410,11 @@ def render(
     `lookback_kind` selects which member of the lookback pair a DataModel declares. `rows` is the
     default because it is what this scaffold always emitted; `calendar` exists because the default
     is the wrong member for every cross-sectional model and there was no way to ask for the other
-    one (`docs/issues/archive/033`). The StrategyModel template takes `rows` only: its body counts
-    observations per name, so a calendar window would leave the emitted guard meaningless.
+    one (`docs/issues/archive/033`). The StrategyModel template takes `rows` or `calendar`, each
+    with the guard its window implies (record `251`): it took `rows` only, while the strategy
+    skill told authors to scaffold a day window with `--calendar-lookback`, and three of three
+    agents building a 12-month momentum were refused
+    (`docs/issues/report-2026-09-11-new-help-points-a-strategy-at-calendar-lookback-...`).
 
     A panel-grain body computes on `window.matrix()` -- one float array over every name -- and a
     rows-grain body reduces per name (record `233`, `docs/issues/096`).
@@ -384,12 +436,12 @@ def render(
     if dataset_id is None:
         raise ValueError(f"{kind.value} reads a dataset, so dataset_id is required")
     if kind is ComponentKind.STRATEGY_MODEL:
-        if lookback_kind != "rows":
+        if lookback_kind not in _STRATEGY_FLAVOURS:
             raise ValueError(
-                "the strategy scaffold declares a rows lookback: its signal counts observations "
-                "per name. Scaffold it with the default and edit the requirement if you want a "
-                "calendar window"
+                "the strategy scaffold declares a rows or a calendar lookback; each name's own "
+                "last N reported instants are a rows-grain read, which a datamodel scaffolds"
             )
+        window = _STRATEGY_FLAVOURS[lookback_kind]
         return _TEMPLATES[kind].format(
             component_id=component_id,
             class_name=_class_name(component_id),
@@ -398,9 +450,13 @@ def render(
             # required name to a first-time user, and described a read the flags did not ask for.
             alias=dataset_id,
             field=field,
-            lookback=lookback,
             invested=invested,
             output_field=output_field,
+            lookback_declaration=window["lookback_declaration"].format(lookback=lookback),
+            window_words=window["window_words"],
+            lookback_expression=window["lookback_expression"],
+            window_comment=window["window_comment"],
+            signal_block=window["signal_block"],
         )
     flavour = _LOOKBACK_FLAVOURS[lookback_kind]
     return _TEMPLATES[kind].format(

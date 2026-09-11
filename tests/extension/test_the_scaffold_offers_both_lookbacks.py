@@ -209,15 +209,48 @@ def test_neither_flag_still_scaffolds_the_rows_default(tmp_path: Path) -> None:
     assert "LOOKBACK = 6" in Path(envelope["path"]).read_text(encoding="utf-8")
 
 
-def test_a_strategy_is_told_why_the_flag_does_not_apply(tmp_path: Path) -> None:
-    """The strategy body counts observations per name, so a day count would leave it meaningless."""
+def test_a_strategy_scaffolds_a_calendar_window_with_the_guard_it_implies(tmp_path: Path) -> None:
+    """`docs/issues/report-2026-09-11-new-help-points-a-strategy-at-calendar-lookback-...`.
+
+    `vqapr new --help` and the strategy skill both sent a day window to `--calendar-lookback`, and
+    `new strategy` refused it: three of three agents scaffolding a 12-month momentum hit that
+    refusal first (record `251`). The strategy template now takes the window, and its guard is
+    the calendar one -- two observed values -- never a row count against a number of days.
+    """
+    envelope = new_command(
+        _namespace(kind="strategy", component_id="alpha", calendar_lookback=400),
+        project_root=tmp_path,
+    )
+
+    emitted = Path(envelope["path"]).read_text(encoding="utf-8")
+    assert "LOOKBACK_DAYS = 400" in emitted
+    assert "va.CalendarLookback(days=LOOKBACK_DAYS, timezone=TIMEZONE)" in emitted
+    assert "RowsLookback" not in emitted
+    assert "finite.sum(axis=0) >= 2" in emitted
+    assert "closes.shape[0] < LOOKBACK" not in emitted, "no row count against a day count"
+    compile(emitted, "alpha.py", "exec")
+
+
+def test_the_rows_strategy_scaffold_is_what_it_always_was() -> None:
+    """The default strategy text is unchanged by the second flavour, byte for byte in spirit."""
+    source = render(ComponentKind.STRATEGY_MODEL, "alpha", dataset_id="price_daily", lookback=6)
+
+    assert "LOOKBACK = 6  # rows of the window" in source
+    assert "lookback=va.RowsLookback(rows=LOOKBACK)" in source
+    assert "if closes.shape[0] < LOOKBACK:" in source
+    assert "scores = closes[-1] / closes[0] - 1.0" in source
+
+
+def test_a_strategy_is_told_the_instants_window_is_the_datamodels(tmp_path: Path) -> None:
+    """It reached the template's bare `ValueError`, which the envelope rendered `unhandled`."""
     from vqapr.domain.inputs import InputError
 
     with pytest.raises(InputError) as refused:
         new_command(
-            _namespace(kind="strategy", component_id="alpha", calendar_lookback=90),
+            _namespace(kind="strategy", component_id="alpha", instants_lookback=5),
             project_root=tmp_path,
         )
 
     assert "datamodel scaffold" in refused.value.requirement
-    assert "counts observations per name" in refused.value.fix
+    assert "--calendar-lookback" in refused.value.fix
+    assert not list(tmp_path.glob("*.py")), "a refused scaffold must write nothing"

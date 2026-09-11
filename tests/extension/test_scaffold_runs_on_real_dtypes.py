@@ -115,10 +115,18 @@ def _window(workspace: Workspace, requirement: DataRequirement) -> ModelWindow:
         consumer_id="test-consumer",
     )
 
-def _emit(project: Path, kind: ComponentKind, component_id: str) -> Path:
+def _emit(
+    project: Path, kind: ComponentKind, component_id: str, lookback_kind: str = "rows"
+) -> Path:
     path = project / f"{component_id.replace('-', '_')}.py"
     path.write_text(
-        render(kind, component_id, dataset_id="price_daily", lookback=LOOKBACK),
+        render(
+            kind,
+            component_id,
+            dataset_id="price_daily",
+            lookback=LOOKBACK,
+            lookback_kind=lookback_kind,
+        ),
         encoding="utf-8",
     )
     return path
@@ -198,6 +206,42 @@ def test_the_strategy_scaffold_decides_against_a_float64_column(
     # fix this raised `TypeError` instead of returning any decision.
     assert decision is not None
     assert type(decision).__name__ in {"Hold", "Rebalance"}
+
+
+def test_the_calendar_strategy_scaffold_decides_against_a_float64_column(
+    tmp_path: Path, float_price_parquet: Path
+) -> None:
+    """The calendar flavour runs as written (record `251`), and reaches a real decision.
+
+    Three calendar days back from 2024-03-07 16:00 KST keeps the 03-05..03-07 rows: A rises
+    100 -> 105 and B 50 -> 53, so the momentum signal chooses both and the template rebalances.
+    """
+    workspace = _workspace(tmp_path, float_price_parquet)
+    path = _emit(tmp_path, ComponentKind.STRATEGY_MODEL, "day-alpha", lookback_kind="calendar")
+    ref = register_strategy_model(tmp_path, "day-alpha", path, "DayAlpha")
+    strategy = load_strategy_model(ref, project_root=tmp_path)
+
+    context = StrategyModelContext(
+        occurrence=OperationOccurrence(
+            "cb-1",
+            LocalInstantDeclaration(
+                EVALUATION_TIME.date(),
+                EVALUATION_TIME.timetz().replace(tzinfo=None),
+                "Asia/Seoul",
+                0,
+                "+09:00",
+            ),
+        ),
+        window=_window(workspace, strategy.requirements()[0]),
+        reads=strategy.inputs(),
+        account=EconomicAccountView(
+            cash=Decimal("1000000"), positions={}, nav=None, nav_observed_at=None
+        ),
+    )
+
+    decision = strategy.decide(context)
+
+    assert type(decision).__name__ == "Rebalance", decision
 
 @pytest.mark.parametrize("kind", [ComponentKind.DATA_MODEL, ComponentKind.STRATEGY_MODEL])
 def test_neither_template_collects_a_raw_cell(kind: ComponentKind) -> None:

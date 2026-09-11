@@ -5,9 +5,8 @@ top level until record `193`, where the name put it next to the authoring contra
 declares nothing an author subclasses. It answers what `vqapr new` should emit, its only
 caller is `cli/new.py`, and it reads `ComponentKind` from this package.
 
-**Moved out of `cli/new.py` by record `114`.** This is a domain rule, not an argparse concern: the
-strategy scaffold takes rows only, because its emitted `len(values) >= LOOKBACK` guard counts
-observations and a calendar window would make that guard count observations against a number of days
+**Moved out of `cli/new.py` by record `114`.** This is a domain rule, not an argparse concern:
+which window a kind's template can emit with a guard that means something
 (`docs/issues/archive/033`). A second surface that scaffolds a component has to apply the same rule,
 and while it lived beside the flag parsing it could only be reached by building a `Namespace`.
 
@@ -39,9 +38,11 @@ def lookback_declaration(
     meant. Giving both is refused rather than resolved by precedence: a reader should not have to
     know which flag wins to predict what their own command emits.
 
-    The strategy scaffold takes rows only, and says so here rather than emitting a file whose
-    `len(values) >= LOOKBACK` guard counts observations against a number of days
-    (`docs/issues/archive/033`).
+    Both kinds take rows or a calendar window; the scaffold emits the guard each window implies,
+    so no guard counts observations against a number of days (`docs/issues/archive/033`). The
+    strategy took rows only until record `251` -- while `vqapr new --help` and the strategy
+    skill both pointed a day window at `--calendar-lookback`. `--instants-lookback` stays the
+    datamodel's: a strategy reads a panel window.
     """
     given = {
         name: value
@@ -74,6 +75,19 @@ def lookback_declaration(
                 observed=f"--instants-lookback {instants}",
                 retry="pass a positive number of instants per name, then retry",
             )
+        if kind is not ComponentKind.DATA_MODEL:
+            # The template refused this with a bare `ValueError`, which reached the envelope as
+            # `unhandled` (record `251`).
+            raise InputError(
+                VALUE_INVALID,
+                requirement="--instants-lookback applies to the datamodel scaffold",
+                observed=f"--instants-lookback given for kind {DECLARATION_KIND[kind]}",
+                retry=(
+                    "scaffold the strategy with --lookback N (the table's last N rows) or "
+                    "--calendar-lookback DAYS (a window of N days); each name's own last N "
+                    "reported instants are a rows-grain read, which a datamodel makes"
+                ),
+            )
         return {"lookback": instants, "lookback_kind": "instants"}
     if calendar is None:
         return {
@@ -86,15 +100,5 @@ def lookback_declaration(
             requirement="--calendar-lookback must be a positive number of days",
             observed=f"--calendar-lookback {calendar}",
             retry="pass a positive number of calendar days, then retry",
-        )
-    if kind is not ComponentKind.DATA_MODEL:
-        raise InputError(
-            VALUE_INVALID,
-            requirement="--calendar-lookback applies to the datamodel scaffold",
-            observed=f"--calendar-lookback given for kind {DECLARATION_KIND[kind]}",
-            retry=(
-                "scaffold the strategy with --lookback, whose signal counts observations per "
-                "name, and edit its DatasetInput if you want a calendar window"
-            ),
         )
     return {"lookback": calendar, "lookback_kind": "calendar"}

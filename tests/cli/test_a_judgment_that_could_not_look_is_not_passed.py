@@ -1,6 +1,6 @@
 """A judgment that could not answer is reported as blocked, never as passed.
 
-`docs/issues/077`. `judgments()` has the right mechanism -- each judge runs inside a wrapper that
+`docs/issues/archive/077`. `judgments()` has the right mechanism -- each judge runs inside a wrapper that
 turns an exception into a BLOCKED entry, and its own comment says why: "the judgment did not find
 nothing, it could not look, and a run nothing was proven about would then report as clean and
 ready." Five helpers caught INSIDE that wrapper and returned an empty result, which is
@@ -8,7 +8,7 @@ indistinguishable from "asked the question, found nothing wrong". `check` theref
 
     {"passed": ["workspace", "run", "judgments"], "blocked": []}
 
-on a run whose look-ahead judgment -- AC-C5, the one `docs/issues/015` exists for -- never ran.
+on a run whose look-ahead judgment -- AC-C5, the one `docs/issues/archive/015` exists for -- never ran.
 
 Two reproductions, from unrelated causes, both of which used to produce exactly that report. The
 run was still refused in both, but only because preflight happens to reach the same doors, and
@@ -27,33 +27,34 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from test_commands import _cli, _workspace_for_run
+from test_commands import _workspace_for_run
 
 from vqapr.cli.check import check
 
 
 def _corrupt_the_sessions_dataset(root: Path) -> None:
-    """The dataset the run derives its sessions from stops being readable after registration.
+    """The execution table the run derives its trading days from (design §3.3) stops being
+    readable after registration.
 
     `register` has already accepted it, and nothing re-validates a source file afterwards, so this
     is a state a real workspace reaches: the file moved, was rewritten, or was truncated between
     declaring the run and checking it.
     """
-    (root / "observation.parquet").write_bytes(b"not a parquet file")
+    (root / "execution.parquet").write_bytes(b"not a parquet file")
 
 
 def _make_available_at_naive(root: Path) -> None:
-    """The same rows, but `available_at` is a naive TIMESTAMP instead of TIMESTAMPTZ."""
-    obs = root / "observation.parquet"
+    """The same venue rows, but `trade_at` is a naive TIMESTAMP instead of TIMESTAMPTZ."""
+    table = root / "execution.parquet"
     con = duckdb.connect()
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-              (DATE '2024-03-05', TIMESTAMP '2024-03-05 03:00:00', 'A', 100.0),
-              (DATE '2024-03-06', TIMESTAMP '2024-03-06 03:00:00', 'A', 101.0),
-              (DATE '2024-03-07', TIMESTAMP '2024-03-07 03:00:00', 'A', 104.0)
-            ) AS t(session_date, available_at, instrument, close))
-            TO '{obs.as_posix()}' (FORMAT PARQUET)"""
+              (TIMESTAMP '2024-03-05 15:30:00', 'A', true, 100.0),
+              (TIMESTAMP '2024-03-06 15:30:00', 'A', true, 103.0),
+              (TIMESTAMP '2024-03-07 15:30:00', 'A', true, 105.0)
+            ) AS t(trade_at, instrument, is_tradable, close))
+            TO '{table.as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()
@@ -63,10 +64,10 @@ def _make_available_at_naive(root: Path) -> None:
     ("name", "break_it"),
     [("corrupt_source", _corrupt_the_sessions_dataset), ("naive_available_at", _make_available_at_naive)],
 )
-def test_an_underivable_agenda_blocks_rather_than_passes(
+def test_an_underivable_schedule_blocks_rather_than_passes(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], name: str, break_it: object
 ) -> None:
-    """The headline. Both causes stop the agenda being derived; neither may read as passed."""
+    """The headline. Both causes stop the schedule being derived; neither may read as passed."""
     _workspace_for_run(tmp_path, capsys)
     break_it(tmp_path)  # type: ignore[operator]
 
@@ -74,18 +75,18 @@ def test_an_underivable_agenda_blocks_rather_than_passes(
 
     assert body["ok"] is False
     assert "judgments" not in body["passed"], (
-        f"[{name}] check reported the judgments as PASSED while the agenda could not be derived: "
+        f"[{name}] check reported the judgments as PASSED while the schedule could not be derived: "
         f"{json.dumps(body)}"
     )
     assert body["blocked"], f"[{name}] nothing was recorded as blocked: {json.dumps(body)}"
 
 
-def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
+def test_both_judgments_that_need_the_schedule_block_with_the_same_reason(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One derivation, one failure, and every judge that asked for it hears the same thing.
 
-    `_agenda_once` derives at most once (`docs/issues/069`) and re-raises the stored exception to
+    `_schedule_once` derives at most once (`docs/issues/archive/069`) and re-raises the stored exception to
     each asker. Blocking one dependent judgment and passing the other would be a report that
     contradicts itself.
     """
@@ -93,25 +94,46 @@ def test_both_judgments_that_need_the_agenda_block_with_the_same_reason(
     _corrupt_the_sessions_dataset(tmp_path)
 
     blocked = check("r1", tmp_path)["blocked"]
-    by_check = {entry["check"]: entry["blocked_by"] for entry in blocked}
+    by_check = _by_judge(blocked)
 
     assert "execution_ordering" in by_check, by_check
     assert "datasets[my-alpha]" in by_check, by_check
     assert by_check["execution_ordering"] == by_check["datasets[my-alpha]"], (
-        f"the two judgments that share one agenda blocked for different reasons: {by_check}"
+        f"the two judgments that share one schedule blocked for different reasons: {by_check}"
     )
 
 
-def test_a_blocked_entry_names_its_error_type(
+def _by_judge(blocked: list[dict]) -> dict[str, str]:
+    """`{judge name: reason}` from the blocked entries, which are `judgment.blocked` failures.
+
+    A blocked judgment renders through the one failure shape (record `171`): `observed` opens
+    with the judge's name, and the exception rides whole in `cause`.
+    """
+    out: dict[str, str] = {}
+    for entry in blocked:
+        assert entry["code"] == "judgment.blocked", entry
+        name, reason = entry["observed"].split(" could not answer: ", 1)
+        out[name] = reason
+    return out
+
+
+def test_a_blocked_entry_carries_its_cause_whole(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """`error_type` rides separately so a framework bug reads differently from a decline."""
+    """`cause` rides separately so a framework bug reads differently from a decline: its type,
+    its message, the whole traceback, and a status saying whose fault it is."""
     _workspace_for_run(tmp_path, capsys)
     _corrupt_the_sessions_dataset(tmp_path)
 
     for entry in check("r1", tmp_path)["blocked"]:
-        assert entry["error_type"], entry
-        assert entry["blocked_by"].startswith(f"{entry['error_type']}:"), entry
+        cause = entry["cause"]
+        assert cause["type"], entry
+        assert entry["observed"].split(" could not answer: ", 1)[1].startswith(
+            f"{cause['type']}:"
+        ), entry
+        assert cause["traceback"] and cause["type"] in cause["traceback"], entry
+        assert cause["where"], "every failure names the line it came from"
+        assert entry["status"] >= 400
 
 
 def test_the_defect_is_named_twice_and_that_is_the_decision(
@@ -131,7 +153,7 @@ def test_the_defect_is_named_twice_and_that_is_the_decision(
 
     assert body["blocked"], "the question that could not be asked is not reported"
     assert body["failures"], "the defect itself is not reported"
-    assert "source.scan.distinct.unreadable" in {f["code"] for f in body["failures"]}
+    assert "source.distinct_unreadable" in {f["code"] for f in body["failures"]}
 
 
 def test_one_member_that_does_not_load_does_not_silence_another_members_datasets(
@@ -155,10 +177,10 @@ def test_one_member_that_does_not_load_does_not_silence_another_members_datasets
 
     assert body["ok"] is False
     assert "judgments" not in body["passed"], json.dumps(body)
-    datasets = [entry for entry in body["blocked"] if entry["check"].startswith("datasets[")]
+    datasets = [name for name in _by_judge(body["blocked"]) if name.startswith("datasets[")]
     assert datasets, f"the unloadable member was not reported as blocked: {json.dumps(body)}"
     # The NAME is where the reader learns which member: the exception's own text does not say.
-    assert datasets[0]["check"] == "datasets[my-alpha]", datasets
+    assert datasets[0] == "datasets[my-alpha]", datasets
 
 
 def test_a_healthy_run_still_passes_every_judgment(

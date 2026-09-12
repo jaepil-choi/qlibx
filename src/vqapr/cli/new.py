@@ -6,18 +6,19 @@ Two modes:
   declaration `.yaml`. Both files are complete: `vqapr new` then `vqapr register` is the whole
   path from nothing to a registered component.
 
-- `vqapr new dataset|execution-input|run --out <path>` emits a YAML template with
+- `vqapr new dataset|run --out <path>` emits a YAML template with
   every required key, inline comments explaining each one, and placeholder values that need
   replacing. An agent that reads this file knows exactly what `vqapr register` or `vqapr run`
   expects, without opening documentation or guessing field names.
 
 ## Every declaration kind a run needs has a template
 
-`register` understands five sections, and a run needs four of them: a dataset, an execution
-input, an exchange and the run itself. There is no agenda to declare (record `148`): the run
-says which sessions it fires on and at what wall time, every strategy is called on every
-session and decides for itself, the book is valued at the instant the venue fills, and the
-declared constraints judge it right after each commit.
+`register` understands four sections, and a run needs three of them: a dataset (the venue table a
+run fills against is a dataset with an `execution:` role), an exchange and the run itself. There is
+no schedule artifact to register (record `148`, then `204`): the run declares its own `schedule` --
+a trading-day filter and a within-day rule -- and its one model is called at every instant of it and
+decides for itself; the book is valued at every instant of the market clock, and the declared
+Compliance rules observe it right after.
 """
 
 from __future__ import annotations
@@ -29,18 +30,18 @@ from typing import Any
 
 import yaml
 
-from vqapr.account.account import AccountMode
-from vqapr.authoring_lookback import lookback_declaration
+from vqapr.agent.sample.materialize import RUN_ID as SAMPLE_RUN_ID
+from vqapr.agent.sample.materialize import materialize as materialize_sample
+from vqapr.agent.scaffold import class_name_for, lookback_declaration, render
 from vqapr.cli.envelope import success
-from vqapr.extension.component import ComponentKind
-from vqapr.extension.scaffold import _class_name, render
-from vqapr.inputs import VALUE_INVALID, InputError, refuse_existing
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.domain.errors import INCOMPLETE, VALUE_INVALID, InputError, refuse_existing
+from vqapr.public import AccountMode, Role
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
 
 _KINDS = {
-    "datamodel": ComponentKind.DATA_MODEL,
-    "strategy": ComponentKind.STRATEGY_MODEL,
-    "constraint": ComponentKind.CONSTRAINT,
+    "datamodel": Role.DATA_MODEL,
+    "strategy": Role.STRATEGY_MODEL,
+    "compliance": Role.COMPLIANCE,
 }
 
 _LOOKBACK_DEFAULT = 6
@@ -52,13 +53,13 @@ asked for rows" from "the user left the default alone and asked for calendar day
 """
 
 _DECLARATION_KIND = {
-    ComponentKind.DATA_MODEL: "datamodel",
-    ComponentKind.STRATEGY_MODEL: "strategy",
-    ComponentKind.CONSTRAINT: "constraint",
+    Role.DATA_MODEL: "datamodel",
+    Role.STRATEGY_MODEL: "strategy",
+    Role.COMPLIANCE: "compliance",
 }
 """The declaration spelling for each authored kind.
 
-Keyed by `ComponentKind` and read while emitting the companion `.yaml`, so a kind added to
+Keyed by `Role` and read while emitting the companion `.yaml`, so a kind added to
 `_KINDS` and forgotten here surfaces as a bare `KeyError` -- `stage: "unhandled"` -- which is the
 failure shape this slice exists to remove. The three tables are the same three kinds.
 """
@@ -108,38 +109,16 @@ datasets:
     fields:                           # every column the dataset exposes, mapping name -> column
       close: close
       volume: volume
+    field_types:                      # what each field IS, one of: TIMESTAMP_TZ, DATE, INTEGER,
+      close: DOUBLE                   #   DOUBLE, VARCHAR, BOOLEAN. Registration reads the file
+      volume: INTEGER                 #   once and refuses a field whose column disagrees. A
+                                      #   DECIMAL column is refused: cast it to DOUBLE while
+                                      #   preparing the source, so a model reads one numeric type.
     # hive_partitioned: false         # uncomment if the source is a hive-partitioned directory
-"""
-
-_EXECUTION_INPUT_TEMPLATE = """\
-# Execution input declaration - register with `vqapr register <this-file.yaml>`
-#
-# This declares the venue table a run fills against: where executable prices live,
-# and the rule that picks which snapshot an order is filled at.
-#
-# Like a dataset, the source file is declared inline (source_id + path). There is no
-# separate `sources:` section.
-#
-# Registrations are immutable. During disposable first-run setup, correct this YAML and rebuild
-# the project-local workspace; after a run matters, preserve provenance by registering a new id.
-
-execution_inputs:
-  EXECUTION_INPUT_ID:               # your chosen identity, named by a run spec's execution_input
-    table:
-      source_id: EXECUTION_INPUT_ID-source  # identifies the physical file
-      path: relative/path/to/venue.parquet  # resolved relative to this YAML file
-      trade_at_field: trade_at      # column holding the instant an execution is available at
-      instrument_field: instrument  # column identifying each instrument
-      is_tradable_field: is_tradable  # boolean column: was this name executable at that instant
-      price_fields:                 # executable prices, mapping name -> column
-        close: close
-    fill:
-      selector: same_day            # SCHEDULING rule, not a price choice. One of:
-      #   same_day       fill at the instant selected within the same session
-      #   next_eligible  fill at the next session where the name is tradable
-      at: "15:30"                   # execution must be STRICTLY LATER than the strategy callback
-      timezone: Asia/Seoul          # venue timezone that `at` is expressed in
-      trade_price: close            # which key from price_fields above the fill uses
+    # execution:                      # uncomment to make this the venue table a run fills against:
+    #   is_tradable: is_tradable      #   a BOOLEAN field saying a name was executable at that row.
+    #                                 #   Its numeric fields are the prices a run may choose
+    #                                 #   from; the run names one as `execution.fill.trade_price`.
 """
 
 _ACCOUNT_MODES = " or ".join(mode.name for mode in AccountMode)
@@ -158,14 +137,13 @@ again: adding or renaming a member updates the template in the same edit.
 _RUN_TEMPLATE = f"""\
 # Run declaration -- register with `vqapr register <this-file.yaml>`, then `vqapr run RUN_ID`
 #
-# A run is configuration (record 139): the universe, the period, the sessions it fires on and
-# the wall time it fires at, the venue, the execution input, the initial account, and the
-# strategies it tries. Every strategy is called on EVERY session at `at` and decides for itself
-# whether to act -- a monthly rebalance is a rule inside the strategy, read from
-# `call.evaluation_time` and kept in `self.memory` (record 148). The book is valued at the
-# instant the venue fills and the declared constraints judge it right after each commit; there
-# is no separate valuation or monitoring time to declare. Each strategy runs with its OWN
-# account from the same initial declaration, in its own record under .vqapr/runs/RUN_ID/.
+# A run is configuration (record 139): the universe, the period, the schedule clock it decides
+# on (`schedule`), the venue, the execution dataset, the initial account, and the one strategy it
+# runs. The clock is expanded over the trading days the execution dataset has rows for -- a
+# denser table adds fill instants, never decision days -- and the strategy is called at every
+# instant of it, deciding for itself whether to act. The book is valued at every instant of the
+# market clock and the declared compliance rules observe it right after; there is no separate
+# valuation or monitoring time to declare. The run's record lives under .vqapr/runs/RUN_ID/.
 # Ids below name registered declarations; nothing here registers them.
 
 runs:
@@ -175,31 +153,46 @@ runs:
       - INSTRUMENT_B
     start: "2024-01-02T00:00:00+09:00"  # timezone-aware ISO-8601 datetime, inclusive
     end: "2024-12-31T15:30:00+09:00"    # include the final callback's later execution target
-    sessions_from: DATASET_ID        # every session this registered dataset has a row for...
-    # sessions:                      # ...or list the days literally. Exactly ONE of the two.
-    #   - "2024-01-02"
-    timezone: Asia/Seoul             # the zone `at` is expressed in
-    at: "15:29"                      # when strategies decide; strictly before the execution `at`
+    timezone: Asia/Seoul             # the zone every wall time below is expressed in
+    schedule:                          # the schedule clock: a day filter and a within-day rule
+      every: 1d                      # 1d | 2d | 1w | 1M select trading days and pair with `at`;
+      at: "15:29"                    #   1m | 5m | 1h select instants and pair with `from`/`to`
+      # on: last                     # 1w | 1M only: the LAST trading day of each week or month
+      # from: "09:00"                # the trading days are the days the execution dataset
+      # to: "15:20"                  #   below has rows for -- nothing to declare here
     exchange: my-venue               # component_id of a registered Exchange
-    execution_input: my-exec         # execution_input_id of a registered execution input
+    execution:                       # the registered venue table, and THIS run's fill on it
+      dataset: my-venue-daily        # a dataset registered with `execution: {{is_tradable: ...}}`
+      trade_price: close             # which numeric field of the dataset this run fills at;
+                                     #   another run may fill the same table at `open`
+      fill:                          # optional. Without it a decision fills at the FIRST
+        at: "15:30"                  #   execution instant after it; `at` keeps only instants at
+        # after: "10m"               #   this wall time (run timezone) -- STRICTLY LATER than the
+        # within: "1d"               #   decision. `after`: minimum gap. `within`: maximum gap,
+                                     #   else the run is refused before it starts. Both are
+                                     #   wall-clock time: a Friday decision that fills on Monday
+                                     #   waits about 3d, so `within: 1d` refuses it
+    # compliance: [no-short]          # registered Compliance rules that observe the committed
+                                     #   book at every market-clock instant; their parameters are
+                                     #   their own, never the strategy's
     initial_account:
       cash: "1000000"                # quoted to preserve precision (parsed as Decimal)
       # The venue must permit the direction too: `--profile krx` is long-only and cannot hold a
       # SIGNED book. A costed long/short book needs a venue whose listings set access=SIGNED.
       mode: LONG_ONLY                # {_ACCOUNT_MODES}
       positions: {{}}                  # mapping of instrument -> quantity, or empty
-    strategies:                      # one entry per registered StrategyModel to try
-      my-alpha: {{}}
-      # my-other-alpha:
-      #   constraints: [constraint-component-id]
-      #   initial_model_memory: {{}}
+    writes: my-alpha-weights         # the dataset this run puts in the warehouse: its allocation,
+                                     #   one row per instrument per decision. Other runs read it
+    strategy:                        # the ONE registered StrategyModel this run executes
+      component: my-alpha
+      # initial_model_memory: {{}}
 """
 
 
 def _emitted_class_name(source: str) -> str:
     """The class a template emitted, found by parsing rather than by splitting on `"class "`.
 
-    The string split this replaces took the first occurrence of `"class "` anywhere in the file,
+    The string split this replaces took the first event of `"class "` anywhere in the file,
     including inside a docstring: a template whose prose contained "subclass and" yielded an
     `object_name` of half a paragraph, which registered and then failed at import with an
     `AttributeError` naming that paragraph. `register.py` already parses its equivalent with `ast`
@@ -215,7 +208,7 @@ def _emitted_class_name(source: str) -> str:
 
 def _declaration(
     component_id: str,
-    kind: ComponentKind,
+    kind: Role,
     source: Path,
     object_name: str,
     *,
@@ -226,7 +219,7 @@ def _declaration(
     The component is declared. A datamodel also gets the run that computes it (record `148`):
     its sessions are the dataset it reads, its output is named after it, and the universe and
     period are placeholders to fill -- registrable as emitted, refused by `check` until the
-    instruments are real. A strategy's run needs a venue, an execution input and an account,
+    instruments are real. A strategy's run needs a venue, an execution dataset and an account,
     which are facts about the user's project rather than about this file, so it gets none.
     """
     document: dict[str, Any] = {
@@ -238,20 +231,20 @@ def _declaration(
             }
         }
     }
-    if kind is ComponentKind.DATA_MODEL and dataset_id:
+    if kind is Role.DATA_MODEL and dataset_id:
         document["runs"] = {
             f"{component_id}-run": {
                 "instruments": ["INSTRUMENT_A", "INSTRUMENT_B"],
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-12-31T23:00:00+09:00",
-                "sessions_from": dataset_id,
                 "timezone": "Asia/Seoul",
-                "at": "16:00",
-                "datamodels": {
-                    component_id: {
-                        "dataset_id": f"{component_id}-values",
-                        "value_fields": ["value"],
-                    }
+                # A datamodel run has no execution table, so it names the dataset whose days
+                # are its trading days (design §3.3).
+                "schedule": {"every": "1d", "at": "16:00", "days_from": dataset_id},
+                "writes": f"{component_id}-values",
+                "datamodel": {
+                    "component": component_id,
+                    "value_fields": ["value"],
                 },
             }
         }
@@ -265,16 +258,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
             *_KINDS,
             "instruments",
             "dataset",
-            "execution-input",
             "exchange",
             "run",
+            "sample",
         ),
         help=(
-            "scaffold a component (datamodel/strategy/constraint) or emit a template "
-            "(instruments/dataset/execution-input/exchange/run). Component and "
+            "scaffold a component (datamodel/strategy/compliance) or emit a template "
+            "(instruments/dataset/exchange/run). Component and "
             "exchange kinds write TWO files: the .py named by --out, and the .yaml beside it "
             "that registers it. Every kind reports the file to hand `vqapr register` as "
-            "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes"
+            "`declaration`; `run` emits the `runs:` declaration `vqapr run <run-id>` executes. "
+            "`sample` writes a complete, runnable journey into the directory named by --out: "
+            "a strategy, a venue, a synthetic panel and the one declaration registering them"
         ),
     )
     parser.add_argument(
@@ -338,16 +333,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         help=(
-            "scaffold a datamodel that reads a CALENDAR window of this many days instead of "
-            "--lookback rows per name. Use it for anything cross-sectional: a rows lookback "
-            "gives each name its own last N observations, so on an unbalanced panel the batch "
-            "spans whatever the sparsest name reaches back to"
+            "scaffold a datamodel or strategy that reads a CALENDAR window of this many days "
+            "instead of --lookback rows per name. Use it for anything cross-sectional: a rows "
+            "lookback gives each name its own last N observations, so on an unbalanced panel the "
+            "batch spans whatever the sparsest name reaches back to"
         ),
     )
     parser.add_argument(
         "--cap",
         default="0.2",
-        help="largest share of the book any one name may be (constraint scaffold)",
+        help="largest share of the book any one name may be (compliance scaffold)",
     )
     parser.add_argument("--out", type=Path, default=None, help="output path for the emitted file")
 
@@ -366,17 +361,17 @@ def _run_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any
 def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
     if not args.component_id:
         raise InputError(
-            "cli.input.keys_missing",
+            INCOMPLETE,
             requirement="datamodel and strategy require a positional component_id",
             observed="no component_id given",
         )
     kind = _KINDS[args.kind]
     # `render` refuses an id that cannot become a Python class name. Caught here rather than left
     # to escape, because a bare `ValueError` reaches the envelope as `stage: "unhandled"` -- and
-    # it did: `vqapr new constraint '123-bad!'` emitted an unparseable file and then failed on
+    # it did: `vqapr new compliance '123-bad!'` emitted an unparseable file and then failed on
     # re-reading it, reporting a SyntaxError about the framework's own output.
     try:
-        _class_name(args.component_id)
+        class_name_for(args.component_id)
     except ValueError as unusable:
         raise InputError(
             VALUE_INVALID,
@@ -385,32 +380,37 @@ def _component(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
             retry="choose an id like `position-cap`, then retry",
         ) from unusable
     # Per kind, not per command. A DataModel and a StrategyModel are defined by what they read; a
-    # Constraint is a rule about weights and reads nothing -- the shipped `NoShort` returns an
+    # Compliance rule is about the book and reads nothing -- the shipped `NoShort` returns an
     # empty `requirements()`. Demanding `--dataset` from all three would make an author invent a
     # dataset to scaffold a rule that never opens one.
-    if kind is ComponentKind.CONSTRAINT:
+    if kind is Role.COMPLIANCE:
         source = render(kind, args.component_id, cap=str(getattr(args, "cap", "0.2")))
     else:
         if not args.dataset:
             raise InputError(
-                "cli.input.keys_missing",
+                INCOMPLETE,
                 requirement="datamodel and strategy require --dataset",
                 observed="--dataset not given",
             )
         _require_registered_dataset(args.dataset, project_root)
+        # The surface reads the flags; the rule about which window a kind may declare
+        # lives in `vqapr/authoring_lookback.py`. Record `114`.
+        window = lookback_declaration(
+            kind,
+            rows=getattr(args, "lookback", None),
+            calendar=getattr(args, "calendar_lookback", None),
+            instants=getattr(args, "instants_lookback", None),
+        )
+        lookback, lookback_kind = window["lookback"], window["lookback_kind"]
+        if not isinstance(lookback, int) or not isinstance(lookback_kind, str):
+            raise RuntimeError("lookback_declaration answered with a window that is not (n, kind)")
         source = render(
             kind,
             args.component_id,
             dataset_id=args.dataset,
             field=args.field,
-            # The surface reads the flags; the rule about which window a kind may declare
-            # lives in `vqapr/authoring_lookback.py`. Record `114`.
-            **lookback_declaration(
-                kind,
-                rows=getattr(args, "lookback", None),
-                calendar=getattr(args, "calendar_lookback", None),
-                instants=getattr(args, "instants_lookback", None),
-            ),
+            lookback=lookback,
+            lookback_kind=lookback_kind,
         )
     target = args.out or project_root / f"{args.component_id.replace('-', '_')}.py"
     if target.suffix != ".py":
@@ -478,7 +478,7 @@ def _require_registered_dataset(dataset_id: str, project_root: Path) -> None:
     known = ", ".join(sorted(registered)) or "(none registered)"
     close = get_close_matches(dataset_id, sorted(registered), n=1)
     raise InputError(
-        "cli.input.value_invalid",
+        VALUE_INVALID,
         requirement="--dataset must name a dataset this workspace has registered",
         observed=f"{dataset_id!r}; registered: {known}",
         retry=(
@@ -497,26 +497,9 @@ def _dataset_template(args: argparse.Namespace, project_root: Path) -> dict[str,
     # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
     # EVERY kind. For a single-file kind the template IS the declaration, so it equals
     # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
-    # instead of branching on which of them happen to write two files (`docs/issues/026`).
+    # instead of branching on which of them happen to write two files (`docs/issues/archive/026`).
     return success(
         "template.new", kind="dataset", path=str(target), declaration=str(target)
-    )
-
-
-def _execution_input_template(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
-    target = args.out or project_root / "execution-input.yaml"
-    refuse_existing(target, what="execution input template")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_EXECUTION_INPUT_TEMPLATE, encoding="utf-8")
-    # `declaration` is the file to hand `vqapr register`, which `new --help` promises for
-    # EVERY kind. For a single-file kind the template IS the declaration, so it equals
-    # `path`. Reporting it anyway is what lets a caller read one key across all nine kinds
-    # instead of branching on which of them happen to write two files (`docs/issues/026`).
-    return success(
-        "template.new",
-        kind="execution-input",
-        path=str(target),
-        declaration=str(target),
     )
 
 
@@ -587,7 +570,7 @@ A run with no registered roster is refused here rather than charged one flat rat
 is no honest answer for an instrument nobody described.
 """
 
-from vqapr.public import KrxExchange, krx_listings
+from vqapr.public import KrxExchange
 
 # The ids this venue trades. What each one IS comes from the roster.
 INSTRUMENTS = (
@@ -602,22 +585,29 @@ class Venue(KrxExchange):
     This one charges; the academic one does not.
     """
 
-    def __init__(self) -> None:
-        # Costs are on. The limit-up/limit-down band is not, and that is the one thing here you
-        # may want to change.
+    def __init__(self, *, sale_tax_rate: str = "0.002", commission_rate: str = "0.0003") -> None:
+        # The venue's SETTINGS: what it models, on record. Costs are on at KRX's rates; the
+        # limit-up/limit-down band is off. Every run records `exchange.settings` in its
+        # `strategy.json` -- `vqapr show strategy` shows it -- so which configuration a past run
+        # measured under is read from the record, never recovered from this file.
+        #
+        # The two rates are constructor arguments so a registration can set them from `config:`
+        # -- `sale_tax_rate: "0"` is a tax-free KRX, a different venue with a different
+        # fingerprint, kept apart in the warehouse from the taxed one.
         #
         # `price_limits=True` models KRX's daily band, computed from the session base price, and
-        # it REQUIRES your execution input to carry that price. Preflight refuses the run by name
-        # if it does not -- it will not quietly produce limit-unaware numbers. The execution-input
-        # template `vqapr new execution-input` emits carries a trade price only, so this scaffold
+        # it REQUIRES your execution dataset to carry that price. Preflight refuses the run by name
+        # if it does not -- it will not quietly produce limit-unaware numbers. The venue-table
+        # dataset a run fills against carries a trade price only by default, so this scaffold
         # ships with the band off in order to run as emitted rather than refusing on first use.
-        #
         # To switch it on: add the session base price to your execution table's `price_fields`,
-        # then set this to True. The setting lives in THIS FILE, which the run record fingerprints
-        # as `source_digest` -- so which of the two a past run measured is recoverable by reading
-        # the venue at that digest. It is not a field in the record; do not expect to see it in
-        # `vqapr show run`.
-        super().__init__(krx_listings(INSTRUMENTS, price_limits=False))
+        # then set it to True.
+        super().__init__(
+            INSTRUMENTS,
+            sale_tax_rate=sale_tax_rate,
+            commission_rate=commission_rate,
+            price_limits=False,
+        )
 '''
 
 _EXCHANGE_DECLARATION = """\
@@ -746,7 +736,7 @@ _INSTRUMENTS_DECLARATION = """\
 # any category might have, and a null would then mean both "not applicable" and "omitted".
 #
 # Each table needs exactly two columns: `instrument_id` and `kind`. `instrument_id` is the same
-# id the dataset, the execution input and the fill table use. `kind` is one of `stock`, `etf`,
+# id the dataset, the execution dataset and the fill table use. `kind` is one of `stock`, `etf`,
 # `index`, `factor` -- the closed set the package knows, because a category a venue has no terms
 # for cannot be charged or sized. Registration refuses anything else and names the offending
 # instrument and file, so a hand-written table is a legitimate input rather than a trap.
@@ -805,7 +795,7 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     # appear in the refusal text derived from the enum, and would be silently missing from the
     # emitted declaration -- landing an author in exactly the undeclared-table case this same
     # command's receipt reports after the fact.
-    from vqapr.domain.instruments import InstrumentKind
+    from vqapr.public import InstrumentKind
 
     for member in InstrumentKind:
         kind = str(member)
@@ -823,13 +813,40 @@ def _instruments_template(args: argparse.Namespace, project_root: Path) -> dict[
     )
 
 
+def _sample(args: argparse.Namespace, project_root: Path) -> dict[str, Any]:
+    """Materialize the sample journey: the filled-in form beside the blank ones this verb emits.
+
+    Every other kind gives a template the user completes with their own data; this one gives a
+    strategy, a venue, a synthetic panel and the declaration that registers them, so a first
+    `vqapr register` / `check` / `run` can happen before anything is authored (PRD §11.4,
+    record `172`). The same function the package's own tests install the sample through.
+    """
+    target = args.out or project_root / "sample"
+    if target.exists() and any(target.iterdir()):
+        refuse_existing(target, what="sample directory")
+    materialized = materialize_sample(target)
+    declaration = materialized.declaration
+    return success(
+        "template.new",
+        kind="sample",
+        path=str(target),
+        declaration=str(declaration),
+        run_id=SAMPLE_RUN_ID,
+        next=[
+            f"vqapr register {declaration}",
+            f"vqapr check {SAMPLE_RUN_ID}",
+            f"vqapr run {SAMPLE_RUN_ID}",
+        ],
+    )
+
+
 def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
+    if args.kind == "sample":
+        return _sample(args, project_root)
     if args.kind == "instruments":
         return _instruments_template(args, project_root)
     if args.kind == "dataset":
         return _dataset_template(args, project_root)
-    if args.kind == "execution-input":
-        return _execution_input_template(args, project_root)
     if args.kind == "exchange":
         return _exchange_template(args, project_root)
     if args.kind == "run":

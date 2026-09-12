@@ -1,7 +1,7 @@
 # 102 — A run says what its orders did, and both envelope fields read the result's real shape
 
-**Closes:** `docs/issues/039-nothing-reports-the-gap-between-the-declared-book-and-the-realised-one.md`
-(owner-approved 2026-08-31), and `docs/issues/041`, which the work found.
+**Closes:** `docs/issues/archive/039-nothing-reports-the-gap-between-the-declared-book-and-the-realised-one.md`
+(owner-approved 2026-08-31), and `docs/issues/archive/041`, which the work found.
 **Branch:** `fix/039-a-run-says-what-its-orders-did`.
 
 ## Why this change exists
@@ -44,9 +44,9 @@ two hours later.
 Reported on the success path deliberately: the run is legitimate, and what is worth saying is what
 it managed to trade.
 
-## What this change found: `docs/issues/024`'s fix never reached production
+## What this change found: `docs/issues/archive/024`'s fix never reached production
 
-`_tables_declared` — record `094`'s fix for `docs/issues/024` — read `result.tables`.
+`_tables_declared` — record `094`'s fix for `docs/issues/archive/024` — read `result.tables`.
 
 **`SimulationResult` has no `tables` attribute.** Its two fields are `occurrences` and `final_state`;
 the rows live at `final_state.recorder_rows`. So the component-declared half of that fix returned
@@ -63,7 +63,7 @@ assert "tables" not in fields
 assert isinstance(AcceptedRunState.recorder_rows, property)
 ```
 
-The lesson is filed separately as `docs/issues/041`, because the class matters more than the
+The lesson is filed separately as `docs/issues/archive/041`, because the class matters more than the
 instance: **a test double that does not have the real object's shape proves the code works against
 the double.** This is the third variant of the same family in two weeks — a boundary in prose
 (`028`), an invariant in a docstring (the materialization refusal), and now a verification against a

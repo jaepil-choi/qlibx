@@ -1,6 +1,6 @@
 """A held run id is reported as a lock with an age, not as a process that is running.
 
-`docs/issues/037`. A run was killed by a two-minute tool timeout, 216 of ~246 callbacks in. The
+`docs/issues/archive/037`. A run was killed by a two-minute tool timeout, 216 of ~246 callbacks in. The
 identical command, re-run seconds later, was refused with `'run_ou_k0_2024' is running now at
 .vqapr/runs/run_ou_k0_2024 (pid 64004)` -- and `Get-Process -Id 64004` returned nothing.
 
@@ -30,14 +30,16 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.run import _held_record
-from vqapr.flow.run_records import (
+
+from tests.skill_prose import shipped_prose
+from vqapr.record import (
     LOCK_FILENAME,
     LOCK_STALE_AFTER,
     LockClaim,
     RunRecordLive,
     RunRecordWriter,
-    _lock_claim,
 )
+from vqapr.record.reader import _lock_claim
 
 
 def test_a_fresh_lock_reports_its_age_and_a_stale_one_reports_nothing(tmp_path: Path) -> None:
@@ -66,7 +68,7 @@ def test_the_exception_states_a_lock_and_its_release_rather_than_liveness(tmp_pa
         RunRecordWriter(tmp_path, "busy").open()
 
     message = str(refused.value)
-    assert refused.value.holder == os.getpid(), "the pid stays available to callers"
+    assert refused.value.claim.pid == os.getpid(), "the pid stays available to callers"
     assert refused.value.claim.age >= 0.0
     assert "last refreshed" in message
     assert "released automatically" in message
@@ -124,7 +126,7 @@ def test_the_skill_states_the_run_lock_self_healing() -> None:
     # Whitespace-normalized, because the skill is hard-wrapped and a sentence that happens to
     # break across two lines is the same sentence.
     skill = " ".join(
-        Path("src/vqapr/agent/skill/SKILL.md").read_text(encoding="utf-8").split()
+        shipped_prose().split()
     )
 
     assert "heartbeat window" in skill

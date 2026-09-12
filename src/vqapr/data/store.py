@@ -2,74 +2,161 @@
 
 from __future__ import annotations
 
-import hashlib
 from bisect import bisect_right
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
 from vqapr.data import scan
-from vqapr.data.datasets import Grain, lookback_fits_grain, require_grain
+from vqapr.data.cube import Cube, open_cube, panel_from_cube
+from vqapr.data.dataset import DatasetRegistration, Grain, lookback_fits_grain, require_declared
 from vqapr.data.lookback import (
     CalendarLookback,
     InstantsLookback,
+    Lookback,
     RowsLookback,
 )
 from vqapr.data.panel import Panel, panel_identity
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.resolution import resolve_field
-from vqapr.data.sources import SourceSpec
-from vqapr.domain.rows import Rows
-from vqapr.domain.timestamps import require_tz_aware
+from vqapr.data.requirement import DataRequirement, resolve_field
+from vqapr.data.source import SourceSpec, physical_digest
+from vqapr.domain.identifiers import DatasetId
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.rows import Rows, normalize_rows
 
 
 class DatasetCatalog(Protocol):
-    def dataset(self, raw_dataset_id: str): ...
+    def dataset(self, raw_dataset_id: str) -> DatasetRegistration: ...
 
     def source(self, raw_source_id: str) -> SourceSpec: ...
 
 
-def physical_digest(path: Path) -> str:
-    """The sha256 of a source's parquet bytes: what a registration's id and path stand for.
+@dataclass(frozen=True, slots=True)
+class AccessRecord:
+    consumer_id: str
+    dataset_id: DatasetId
+    source_id: str
+    source_digest: str
+    fields: tuple[str, ...]
+    lookback: Lookback
+    evaluation_time: datetime
+    instruments: tuple[str, ...]
+    lower_bound: datetime | None
+    actual_rows: Mapping[str, Mapping[str, int]]
+    max_available_at: datetime | None
 
-    Public since record `139`: `run.json` records it per source (testbed A7), so a run says which
-    bytes it read and not only which path it was pointed at.
+
+@dataclass(frozen=True, slots=True)
+class ObservationBatch:
+    """What one declared requirement returned, and the record of how it was read.
+
+    This is the only shape a Model ever receives data in, and until 2026-08-30 it was not
+    importable from `vqapr.public` and had no docstring -- so an author could read its name in
+    `observations()`'s signature and had no way to learn what it holds without opening installed
+    source. One journey answered the questions below by registering a throwaway DataModel that
+    reported `sorted(rows[0].keys())`, which is a full register-materialize-show cycle spent on one
+    type's field names (`docs/issues/031`).
+
+    **`rows` is a flat tuple of dicts, one per (instant, instrument) observation.** Every row
+    carries:
+
+    * `available_at` -- a timezone-aware `datetime`, the row's OWN point-in-time stamp rather than
+      the window's evaluation time. Rows do not share one instant, so this is what a cross-section
+      is built on.
+    * `instrument` -- the instrument id, as a string. **Absent** on a dataset registered with no
+      `instrument_field`: those rows are not keyed by instrument, the declared instrument list is
+      not applied to them, and there is no name to put here (`docs/issues/038`).
+    * the field the requirement named, under its own id -- a requirement names one field and a
+      lookback, and nothing else (`docs/issues/049`). A value is `None` where the source has no
+      value; an `InstantsLookback` also nulls it on rows outside that field's own last-N instants
+      (see `InstantsLookback`).
+
+    **A value arrives as the Python type of the field's declared `ColumnType`.** `DOUBLE` is
+    `float`, `INTEGER` is `int`, `VARCHAR` is `str`, `BOOLEAN` is `bool`, `TIMESTAMP_TZ` is an
+    aware `datetime`, `DATE` a `date`. Nothing here converts: the declaration was compared with
+    the file once, at registration (`docs/issues/088`), and a DECIMAL column was refused there, so
+    `Decimal` never arrives from a dataset. A model that wants exact arithmetic on a price crosses
+    once, through `Decimal(str(value))` -- `Decimal(value)` on a float inherits the binary
+    expansion -- which is what the scaffolds emit.
+
+    **Ordering is guaranteed: ascending `available_at`, then the dataset's registered key fields.**
+    It is pushed into SQL (`scan.observation_rows`) rather than applied afterwards, so it holds for
+    every lookback and every instrument count, and `tests/data/test_observation_batch_shape.py`
+    pins it. A dataset whose fields aggregate within an instant orders by `available_at` then
+    `instrument` instead, because the key fields were consumed making the group and are not in
+    what came out of it. Instruments therefore INTERLEAVE within an instant rather than being
+    grouped by name:
+    a per-instrument series is built by the reader, and a cross-section is `rows` filtered on one
+    `available_at`. `ModelWindow.snapshot` returns the newest cross-section directly.
+
+    `access` is the `AccessRecord` the framework stamps -- source digest, declared fields, the
+    lookback, the bound it resolved, per-instrument non-null counts. It is provenance, not data,
+    and a Model normally reads only `rows`.
     """
-    files = (path,) if path.is_file() else tuple(sorted(path.glob("**/*.parquet")))
-    if not files:
-        raise FileNotFoundError(f"source has no readable parquet bytes: {path}")
-    digest = hashlib.sha256()
-    for file_path in files:
-        with file_path.open("rb") as stream:
-            hashlib.file_digest(stream, lambda: digest)
-    return digest.hexdigest()
 
+    rows: Rows
+    access: AccessRecord
 
-def _window_types():
-    """The one deferred import of `windows`' types: `windows` imports this module, so its record
-    and batch types are reached at call time, by the row read and the panel read alike."""
-    from vqapr.data.windows import AccessRecord, ObservationBatch
+    def __init__(self, rows: object, access: AccessRecord) -> None:
+        object.__setattr__(self, "rows", normalize_rows(rows))
+        object.__setattr__(self, "access", access)
 
-    return AccessRecord, ObservationBatch
+    @classmethod
+    def _trusted(cls, rows: Rows, access: AccessRecord) -> ObservationBatch:
+        """Build from rows this module already normalized.
 
-
-def _access_record(**fields: object):
-    return _window_types()[0](**fields)
+        The public constructor validates every cell because it accepts outside input. Rows taken
+        from a batch this module produced have passed that check once already, and checking them
+        again costs the same as the query that produced them.
+        """
+        batch = cls.__new__(cls)
+        object.__setattr__(batch, "rows", rows)
+        object.__setattr__(batch, "access", access)
+        return batch
 
 
 class DuckDbObservationStore:
     """Resolve workspace declarations and execute bounded physical queries through scan.py."""
 
-    __slots__ = ("__catalog", "__digests", "__panels", "__session")
+    __slots__ = (
+        "__catalog",
+        "__cubes",
+        "__digests",
+        "__horizon",
+        "__opened",
+        "__panels",
+        "__requirements",
+        "__session",
+    )
 
-    def __init__(self, catalog: DatasetCatalog, *, session: scan.ScanSession | None = None) -> None:
+    def __init__(
+        self,
+        catalog: DatasetCatalog,
+        *,
+        session: scan.ScanSession | None = None,
+        horizon: tuple[datetime, datetime] | None = None,
+        requirements: Sequence[DataRequirement] = (),
+        cubes: Path | None = None,
+    ) -> None:
         self.__catalog = catalog
         # None keeps the connect-per-query behaviour, so every existing caller and test is
         # unaffected. public.run() passes a run-lifetime session.
         self.__session = session
+        # The run's period, and every requirement the run declared (record `235`,
+        # `docs/issues/098`). A panel is scanned from the earliest instant any of the run's
+        # lookbacks on that dataset can reach at `start`, up to `end` -- the run's horizon --
+        # rather than over the registered span, so a one-year run over a ten-year source holds
+        # one year. `None` (a test store, an in-process caller) scans the registered span.
+        self.__horizon = horizon
+        self.__requirements = tuple(requirements)
+        # The directory a `--jobs` batch baked its cubes into (record `236`), or None. A panel
+        # whose dataset has a cube there, over the same bytes and carrying every field asked
+        # for, is taken from the memory-mapped cube instead of a scan; anything else scans.
+        self.__cubes = cubes
+        self.__opened: dict[str, Cube | None] = {}
         # One store instance lives for exactly one run, and a run's sources are frozen for its
-        # whole duration. SimulationFlow._actual_source_refs already refuses a callback that
+        # whole duration. CallbackHandler._actual_source_refs already refuses a callback that
         # observes two digests for one source, so caching per instance does not weaken that
         # contract -- it makes violating it impossible instead of merely detected.
         self.__digests: dict[Path, str] = {}
@@ -130,7 +217,7 @@ class DuckDbObservationStore:
                 f"{field!r} is not one of the alias's declared fields: {', '.join(fields)}"
             )
         registration = self.__catalog.dataset(str(first.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         if registration.grain is Grain.ROWS:
             raise TypeError(
                 f"dataset {str(first.dataset_id)!r} declares grain: rows, which has no panel; "
@@ -143,18 +230,27 @@ class DuckDbObservationStore:
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
         names = tuple(instruments) if keyed_by_instrument else ()
-        identity = panel_identity(
-            source_digest, str(first.dataset_id), fields, names, registration.span
-        )
+        bounds = self._scan_bounds(source, registration, declared, evaluation_time)
+        identity = panel_identity(source_digest, str(first.dataset_id), fields, names, bounds)
         panel = self.__panels.get(identity)
+        cube = self._cube(str(first.dataset_id))
+        if (
+            panel is None
+            and cube is not None
+            and cube.source_digest == source_digest
+            and all(name in cube.kinds for name in fields)
+        ):
+            panel = self.__panels[identity] = panel_from_cube(
+                cube,
+                fields=fields,
+                instruments=instruments,
+                keyed_by_instrument=keyed_by_instrument,
+                identity=identity,
+                source_digest=source_digest,
+                bounds=bounds,
+            )
         if panel is None:
-            # The registered span bounds the one scan. A registration that was never validated
-            # (a test catalog) carries none, so the source's own first and last instants stand in.
-            span = registration.span
-            if span is None:
-                grid = self._instant_grid(source, registration.available_at)
-                span = (grid[0], grid[-1]) if grid else (evaluation_time, evaluation_time)
-            rows = scan.observation_rows(
+            table = scan.observation_table(
                 source,
                 instrument_field=registration.instrument_field,
                 available_at_field=registration.available_at,
@@ -162,22 +258,28 @@ class DuckDbObservationStore:
                 fields={item.field_id: resolve_field(registration, item) for item in declared},
                 aggregated=registration.aggregated,
                 instruments=instruments,
-                # The whole registered span: one scan, and every later window is a slice.
-                evaluation_time=span[1],
-                lower_bound=span[0],
+                # One scan over the bounds, and every later window is a slice.
+                evaluation_time=bounds[1],
+                lower_bound=bounds[0],
                 session=self.__session,
             )
-            panel = self.__panels[identity] = Panel.from_rows(
-                rows,
+            panel = self.__panels[identity] = Panel.from_table(
+                table,
                 dataset_id=str(first.dataset_id),
                 fields=fields,
                 instruments=instruments,
                 keyed_by_instrument=keyed_by_instrument,
                 identity=identity,
                 source_digest=source_digest,
+                bounds=bounds if self.__horizon is not None else None,
             )
-        window = panel.window(field, evaluation_time=evaluation_time, lookback=first.lookback)
-        access = _access_record(
+        # `lookback_fits_grain` already refused the one kind a panel cannot take; this only lets
+        # the window's signature see it.
+        lookback = first.lookback
+        if isinstance(lookback, InstantsLookback):
+            raise RuntimeError("lookback_fits_grain admitted an InstantsLookback on a panel grain")
+        window = panel.window(field, evaluation_time=evaluation_time, lookback=lookback)
+        access = AccessRecord(
             consumer_id=consumer_id,
             dataset_id=first.dataset_id,
             source_id=str(source.source_id),
@@ -194,6 +296,56 @@ class DuckDbObservationStore:
         )
         return window, access
 
+    def _cube(self, dataset_id: str) -> Cube | None:
+        """The batch's cube for one dataset, opened once per store; `None` outside a batch."""
+        if self.__cubes is None:
+            return None
+        if dataset_id not in self.__opened:
+            self.__opened[dataset_id] = open_cube(self.__cubes, dataset_id)
+        return self.__opened[dataset_id]
+
+    def _scan_bounds(
+        self,
+        source: SourceSpec,
+        registration: DatasetRegistration,
+        declared: Sequence[DataRequirement],
+        evaluation_time: datetime,
+    ) -> tuple[datetime, datetime]:
+        """The instants one panel scan must cover.
+
+        With a horizon: from the earliest instant any lookback the run declared on this dataset
+        reaches back to at the run's `start` -- a calendar lookback by its bound, a rows lookback
+        by arithmetic on the source's instant grid (design §2.4) -- up to the run's `end`. Every
+        window the run will ask for lies inside that, and `Panel.window` refuses one that does
+        not. Without a horizon: the registered span, which is everything the registration holds;
+        a registration that was never verified (a test catalog) carries none, so the source's own
+        first and last instants stand in.
+        """
+        if self.__horizon is None:
+            span = registration.span
+            if span is not None:
+                return span
+            grid = self._instant_grid(source, registration.available_at)
+            if not grid:
+                return (evaluation_time, evaluation_time)
+            return (grid[0], grid[-1])  # type: ignore[return-value]
+        start, end = self.__horizon
+        lower = start
+        dataset_id = declared[0].dataset_id
+        lookbacks: list[Lookback] = []
+        for item in (*self.__requirements, *declared):
+            if item.dataset_id == dataset_id and item.lookback not in lookbacks:
+                lookbacks.append(item.lookback)
+        for lookback in lookbacks:
+            if isinstance(lookback, RowsLookback):
+                bound = self._grid_bound(source, registration.available_at, start, lookback.rows)
+            elif isinstance(lookback, CalendarLookback):
+                bound = lookback.lower_bound(start)
+            else:
+                continue
+            lower = min(lower, bound)
+        return (lower, end)
+
     def _instant_grid(self, source: SourceSpec, available_at_field: str) -> tuple[object, ...]:
         """Every distinct instant of one source, ascending; once per run when a session is held."""
         if self.__session is not None:
@@ -204,7 +356,7 @@ class DuckDbObservationStore:
 
     def grain(self, requirement: DataRequirement):
         registration = self.__catalog.dataset(str(requirement.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         return registration.grain
 
     def _digest(self, path: Path) -> str:
@@ -212,22 +364,6 @@ class DuckDbObservationStore:
         if cached is None:
             cached = self.__digests[path] = physical_digest(path)
         return cached
-
-    def query(
-        self,
-        requirement: DataRequirement,
-        *,
-        evaluation_time: datetime,
-        instruments: Sequence[str],
-        consumer_id: str,
-    ):
-        """One requirement, one field: the single-field spelling of `query_many`."""
-        return self.query_many(
-            (requirement,),
-            evaluation_time=evaluation_time,
-            instruments=instruments,
-            consumer_id=consumer_id,
-        )
 
     def query_many(
         self,
@@ -248,8 +384,6 @@ class DuckDbObservationStore:
         rows the joined reads did: one row per (instant, instrument) any field admitted, each
         field null outside its own window. One access is recorded, naming every field.
         """
-        ObservationBatch = _window_types()[1]
-
         require_tz_aware(evaluation_time, name="evaluation_time")
         declared = tuple(requirements)
         if not declared:
@@ -263,7 +397,7 @@ class DuckDbObservationStore:
         if len(set(declared_fields)) != len(declared_fields):
             raise ValueError("a read must not name one field twice")
         registration = self.__catalog.dataset(str(first.dataset_id))
-        require_grain(registration)
+        require_declared(registration)
         keyed_by_instrument = registration.instrument_field is not None
         source = self.__catalog.source(str(registration.source))
         source_digest = self._digest(source.path)
@@ -332,7 +466,7 @@ class DuckDbObservationStore:
                 raise TypeError("registered available_at values must be datetimes")
             if max_available_at is None or available_at > max_available_at:
                 max_available_at = available_at
-        access = _access_record(
+        access = AccessRecord(
             # Stamped, not declared. The component reading is the consumer, and the framework is
             # the only one that knows which component is running.
             consumer_id=consumer_id,

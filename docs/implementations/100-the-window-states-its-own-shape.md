@@ -1,6 +1,6 @@
 # 100 — The observation window states its own shape, on the surface an author reads
 
-**Closes:** `docs/issues/031-the-type-a-datamodel-must-consume-is-not-importable.md`.
+**Closes:** `docs/issues/archive/031-the-type-a-datamodel-must-consume-is-not-importable.md`.
 **Branch:** `fix/031-observation-batch-is-public`.
 
 ## Why this change exists

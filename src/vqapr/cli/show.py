@@ -20,8 +20,8 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.domain.errors import VqaprError
-from vqapr.flow.run_records import (
+from vqapr.domain.errors import VALUE_INVALID, InputError, VqaprError
+from vqapr.record import (
     DATAMODEL_KIND,
     RECORD_FIELDS_BY_KIND,
     RUN_JSON_FIELDS,
@@ -36,9 +36,9 @@ from vqapr.flow.run_records import (
     run_ids,
     strategy_refs,
     table_ids,
+    unfinished_member_refs,
 )
-from vqapr.inputs import InputError
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
 
 KINDS = ("run", "strategy", "datamodel", "model", "dataset")
 
@@ -98,7 +98,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="limit",
         type=int,
         default=100,
-        help="rows to return when --table is given; 0 returns every row",
+        help=(
+            "rows to return when --table is given, or for `show dataset`: at most this many, and "
+            "0 returns none. The envelope's rows_total says how many there are, so a page that "
+            "wants them all asks for that many"
+        ),
+    )
+    parser.add_argument(
+        "--source",
+        dest="source_rows",
+        action="store_true",
+        help=(
+            "with `show dataset`: return rows of the underlying source file, with the file's own "
+            "columns, instead of the dataset's declared projection. By default `items` holds the "
+            "declared fields with the values a model receives -- for an aggregated registration "
+            "that means evaluating the whole grouping, a full pass over a large file"
+        ),
     )
     parser.add_argument(
         "--instrument",
@@ -120,9 +135,8 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     head. Read by loading the component rather than by parsing it, so what is reported is what the
     framework will actually act on.
     """
-    from vqapr.authoring import StrategyModel
-    from vqapr.extension.component import ComponentKind
-    from vqapr.extension.loading import load_data_model, load_strategy_model
+    from vqapr.public import Compliance, DataModel, Role, StrategyModel
+    from vqapr.workspace.registry import load_registered
 
     space = Workspace.open(project_root)
     try:
@@ -130,41 +144,68 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     except VqaprError:
         known = sorted(str(item.component_id) for item in space.components)
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show model requires the id of a registered component",
             observed=f"{component_id!r}; registered: {', '.join(known) or '(none)'}",
             retry="run `vqapr list components` to see what this workspace holds",
         ) from None
 
     kind = getattr(ref, "kind", None)
-    if kind is ComponentKind.CONSTRAINT:
-        # A constraint declares what it reads and answers to an id, so it is describable in the
-        # same terms -- it simply forms nothing and produces no weights.
-        from vqapr.extension.loading import load_constraint
-
-        rule = load_constraint(ref, project_root=project_root)
+    if kind is Role.COMPLIANCE:
+        # A rule declares what it reads and answers to an id, so it is describable in the same
+        # terms -- it simply forms nothing and produces no weights.
+        rule = load_registered(ref, project_root=project_root)
+        if not isinstance(rule, Compliance):
+            raise RuntimeError(
+                f"{component_id!r} is registered as compliance and loaded as "
+                f"{type(rule).__name__}"
+            )
         return {
             "component_id": component_id,
             "kind": cli_kind(kind),
-            "constraint_id": str(rule.constraint_id),
+            "compliance_id": str(rule.compliance_id),
             "reads": {
                 f"{requirement.dataset_id}.{requirement.field_id}": str(requirement.lookback)
                 for requirement in rule.requirements()
             },
-            "decides": "the feasible set every instrument's weight must lie in",
+            "decides": "whether the committed book, marked, is inside the limit it observes",
             "forms": [],
-            "weights": "bounds only; a constraint narrows weights and never proposes them",
-            "records": [],
+            "weights": "none; a compliance rule observes the book and never proposes weights",
+            "records": ["vqapr.monitoring"],
         }
-    if kind is ComponentKind.DATA_MODEL:
-        model = load_data_model(ref, project_root=project_root)
+    if kind in (Role.DATA_MODEL, Role.STRATEGY_MODEL):
+        model = load_registered(ref, project_root=project_root)
+        if not isinstance(model, DataModel | StrategyModel):
+            raise RuntimeError(
+                f"{component_id!r} is registered as {cli_kind(kind)} and loaded as "
+                f"{type(model).__name__}"
+            )
     else:
-        model = load_strategy_model(ref, project_root=project_root)
+        # A registered id of a kind this verb does not describe. It used to fall through to the
+        # strategy loader, whose `TypeError: ref must identify a strategy_model component` then left
+        # as `stage: unhandled` -- a sentence that is false (this verb reads three kinds, and had
+        # just shown a datamodel) and unstructured (`docs/issues/archive/083`). The mistake is the
+        # same one as an unregistered id, one line up, and gets the same answer.
+        shown = ", ".join(
+            cli_kind(item)
+            for item in (
+                Role.STRATEGY_MODEL, Role.DATA_MODEL, Role.COMPLIANCE
+            )
+        )
+        raise InputError(
+            VALUE_INVALID,
+            requirement=f"show model describes a component of kind {shown}",
+            observed=f"{component_id!r} is registered as {cli_kind(kind)}",
+            retry=(
+                "run `vqapr list components --kind <kind>` to pick a component this verb "
+                "describes"
+            ),
+        )
     # From the model's own declarations -- `inputs()`, `tables()`, `account_history()` -- which
     # are what the framework acts on. This read three private attributes nothing in the tree
     # assigned (`_aliases`, `_authored_tables`, `_authored_history`, relics of the shape records
     # `126`-`133` removed) behind `getattr` defaults, so `reads` was always empty and `records`
-    # never listed a declared table (`docs/issues/055`). No defaults now: a model without
+    # never listed a declared table (`docs/issues/archive/055`). No defaults now: a model without
     # `inputs` is not a model, and the loader would already have refused it.
     aliases = dict(model.inputs())
     tables = tuple(model.tables()) if isinstance(model, StrategyModel) else ()
@@ -192,27 +233,43 @@ def _model(component_id: str, project_root: Path) -> dict[str, Any]:
     }
 
 
-def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
-    """What a registered dataset actually holds, not merely that it exists."""
-    from vqapr.data import scan
+def _dataset(
+    dataset_id: str, project_root: Path, limit: int, *, source_rows: bool = False
+) -> dict[str, Any]:
+    """What a registered dataset actually holds, not merely that it exists.
+
+    `items` is the declared PROJECTION -- the fields the registration names, holding what a model
+    reading it receives -- read through the same `projection_relation` the read path uses. It was
+    the source file's head, which for the one registration whose fields are aggregate expressions
+    showed nine columns the dataset does not expose and none of the nine it does, on rows the
+    projection filters out, while `fields`, `field_types` and `aggregated` in the same response
+    described the projection (`docs/issues/093`). `--source` asks for the file's rows instead, and
+    `items_are` says which was answered so a reader never has to infer it.
+    """
+    from vqapr.workspace.preview import preview_dataset
 
     space = Workspace.open(project_root)
     registered = {str(item.dataset_id): item for item in space.datasets}
     item = registered.get(dataset_id)
     if item is None:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show dataset requires the id of a registered dataset",
             observed=f"{dataset_id!r}; registered: {', '.join(sorted(registered)) or '(none)'}",
             retry="run `vqapr list datasets` to see what this workspace holds",
         )
 
     source = space.source(str(item.source))
-    rows = scan.head(source, limit=limit)
+    preview = preview_dataset(source, item, limit=limit, source_rows=source_rows)
+    rows = preview.rows
     return {
         "dataset_id": dataset_id,
         "source_id": str(source.source_id),
         "path": str(source.path),
+        # Which rows `items` holds: the declared projection, or the source file's own. A
+        # registration that was never measured (`aggregated` unknown) has no projection shape to
+        # read through and answers with source rows, saying so.
+        "items_are": preview.items_are,
         "fields": dict(item.fields),
         "field_types": (
             None
@@ -224,7 +281,11 @@ def _dataset(dataset_id: str, project_root: Path, limit: int) -> dict[str, Any]:
         "instrument_field": item.instrument_field,
         "available_at": item.available_at,
         "span": [str(value) for value in (item.span or ())] or None,
-        "rows_total": scan.row_count(source),
+        "produced_by": item.produced_by,
+        "produced_by_record": item.produced_by_record,
+        # `rows_total` counts what `items` pages over; `source_rows_total` is always the file's.
+        "rows_total": preview.rows_total,
+        "source_rows_total": preview.source_rows_total,
         "returned": len(rows),
         "items": rows,
     }
@@ -235,30 +296,41 @@ def resolve_strategy(root: Path, identifier: str) -> tuple[str, str]:
     return resolve_member(root, identifier, kind="strategy")
 
 
-def resolve_member(root: Path, identifier: str, *, kind: str) -> tuple[str, str]:
+def resolve_member(
+    root: Path, identifier: str, *, kind: str, unfinished: bool = False
+) -> tuple[str, str]:
     """`<run-id>/<id>@<fp8>` -> (run_id, ref) for a strategy or a datamodel record.
 
     The short form is a convenience for the ordinary case of one record per model; with several
     fingerprints of one model the reader is shown them and asked to pick, because guessing the
     newest would answer a question about a tweak the reader did not name.
+
+    `unfinished` widens the known set to directories without a record. `show` reads finished
+    records only; `rm` is precisely the verb a reader wants for a directory a crashed run left
+    behind, and it could not name one (`docs/issues/archive/080`).
     """
     plural = "strategies" if kind == "strategy" else "datamodels"
     run_id, slash, rest = identifier.partition("/")
     if not slash or not rest:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement=f"show {kind} takes `<run-id>/<{kind}-id>@<fp8>`",
             observed=repr(identifier),
             retry=f"run `vqapr list {plural} --run <run-id>` to see the records, then show one",
         )
     known = strategy_refs(root, run_id) if kind == "strategy" else datamodel_refs(root, run_id)
+    if unfinished:
+        known = (
+            *known,
+            *unfinished_member_refs(root, run_id, kind=kind),
+        )
     if rest in known:
         return run_id, rest
     matching = [ref for ref in known if ref.rsplit("@", 1)[0] == rest]
     if len(matching) == 1:
         return run_id, matching[0]
     raise InputError(
-        "cli.input.value_invalid",
+        VALUE_INVALID,
         requirement=f"show {kind} requires a {kind} record this store holds",
         observed=(
             f"{identifier!r}; "
@@ -280,7 +352,7 @@ def _rows(
     known_tables = table_ids(root, run_id, strategy_ref)
     if table not in known_tables:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="--table names one of the tables this record holds",
             observed=f"{table!r}; recorded: {', '.join(known_tables) or '(none)'}",
             retry=(
@@ -301,11 +373,11 @@ def _rows(
             if instrument is not None and row.get("instrument") != instrument:
                 continue
             matched += 1
-            if limit == 0 or len(rows) < limit:
+            if len(rows) < limit:
                 rows.append(row)
     except ValueError as damaged:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement=f"every line of {table!r} must be one JSON row",
             observed=str(damaged),
             retry=f"restore the file, or run again to write a fresh record; `vqapr show {label}` "
@@ -329,7 +401,15 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         return success("model.show", **_model(args.identifier, project_root))
     if args.kind == "dataset":
         limit = max(int(getattr(args, "limit", 100) or 0), 0)
-        return success("dataset.show", **_dataset(args.identifier, project_root, limit))
+        return success(
+            "dataset.show",
+            **_dataset(
+                args.identifier,
+                project_root,
+                limit,
+                source_rows=bool(getattr(args, "source_rows", False)),
+            ),
+        )
     root = args.store_root or project_root / WORKSPACE_DIRECTORY
     if args.kind == "strategy":
         run_id, strategy_ref = resolve_strategy(root, args.identifier)
@@ -349,7 +429,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         record = read_datamodel_record(root, run_id, datamodel_ref)
         if getattr(args, "table", None) is not None:
             raise InputError(
-                "cli.input.value_invalid",
+                VALUE_INVALID,
                 requirement="a datamodel's rows are the dataset it registered, not a table",
                 observed=f"{args.identifier!r} wrote dataset {record.get('dataset_id')!r}",
                 retry=f"vqapr show dataset {record.get('dataset_id')}",
@@ -362,7 +442,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
     known = run_ids(root)
     if args.identifier not in known:
         raise InputError(
-            "cli.input.value_invalid",
+            VALUE_INVALID,
             requirement="show run requires the id of a run this store holds a record for",
             observed=f"{args.identifier!r}; known: {', '.join(known) or '(none)'}",
             retry=(
@@ -375,7 +455,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # live with its strategies now.
         if "strategies" in record:
             raise InputError(
-                "cli.input.value_invalid",
+                VALUE_INVALID,
                 requirement="a run's tables belong to its strategies",
                 observed=(
                     f"run {args.identifier!r} recorded "

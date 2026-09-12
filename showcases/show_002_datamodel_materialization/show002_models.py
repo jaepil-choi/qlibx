@@ -7,16 +7,16 @@ the third section of the report, so the model exists to be rejected rather than 
 
 from __future__ import annotations
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class ReversalFeatureModel(va.DataModel):
+class ReversalFeatureModel(vq.DataModel):
     """Two-session reversal, keeping both closes so the report can show what was read."""
 
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=2)
+            "prices": vq.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=vq.RowsLookback(rows=2)
             )
         }
 
@@ -38,13 +38,13 @@ class ReversalFeatureModel(va.DataModel):
         )
 
 
-class AbsoluteScoreModel(va.DataModel):
+class AbsoluteScoreModel(vq.DataModel):
     """Reads the DERIVED dataset, which is what makes the second materialization evidence."""
 
     def inputs(self):
         return {
-            "scores": va.DatasetInput(
-                dataset_id="reversal_features", fields=("score",), lookback=va.RowsLookback(rows=1)
+            "scores": vq.DatasetInput(
+                dataset_id="reversal_features", fields=("score",), lookback=vq.RowsLookback(rows=1)
             )
         }
 
@@ -60,6 +60,6 @@ class ForgingModel(ReversalFeatureModel):
 
     def compute(self, context):
         return tuple(
-            {**row, "available_at": context.evaluation_time}
+            {**row, "available_at": context.at}
             for row in super().compute(context)
         )

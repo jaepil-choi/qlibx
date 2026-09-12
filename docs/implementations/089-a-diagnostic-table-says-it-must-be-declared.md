@@ -1,6 +1,6 @@
 # 089 — A diagnostic table says it must be declared
 
-**Closes:** `docs/issues/019-a-diagnostic-table-must-be-declared-and-only-the-refusal-says-so.md`.
+**Closes:** `docs/issues/archive/019-a-diagnostic-table-must-be-declared-and-only-the-refusal-says-so.md`.
 **Branch:** `fix/019-declare-diagnostics`.
 
 ## Why this change exists

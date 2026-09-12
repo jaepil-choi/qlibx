@@ -7,7 +7,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
 
 1. **Real ingest and registration.** `scripts/extract_dw_fixture.py` slices the vendor CSV into one
    observation parquet and one exact execution parquet, then `register_dataset` and
-   `register_execution_input` validate and persist them.
+   `register_dataset` (the venue table carries an `execution` role) validate and persist them.
 2. **DataModel → derived dataset.** A 5-session cross-sectionally demeaned reversal score is
    computed per trading session and published through `materialize` as the registered dataset
    `reversal_score`, with per-invocation lineage.
@@ -20,7 +20,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
    `AcademicExchange` fills it at the exact selected close.
 5. **Full lifecycle per rebalance.** Each session runs
    `ACCEPTED_INTENT → ACCOUNT_COMMITTED → MARKED → FEEDBACK_PUBLISHED`, then independent
-   valuation and monitoring occurrences, and the run finalizes with no pending intent.
+   valuation and monitoring events, and the run finalizes with no pending intent.
 6. **Independent accounting proof.** The run replays cash, positions and NAV from the published
    fill journal alone and asserts an exact match with the committed Account. A mismatch aborts.
 
@@ -28,7 +28,7 @@ price, trading session and tradability flag is real. No value is mocked, stubbed
 
 - Observation and execution rows for a session share the venue close instant `15:30 KST`.
 - The strategy callback is `08:30 KST`, so it can only ever see strictly prior sessions.
-- `FillConvention(SAME_DAY, 15:30)` resolves one strictly-later execution target inside the run.
+- `FillRule("close", "Asia/Seoul", at=15:30)` resolves one strictly-later execution target inside the run.
 - Valuation `16:00` and monitoring `16:30` run on their own agendas.
 
 ## Honest limitations

@@ -1,6 +1,6 @@
 """A mistyped closed-set value is refused with the permitted set, not an exception repr.
 
-`docs/issues/017`, message half. `AccountMode[str(...).upper()]` raised a bare `KeyError`, which
+`docs/issues/archive/017`, message half. `AccountMode[str(...).upper()]` raised a bare `KeyError`, which
 reached the envelope as:
 
     "observed": "KeyError: 'LONG_SHORT'"
@@ -22,17 +22,18 @@ from pathlib import Path
 
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.declarations import _enum, apply
+from vqapr.domain.account import AccountMode
 from vqapr.domain.errors import VqaprError
-from vqapr.workspace import Workspace
+from vqapr.workspace.registration import _enum, apply
+from vqapr.workspace.registry import Workspace
 
 
-class _Selector(StrEnum):
-    """A second closed set, so the helper is proven general rather than fitted to one field."""
+class _Unit(StrEnum):
+    """A closed set beside `AccountMode`, so the refusal's shape is proven on two keys."""
 
-    SAME_DAY = "same_day"
-    NEXT_ELIGIBLE = "next_eligible"
+    D = "d"
+    H = "h"
+    M = "m"
 
 
 def _failure(error: VqaprError) -> dict:
@@ -47,12 +48,15 @@ def _register_run_with_mode(root: Path, mode: str) -> dict:
                 "instruments": ["A"],
                 "start": "2024-01-02T00:00:00+09:00",
                 "end": "2024-01-03T00:00:00+09:00",
-                "sessions_from": "prices",
                 "timezone": "Asia/Seoul",
-                "at": "15:29",
+                "schedule": {"every": "1d", "at": "15:29"},
                 "exchange": "venue",
-                "execution_input": "venue-daily",
+                "execution": {
+                    "dataset": "venue-daily",
+                    "trade_price": "close", "fill": {"at": "15:30"},
+                },
                 "initial_account": {"cash": "1000", "mode": mode, "positions": {}},
+                "writes": "r-weights",
                 "strategies": {"alpha": {}},
             }
         }
@@ -66,7 +70,7 @@ def test_the_account_mode_refusal_names_the_permitted_set(tmp_path: Path) -> Non
     """The journey's own value, and the exact shape it produced."""
     failure = _register_run_with_mode(tmp_path, "LONG_SHORT")
 
-    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["code"] == "declaration.value_not_permitted"
     assert failure["requirement"] == "runs.r.initial_account.mode must be one of: long_only, signed"
     assert failure["examples"] == ["long_only", "signed"]
     assert failure["source"]["key_path"] == "runs.r.initial_account.mode"
@@ -95,7 +99,7 @@ def test_the_suggestion_names_the_nearest_member(tmp_path: Path) -> None:
     ("enum", "written", "key_path", "expected"),
     [
         (AccountMode, "LONG_SHORT", "initial_account.mode", "long_only, signed"),
-        (_Selector, "CLOSE", "fill.selector", "same_day, next_eligible"),
+        (_Unit, "week", "schedule.unit", "d, h, m"),
     ],
 )
 def test_the_refusal_is_the_same_shape_on_two_different_keys(
@@ -103,8 +107,8 @@ def test_the_refusal_is_the_same_shape_on_two_different_keys(
 ) -> None:
     """Verified on two keys, because a fix fitted to one field is not a fix to the class.
 
-    The second case is the `fill.selector` vocabulary trap by name: `CLOSE` is a price word, and
-    the members are scheduling words, so no number of guesses gets there without the list.
+    The second case stands in for the vocabulary trap the retired `fill.selector` was: a value
+    from a neighbouring vocabulary, refused with the list rather than a bare `KeyError`.
     """
     with pytest.raises(VqaprError) as raised:
         _enum(enum, written, name=key_path)
@@ -135,5 +139,5 @@ def test_a_permitted_value_is_still_accepted_in_either_case(tmp_path: Path) -> N
     """
     for spelling in ("SIGNED", "signed"):
         failure = _register_run_with_mode(tmp_path / spelling, spelling)
-        assert failure["code"] == "workspace.run.register.reference", failure
+        assert failure["code"] == "run.reference_invalid", failure
     assert _enum(AccountMode, "signed", name="k") is AccountMode.SIGNED

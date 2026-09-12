@@ -1,6 +1,6 @@
 # 152 — one preflight refusal door: the step is named and the cause travels
 
-**Closes:** `docs/issues/076`. **Branch:** `step-02-076-one-preflight-door`, off `develop @
+**Closes:** `docs/issues/archive/076`. **Branch:** `step-02-076-one-preflight-door`, off `develop @
 aded3145`. **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`, Step 2.
 **Authority:** the owner, 2026-09-04.
 

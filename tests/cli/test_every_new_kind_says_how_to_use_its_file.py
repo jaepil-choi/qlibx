@@ -1,6 +1,6 @@
 """Every `vqapr new` kind says what to do with the file it wrote.
 
-`docs/issues/026`. `new --help` promised:
+`docs/issues/archive/026`. `new --help` promised:
 
     Every kind reports the file to hand `vqapr register` as `declaration`
 
@@ -14,7 +14,9 @@ those four could not honestly emit it: a run SPEC was not registrable, so the en
 Since record 139 a run is a `runs:` section of a declaration document, so the one exception is
 gone: `vqapr new run` emits a declaration `vqapr register` takes, and every kind answers the
 caller's actual question -- *what do I do with this file?* -- with `declaration`. Record 148
-retired `agendas` (a run declares its own sessions and wall time), so eight kinds remain.
+retired `agendas` (a run declares its own sessions and wall time), so eight kinds remained;
+record 172 added `sample`, which writes a directory rather than a file and reports the
+declaration inside it.
 """
 
 from __future__ import annotations
@@ -29,12 +31,13 @@ import pytest
 _KINDS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("datamodel", ("dm", "--dataset", "prices")),
     ("strategy", ("st", "--dataset", "prices")),
-    ("constraint", ("c",)),
+    ("compliance", ("c",)),
     ("exchange", ("ex",)),
     ("instruments", ()),
     ("dataset", ()),
     ("run", ()),
-    ("execution-input", ()),
+    # The filled-in form beside the blank ones (record 172): a whole journey, one declaration.
+    ("sample", ()),
 )
 
 
@@ -47,6 +50,7 @@ def _new(root: Path, kind: str, extra: tuple[str, ...]) -> dict:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -122,6 +126,7 @@ def test_the_emitted_run_template_is_refused_for_its_placeholders_not_for_its_sh
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 
@@ -129,8 +134,8 @@ def test_the_emitted_run_template_is_refused_for_its_placeholders_not_for_its_sh
     refusal = json.loads((result.stdout or result.stderr).strip().splitlines()[-1])
     assert refusal["stage"] != "unhandled"
     codes = [failure["code"] for failure in refusal["failures"]]
-    assert codes == ["workspace.run.register.reference"], codes
-    assert "declaration.read.unknown_section" not in codes, "`runs:` is a known section now"
+    assert codes == ["run.reference_invalid"], codes
+    assert "declaration.unknown_section" not in codes, "`runs:` is a known section now"
 
 
 def test_the_help_promises_the_key_for_every_kind_again() -> None:
@@ -171,9 +176,12 @@ def test_new_datamodel_emits_the_run_that_computes_it(tmp_path: Path) -> None:
     assert list(document["components"]) == ["dm"]
     assert list(document["runs"]) == ["dm-run"]
     run = document["runs"]["dm-run"]
-    assert run["sessions_from"] == "prices", "the run's sessions are the dataset the model reads"
-    assert run["timezone"] == "Asia/Seoul" and run["at"] == "16:00"
-    assert run["datamodels"] == {"dm": {"dataset_id": "dm-values", "value_fields": ["value"]}}
+    assert run["schedule"] == {"every": "1d", "at": "16:00", "days_from": "prices"}, (
+        "a datamodel run names the dataset whose days are its trading days"
+    )
+    assert run["timezone"] == "Asia/Seoul"
+    assert run["writes"] == "dm-values"
+    assert run["datamodel"] == {"component": "dm", "value_fields": ["value"]}
     assert "strategies" not in run
     assert run["instruments"] == ["INSTRUMENT_A", "INSTRUMENT_B"], "placeholders, not guesses"
     for key in ("start", "end"):

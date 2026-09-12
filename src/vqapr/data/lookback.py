@@ -2,15 +2,40 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, time
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from typing import Self
+from zoneinfo import ZoneInfo
 
-from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
+from pydantic import BaseModel, ConfigDict, ValidationInfo, field_validator, model_validator
+
+from vqapr.domain.instants import at_local, iana_zone, require_tz_aware, shift_calendar
 
 
-@dataclass(frozen=True, slots=True)
-class RowsLookback:
+class _Lookback(BaseModel):
+    """What the three lookbacks share: a strict, frozen door and a printed form.
+
+    A lookback is a value an author constructs and hands to the engine, so its door is a
+    validated one (pydantic by default, owner ruling 2026-09-08). `strict=True` is what keeps a
+    count a count: `RowsLookback(True)` and `RowsLookback("3")` are refused rather than coerced,
+    which is the rule the `__post_init__` these replaced spelled as an `isinstance` pair.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    def __init__(self, **fields: object) -> None:
+        # A pass-through, written out because a type checker synthesises a field-less
+        # constructor for a field-less model and would then refuse the `super().__init__(rows=)`
+        # each subclass's positional constructor makes.
+        super().__init__(**fields)
+
+    def __str__(self) -> str:
+        # A lookback prints the way it is written -- `RowsLookback(rows=30)` -- which is what
+        # `vqapr show model` shows beside each read. pydantic's default `str` drops the class
+        # name, and `rows=30` alone no longer says which of the three kinds it is.
+        return repr(self)
+
+
+class RowsLookback(_Lookback):
     """The last `rows` rows of the pivoted table: the same instants for every name.
 
     **A panel lookback** (design §2.4, owner ruling 2026-09-01): on a `grain: instrument_instant`
@@ -32,15 +57,20 @@ class RowsLookback:
 
     rows: int
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.rows, int) or isinstance(self.rows, bool):
-            raise TypeError("rows lookback must be an integer")
-        if self.rows <= 0:
+    def __init__(self, rows: int) -> None:
+        # Positional as well as keyword: `RowsLookback(313)` is how the docstrings and the tests
+        # spell it, and a `BaseModel` takes keywords only unless its constructor says otherwise.
+        super().__init__(rows=rows)
+
+    @field_validator("rows")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
             raise ValueError("rows lookback must be positive")
+        return value
 
 
-@dataclass(frozen=True, slots=True)
-class InstantsLookback:
+class InstantsLookback(_Lookback):
     """The last `instants` observations of **each instrument independently**.
 
     Per name, per field, counting only instants on which the field is non-null: a field's rank is
@@ -60,15 +90,18 @@ class InstantsLookback:
 
     instants: int
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.instants, int) or isinstance(self.instants, bool):
-            raise TypeError("instants lookback must be an integer")
-        if self.instants <= 0:
+    def __init__(self, instants: int) -> None:
+        super().__init__(instants=instants)
+
+    @field_validator("instants")
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
             raise ValueError("instants lookback must be positive")
+        return value
 
 
-@dataclass(frozen=True, slots=True)
-class CalendarLookback:
+class CalendarLookback(_Lookback):
     """Every observation from a calendar bound back to the evaluation time, for every instrument.
 
     The bound is the local calendar date at 00:00 in `timezone`, shifted back by the declared
@@ -89,20 +122,24 @@ class CalendarLookback:
     days: int = 0
     timezone: str = "UTC"
 
-    def __post_init__(self) -> None:
-        for name, value in (("years", self.years), ("months", self.months), ("days", self.days)):
-            if not isinstance(value, int) or isinstance(value, bool):
-                raise TypeError(f"calendar lookback {name} must be an integer")
-            if value < 0:
-                raise ValueError(f"calendar lookback {name} must be non-negative")
+    @field_validator("years", "months", "days")
+    @classmethod
+    def _non_negative(cls, value: int, info: ValidationInfo) -> int:
+        if value < 0:
+            raise ValueError(f"calendar lookback {info.field_name} must be non-negative")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def _iana(cls, value: str) -> str:
+        iana_zone(value)
+        return value
+
+    @model_validator(mode="after")
+    def _some_amount(self) -> Self:
         if self.years == self.months == self.days == 0:
             raise ValueError("calendar lookback requires at least one positive amount")
-        if not isinstance(self.timezone, str) or not self.timezone.strip():
-            raise ValueError("timezone must be a non-empty IANA timezone name")
-        try:
-            ZoneInfo(self.timezone)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError(f"unknown IANA timezone: {self.timezone!r}") from error
+        return self
 
     def lower_bound(self, evaluation_time: datetime) -> datetime:
         """Return the clamped local calendar date at 00:00."""
@@ -126,4 +163,3 @@ type SeriesLookback = InstantsLookback
 """What `grain: rows` takes: each name's own last N reported instants."""
 
 type Lookback = PanelLookback | SeriesLookback
-

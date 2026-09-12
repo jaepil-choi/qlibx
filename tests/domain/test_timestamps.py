@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.domain.timestamps import at_local, require_tz_aware, shift_calendar
+from vqapr.domain.instants import at_local, require_tz_aware, shift_calendar
 
 
 def test_require_tz_aware_rejects_a_naive_datetime() -> None:

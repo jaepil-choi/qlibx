@@ -7,7 +7,7 @@
 `decision_time`·`effective_after`를 제출하며 `offset_sessions`로 target을 고르는 authority 혼선이 있었다.
 
 이 변경은 PRD `UC-TIME-002`, Architecture timing contract와
-`docs/issues/001-separate-session-evaluation-and-execution-time.md`의 runtime acceptance를 구현한다.
+`docs/issues/archive/001-separate-session-evaluation-and-execution-time.md`의 runtime acceptance를 구현한다.
 
 ## 결과
 

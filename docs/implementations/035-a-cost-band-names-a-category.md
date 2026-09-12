@@ -24,7 +24,7 @@ Canon 6.2 had already decided this and the code had not implemented it:
 > 3,000종목을 거래해도 주식 규칙 하나와 ETF 규칙 하나면 된다.
 
 The `kind` that selector needs lives on `Instrument`, and **`Instrument` had never been built**.
-`docs/issues/003` proposed hanging a `costs` tuple off `ListingRule` instead. That would have
+`docs/issues/archive/003` proposed hanging a `costs` tuple off `ListingRule` instead. That would have
 worked for one sleeve and been wrong in the same way the original code was: it puts a rate on a
 ticker, so a tax change edits three thousand lines, and it contradicts canon 2.8's placement of
 `kind` as a venue-independent fact. The missing type, not the missing field, was the defect.

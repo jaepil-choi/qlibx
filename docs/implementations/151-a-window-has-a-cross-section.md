@@ -1,6 +1,6 @@
 # 151 — a window has a cross-section: `PanelWindow.current()`
 
-**Closes:** `docs/issues/072`. **Branch:** `step-01-072-current`, off `develop @ ed3c348c`.
+**Closes:** `docs/issues/archive/072`. **Branch:** `step-01-072-current`, off `develop @ ed3c348c`.
 **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`, Step 1. **Authority:** the
 owner, 2026-09-04.
 

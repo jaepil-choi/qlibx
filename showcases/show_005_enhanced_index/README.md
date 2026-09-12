@@ -20,9 +20,9 @@ It reads `tests/fixtures/real`, so it runs on a clean checkout with no vendor wa
 | A run subscribes to two allocation inputs | `EnhancedIndex.requirements()` declares `benchmark_weight_daily` and the published `alpha_allocation` as ordinary `DataRequirement`s; both arrive through the same point-in-time window, so the combination happens on the subscription path |
 | The stamp is derived, so the chain is honest | The alpha's `available_at` comes from its own reads; the index callback runs at 09:00, after the 08:30 alpha decision it consumes |
 | Long-only is emergent | The alpha is signed and dollar-neutral. Nothing strips the short leg; the registered `no_short` intersected with `single_name_cap` does |
-| The bounds are the shipped constraint set's own | `optimize` is called with `context.constraint_bounds` — what the registered `NoShort` and `SingleNameCap` projected for that occurrence — not with a local copy of the same rule |
+| The bounds are the shipped kit's own | `optimize` is called with the box the strategy builds from `no_short` and `single_name_cap` on the benchmark it subscribes to — not with a local copy of the same rule |
 | Frozen names survive exactly, or the freeze is refused | Each callback pins the holding with the least slack against its own upper bound. 10 callbacks got that holding back verbatim; on 10 others overnight drift had pushed it past its cap, and `optimize`'s own refusal is what released the freeze |
-| The constraint set is enforced, and monitored separately | 21 completed rebalances are 21 intents that passed their projected bounds — a failing intended finding stops the run. The marked account is then read back at every monitoring occurrence, and its findings are reported rather than assumed |
+| The box is built, and the book is observed separately | 21 completed rebalances are 21 intents built inside the box. The marked account is then observed by the registered `no-short` and `single-name-cap` rules at every market-clock instant, against their own copy of the cap, and their findings are reported rather than assumed |
 | The account is verified against its own journal | Cash and every position are rebuilt from the committed fill journal and compared to the committed `AccountSnapshot`; a mismatch aborts the run |
 | Output is deterministic | The whole pipeline runs twice into separate projects, and both the reported outcome and the SHA-256 artifact digests must match |
 
@@ -76,13 +76,13 @@ KRX slice (22 sessions, 21 callbacks, 4 instruments).
 
 | Metric | Value |
 |---|---|
-| alpha occurrences published | 21 |
+| alpha events published | 21 |
 | allocation inputs subscribed | `alpha_allocation` + `benchmark_weight_daily` |
-| shipped constraints registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
+| shipped compliance registered | `no_short`, `single_name_cap` (cap 0.10 above index weight) |
 | rebalances | 21 |
 | freezes returned verbatim | 10 |
 | freezes released as out of box | 10 |
-| monitored occurrences | 21 |
+| monitored events | 21 |
 | marked short positions | 0 |
 | cap-drift findings between rebalances | 10 (worst excess 0.0078 over a 0.3212 ceiling) |
 | dealt fills | 67 (whole shares) |
@@ -102,7 +102,7 @@ must do: a raw NAV-derived ratio carries far more digits than the grid and the b
 refuses it. The refusal itself is proved in `tests/portfolio/test_optimize.py`, not here.
 
 The subscribed alpha is validated at consumption time as a signed allocation summing to zero within
-a declared neutrality tolerance. No constraint owns that input, so the consuming Strategy checks it
+a declared neutrality tolerance. No rule owns that input, so the consuming Strategy checks it
 before a single weight moves.
 
 **The cap-drift findings are the honest result, not a defect.** `single_name_cap` is defined

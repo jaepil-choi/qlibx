@@ -7,28 +7,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-from vqapr.cli.envelope import MAX_INLINE_TRACEBACK_LINES, failure, success
+from vqapr.cli.envelope import failure, success
 from vqapr.domain.errors import (
-    ExplainTopic,
     Failure,
-    FailureFamily,
     FailureSource,
+    Stage,
+    Status,
     VqaprError,
+)
+
+_FIELDS = (
+    "code", "status", "source", "requirement", "observed", "fix", "cause", "examples",
+    "example_total",
 )
 
 
 def _error() -> VqaprError:
     return VqaprError(
-        stage="component.load",
-        family=FailureFamily.DATA,
+        stage=Stage.LOAD,
         failures=[
             Failure.bounded(
-                "component.load.wrong_type",
+                "component.wrong_type",
                 "must implement",
+                status=Status.CONTRACT,
                 observed="S",
                 source=FailureSource(file="strategies.py", key_path="UserStrategy", line=12),
                 fix="subclass StrategyModel, then register the component again",
-                explain=ExplainTopic.COMPONENT_CONTRACT,
             )
         ],
         mutation=False,
@@ -39,7 +43,7 @@ def _error() -> VqaprError:
 def test_success_and_failure_share_their_envelope_keys() -> None:
     """An agent must not need to know which outcome it got before parsing it."""
     ok = success("component.register", id="x")
-    bad = failure(_error())
+    bad = failure(_error(), stage=Stage.REGISTER)
     assert ok["ok"] is True
     assert bad["ok"] is False
     assert {"ok", "stage"} <= set(ok)
@@ -47,11 +51,16 @@ def test_success_and_failure_share_their_envelope_keys() -> None:
 
 
 def test_failure_preserves_the_package_verdict_verbatim() -> None:
-    """The CLI must not invent stage, code, or remedy text of its own."""
-    payload = failure(_error())
-    assert payload["stage"] == "component.load"
-    assert payload["family"] == "DATA"
-    assert payload["failures"][0]["code"] == "component.load.wrong_type"
+    """The CLI must not invent stage, code, or remedy text of its own.
+
+    The `stage` handed to `failure()` is for an exception the package did not classify; a
+    `VqaprError` already knows its own, and that one is what the envelope carries.
+    """
+    payload = failure(_error(), stage=Stage.REGISTER)
+    assert payload["stage"] == "load"
+    assert "family" not in payload
+    assert payload["failures"][0]["code"] == "component.wrong_type"
+    assert payload["failures"][0]["status"] == 422
     assert payload["retry_precondition"] == "fix and register the component again, then retry"
 
 
@@ -62,97 +71,135 @@ def test_every_envelope_field_survives_a_json_round_trip() -> None:
     in a log and arrives as something else in the consumer. `source` is the field at risk, because
     it is the only nested structure in the payload.
     """
-    payload = failure(_error())
+    payload = failure(_error(), stage=Stage.REGISTER)
     restored = json.loads(json.dumps(payload))
 
     assert restored == payload, "the envelope did not survive a JSON round trip unchanged"
 
     entry = restored["failures"][0]
     assert entry["fix"] == "subclass StrategyModel, then register the component again"
-    assert entry["explain"] == "component-contract"
+    assert entry["status"] == 422
     # `source` stays a structure. Flattening it to "strategies.py:12" would force every consumer to
     # write a regex, and that regex would break silently the day the format changed.
     assert entry["source"] == {"file": "strategies.py", "key_path": "UserStrategy", "line": 12}
+    # So does `cause`: the raise site of a deliberate refusal, with no traceback to carry.
+    assert entry["cause"]["where"].endswith("test_envelope.py:29 (_error)"), entry["cause"]
+    assert entry["cause"]["traceback"] is None
 
 
-def test_a_refusal_carries_all_six_envelope_fields() -> None:
+def test_a_refusal_carries_every_envelope_field() -> None:
     """An agent parses these by name, so every one of them must be present and populated."""
-    entry = failure(_error())["failures"][0]
+    entry = failure(_error(), stage=Stage.REGISTER)["failures"][0]
 
-    for field in ("code", "source", "requirement", "observed", "fix", "explain"):
-        assert field in entry, f"the envelope lost {field!r}"
-    for field in ("code", "requirement", "fix", "explain"):
+    assert list(entry) == list(_FIELDS), "the one key order, from `Failure.as_dict`"
+    for field in ("code", "status", "requirement", "fix", "cause"):
         assert entry[field], f"{field!r} is present but empty, which tells the reader nothing"
+    assert "explain" not in entry
 
 
 def test_an_absent_location_says_so_rather_than_inventing_one() -> None:
     """Not every refusal has a file or a line, and guessing one would send the reader somewhere."""
     unlocated = VqaprError(
-        stage="preflight.account",
-        family=FailureFamily.ACCOUNT,
+        stage=Stage.FREEZE,
         failures=[
             Failure.bounded(
-                "preflight.account.mode",
+                "account.mode",
                 "a long-only account must not hold a short",
+                status=Status.PRECONDITION,
                 observed="A005930: -10",
                 fix="drop the short holding, or declare the account SIGNED",
-                explain=ExplainTopic.RUN_PRECONDITION,
             )
         ],
     )
 
-    source = failure(unlocated)["failures"][0]["source"]
+    source = failure(unlocated, stage=Stage.RUN)["failures"][0]["source"]
 
     assert source == {"file": None, "key_path": None, "line": None}
 
 
-def test_a_short_traceback_stays_inline(tmp_path: Path) -> None:
-    payload = failure(ValueError("small"), project_root=tmp_path)
-    assert "detail" not in payload
-    assert not (tmp_path / ".vqapr" / "diagnostics").exists()
-
-
-def test_an_oversized_traceback_moves_to_a_dump(tmp_path: Path) -> None:
+def _raised(depth: int) -> RuntimeError:
     def deep(n: int) -> None:
         if n == 0:
             raise RuntimeError("bottom")
         deep(n - 1)
 
     try:
-        deep(MAX_INLINE_TRACEBACK_LINES + 5)
+        deep(depth)
     except RuntimeError as error:
-        payload = failure(error, project_root=tmp_path)
+        return error
+    raise AssertionError("unreachable")
 
-    detail = payload["detail"]
-    assert detail is not None
-    written = Path(detail)
+
+def test_an_unclassified_exception_is_one_real_failure_with_its_cause_whole(
+    tmp_path: Path,
+) -> None:
+    """Record `171`: no more `stage: "unhandled"` with an empty failure list.
+
+    The exception nobody classified is a failure like any other -- `code: "unhandled"`, a status
+    by whose frame raised it, and the WHOLE traceback in `cause` -- so an agent can tell the
+    framework's bug from its own (`docs/issues/archive/076`). The stage is the command's, because the
+    exception does not know it and the command does.
+    """
+    error = _raised(40)
+
+    payload = failure(error, project_root=tmp_path, stage=Stage.RUN)
+
+    assert payload["ok"] is False
+    assert payload["stage"] == "run"
+    assert payload["error"] == "RuntimeError: bottom"
+    (entry,) = payload["failures"]
+    assert list(entry) == list(_FIELDS)
+    assert entry["code"] == "unhandled"
+    # Raised from this test file, which is outside the package: the user's frame is innermost.
+    assert entry["status"] == 502
+    assert entry["cause"]["type"] == "RuntimeError"
+    assert entry["cause"]["message"] == "bottom"
+    assert entry["cause"]["origin"] == "user"
+    assert entry["cause"]["where"].endswith("test_envelope.py:123 (deep)"), entry["cause"]
+    traceback = entry["cause"]["traceback"]
+    # Whole, as Python itself prints it: the interpreter folds a recursion into
+    # `[Previous line repeated N more times]`, which is its formatting and not a cut of ours.
+    assert traceback.startswith("Traceback (most recent call last):")
+    assert "[Previous line repeated 37 more times]" in traceback, traceback
+    assert traceback.rstrip().endswith("RuntimeError: bottom")
+    assert "traceback" not in payload, "nothing rides outside the failure entry"
+    assert entry["fix"], "even an unhandled failure names the next action"
+
+
+def test_a_short_traceback_is_also_written_beside_the_workspace(tmp_path: Path) -> None:
+    """The diagnostics file is an extra for a reader with a terminal, never a substitute."""
+    payload = failure(_raised(1), project_root=tmp_path, stage=Stage.RUN)
+
+    written = Path(payload["detail"])
     assert written.exists()
     assert "RuntimeError" in written.read_text(encoding="utf-8")
+    assert payload["failures"][0]["cause"]["traceback"], "and the envelope is whole without it"
+
+
+def test_a_classified_refusal_writes_no_dump(tmp_path: Path) -> None:
+    """A read-only verb refusing must not create `.vqapr/` as a side effect."""
+    payload = failure(_error(), project_root=tmp_path, stage=Stage.READ)
+
+    assert "detail" not in payload
+    assert not (tmp_path / ".vqapr").exists()
 
 
 def test_a_dump_that_cannot_be_written_still_reports_the_failure(tmp_path: Path) -> None:
     """Rendering a failure must never destroy the failure."""
-
-    def deep(n: int) -> None:
-        if n == 0:
-            raise RuntimeError("bottom")
-        deep(n - 1)
-
     blocked = tmp_path / "blocked"
     blocked.write_text("not a directory", encoding="utf-8")
-    try:
-        deep(MAX_INLINE_TRACEBACK_LINES + 5)
-    except RuntimeError as error:
-        payload = failure(error, project_root=blocked)
+
+    payload = failure(_raised(12), project_root=blocked, stage=Stage.RUN)
 
     assert payload["ok"] is False
-    assert "RuntimeError" in payload["traceback"]
+    assert "detail" not in payload
+    assert "RuntimeError" in payload["failures"][0]["cause"]["traceback"]
 
 
 def test_the_declared_entry_point_builds_every_command() -> None:
-    """`pyproject` promises `vqapr.cli:main`, so importing it must yield a usable parser."""
-    from vqapr.cli import main as entry_point
+    """`pyproject` promises `vqapr.cli.main:main`, so importing it must yield a usable parser."""
     from vqapr.cli.main import build_parser
+    from vqapr.cli.main import main as entry_point
 
     assert callable(entry_point)
     actions = build_parser()._subparsers

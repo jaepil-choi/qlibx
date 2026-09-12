@@ -19,14 +19,14 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration, lookback_fits_grain
+from vqapr.data.dataset import DatasetRegistration, lookback_fits_grain
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.workspace.registry import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -42,7 +42,9 @@ def sparse_parquet(tmp_path_factory) -> Path:
         f"(TIMESTAMPTZ '2024-03-{day:02d} 15:30:00+09', 'B', {50 + day}.0)" for day in range(1, 4)
     )
     duckdb.connect().execute(
-        f"COPY (SELECT * FROM (VALUES {rows}) AS t(available_at, instrument, close)) "
+        # A decimal literal is a DECIMAL to duckdb; the dataset declares DOUBLE, so write one.
+        f"COPY (SELECT available_at, instrument, close::DOUBLE AS close "
+        f"FROM (VALUES {rows}) AS t(available_at, instrument, close)) "
         f"TO '{out.as_posix()}' (FORMAT PARQUET)"
     )
     return out
@@ -58,6 +60,7 @@ def _workspace(root: Path, parquet: Path, grain: str) -> Workspace:
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain=grain,
         ),
         SourceSpec.of("src", parquet),
@@ -130,7 +133,7 @@ def test_the_wrong_kind_of_lookback_is_refused_by_name_at_the_read(
 
 
 def test_the_steering_rule_is_stated_once() -> None:
-    from vqapr.data.datasets import Grain
+    from vqapr.data.dataset import Grain
 
     assert lookback_fits_grain(RowsLookback(1), Grain.INSTRUMENT_INSTANT) is None
     assert lookback_fits_grain(CalendarLookback(days=1), Grain.INSTANT) is None
@@ -154,7 +157,8 @@ def vendor_grain_parquet(tmp_path_factory) -> Path:
         for index, code in enumerate("xyz")
     )
     duckdb.connect().execute(
-        f"COPY (SELECT * FROM (VALUES {rows}) AS t(available_at, instrument, code, close)) "
+        f"COPY (SELECT available_at, instrument, code, close::DOUBLE AS close "
+        f"FROM (VALUES {rows}) AS t(available_at, instrument, code, close)) "
         f"TO '{out.as_posix()}' (FORMAT PARQUET)"
     )
     return out
@@ -177,6 +181,7 @@ def test_an_instants_lookback_counts_instants_not_rows_on_a_vendor_grain_table(
             available_at="available_at",
             key_fields=("available_at", "instrument", "code"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="rows",
         ),
         SourceSpec.of("src", vendor_grain_parquet),

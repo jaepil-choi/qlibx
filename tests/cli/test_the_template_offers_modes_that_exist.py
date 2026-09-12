@@ -1,6 +1,6 @@
 """The run template offers account modes that actually exist.
 
-`docs/issues/017`. `vqapr new run-spec` (now `vqapr new run`) emitted `mode: LONG_ONLY` with the
+`docs/issues/archive/017`. `vqapr new run-spec` (now `vqapr new run`) emitted `mode: LONG_ONLY` with the
 comment `# LONG_ONLY or LONG_SHORT`, reading as a closed set of exactly two. The book was
 long/short, so the author took the value the template offered. **`LONG_SHORT` does not exist and
 never did** --
@@ -13,8 +13,8 @@ screen.
 
 from __future__ import annotations
 
-from vqapr.account.account import AccountMode
 from vqapr.cli.new import _ACCOUNT_MODES, _RUN_TEMPLATE
+from vqapr.domain.account import AccountMode
 
 
 def test_the_template_never_names_a_mode_that_does_not_exist() -> None:

@@ -171,13 +171,13 @@ except Exception:
 > *"OUTSIDE the guard above, deliberately. ... 'no roster' and 'a roster whose record is damaged'
 > are different states, and only the first is ordinary."*
 
-**pointer** 손상에 대해서는 그 원칙이 지켜졌다(C1 / `docs/issues/042`가 닫은 것). **workspace 손상**에
+**pointer** 손상에 대해서는 그 원칙이 지켜졌다(C1 / `docs/issues/archive/042`가 닫은 것). **workspace 손상**에
 대해서는 지켜지지 않았다. preflight와 `run()` 사이에 workspace.yaml이 손상되거나, 긴 run 중
 `vqapr register`가 재작성하는 순간에 걸리면, `registry=None`으로 run이 계속되고 모든 fill이
 `kind: None`을 기록한다 — KRX 형태 venue에서 ETF sleeve가 주식 세율로 과금되는
-`docs/issues/007`이 **다른 문으로** 되살아난다.
+`docs/issues/archive/007`이 **다른 문으로** 되살아난다.
 
-**분류.** (b) 기존 결함. `docs/issues/042`가 pointer 쪽만 닫고 `Workspace.open` 쪽 guard는 넓은 채로
+**분류.** (b) 기존 결함. `docs/issues/archive/042`가 pointer 쪽만 닫고 `Workspace.open` 쪽 guard는 넓은 채로
 남겼다 — 그 이슈의 종결 문구가 *"only `Workspace.open` itself is guarded"*라고 정확히 적고 있다.
 그 guard가 의도한 것은 "workspace가 **없는** 경우"인데 코드는 "workspace를 못 읽는 모든 경우"를
 덮는다.
@@ -383,8 +383,8 @@ report = roster_report(project_root, _registered_roster_for_report(project_root)
 
 | # | 성격 | 권고 |
 |---|---|---|
-| **R1** | correctness, 심각 | **`docs/issues/`로 승격.** 완주한 run이 사라지는 결함이고 재현 경로가 명확하다. `docs/issues/042`의 형제 |
-| **R3** | correctness | **`docs/issues/042`를 재개**하거나 그 후속 이슈로 등록. 042가 닫은 것은 pointer 문 하나뿐이다 |
+| **R1** | correctness, 심각 | **`docs/issues/`로 승격.** 완주한 run이 사라지는 결함이고 재현 경로가 명확하다. `docs/issues/archive/042`의 형제 |
+| **R3** | correctness | **`docs/issues/archive/042`를 재개**하거나 그 후속 이슈로 등록. 042가 닫은 것은 pointer 문 하나뿐이다 |
 | **R4** | correctness | R1과 같은 지점. **한 커밋으로 묶는다** |
 | **R2** | 구조 | Step 7의 후속 수정. 별도 이슈 없이 `flow/records.py` 이동으로 닫는다 |
 | **R5 · R6** | 구조, 사용자 가시 | **3단계(protocol 통합)의 완료 조건에 편입.** 별도 이슈보다 계획 수정이 맞다 |

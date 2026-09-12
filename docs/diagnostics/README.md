@@ -1,5 +1,12 @@
 # 진단 — 무엇이 어떻게 잘못되어 있는가
 
+> **2026-09-07 · 0.6.0 추가 리뷰:** [호출 흐름과 객체 생성](2026-09-07-v060-call-flow-review.md).
+> 현재 working tree의 AST/Vulture, CLI 10세션 profile, 생성자 실패 주입에 근거한다.
+> 아래 2026-09-03 색인은 당시 캠페인의 기록이며, 최신 리뷰의 작업 목록이 아니다.
+> 그 색인의 "run 기록이 메모리에 쌓였다가 끝에 쓰인다 — 죽으면 전부 없음"은 당시 관측이다. 기록 `164`
+> 이후 기록은 run이 끝날 때 한 번 쓰고, 정상·예외 종료는 모두 flush하며, hard kill만 spill 밸브가 이미
+> 쓴 부분을 남긴다 (`docs/design/run-record-layout.md`). 리뷰 R1의 생성 중 자원 누락은 기록 `167`이 닫았다.
+
 **이 디렉터리는 관측만 담는다.** 무엇을 할 것인가는 `docs/refactoring/`에 있고, 무엇을 했는가는
 `docs/implementations/`에, 무엇이 열려 있는가는 `docs/issues/README.md`에 있다. 진단이 계획과
 같은 파일에 살면 계획이 바뀔 때마다 관측이 다시 쓰이고, 그러면 다음 사람이 **무엇이 실제로
@@ -16,7 +23,7 @@
 > 들어왔고, "실환경 결함 다섯"은 `134`(원자적 등록) · `135`(흘려 쓰기, tz 안전한 포맷) · `139`(등록
 > digest) · `129`(unused deps)가 닫았다. `049`의 최종 측정은 `experiments/exp_049_the_measurement/`가
 > 잰다 (rows 372.57s · expr 5.04s · wide 2.46s, anti-join 0). 그 측정이 새로 낸 관측 둘은
-> `docs/issues/053`·`054`다. §0 이하는 **2026-09-02의 관측**으로 남긴다 — 무엇이 측정되었는지의 기록이지
+> `docs/issues/archive/053`·`054`다. §0 이하는 **2026-09-02의 관측**으로 남긴다 — 무엇이 측정되었는지의 기록이지
 > 할 일 목록이 아니다.
 
 ---
@@ -67,7 +74,7 @@ resolved/still-live를 항목별로 적고, 재검증하지 않은 항목은 그
 | 문서 | 왜 보관인가 |
 |---|---|
 | [`archive/2026-08-18-vqapr-review.md`](archive/2026-08-18-vqapr-review.md) | 130 modules / 11,959 lines / 334 tests 기준. 오늘 트리는 30,260 lines / 1,292 tests다. **still live: OS-2 · RF-1 · RF-2** |
-| [`archive/2026-08-19-vqapr-performance.md`](archive/2026-08-19-vqapr-performance.md) | 읽기 경로를 그 뒤로 두 번 다시 썼다(records `104`–`118`, `119`–`128`). 이 파일의 논지 전체가 `docs/issues/049`의 숫자 하나가 되었다 |
+| [`archive/2026-08-19-vqapr-performance.md`](archive/2026-08-19-vqapr-performance.md) | 읽기 경로를 그 뒤로 두 번 다시 썼다(records `104`–`118`, `119`–`128`). 이 파일의 논지 전체가 `docs/issues/archive/049`의 숫자 하나가 되었다 |
 
 ## 3. 뒤집힌 진단 — 읽는 사람이 반드시 알아야 할 하나
 

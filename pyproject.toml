@@ -1,11 +1,13 @@
 [project]
 name = "vqapr"
-version = "0.4.1"
+version = "0.16.0"
 description = "Point-in-time quantitative research and portfolio execution framework"
 readme = "README.md"
 authors = [
     { name = "Jaepil.Choi", email = "chljeffreyz@gmail.com" }
 ]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12,<3.15"
 # `cvxpy` and `pydantic` were listed here and imported nowhere in the repository -- a convex
 # solver stack and a validation library on every `uv add vqapr`, reaching no shipped code path
@@ -24,14 +26,22 @@ requires-python = ">=3.12,<3.15"
 # It is our dependency because our dependency will not declare its own.
 dependencies = [
     "duckdb>=1.5,<2",
+    # `numpy` is the panel's matrix (record `232`): a field is one `(instants x instruments)`
+    # block a model computes on. pyarrow already required it; naming it is naming what we use.
+    "numpy>=2,<3",
     "pyarrow>=25,<26",
     "pydantic>=2,<3",
     "pytz>=2024.1",
     "pyyaml>=6,<7",
+    # Windows ships no IANA time zone database, and `zoneinfo` finds none there without this
+    # package, so `Asia/Seoul` -- the zone of every KRX example -- was an unknown zone until the
+    # user installed it themselves (report 2026-09-11, record `263`). Elsewhere the system
+    # database answers and this is not installed.
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.scripts]
-vqapr = "vqapr.cli:main"
+vqapr = "vqapr.cli.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
@@ -44,6 +54,7 @@ build-backend = "uv_build"
 # The package's own numeric work is Decimal and duckdb.
 dev = [
     "pandas>=3,<4",
+    "pyright>=1.1.411,<2",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
     "vulture>=2.14,<3",
@@ -52,9 +63,21 @@ dev = [
 # Layer boundaries are not enforced by an import-linter contract. See
 # docs/vqapr-architecture.md §10.1 — module layout is non-normative (PRD §0.1), so a tool
 # contract must not drive type placement. Every boundary that matters is enforced by the
-# absence of a path (no account() on DataModelContext, no store handle outside flow/views,
-# pure functions that take their inputs as arguments), and a misplaced type surfaces as a
-# circular import, which Python reports without a tool.
+# absence of a path (no account() on DataModelContext, no store handle outside flow/engine,
+# pure functions that take their inputs as arguments).
+#
+# This comment used to end "and a misplaced type surfaces as a circular import, which Python
+# reports without a tool". That half was false and is retired (record 198). The layering
+# campaign measured four package cycles at 0.8.0 and Python reported none of them: two were
+# deferred into function bodies, one was held open by a TYPE_CHECKING import, and one was
+# module-level in both directions and merely happened to load in a working order. A fifth --
+# extension writing to the workspace it sits below — was found only once the layers were
+# written down.
+#
+# What replaces it is not a contract file: it is tests/boundaries/test_the_layers_hold.py,
+# which declares the altitude of every package and fails on an import that reaches its own
+# layer or above. The first argument above still stands, which is why the table is a test in
+# this repository's own idiom rather than a tool's config.
 
 [tool.pytest.ini_options]
 minversion = "9.1"
@@ -84,12 +107,15 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "A005"]
 
 [tool.ruff.lint.per-file-ignores]
 # A vulture whitelist is a list of bare names, which is exactly what F821 and B018 exist to
 # catch. The file is never imported and never run; it is input to vulture's own parser.
 "scripts/vulture_whitelist.py" = ["F821", "B018"]
+# The declarations a traced project was given (exp_235): the committed bytes are the bytes the
+# profiler saw and the records fingerprinted, so a line is not re-wrapped after the fact.
+"experiments/exp_235_the_scenario_trace/declarations/*.py" = ["E501"]
 
 # Cross-module dead-code pass. `ruff` is file-local by construction -- F401 and F841 see one
 # module at a time -- so nothing in the configured rule set can answer "is this method called
@@ -119,3 +145,13 @@ ignore_decorators = [
 ]
 # `model_config` is pydantic's class-level configuration attribute.
 ignore_names = ["model_config"]
+
+# Static type gate (redesign campaign 2026-09-08, step 0). `src/` only: tests and scripts are
+# not the contract. `basic` first so the count of findings is a measurement the campaign
+# drives down; `strict` is the target once the Component/EventLoop generics land.
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false

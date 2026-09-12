@@ -1,4 +1,4 @@
-# exp_049 -- the measurement `docs/issues/049` exists for
+# exp_049 -- the measurement `docs/issues/archive/049` exists for
 
 `049` measured one model twice and found 806.61 s against 1.31 s: a statement warehouse read
 at the vendor's long grain, and the same facts pivoted wide, same reduction, identical output.
@@ -38,7 +38,7 @@ pivot -- and `wide` is `049`'s own second measurement, unchanged.
   admits only `InstantsLookback`. It declares twelve instants -- three fiscal years at four
   availability instants a year (see the constant's docstring in `exp049_models.py`); the
   reduction keeps two, so the output is the same, and the anti-join is what proves it. (Until
-  record `141` the count ranked source rows rather than instants, `docs/issues/053`, and the
+  record `141` the count ranked source rows rather than instants, `docs/issues/archive/053`, and the
   harness had to declare 2,000 rows and argue that they reached three years.)
 - Every output value is an integer stored as `DOUBLE`, so the three sides see the same
   `Decimal` and the anti-join compares values, not formatting.

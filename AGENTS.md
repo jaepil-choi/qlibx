@@ -79,7 +79,7 @@ when the configured repeated-failure limit is reached.
   work is explicitly requested.
 - Prefer fast, explicit failure over guessed schemas, guessed fields, or silent fallback.
 - Run narrow validation while iterating and the declared completion validation before handoff.
-- The default test command deselects `slow`, which is thirteen end-to-end journeys. Use the
+- The default test command deselects `slow`, the end-to-end journeys and showcases. Use the
   manifest's `test` while iterating and `test_all` before handoff or release; a change to run
   assembly, the record shape, or the emitted scaffolds is not verified until `test_all` passes.
 
@@ -103,8 +103,17 @@ if a record is removed, its number stays retired.
 Do not create implementation records for harness-only, documentation-only, experiment-only, or
 showcase-only changes.
 
-Keep commit messages concise. Keep detailed reasoning in the implementation record. Never stage,
-commit, push, or publish unless the task or user explicitly authorizes that action.
+Keep commit messages concise. Keep detailed reasoning in the implementation record.
+
+Commit each unit of work as it completes. Do not accumulate several units and commit them
+together at the end: a large commit hides which change caused which effect, cannot be reverted
+without taking unrelated work with it, and leaves the user unable to see progress until the whole
+thing lands. A unit is one milestone, one fix, or one coherent change with its own validation —
+the same boundary the implementation record draws. Committing needs no approval.
+
+Push and publish still do. A commit is local history the user can rewrite; a push is not. Never
+push, open a pull request, publish a package, or otherwise send work outward unless the task or
+user explicitly authorizes that action.
 
 Do not mix unrelated user changes into a commit. Stage by naming the paths the task actually
 touched. Never use `git add -A`, `git add .`, `git commit -a`, or any other blanket stage: the

@@ -14,8 +14,8 @@ speculation it started as.
    bare `Exception`, records the judgment as `blocked` with its exception type, withholds
    `judgments` from `passed`, and returns `ok: false`. The other judgments still report.
 
-3. **Three advertised codes that could never fire.** `check.dataset.unregistered`,
-   `check.field.absent` and `check.lookback.uncovered` read requirements off the raw `ComponentRef`
+3. **Three advertised codes that could never fire.** `dataset.unregistered`,
+   `field.absent` and `lookback.uncovered` read requirements off the raw `ComponentRef`
    that `workspace.component()` returns -- which has no `requirements` attribute at all, so a
    `getattr(..., ())` fallback always won and the loop body never executed. `check` now LOADS the
    component, and all three fire; this file proves the first of them end to end below.
@@ -23,24 +23,31 @@ speculation it started as.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
+import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow import judgments as judgments_module
-from vqapr.flow.run import RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
+from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.wiring import Role
+from vqapr.public import register_instruments
+from vqapr.run.preflight import checks as judgments_module
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    RunSchedule,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 
@@ -56,22 +63,25 @@ def workspace(tmp_path: Path) -> Path:
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
     ).with_span(*_SPAN)
-    space.register_dataset(registration, SourceSpec.of("prices-source", "prepared/prices"))
+    with Workspace.transaction(space) as t:
+        t.register_dataset(registration, SourceSpec.of("prices-source", "prepared/prices"))
     return tmp_path
 
 
-def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
+def _register_component(root: Path, component_id: str, kind: Role, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            object_name,
-            fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
 
 
 def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
@@ -81,27 +91,40 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
     the unregistered-dataset defect. The run decides at 15:30 against a fill at 15:30, which is
     the look-ahead defect every run here carries.
     """
+    # A REAL venue table: the run's trading days are the days it has rows for (design §3.3).
+    # One day inside the run's period, printed at 15:30 KST -- the fill instant the 15:30
+    # decision collides with.
     exec_dir = root / "exec"
     exec_dir.mkdir(exist_ok=True)
-    (exec_dir / "placeholder").write_text("x", encoding="utf-8")
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime(2024, 1, 1, 15, 30).time(),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
+    con = duckdb.connect()
+    try:
+        con.execute(
+            "COPY (SELECT * FROM (VALUES (TIMESTAMPTZ '2024-01-05 15:30:00+09', 'A', true, "
+            "100.0::DOUBLE)) AS t(trade_at, instrument, is_tradable, close)) TO "
+            f"'{(exec_dir / 'e.parquet').as_posix()}' (FORMAT PARQUET)"
         )
+    finally:
+        con.close()
+    # Measured through the one door (record `234`): the ordering judgment reads the table by
+    # the digest registration kept, and a hand-registered table is `dataset.unverified`.
+    exec_source = SourceSpec.of("exec-src", exec_dir)
+    diagnosis, _, measured = verify_source(
+        DatasetRegistration.of(
+            'my-exec',
+            'exec-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        exec_source,
     )
+    diagnosis.raise_if_failed()
+    with Workspace.transaction(root) as t:
+        t.register_dataset(measured, exec_source)
     source = root / "strategy.py"
     source.write_text(
         "from vqapr.public import StrategyModel, DataRequirement, RowsLookback, Hold\n\n"
@@ -112,37 +135,45 @@ def _run_ready(root: Path, *, short: bool, reads: str = "prices") -> str:
         "        return Hold(reason='qa probe')\n",
         encoding="utf-8",
     )
-    _register_component(root, "my-strat", ComponentKind.STRATEGY_MODEL, source)
+    _register_component(root, "my-strat", Role.STRATEGY_MODEL, source)
     venue = root / "venue.py"
     venue.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,"
         " ListingAccess.SIGNED)})\n",
         encoding="utf-8",
     )
-    _register_component(root, "venue", ComponentKind.EXCHANGE, venue)
-    Workspace.open(root).register_run(
-        RunDefinition(
-            run_id="probe",
-            strategies=(StrategyEntry("my-strat"),),
-            timezone="Asia/Seoul",
-            at=time(15, 30),
-            sessions=(date(2024, 1, 2),),
-            instruments=("A",),
-            exchange="venue",
-            execution_input_id="my-exec",
-            start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
-            end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),
-            initial_account_snapshot=AccountSnapshot(
-                0, Decimal("1000"), {"A": Decimal("-5")} if short else {}
-            ),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    _register_component(root, "venue", Role.EXCHANGE, venue)
+    # Declared, so preflight reaches the refusal this fixture is built for rather than stopping
+    # at `roster.absent` -- which is a judgment code, and this test counts the non-judgment one.
+    register_instruments(root, {"A": "stock"})
+    with Workspace.transaction(root) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="probe",
+                strategy=StrategyEntry("my-strat"),
+                timezone="Asia/Seoul",
+                schedule=RunSchedule(every="1d", at=(time(15, 30),)),
+                instruments=("A",),
+                exchange="venue",
+                execution=RunExecution(
+                    dataset='my-exec',
+                    trade_price='close',
+                    fill=RunFill(at=time(15, 30)),
+                ),
+                start=datetime.fromisoformat("2024-01-01T00:00:00+00:00"),
+                end=datetime.fromisoformat("2024-02-01T00:00:00+00:00"),
+                initial_account_snapshot=AccountSnapshot(
+                    0, Decimal("1000"), {"A": Decimal("-5")} if short else {}
+                ),
+                initial_account_mode=AccountMode.LONG_ONLY,
+                writes="probe-weights",
+            )
         )
-    )
     return "probe"
 
 
@@ -164,11 +195,11 @@ def test_several_simultaneous_independent_defects_all_report(workspace: Path) ->
 
     reported = {entry["code"] for entry in body["failures"]}
     assert {
-        "check.execution.not_after_decision",
-        "check.weights.mode_conflict",
-        "check.dataset.unregistered",
+        "execution.not_after_decision",
+        "weights.mode_conflict",
+        "dataset.unregistered",
     } <= reported, f"expected three independent judgments, got {sorted(reported)}"
-    assert any(not code.startswith("check.") for code in reported), (
+    assert reported - set(judgments_module.JUDGMENT_CODES), (
         f"preflight ran and refused, and its refusal must be reported: {sorted(reported)}"
     )
     assert body["blocked"] == [], "every phase could run; nothing was blocked"
@@ -201,11 +232,15 @@ def test_an_unexpected_exception_type_inside_one_judgment_is_reported_as_blocked
         "a judgment that could not run was reported as passed, so a run nothing was proven "
         "about reads as clean and ready"
     )
-    reasons = [entry["blocked_by"] for entry in body["blocked"] if entry["check"] == "universe"]
-    assert reasons and "RuntimeError" in reasons[0], body["blocked"]
+    universe = [
+        entry for entry in body["blocked"] if entry["observed"].startswith("universe could not")
+    ]
+    assert universe, body["blocked"]
+    assert universe[0]["cause"]["type"] == "RuntimeError", universe
+    assert "RuntimeError" in universe[0]["cause"]["traceback"]
 
     # And the other judgments still reported, which is the property this verb exists for.
-    assert {entry["code"] for entry in body["failures"]} >= {"check.weights.mode_conflict"}
+    assert {entry["code"] for entry in body["failures"]} >= {"weights.mode_conflict"}
 
 
 def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(workspace: Path) -> None:
@@ -221,7 +256,7 @@ def test_the_three_dataset_codes_are_reachable_once_the_model_is_loaded(workspac
 
     body = check(run_id, workspace)
     codes = {entry["code"] for entry in body["failures"]}
-    assert "check.dataset.unregistered" in codes, (
+    assert "dataset.unregistered" in codes, (
         "the dataset judgment is dead again: it is reading the ComponentRef rather than the "
         "loaded model, so the loop body never runs and the code only looks implemented"
     )

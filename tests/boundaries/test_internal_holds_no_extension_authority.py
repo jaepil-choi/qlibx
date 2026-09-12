@@ -1,7 +1,7 @@
 """`_internal` has no extension authorities left, and the two shared primitives are named.
 
 **This file's original subject no longer exists, and that is the outcome rather than a loss.** It
-was written for `docs/issues/029`: four modules under `extension/` were forwarding shims over
+was written for `docs/issues/archive/029`: four modules under `extension/` were forwarding shims over
 `_internal/extensions/*`, and the rule was that every caller reach the authorities through the one
 door, so the shims' eventual deletion would be four files removed with every stale import breaking
 loudly rather than a grep.
@@ -26,9 +26,9 @@ INTERNAL_ROOT = "src/vqapr/_internal/"
 PERMITTED: frozenset[str] = frozenset(
     {
         # Reaches `_internal.atomic` for the one durable write (record `107`).
-        "src/vqapr/flow/run_records.py",
+        "src/vqapr/record/writer.py",
         # Reaches `_internal.filelock` and `_internal.atomic` (records `106`, `107`).
-        "src/vqapr/workspace.py",
+        "src/vqapr/workspace/registry.py",
     }
 )
 
@@ -85,7 +85,7 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     """The outcome of record `110`, asserted so it cannot quietly come back.
 
     A future change that recreates `_internal/extensions/` would restore the exact shape
-    `docs/issues/029` was filed about: one authority reachable by two names, and a deletion that
+    `docs/issues/archive/029` was filed about: one authority reachable by two names, and a deletion that
     has to be found by grep.
     """
     # Modules, not the directory. `.exists()` failed on a tree that had merely kept the stale
@@ -98,17 +98,26 @@ def test_the_extension_authorities_no_longer_live_under_internal() -> None:
     )
     assert not modules, (
         f"`_internal/extensions/` is back: {modules}. The extension authorities live in "
-        "`vqapr/extension/` since record 110; putting an implementation back under `_internal` "
-        "recreates the two-door problem docs/issues/029 records."
+        "`vqapr/component/` (moved out of `_internal` by record 110, into `component/` by record 271); "
+        "putting an implementation back under `_internal` "
+        "recreates the two-door problem docs/issues/archive/029 records."
     )
 
     # `identity` is deliberately absent. It was the fifth promoted module, and record `124`
     # deleted it with the Project cluster: its only two importers were `registration_bridge` and
     # `venue_bridge`, both of which went the same way. What this asserts is that the four that
     # remain are still at their promoted paths, not that the original five all survived.
-    for name in ("component", "fingerprint", "loading", "registration"):
-        module = pathlib.Path(f"src/vqapr/extension/{name}.py")
-        assert module.is_file(), f"{name} must live at vqapr/extension/{name}.py"
+    #
+    # `registration` is `prepare` since record `198`. Record `196` moved the half that writes down
+    # to `workspace/registration.py` -- the workspace is the project's -- and what stayed only
+    # prepares, so the old name had become false rather than merely dated. The property here is
+    # unchanged: the authority is in `extension/`, not under `_internal`.
+    #
+    # Record `271` folded `extension/` into `component/`: `component` is `reference`, and `prepare`
+    # is part of `conformance`, the door a component is proved at.
+    for name in ("reference", "fingerprint", "loading", "conformance"):
+        module = pathlib.Path(f"src/vqapr/component/{name}.py")
+        assert module.is_file(), f"{name} must live at vqapr/component/{name}.py"
 
 
 def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
@@ -117,8 +126,8 @@ def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
     Deliberately a floor on substance rather than an exact size: the point is that these files hold
     the implementation, and a re-export shim cannot.
     """
-    for name in ("component", "fingerprint", "loading", "registration"):
-        source = pathlib.Path(f"src/vqapr/extension/{name}.py").read_text(encoding="utf-8")
+    for name in ("reference", "fingerprint", "loading", "conformance"):
+        source = pathlib.Path(f"src/vqapr/component/{name}.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         defined = [
             node
@@ -126,7 +135,7 @@ def test_the_promoted_modules_are_real_rather_than_forwarding() -> None:
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef)
         ]
         assert defined, (
-            f"vqapr/extension/{name}.py defines nothing and is forwarding again; record 110 moved "
+            f"vqapr/component/{name}.py defines nothing and is forwarding again; record 110 moved "
             "the implementation here so the temporary file could stop existing"
         )
 
@@ -163,7 +172,7 @@ def test_every_internal_edge_is_a_shared_primitive_or_a_frozen_inheritance() -> 
         # Frozen; its edges predate the freeze and may not grow.
         "src/vqapr/project.py",
         # The authoring seam, pending the convergence step.
-        "src/vqapr/extension/loading.py",
+        "src/vqapr/component/loading.py",
     }
     unexplained = sorted(
         (importer, module)

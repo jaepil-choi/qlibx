@@ -14,18 +14,18 @@ so a run is the one live declaration a removal has to look for.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.extension.registration import ComponentRef
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.public import AccountMode, AccountSnapshot, RunSchedule, RunDefinition, StrategyEntry
+from vqapr.workspace.registry import Workspace
 
 ZONE = "Asia/Seoul"
 
@@ -33,12 +33,12 @@ ZONE = "Asia/Seoul"
 def _ref(path: Path, component_id: str = "mom") -> ComponentRef:
     return ComponentRef(
         component_id=component_id,
-        kind=ComponentKind.STRATEGY_MODEL,
+        kind=Role.STRATEGY_MODEL,
         path=path,
         object_name="S",
         config={},
         fingerprint=fingerprint_component(
-            path, kind=ComponentKind.STRATEGY_MODEL, object_name="S", config={}
+            path, kind=Role.STRATEGY_MODEL, object_name="S", config={}
         ),
     )
 
@@ -51,18 +51,19 @@ def _workspace(tmp_path: Path) -> tuple[Workspace, Path]:
 
 
 def _register_a_run(workspace: Workspace, ref: ComponentRef) -> None:
-    workspace.register_run(
-        RunDefinition(
-            run_id="daily",
-            strategies=(StrategyEntry(str(ref.component_id)),),
-            instruments=("A",),
-            timezone=ZONE,
-            at=time(9, 0),
-            sessions=(date(2026, 4, 1),),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="daily",
+                strategy=StrategyEntry(str(ref.component_id)),
+                instruments=("A",),
+                timezone=ZONE,
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
+            )
         )
-    )
 
 
 def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
@@ -75,39 +76,44 @@ def test_an_edited_component_re_registers_in_place(tmp_path: Path) -> None:
     """
     workspace, source = _workspace(tmp_path)
     first = _ref(source)
-    workspace.register_component(first)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(first)
 
     source.write_text("class S:\n    value = 1\n", encoding="utf-8")
     second = _ref(source)
     assert second.fingerprint != first.fingerprint
 
-    assert workspace.register_component(second) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(second) is True
     assert workspace.component("mom").fingerprint == second.fingerprint
     assert len(workspace.components) == 1, "an edit must not mint a second component id"
 
 
 def test_there_is_no_force_parameter_left_to_promise(tmp_path: Path) -> None:
-    """`docs/issues/067`: the method carried a `force` that gated nothing, and the skill kept
+    """`docs/issues/archive/067`: the method carried a `force` that gated nothing, and the skill kept
     promising `register --force` against it. One contract, replacement by default, and the
     dead spelling is gone so a docstring cannot cite it again."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    with pytest.raises(TypeError):
-        workspace.register_component(ref, force=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError), Workspace.transaction(workspace) as t:
+        t.register_component(ref, force=True)  # type: ignore[call-arg]
 
 
 def test_re_registering_an_unchanged_component_stays_idempotent(tmp_path: Path) -> None:
     """A second registration of the same bytes writes nothing and says so."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
 
-    assert workspace.register_component(ref) is False
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(ref) is False
 
 
 def test_remove_withdraws_a_registration_and_is_idempotent(tmp_path: Path) -> None:
     workspace, source = _workspace(tmp_path)
-    workspace.register_component(_ref(source))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_ref(source))
 
     assert workspace.remove("component", "mom") is True
     assert workspace.remove("component", "mom") is False
@@ -121,10 +127,11 @@ def test_remove_refuses_while_something_still_references_it(tmp_path: Path) -> N
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.referenced") as error:
+    with pytest.raises(VqaprError, match=r"remove\.referenced") as error:
         workspace.remove("component", "mom")
     # Asserted on `observed` and `fix` rather than on str(error): those are the fields a reader
     # is shown, and naming the blocker is the whole requirement here.
@@ -147,7 +154,8 @@ def test_references_to_reports_every_edge_that_blocks_a_removal(tmp_path: Path) 
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
     assert workspace.references_to("component", "mom") == ("run 'daily'",)
@@ -159,7 +167,8 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     """A run is the top of the document: nothing names a run, so it is always removable."""
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
     _register_a_run(workspace, ref)
 
     assert workspace.references_to("run", "daily") == ()
@@ -168,40 +177,42 @@ def test_a_leaf_declaration_has_no_referents(tmp_path: Path) -> None:
     assert workspace.references_to("component", "mom") == ()
 
 
-def test_a_dataset_is_blocked_by_the_runs_that_take_their_sessions_from_it(
+def test_a_dataset_is_blocked_by_the_runs_that_take_their_trading_days_from_it(
     tmp_path: Path,
 ) -> None:
-    """`docs/issues/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
+    """`docs/issues/archive/060`: a dataset is removable, and what the DOCUMENT knows blocks it.
 
     A component's reads live in its code and are refused at its next preflight; a registered
-    run's `sessions_from` lives here, and is the blocker this walk can name.
+    datamodel run's `schedule.days_from` lives here, and is the blocker this walk can name.
     """
     workspace, source = _workspace(tmp_path)
     ref = _ref(source)
-    workspace.register_component(ref)
+    with Workspace.transaction(workspace) as t:
+        t.register_component(ref)
 
     assert workspace.references_to("dataset", "prices") == ()
     assert workspace.remove("dataset", "prices") is False, "absent is idempotent, not an error"
 
-    workspace.register_run(
-        RunDefinition(
-            run_id="daily",
-            strategies=(StrategyEntry(str(ref.component_id)),),
-            instruments=("A",),
-            timezone=ZONE,
-            at=time(9, 0),
-            sessions=(date(2026, 4, 1),),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="daily",
+                strategy=StrategyEntry(str(ref.component_id)),
+                instruments=("A",),
+                timezone=ZONE,
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+                writes="daily-weights",
+            )
         )
-    )
     assert workspace.references_to("dataset", "prices") == ()
-    # `sessions_from` a dataset that is not registered is refused at `register_run`, so the
+    # `schedule.days_from` naming an unregistered dataset is refused at `register_run`, so the
     # blocker is asked through the CLI journey in `tests/cli/test_rm_dataset_withdraws_a_registration.py`.
 
 
 def test_an_unknown_kind_is_refused_with_the_permitted_set(tmp_path: Path) -> None:
     workspace, _ = _workspace(tmp_path)
 
-    with pytest.raises(VqaprError, match=r"workspace\.remove\.unsupported_kind"):
+    with pytest.raises(VqaprError, match=r"remove\.unsupported_kind"):
         workspace.remove("nonsense", "x")

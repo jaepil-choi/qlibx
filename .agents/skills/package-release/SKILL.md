@@ -12,14 +12,17 @@ upload.
 1. Confirm a clean, reviewed tree and the intended version and target index.
 2. Confirm canonical requirements, release notes, compatibility range, and current showcases.
 3. Run the full declared validation and `python-compatibility-matrix`.
-4. Build wheel and sdist from the repository using the declared command and with development-only
+4. Run every release-only gate the project manifest declares, and commit whatever it writes. These
+   record facts about the artifact that only a release can establish, so a gate skipped here is
+   not discovered until the release after it.
+5. Build wheel and sdist from the repository using the declared command and with development-only
    source overrides disabled.
-5. Follow `references/artifact-verification.md`.
-6. Review the final artifact list and hashes.
-7. Follow `references/publishing-safety.md`; obtain explicit approval immediately before upload.
-8. After upload, verify package metadata and installation from the target index without modifying
+6. Follow `references/artifact-verification.md`.
+7. Review the final artifact list and hashes.
+8. Follow `references/publishing-safety.md`; obtain explicit approval immediately before upload.
+9. After upload, verify package metadata and installation from the target index without modifying
    the source tree.
-9. Record the released commit, version, artifact hashes, validation, index, and remaining caveats.
+10. Record the released commit, version, artifact hashes, validation, index, and remaining caveats.
 
 Never publish from an uncommitted tree, reuse unverified artifacts, expose an API token, silently
 replace an existing version, or treat a successful upload as proof that installation works.

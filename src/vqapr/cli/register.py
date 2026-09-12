@@ -1,7 +1,7 @@
 """`vqapr register <declaration.yaml>` — validate everything declared, then persist it.
 
 **One verb, one file.** A workspace holds two kinds of thing: code the user wrote (a Strategy, a
-DataModel, a Constraint, a venue) and facts about the world that code needs (where the data is,
+DataModel, a Compliance rule, a venue) and facts about the world that code needs (where the data is,
 what its columns mean, when decisions happen, at what price they fill). Both are registrations —
 both are refused unless they check out, and both live in the same workspace — so both enter here.
 
@@ -25,7 +25,8 @@ So the declaration is the unit. `vqapr new` emits one beside the component it sc
   key is scanned in full for nulls and duplicates. A dataset whose `(available_at, instrument)`
   repeats is refused with the offending groups as evidence, because a duplicated key silently
   changes what a lookback window contains.
-- **execution inputs** — the same schema check over the venue table, plus the fill convention.
+- **execution datasets** — a dataset with an `execution:` role gets the same schema check, plus
+  a boolean tradable flag and at least one numeric price a run could bind.
 - **components** — loaded, constructed, and put through `conformance()`: every contract method
   Flow calls must exist and accept the positional call it makes.
 - **runs** — every id a run names must already be registered, and its sessions' dataset too.
@@ -41,9 +42,11 @@ from pathlib import Path
 from typing import Any
 
 from vqapr.cli.envelope import success
-from vqapr.declarations import AUTHORED_KINDS, apply, register_authored
-from vqapr.declarations import cli_kind as cli_kind  # re-export: cli/check.py, run.py, list_.py
-from vqapr.inputs import read_yaml_mapping
+from vqapr.domain.errors import read_yaml_mapping
+from vqapr.workspace.registration import AUTHORED_KINDS, apply, register_authored
+from vqapr.workspace.registration import (
+    cli_kind as cli_kind,  # re-export: cli/check.py, run.py, list_.py
+)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -79,9 +82,7 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         ))
     declaration = Path(args.declaration)
     document = read_yaml_mapping(declaration, what="a declaration")
-    return success(
-        "workspace.register",
-        registered=apply(
-            document, project_root, base=declaration.parent, declaration=declaration
-        ),
-    )
+    registered = apply(document, project_root, base=declaration.parent, declaration=declaration)
+    # What was just declared, said once in words (`docs/issues/archive/027`): one sentence per
+    # point-in-time concept, or nothing for a declaration that carries none.
+    return success("workspace.register", registered=dict(registered), spoken=registered.spoken)

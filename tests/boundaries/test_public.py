@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,41 +9,37 @@ from types import SimpleNamespace
 import duckdb
 import pytest
 
-import vqapr.flow.orchestration as orchestration
 import vqapr.public as public
+import vqapr.run.assemble as orchestration
 from vqapr.public import (
     QUANTUM,
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AcademicExchange,
     AccountMode,
     AccountSnapshot,
     AllocationInvariants,
-    AllocationPublicationResult,
-    AllocationPublicationSpec,
     AllocationSign,
     AllocationViolation,
     Budget,
     CalendarLookback,
-    ComponentKind,
+    Compliance,
+    ComplianceCall,
+    ComplianceFinding,
+    ComplianceReport,
+    ComplianceSet,
+    Component,
     ComponentRef,
-    Constraint,
-    ConstraintBounds,
-    ConstraintFinding,
-    ConstraintReport,
-    ConstraintSet,
+    CrossSection,
     DataModel,
     DataModelContext,
     DataRequirement,
     DatasetRegistration,
     EconomicPortfolioIntent,
     EtfInstrument,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
+    ExecutionRole,
     FactorInstrument,
-    FillConvention,
-    FillSelector,
-    FrozenAgenda,
     FrozenRun,
+    FrozenSchedule,
     Hold,
     IndexInstrument,
     Instrument,
@@ -52,14 +47,15 @@ from vqapr.public import (
     IntentSourceRef,
     ListingAccess,
     LocalInstantDeclaration,
-    OperationOccurrence,
-    OperationRole,
     OptimizeRefusal,
     OptimizeResult,
     PortfolioDirection,
     PortfolioTarget,
+    Role,
     RowsLookback,
     RunDefinition,
+    ScheduledEvent,
+    Series,
     Side,
     SimulationFailure,
     SimulationResult,
@@ -70,18 +66,16 @@ from vqapr.public import (
     TradeRule,
     VqaprError,
     callback_evidence,
+    freeze,
     optimize,
-    preflight_run,
-    publish_run_allocation,
-    register_component,
     register_data_model,
     register_dataset,
-    register_execution_input,
     register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
     validate_allocation,
 )
+from vqapr.workspace.registry import Workspace
 
 
 def _registration(**overrides) -> DatasetRegistration:
@@ -91,6 +85,7 @@ def _registration(**overrides) -> DatasetRegistration:
         "key_fields": ("session_date", "instrument"),
         "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
+        "field_types": {"close": "INTEGER", "session_date": "DATE"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of("price_daily", "prices", **kwargs)
@@ -106,18 +101,20 @@ def test_public_exports_are_fixed() -> None:
             AccountSnapshot,
             Budget,
             CalendarLookback,
-            ComponentKind,
+            CrossSection,
+            Component,
+            Role,
             ComponentRef,
-            Constraint,
-            ConstraintBounds,
-            ConstraintFinding,
-            ConstraintReport,
-            ConstraintSet,
+            Compliance,
+            ComplianceCall,
+            ComplianceFinding,
+            ComplianceReport,
+            ComplianceSet,
             DataModel,
             DataModelContext,
             DataRequirement,
             EconomicPortfolioIntent,
-            FrozenAgenda,
+            FrozenSchedule,
             FrozenRun,
             Instrument,
             InstrumentKind,
@@ -126,13 +123,10 @@ def test_public_exports_are_fixed() -> None:
             TradeRule,
             LocalInstantDeclaration,
             AllocationInvariants,
-            AllocationPublicationResult,
-            AllocationPublicationSpec,
             AllocationSign,
             AllocationViolation,
             Hold,
-            OperationOccurrence,
-            OperationRole,
+            ScheduledEvent,
             OptimizeRefusal,
             OptimizeResult,
             PortfolioDirection,
@@ -145,43 +139,45 @@ def test_public_exports_are_fixed() -> None:
             IndexInstrument,
             FactorInstrument,
             SimulationResult,
+            Series,
             Side,
             StrategyModel,
             StrategyModelContext,
             callback_evidence,
             optimize,
-            publish_run_allocation,
-            preflight_run,
-            register_component,
+            freeze,
             register_data_model,
             register_strategy_model,
             run,
-            shipped_constraint_path,
+            shipped_compliance_path,
             validate_allocation,
         )
     )
     assert QUANTUM is public.QUANTUM
-    assert SHIPPED_CONSTRAINTS is public.SHIPPED_CONSTRAINTS
+    assert SHIPPED_COMPLIANCE is public.SHIPPED_COMPLIANCE
     assert public.__all__ == (
         "QUANTUM",
-        "SHIPPED_CONSTRAINTS",
+        "SHIPPED_COMPLIANCE",
         "AcademicExchange",
+        "AccountHistory",
+        "AccountHistoryInput",
         "AccountMode",
         "AccountSnapshot",
         "AllocationInvariants",
-        "AllocationPublicationResult",
-        "AllocationPublicationSpec",
         "AllocationSign",
         "AllocationViolation",
         "Budget",
         "CalendarLookback",
-        "ComponentKind",
+        "Call",
+        "Compliance",
+        "ComplianceCall",
+        "ComplianceFinding",
+        "ComplianceReport",
+        "ComplianceSet",
+        "Component",
         "ComponentRef",
-        "Constraint",
-        "ConstraintBounds",
-        "ConstraintFinding",
-        "ConstraintReport",
-        "ConstraintSet",
+        "CrossSection",
+        "DataCall",
         "DataModel",
         "DataModelContext",
         "DataModelEntry",
@@ -189,20 +185,22 @@ def test_public_exports_are_fixed() -> None:
         "DataRequirement",
         "DatasetInput",
         "DatasetRegistration",
+        "EconomicAccountView",
         "EconomicPortfolioIntent",
         "EtfInstrument",
         "ExactExecutionTarget",
         "ExchangeRulesView",
+        "ExecutionCall",
         "ExecutionFieldRequirement",
-        "ExecutionInputRegistration",
+        "ExecutionRole",
+        "ExecutionTable",
         "ExecutionTableSpec",
         "FactorInstrument",
-        "FillConvention",
         "FillCost",
-        "FillSelector",
-        "FrozenAgenda",
+        "FillRule",
         "FrozenDataModel",
         "FrozenRun",
+        "FrozenSchedule",
         "FrozenStrategy",
         "Grain",
         "Hold",
@@ -213,6 +211,7 @@ def test_public_exports_are_fixed() -> None:
         "InstrumentRoster",
         "IntentSourceRef",
         "KrxExchange",
+        "KrxSettings",
         "KrxTradeRule",
         "ListingAccess",
         "LocalInstantDeclaration",
@@ -220,35 +219,43 @@ def test_public_exports_are_fixed() -> None:
         "MarkBatch",
         "ModelWindow",
         "NeutralizationRefusal",
-        # `docs/issues/031`: the return type of `ModelWindow.observations`, which is the only
-        # method a DataModel author can call, and which could not be imported from the facade.
+        "Observation",
         "ObservationBatch",
-        "OperationOccurrence",
-        "OperationRole",
         "OptimizeRefusal",
         "OptimizeResult",
         "PanelWindow",
+        "Part",
         "PortfolioDirection",
         "PortfolioTarget",
         "Rebalance",
+        "Role",
         "RowsLookback",
         "RunDefinition",
+        "RunExecution",
+        "RunFill",
         "RunRecordMissing",
-        "RunRecordResult",
-        "RunRecordSpec",
+        "RunReport",
         "RunResult",
+        "RunSchedule",
+        "ScheduledEvent",
+        "Series",
         "Side",
         "SideCost",
         "SimulationFailure",
         "SimulationResult",
         "SourceSpec",
+        "Stage",
+        "Status",
         "StockInstrument",
+        "StrategyCall",
         "StrategyEntry",
         "StrategyModel",
         "StrategyModelContext",
         "StrategyOutcome",
+        "StrategyReport",
         "TableSpec",
         "TickerNetting",
+        "Tool",
         "TradeRule",
         "TradeTerms",
         "VqaprError",
@@ -256,7 +263,6 @@ def test_public_exports_are_fixed() -> None:
         "ZeroDealtReason",
         "build_roster",
         "callback_evidence",
-        "component_ref",
         "conformance",
         "decay",
         "declare_local_instant",
@@ -265,45 +271,48 @@ def test_public_exports_are_fixed() -> None:
         "export_roster",
         "fama_french_assign",
         "fama_french_cut_points",
+        "freeze",
         "hit_rate",
         "information_coefficient",
         "instrument",
         "instruments",
+        "intersect",
         "krx_listings",
         "krx_rules",
         "nav_series",
         "net_members",
         "neutralize",
+        "no_short",
         "optimize",
-        "preflight_run",
         "proportional_weight",
-        "publish_run_allocation",
-        "publish_run_record",
         "rank",
         "rank_information_coefficient",
         "read_run_record",
         "read_strategy_record",
         "read_strategy_table",
-        "register_component",
-        "register_constraint",
+        "register_compliance",
         "register_data_model",
         "register_dataset",
         "register_exchange",
-        "register_execution_input",
+        "register_instruments",
         "register_run",
         "register_strategy_model",
+        "requirements_for",
         "rescale",
         "returns",
         "run",
         "run_ids",
-        "shipped_constraint_path",
+        "run_report",
+        "shipped_compliance_path",
         "signal_weight",
+        "single_name_cap",
         "strategy_refs",
+        "strategy_report",
         "trade_rules_by_kind",
         "validate_allocation",
     )
     assert "Workspace" not in public.__all__
-    assert "SimulationFlow" not in public.__all__
+    assert "strategy_loop" not in public.__all__
     assert "DuckDbObservationStore" not in public.__all__
     assert "RunStateRepository" not in public.__all__
     assert "AccountState" not in public.__all__
@@ -326,12 +335,16 @@ def test_schema_failure_does_not_create_a_workspace(tmp_path: Path, hive_parquet
     source = SourceSpec.of("prices", hive_parquet, hive_partitioned=True)
 
     with pytest.raises(VqaprError) as caught:
-        register_dataset(tmp_path, _registration(fields={"close": "missing"}), source)
+        register_dataset(
+            tmp_path,
+            _registration(fields={"close": "missing"}, field_types={"close": "INTEGER"}),
+            source,
+        )
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.schema"
-    assert payload["failures"][0]["code"] == "dataset.register.schema.field_missing"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "dataset.field_missing"
     assert not (tmp_path / ".vqapr").exists()
 
 
@@ -344,10 +357,10 @@ def test_key_failure_does_not_create_a_workspace(tmp_path: Path, dup_parquet: Pa
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.key"
+    assert payload["stage"] == "register"
     assert {failure["code"] for failure in payload["failures"]} == {
-        "dataset.register.key.duplicate",
-        "dataset.register.key.null",
+        "dataset.key_duplicate",
+        "dataset.key_null",
     }
     assert not (tmp_path / ".vqapr").exists()
 
@@ -362,8 +375,8 @@ def test_source_id_mismatch_fails_before_opening_or_mutating(tmp_path: Path) -> 
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "dataset.register.schema"
-    assert payload["failures"][0]["code"] == "dataset.register.schema.source_mismatch"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "dataset.source_mismatch"
     assert not missing.exists()
     assert not (tmp_path / ".vqapr").exists()
 
@@ -377,51 +390,51 @@ def test_source_open_failure_does_not_create_a_workspace(tmp_path: Path) -> None
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "source.scan.path_missing"
+    assert payload["failures"][0]["code"] == "source.path_missing"
     assert not (tmp_path / ".vqapr").exists()
 
 
 @pytest.mark.uc("UC-EXEC-001")
-def test_public_facade_registers_a_valid_execution_input(
+def test_public_facade_registers_a_venue_table_as_a_dataset(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
-    registration = ExecutionInputRegistration.of(
+    """The execution table is data (record `185`): it registers through the dataset door, with
+    an execution role; which price a run fills at is the run's, not the registration's."""
+    registration = DatasetRegistration.of(
         "krx-daily",
-        ExecutionTableSpec(
-            source=SourceSpec.of("execution", execution_parquet),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"close": "close"},
-        ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        "execution",
+        instrument_field="instrument",
+        available_at="trade_at",
+        key_fields=("trade_at", "instrument"),
+        fields={"close": "close", "is_tradable": "is_tradable"},
+        field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        grain="instrument_instant",
+        execution={"is_tradable": "is_tradable"},
     )
+    assert registration.execution == ExecutionRole("is_tradable")
+    source = SourceSpec.of("execution", execution_parquet)
 
-    assert register_execution_input(tmp_path, registration) is True
+    assert register_dataset(tmp_path, registration, source) is True
     before = (tmp_path / ".vqapr" / "workspace.yaml").read_bytes()
-    assert register_execution_input(tmp_path, registration) is False
+    assert register_dataset(tmp_path, registration, source) is False
     assert (tmp_path / ".vqapr" / "workspace.yaml").read_bytes() == before
+    assert Workspace.open(tmp_path).dataset("krx-daily").execution == ExecutionRole("is_tradable")
 
 
 def test_public_run_uses_frozen_initial_model_memory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The strategy layer's frozen memory reaches the loaded strategy, detached (record `139`)."""
-    from vqapr.flow.run import FrozenStrategy
+    from vqapr.run.preflight.frozen import FrozenStrategy
 
     memory = {"carry": [1]}
     layer = object.__new__(FrozenStrategy)
     for name, value in {
         "config": SimpleNamespace(component=SimpleNamespace(component_id="s")),
-        "constraints": SimpleNamespace(constraints=()),
-        "agenda": SimpleNamespace(occurrences=()),
+        "compliance": SimpleNamespace(rules=()),
+        "schedule": SimpleNamespace(events=()),
         "requirements": (),
-        "constraint_requirements": (),
+        "compliance_requirements": (),
         "initial_model_memory": memory,
         "initial_model_state_ref": "frozen-memory-ref",
         "initial_payload": b"",
@@ -431,12 +444,13 @@ def test_public_run_uses_frozen_initial_model_memory(
     frozen = object.__new__(FrozenRun)
     for name, value in {
         "run_id": "facade",
+        "writes": "facade-weights",
         "initial_account_snapshot": AccountSnapshot(0, Decimal("100"), {}),
         "initial_account_mode": AccountMode.LONG_ONLY,
         "exchange": object(),
-        "execution_input": object(),
-        "strategies": (layer,),
-        "datamodels": (),
+        "execution": object(),
+        "strategy": layer,
+        "datamodel": None,
         "datasets": (),
         "sources": (),
         "instruments": ("A",),
@@ -451,6 +465,11 @@ def test_public_run_uses_frozen_initial_model_memory(
     )
     observed: dict[str, object] = {}
 
+    # What `public.run` reads off a finished run and nothing more: the recorder rows it
+    # publishes under `writes` (none here, so nothing is published). One object, so the
+    # assertions below can check identity: the outcome carries what the flow returned.
+    finished = SimpleNamespace(final_state=SimpleNamespace(recorder_rows={}))
+
     class Flow:
         def __init__(self, _frozen, loaded_strategy, state, **_kwargs) -> None:
             observed["frozen"] = _frozen
@@ -458,7 +477,7 @@ def test_public_run_uses_frozen_initial_model_memory(
             observed["ref"] = state.root.current_model_state_ref
 
         def run(self) -> object:
-            return "result"
+            return finished
 
     class State:
         def __init__(self, **_kwargs) -> None:
@@ -469,24 +488,19 @@ def test_public_run_uses_frozen_initial_model_memory(
 
     monkeypatch.setattr(
         orchestration,
-        "preflight_run",
+        "freeze",
         lambda *_args: pytest.fail("run must not preflight a FrozenRun"),
     )
-    # `run` lives in `vqapr.flow.orchestration` since record `111`, so the loader it calls is
+    # `run` lives in `vqapr.run.assemble` since record `111`, so the loader it calls is
     # patched there. `vqapr.public.run` is the same function object, re-exported.
     monkeypatch.setattr(orchestration, "load_strategy_model", lambda *_a, **_k: strategy)
     monkeypatch.setattr(orchestration, "load_exchange", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(
-        orchestration,
-        "validate_execution_input",
-        lambda _registration: SimpleNamespace(raise_if_failed=lambda: None),
-    )
     monkeypatch.setattr(orchestration, "RunStateRepository", State)
-    monkeypatch.setattr(orchestration, "SimulationFlow", Flow)
+    monkeypatch.setattr(orchestration, "strategy_loop", Flow)
 
     outcome = public.run(tmp_path, frozen)
-    assert outcome.result() == "result"
-    assert outcome.results == {"s": "result"}
+    assert outcome.result() is finished
+    assert outcome.results == {"s": finished}
     memory["carry"].append(2)
     assert observed == {
         "frozen": frozen,
@@ -501,7 +515,9 @@ def test_public_run_rejects_anything_other_than_a_frozen_run(tmp_path: Path) -> 
 
 
 @pytest.mark.uc("UC-FILL-001")
-def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> None:
+def test_a_non_positive_execution_price_is_measured_without_creating_a_workspace(
+    tmp_path: Path,
+) -> None:
     target = tmp_path / "bad-execution.parquet"
     con = duckdb.connect()
     try:
@@ -509,31 +525,31 @@ def test_execution_price_failure_does_not_create_a_workspace(tmp_path: Path) -> 
             f"""COPY (
                 SELECT TIMESTAMPTZ '2024-03-05 15:30:00+09' AS trade_at,
                        'A' AS instrument, true AS is_tradable,
-                       99.0 AS open, CAST('NaN' AS DOUBLE) AS close
+                       99.0::DOUBLE AS open, 0.0::DOUBLE AS close
             ) TO '{target.as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()
-    registration = ExecutionInputRegistration.of(
+    from vqapr.data.dataset import DatasetRegistration
+    from vqapr.data.verification import verify_source
+
+    registration = DatasetRegistration.of(
         "krx-daily",
-        ExecutionTableSpec(
-            source=SourceSpec.of("execution", target),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"open": "open", "close": "close"},
-        ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price="close",
-        ),
+        "execution",
+        instrument_field="instrument",
+        available_at="trade_at",
+        key_fields=("trade_at", "instrument"),
+        fields={"open": "open", "close": "close", "is_tradable": "is_tradable"},
+        field_types={"open": "DOUBLE", "close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        grain="instrument_instant",
+        execution={"is_tradable": "is_tradable"},
     )
 
-    with pytest.raises(VqaprError) as caught:
-        register_execution_input(tmp_path, registration)
+    # The one door measures which prices are finite and positive wherever a row is tradable
+    # (record `234`); a run that chooses `close` is refused at preflight by that fact. Nothing
+    # here touches a workspace.
+    diagnosis, _, measured = verify_source(registration, SourceSpec.of("execution", target))
 
-    assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "execution_input.register.price.invalid"
+    assert diagnosis.ok
+    assert measured.execution_prices == ("open",)
     assert not (tmp_path / ".vqapr").exists()

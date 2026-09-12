@@ -1,6 +1,6 @@
 # 121 — A content check counts before it refuses
 
-**Closes:** `docs/issues/032-a-content-check-fails-fast-and-then-reports-a-count-of-zero.md`
+**Closes:** `docs/issues/archive/032-a-content-check-fails-fast-and-then-reports-a-count-of-zero.md`
 (F-006, found by the first-time-user journey in `kaist-thesis/vqapr-final-testbed/` against
 `vqapr-0.2.0a1`).
 **Branch:** `fix-032-refusal-counts`.

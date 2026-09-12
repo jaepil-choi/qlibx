@@ -86,6 +86,19 @@ def _decimal(value: object, *, name: str) -> Decimal:
     return value
 
 
+def finite_exponent(value: Decimal) -> int:
+    """The power of ten a finite Decimal's last digit sits at.
+
+    A NaN or an infinity carries a letter in that slot instead of a number, so a caller that
+    has already refused those reads an integer here; one that has not is told so rather than
+    handed a comparison against a string.
+    """
+    exponent = value.as_tuple().exponent
+    if not isinstance(exponent, int):
+        raise RuntimeError(f"{value} is not finite, so it has no grid exponent")
+    return exponent
+
+
 def _on_grid(value: Decimal, *, name: str) -> Decimal:
     """Refuse an input finer than the canonical grid, naming it.
 
@@ -94,10 +107,14 @@ def _on_grid(value: Decimal, *, name: str) -> Decimal:
     while this function reported success.
     """
     _decimal(value, name=name)
-    if value.as_tuple().exponent < QUANTIZATION_EXPONENT:
+    if finite_exponent(value) < QUANTIZATION_EXPONENT:
         raise OptimizeRefusal(
             f"{name} has exponent finer than the canonical grid {QUANTUM}; "
-            "coarser bounds are accepted, finer ones are not"
+            "coarser bounds are accepted, finer ones are not. Build the box with "
+            "vqapr.portfolio.bounds (no_short, single_name_cap, intersect), which rounds inward "
+            f"onto the grid; or quantize yourself, an upper bound with ROUND_FLOOR and a lower "
+            f"bound with ROUND_CEILING to {QUANTUM}, so rounding tightens a mandate and never "
+            "loosens it"
         )
     return value
 

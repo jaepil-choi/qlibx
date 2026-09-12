@@ -21,7 +21,7 @@ between the file and the window" is what this closes; §17.1.4's sharing across 
 is deferred to Step 7 with Noun 3, per design §7-2.
 
 **Status update 2026-09-01 — this file now has two halves with different fates.** The campaign is
-anchored at [049](049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
+anchored at [049](archive/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 
 **Update 2026-09-01, later the same day: the validation half is CLOSED.**
 `docs/implementations/119-*.md` moved every check `normalize_scalar` performed into registration and
@@ -30,7 +30,7 @@ removed the read-path pass. **This file's addendum is what made that a move rath
 registration refusal it warned would be needed. The remaining open half is the columnar accessor,
 below, and it is still waiting on lane C.
 
-- **The validation half is scheduled**, as [044](044-the-read-path-revalidates-eight-column-names-once-per-row.md),
+- **The validation half is scheduled**, as [044](archive/044-the-read-path-revalidates-eight-column-names-once-per-row.md),
   which measured that the *key* check — not the per-cell value check this file examined — is the
   larger part of `normalize_rows`. The ruling below governs both.
 - **The columnar-accessor half stays open and is deliberately NOT decided yet.** This file's case for

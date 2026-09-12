@@ -21,7 +21,7 @@ import time as _time
 from pathlib import Path
 
 from vqapr._internal import filelock
-from vqapr.workspace import (
+from vqapr.workspace.registry import (
     WORKSPACE_LOCK_FILENAME,
     WORKSPACE_LOCK_STALE_AFTER,
     WORKSPACE_LOCK_TIMEOUT,
@@ -85,8 +85,9 @@ def test_the_workspace_still_refuses_a_contended_write_with_its_own_vocabulary(
 ) -> None:
     """A shared mutex must not own its caller's failure vocabulary.
 
-    A workspace refusal names the workspace and carries `WORKSPACE_STATE`. That is why `on_timeout`
-    is a caller-supplied factory rather than a fixed error type inside the lock.
+    A workspace refusal names the workspace and says who must act (423: another process holds
+    it). That is why `on_timeout` is a caller-supplied factory rather than a fixed error type
+    inside the lock.
     """
     workspace = Workspace.create(tmp_path)
     lock = workspace.path.parent / WORKSPACE_LOCK_FILENAME
@@ -95,6 +96,7 @@ def test_the_workspace_still_refuses_a_contended_write_with_its_own_vocabulary(
 
     refusal = workspace._locked_refusal(lock, WORKSPACE_LOCK_TIMEOUT)
 
-    assert refusal.stage == "workspace.write"
-    assert refusal.failures[0].code == "workspace.write.locked"
+    assert refusal.stage == "write"
+    assert refusal.failures[0].code == "workspace.locked"
+    assert refusal.failures[0].status == 423
     assert str(workspace.path) in refusal.failures[0].requirement

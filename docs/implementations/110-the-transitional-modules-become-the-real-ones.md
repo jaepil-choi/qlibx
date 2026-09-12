@@ -1,7 +1,7 @@
 # 110 — The transitional modules become the real ones
 
 **Closes:** Step 6 of the approved structural plan, and discharges the deletion promise
-`docs/issues/029` left open.
+`docs/issues/archive/029` left open.
 **Branch:** `step-06-the-transitional-modules-become-real`.
 
 ## Why this change exists
@@ -25,7 +25,7 @@ the first changes every call site to reach into a private package, and the secon
 `src/vqapr/_internal/extensions/` no longer exists. History follows the files because the move went
 through git rather than a copy-and-delete.
 
-**No caller changed a line.** That is exactly what the one-door rule from `docs/issues/029` bought:
+**No caller changed a line.** That is exactly what the one-door rule from `docs/issues/archive/029` bought:
 because every importer already reached these authorities through `vqapr.extension.*`, the promotion
 was invisible to all of them. Had callers been split across two doors, this step would have been a
 grep.
@@ -67,7 +67,7 @@ behind it. What replaces them:
 
 - `_internal/extensions/` **does not exist**, and a change recreating it fails. That is the outcome,
   asserted so it cannot quietly come back — a reappearance would restore the exact two-door shape
-  `docs/issues/029` was filed about.
+  `docs/issues/archive/029` was filed about.
 - The promoted modules **define rather than forward**. They were four-line re-exports; if one shrinks
   back to that, the move was undone.
 - The surviving discipline: `_internal` is not a general-purpose import target, its permitted

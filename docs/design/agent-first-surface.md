@@ -320,8 +320,15 @@ statement for `vqapr.public`, excluding every occurrence inside a string literal
 what makes that exclusion real: template text and refusal strings are `Constant` nodes and are
 structurally invisible to it.
 
-**Verified value: 5**, as of 2026-09-01, asserted by
+**Verified value: 3**, as of 2026-09-08 (record `172`), asserted by
 `tests/boundaries/test_the_facade_is_not_reached_up_to.py`.
+
+It was **2** between records `170` and `172`: `172` shipped `agent/sample/exchange.py` again,
+behind `vqapr new sample`, so a user's copy of it reaches the facade the way a user does.
+It was **4** until record `170` moved `agent/sample/exchange.py` and `agent/sample/journey.py` to
+`tests/sample/`: no command, public name or skill path reached the sample, so it was test code
+shipped in the wheel -- the shape record `124` deleted. It was **5** as of 2026-09-01, before
+record `125` took the facade import out of `_internal/strategy_bridge.py`.
 
 It was **11** until record `124` deleted `project.py` and the five `_internal` bridges reachable
 only from it. What remains is four permanent entries — two CLI verbs and two shipped samples using
@@ -331,7 +338,8 @@ adapt a StrategyModel authored against `vqapr.authoring`. It goes when the two a
 become one.
 
 It was **12** until `docs/implementations/112-registration-without-the-cli.md` moved
-`cli/register.py`'s declaration parsing into `vqapr/declarations.py`. That module reaches the
+`cli/register.py`'s declaration parsing into `vqapr/declarations.py` (now
+`vqapr/project/registration.py`, record `194`). That module reaches the
 owning modules directly rather than the facade, so the verb stopped being an importer. The
 original count was confirmed by running the command below on 2026-08-28.
 
@@ -393,7 +401,7 @@ later reader can tell an inherited edge from a new one.
 The tripwire above watches modules reaching **up** to `vqapr.public`. This section watches the
 other end: modules reaching **past** the four forwarding adapters under `extension/` into
 `_internal/extensions/`, which is the same failure — a boundary documented in prose and enforced by
-nothing — measured at the bottom of the package instead of the top. `docs/issues/029` is the file
+nothing — measured at the bottom of the package instead of the top. `docs/issues/archive/029` is the file
 that found it.
 
 **The rule.** `vqapr.extension.component`, `.fingerprint`, `.loading` and `.registration` are the
@@ -420,7 +428,7 @@ frozen cluster above — unshipped, no new callers, no growth — so its `_inter
 inherited edges recorded here rather than an example to copy.
 
 `tests/boundaries/test_internal_has_one_door.py` enforces this list by AST walk, including
-function-local imports, because the three bypasses `docs/issues/029` found were all inside function
+function-local imports, because the three bypasses `docs/issues/archive/029` found were all inside function
 bodies and a header-only check would have called those files clean. `tests/` are deliberately out of
 scope: they may reach the physical home directly, and
 `tests/extension/test_agent_first_internal_routes.py` exists to do exactly that.
@@ -506,6 +514,21 @@ scaffold-propagation finding all come from.
 
 **It stays untracked and untouched, by owner ruling.** Nothing is `git add`ed out of it, no file is
 relocated into `docs/`, and it is not committed. This ruling and
-`docs/issues/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
+`docs/issues/archive/011-the-documented-surface-cannot-reach-a-cost.md` cite it by path, which is the
 intended durability: the conclusions are carried by tracked documents, and the raw journey stays
 where a later run can regenerate or replace it without a repository decision.
+
+## Addendum (2026-09-12): the CLI reads through the surfaces
+
+Owner ruling AC4 (concept-tree campaign, 2026-09-11) states the CLI's side of this boundary: `cli/`
+imports `vqapr.public`, the application layer (`workspace`, `run`, `record`, `report`, `agent`) and
+`domain.errors`, and nothing else. It changes nothing above or below the facade -- the facade is still
+the CLI's supported surface, and no module below the CLI may import it. What it changes is the
+tripwire's floor: three more verbs, `cli/list_.py`, `cli/new.py` and `cli/show.py`, now take `Role`,
+`AccountMode`, `InstrumentKind`, `StrategyModel` and `Compliance` from the facade rather than from
+`domain` and `component`, so the importer count is **6** (record `277`).
+
+The services those verbs had assembled from internals got application-layer doors rather than facade
+entries: `workspace.registry.load_registered`, `run.roster.read_roster_tables`,
+`workspace.preview.preview_dataset`, and the scaffold `vqapr new` renders moved to
+`agent/scaffold.py`. `tests/boundaries/test_the_cli_reads_through_the_surfaces.py` holds the rule.

@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "roster": {
+    "known": false,
+    "note": "no instrument roster is registered, so every fill records kind: None and cost_by_kind() collapses to one unlabelled bucket; register one with `vqapr register <instruments>.yaml`"
+  },
+  "run_id": "review-bounded",
+  "stage": "run.complete",
+  "store_root": "D:\\chljeffreyz\\DevProjects\\qlibx\\.agent\\runs\\v060-call-flow-review\\sample\\.vqapr",
+  "strategies": {
+    "sample-reversal-5d": {
+      "account_version": 10,
+      "contract": {
+        "accepted_intents": 10
+      },
+      "fills": {
+        "dealt": 36,
+        "never_filled": [],
+        "orders": 42,
+        "partial": 0,
+        "reasons": {
+          "no_trade": 6
+        },
+        "zero_dealt": 6
+      },
+      "fingerprint": "be532e917d4fcaa899c978a71b267f2422cc2e5088139b7960849ba6c2cf50a1",
+      "occurrences": 20,
+      "record": "sample-reversal-5d@be532e91",
+      "status": "completed",
+      "tables": [
+        "vqapr.account",
+        "vqapr.fill",
+        "vqapr.weight"
+      ],
+      "timing": {
+        "callback": 0.18598,
+        "due": 0.063598,
+        "simulation.due.account_commit": 0.000401,
+        "simulation.due.account_mark": 0.022679,
+        "simulation.due.account_preparation": 0.001956,
+        "simulation.due.exchange_execution": 0.003031,
+        "simulation.due.feedback_candidate": 0.000114,
+        "simulation.due.feedback_publication": 0.000392,
+        "simulation.due.order_planning": 0.006429,
+        "simulation.due.snapshot": 0.02488,
+        "simulation.due.valuation_mark": 0.001173,
+        "simulation.due.valuation_selection": 0.000432,
+        "total": 0.292357
+      }
+    }
+  },
+  "workspace_root": "D:\\chljeffreyz\\DevProjects\\qlibx\\.agent\\runs\\v060-call-flow-review\\sample"
+}

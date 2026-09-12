@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from vqapr.component.reference import ComponentRef
 from vqapr.data import scan
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.workspace.registry import Workspace
 
 # A span these tests supply directly. Persistence requires one, because the span is measured
 # during validation and a stored registration missing it would force the next reader to re-read
@@ -33,6 +32,7 @@ def _registration(raw_id: str = "price_daily", **overrides) -> DatasetRegistrati
         "key_fields": ("session_date", "instrument"),
         "grain": "rows",
         "fields": {"close": "close", "session_date": "session_date"},
+        "field_types": {"close": "INTEGER", "session_date": "DATE"},
     }
     kwargs.update(overrides)
     return DatasetRegistration.of(raw_id, "prices", **kwargs).with_span(*_SPAN)
@@ -44,32 +44,27 @@ def _source(**overrides) -> SourceSpec:
     return SourceSpec.of("prices", "prepared/price_daily", **kwargs)
 
 
-def _execution(
-    path: Path, raw_id: str = "krx-daily", *, trade_price: str = "close"
-) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
+def _venue(raw_id: str = "krx-daily") -> DatasetRegistration:
+    """A venue table: a dataset with an execution role (record 185). The fill is the run's."""
+    return DatasetRegistration.of(
         raw_id,
-        ExecutionTableSpec(
-            source=SourceSpec.of("krx-execution", path),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"open": "open", "close": "close"},
-        ),
-        FillConvention(
-            selector=FillSelector.NEXT_ELIGIBLE,
-            local_time=time(15, 30),
-            timezone="Asia/Seoul",
-            trade_price=trade_price,
-        ),
-    )
+        'krx-execution',
+        instrument_field="instrument",
+        available_at="trade_at",
+        grain="instrument_instant",
+        key_fields=("trade_at", "instrument"),
+        fields={"open": "open", "close": "close", "is_tradable": "is_tradable"},
+        field_types={"open": "DOUBLE", "close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        execution={"is_tradable": "is_tradable"},
+    ).with_span(*_SPAN)
 
 
 def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
     expected = _registration()
     workspace = Workspace.create(tmp_path)
 
-    assert workspace.register_dataset(expected, _source()) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(expected, _source()) is True
 
     reopened = Workspace.open(tmp_path)
     assert reopened.dataset("price_daily") == expected
@@ -77,11 +72,15 @@ def test_registration_survives_reopening_the_workspace(tmp_path: Path) -> None:
 
 def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
     first = _registration()
-    second = _registration("price_adjusted", fields={"close": "adjusted_close"})
+    second = _registration(
+        "price_adjusted", fields={"close": "adjusted_close"}, field_types={"close": "INTEGER"}
+    )
     workspace = Workspace.create(tmp_path)
 
-    workspace.register_dataset(first, _source())
-    workspace.register_dataset(second, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(first, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(second, _source())
 
     reopened = Workspace.open(tmp_path)
     assert {item.dataset_id: item for item in reopened.datasets} == {
@@ -93,27 +92,32 @@ def test_two_datasets_are_both_queryable_after_reopen(tmp_path: Path) -> None:
 def test_identical_reregistration_is_an_idempotent_noop(tmp_path: Path) -> None:
     registration = _registration()
     workspace = Workspace.create(tmp_path)
-    assert workspace.register_dataset(registration, _source()) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(registration, _source()) is True
     before = workspace.path.read_bytes()
 
-    assert workspace.register_dataset(_registration(), _source()) is False
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(_registration(), _source()) is False
     assert workspace.path.read_bytes() == before
 
 
 def test_conflicting_reregistration_fails_without_mutation(tmp_path: Path) -> None:
     original = _registration()
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(original, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(original, _source())
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(_registration(fields={"open": "open"}), _source())
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(
+            _registration(fields={"open": "open"}, field_types={"open": "INTEGER"}), _source()
+        )
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert [failure["code"] for failure in payload["failures"]] == [
-        "workspace.dataset.register.conflict"
+        "dataset.registered"
     ]
     assert workspace.path.read_bytes() == before
     assert Workspace.open(tmp_path).dataset("price_daily") == original
@@ -125,7 +129,7 @@ def test_opening_a_missing_workspace_is_a_structured_failure(tmp_path: Path) -> 
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.missing"
+    assert payload["failures"][0]["code"] == "workspace.missing"
 
 
 def test_opening_malformed_yaml_is_a_structured_failure(tmp_path: Path) -> None:
@@ -138,7 +142,7 @@ def test_opening_malformed_yaml_is_a_structured_failure(tmp_path: Path) -> None:
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.invalid"
+    assert payload["failures"][0]["code"] == "workspace.invalid"
 
 
 def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
@@ -147,8 +151,10 @@ def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
     first = Workspace.create(first_root)
     second = Workspace.create(second_root)
 
-    first.register_dataset(_registration(), _source())
-    second.register_dataset(_registration("fundamentals"), _source())
+    with Workspace.transaction(first) as t:
+        t.register_dataset(_registration(), _source())
+    with Workspace.transaction(second) as t:
+        t.register_dataset(_registration("fundamentals"), _source())
 
     assert [str(item.dataset_id) for item in Workspace.open(first_root).datasets] == ["price_daily"]
     assert [str(item.dataset_id) for item in Workspace.open(second_root).datasets] == [
@@ -158,7 +164,8 @@ def test_explicit_workspaces_do_not_share_declarations(tmp_path: Path) -> None:
 
 def test_direct_construction_cannot_bypass_an_existing_workspace(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
     before = workspace.path.read_bytes()
 
     with pytest.raises(TypeError, match=r"Workspace\.create.*Workspace\.open"):
@@ -169,11 +176,14 @@ def test_direct_construction_cannot_bypass_an_existing_workspace(tmp_path: Path)
 
 def test_stale_instance_merges_with_current_durable_state(tmp_path: Path) -> None:
     current = Workspace.create(tmp_path)
-    current.register_dataset(_registration("one"), _source())
+    with Workspace.transaction(current) as t:
+        t.register_dataset(_registration("one"), _source())
     stale = Workspace.open(tmp_path)
 
-    current.register_dataset(_registration("two"), _source())
-    stale.register_dataset(_registration("three"), _source())
+    with Workspace.transaction(current) as t:
+        t.register_dataset(_registration("two"), _source())
+    with Workspace.transaction(stale) as t:
+        t.register_dataset(_registration("three"), _source())
 
     assert [str(item.dataset_id) for item in Workspace.open(tmp_path).datasets] == [
         "one",
@@ -185,15 +195,16 @@ def test_stale_instance_merges_with_current_durable_state(tmp_path: Path) -> Non
 def test_idempotent_registration_rechecks_that_workspace_still_exists(tmp_path: Path) -> None:
     registration = _registration()
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(registration, _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(registration, _source())
     workspace.path.unlink()
 
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(registration, _source())
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(registration, _source())
 
     payload = caught.value.as_dict()
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.open.missing"
+    assert payload["failures"][0]["code"] == "workspace.missing"
     assert not workspace.path.exists()
 
 
@@ -201,7 +212,8 @@ def test_source_spec_survives_reopening_the_workspace(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
     source = _source()
 
-    workspace.register_dataset(_registration(), source)
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), source)
 
     assert Workspace.open(tmp_path).source("prices") == source
 
@@ -213,9 +225,9 @@ def test_invalid_dataset_id_lookup_is_a_structured_failure(tmp_path: Path) -> No
         workspace.dataset("bad id")
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.invalid"
+    assert payload["failures"][0]["code"] == "dataset.reference_invalid"
 
 
 def test_missing_dataset_lookup_is_a_structured_failure(tmp_path: Path) -> None:
@@ -225,48 +237,49 @@ def test_missing_dataset_lookup_is_a_structured_failure(tmp_path: Path) -> None:
         workspace.dataset("missing")
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.lookup.missing"
+    assert payload["failures"][0]["code"] == "dataset.unregistered"
 
 
 def test_registration_rejects_a_mismatched_source_without_mutation(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), SourceSpec.of("other", "prepared/other"))
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_mismatch"
+    assert payload["failures"][0]["code"] == "dataset.source_mismatch"
     assert workspace.path.read_bytes() == before
 
 
 def test_conflicting_source_spec_fails_without_mutation(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
     before = workspace.path.read_bytes()
 
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_dataset(
+    with pytest.raises(VqaprError) as caught, Workspace.transaction(workspace) as t:
+        t.register_dataset(
             _registration("price_adjusted"),
             _source(hive_partitioned=False),
         )
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.dataset.register"
+    assert payload["stage"] == "register"
     assert payload["mutation"] is False
-    assert payload["failures"][0]["code"] == "workspace.dataset.register.source_conflict"
+    assert payload["failures"][0]["code"] == "dataset.source_conflict"
     assert workspace.path.read_bytes() == before
 
 
 @pytest.mark.parametrize(
     ("raw_source_id", "code"),
     [
-        ("bad id", "workspace.source.lookup.invalid"),
-        ("missing", "workspace.source.lookup.missing"),
+        ("bad id", "source.reference_invalid"),
+        ("missing", "source.unregistered"),
     ],
 )
 def test_source_lookup_failures_are_structured(
@@ -278,93 +291,44 @@ def test_source_lookup_failures_are_structured(
         workspace.source(raw_source_id)
 
     payload = caught.value.as_dict()
-    assert payload["stage"] == "workspace.source.lookup"
+    assert payload["stage"] == "lookup"
     assert payload["mutation"] is False
     assert payload["failures"][0]["code"] == code
 
 
-def test_execution_input_round_trips_through_workspace(
+def test_a_venue_dataset_round_trips_its_execution_role(
     tmp_path: Path, execution_parquet: Path
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    expected = _execution(execution_parquet)
+    expected = _venue()
+    source = SourceSpec.of("krx-execution", execution_parquet)
 
-    assert workspace.register_execution_input(expected) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_dataset(expected, source) is True
 
     reopened = Workspace.open(tmp_path)
-    assert reopened.execution_input("krx-daily") == expected
-    assert reopened.execution_inputs == (expected,)
-    assert reopened.source("krx-execution") == expected.table.source
+    assert reopened.dataset("krx-daily") == expected
+    assert reopened.dataset("krx-daily").execution is not None
+    assert reopened.dataset("krx-daily").execution.is_tradable == "is_tradable"
+    assert reopened.source("krx-execution") == source
 
 
-def test_execution_input_round_trips_fill_dst_proof(
-    tmp_path: Path, execution_parquet: Path
+def test_a_document_still_declaring_execution_inputs_is_refused_by_name(
+    tmp_path: Path,
 ) -> None:
-    workspace = Workspace.create(tmp_path)
-    base = _execution(execution_parquet)
-    expected = ExecutionInputRegistration.of(
-        str(base.execution_input_id),
-        base.table,
-        FillConvention(
-            selector=base.fill.selector,
-            local_time=base.fill.local_time,
-            timezone=base.fill.timezone,
-            trade_price=base.fill.trade_price,
-            fold=1,
-            offset="+09:00",
-        ),
-    )
-
-    assert workspace.register_execution_input(expected) is True
-    assert Workspace.open(tmp_path).execution_input("krx-daily") == expected
-
-
-def test_workspace_rejects_old_fill_schema_without_dst_proof(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    workspace.register_execution_input(_execution(execution_parquet))
-    path = workspace.path
-    path.write_text(
-        path.read_text(encoding="utf-8")
-        .replace("      fold: null\n", "")
-        .replace("      offset: null\n", ""),
+    """`execution_inputs:` is retired (record 185); the refusal says where the fill went."""
+    workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
+    workspace_path.parent.mkdir(parents=True)
+    workspace_path.write_text(
+        "sources: {}\ndatasets: {}\nexecution_inputs:\n  krx-daily:\n    trade_price: close\n",
         encoding="utf-8",
     )
 
-    with pytest.raises(VqaprError, match="old fill schema"):
+    with pytest.raises(VqaprError, match="execution_inputs is retired"):
         Workspace.open(tmp_path)
 
 
-def test_execution_input_registration_is_idempotent(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    registration = _execution(execution_parquet)
-
-    assert workspace.register_execution_input(registration) is True
-    before = workspace.path.read_bytes()
-    assert workspace.register_execution_input(registration) is False
-    assert workspace.path.read_bytes() == before
-
-
-def test_conflicting_execution_input_fails_without_mutation(
-    tmp_path: Path, execution_parquet: Path
-) -> None:
-    workspace = Workspace.create(tmp_path)
-    workspace.register_execution_input(_execution(execution_parquet))
-    before = workspace.path.read_bytes()
-
-    with pytest.raises(VqaprError) as caught:
-        workspace.register_execution_input(_execution(execution_parquet, trade_price="open"))
-
-    assert caught.value.stage == "workspace.execution_input.register"
-    assert caught.value.mutation is False
-    assert caught.value.failures[0].code == "workspace.execution_input.register.conflict"
-    assert workspace.path.read_bytes() == before
-
-
-def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -> None:
+def test_legacy_workspace_without_components_or_runs_still_opens(tmp_path: Path) -> None:
     workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
     workspace_path.parent.mkdir(parents=True)
     workspace_path.write_text("sources: {}\ndatasets: {}\n", encoding="utf-8")
@@ -372,21 +336,21 @@ def test_legacy_workspace_without_execution_inputs_still_opens(tmp_path: Path) -
     workspace = Workspace.open(tmp_path)
 
     assert workspace.datasets == ()
-    assert workspace.execution_inputs == ()
 
 
 def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> None:
     workspace = Workspace.create(tmp_path)
     expected = ComponentRef.of(
         "reversal",
-        ComponentKind.DATA_MODEL,
+        Role.DATA_MODEL,
         tmp_path / "reversal.py",
         "ReversalModel",
         config={"window": 20},
         fingerprint="a" * 64,
     )
 
-    assert workspace.register_component(expected) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_component(expected) is True
     assert Workspace.open(tmp_path).component("reversal") == expected
     assert Workspace.open(tmp_path).components == (expected,)
 
@@ -394,7 +358,7 @@ def test_datamodel_component_round_trips_through_workspace(tmp_path: Path) -> No
 def test_legacy_workspace_without_components_still_opens(tmp_path: Path) -> None:
     workspace_path = tmp_path / ".vqapr" / "workspace.yaml"
     workspace_path.parent.mkdir(parents=True)
-    workspace_path.write_text("sources: {}\ndatasets: {}\nexecution_inputs: {}\n", encoding="utf-8")
+    workspace_path.write_text("sources: {}\ndatasets: {}\nruns: {}\n", encoding="utf-8")
 
     workspace = Workspace.open(tmp_path)
 
@@ -435,7 +399,8 @@ def test_a_workspace_holding_a_pre_span_registration_still_opens(tmp_path: Path)
     """
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "beta", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 2)
 
     reopened = Workspace.open(tmp_path)
@@ -453,7 +418,8 @@ def test_using_a_quarantined_registration_names_the_command_that_repairs_it(
     """Admitted at decode, refused at use. Nothing may consume a registration without a span."""
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 1)
     reopened = Workspace.open(tmp_path)
 
@@ -461,7 +427,7 @@ def test_using_a_quarantined_registration_names_the_command_that_repairs_it(
         reopened.dataset("alpha")
 
     failure = refused.value.failures[0]
-    assert failure.code == "dataset.register.span.absent"
+    assert failure.code == "dataset.span_absent"
     assert "alpha" in (failure.observed or "")
     assert "vqapr register <declaration.yaml>" in (refused.value.retry_precondition or "")
 
@@ -479,19 +445,22 @@ def test_the_advertised_repair_command_actually_runs(tmp_path: Path) -> None:
     """
     workspace = Workspace.create(tmp_path)
     for name in ("alpha", "beta", "gamma"):
-        workspace.register_dataset(_registration(name), _source())
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
     _make_legacy(workspace, 2)
 
-    Workspace.open(tmp_path).register_dataset(_registration("alpha"), _source())
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(_registration("alpha"), _source())
 
     repaired = Workspace.open(tmp_path)
     assert repaired.span("alpha") == _SPAN
     assert repaired.span("gamma") == _SPAN, "repairing one dataset disturbed a healthy one"
     with pytest.raises(VqaprError) as still_stale:
         repaired.dataset("beta")
-    assert still_stale.value.failures[0].code == "dataset.register.span.absent"
+    assert still_stale.value.failures[0].code == "dataset.span_absent"
 
-    Workspace.open(tmp_path).register_dataset(_registration("beta"), _source())
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(_registration("beta"), _source())
     final = Workspace.open(tmp_path)
     assert all(final.span(name) == _SPAN for name in ("alpha", "beta", "gamma"))
 
@@ -506,15 +475,69 @@ def test_repairing_a_quarantined_registration_may_not_change_its_declaration(
     dataset under cover of the migration.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration("alpha"), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration("alpha"), _source())
     _make_legacy(workspace, 1)
 
-    with pytest.raises(VqaprError) as refused:
-        Workspace.open(tmp_path).register_dataset(
-            _registration("alpha", key_fields=("instrument",)), _source()
-        )
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(tmp_path) as t:
+        t.register_dataset(_registration("alpha", key_fields=("instrument",)), _source())
 
-    assert refused.value.failures[0].code == "workspace.dataset.register.conflict"
+    assert refused.value.failures[0].code == "dataset.registered"
+
+
+def _make_undeclared(workspace: Workspace, count: int) -> None:
+    """Rewrite the first `count` registrations into the shape they had before `field_types`.
+
+    The `field_types:` key and its indented entries are removed and nothing else: a document
+    written before `docs/issues/archive/088`, not a corrupt one.
+    """
+    kept: list[str] = []
+    dropping = False
+    stripped = 0
+    for line in workspace.path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "field_types:" and stripped < count:
+            dropping = True
+            stripped += 1
+            continue
+        if dropping:
+            if len(line) - len(line.lstrip()) > 4:
+                continue
+            dropping = False
+        kept.append(line)
+    assert stripped == count, "the fixture did not strip the field_types it meant to"
+    workspace.path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+
+def test_a_registration_without_field_types_is_quarantined_not_a_deadlock(tmp_path: Path) -> None:
+    """`docs/issues/archive/088`: the same quarantine as a missing span, for the key it introduced.
+
+    An entry that predates `field_types` still opens and lists (or nothing could report it),
+    every read on it is refused by name until its author declares the types, and registering it
+    again with them is the repair -- through the same `register` the refusal advertises.
+    """
+    from vqapr.data.dataset import require_declared
+
+    workspace = Workspace.create(tmp_path)
+    for name in ("alpha", "gamma"):
+        with Workspace.transaction(workspace) as t:
+            t.register_dataset(_registration(name), _source())
+    _make_undeclared(workspace, 1)
+
+    reopened = Workspace.open(tmp_path)
+    assert sorted(str(item.dataset_id) for item in reopened.datasets) == ["alpha", "gamma"]
+    assert reopened.dataset("alpha").field_types is None
+    assert reopened.dataset("gamma") == _registration("gamma")
+
+    with pytest.raises(VqaprError) as refused:
+        require_declared(reopened.dataset("alpha"))
+    failure = refused.value.failures[0]
+    assert failure.code == "dataset.field_types_undeclared"
+    assert "alpha" in (failure.observed or "")
+    assert "field_types:" in failure.fix, "the refusal must name the key that repairs it"
+
+    with Workspace.transaction(tmp_path) as t:
+        assert t.register_dataset(_registration("alpha"), _source()) is True
+    assert Workspace.open(tmp_path).dataset("alpha") == _registration("alpha")
 
 
 def test_reading_a_span_does_not_touch_the_source(
@@ -529,7 +552,8 @@ def test_reading_a_span_does_not_touch_the_source(
     reaching one is the failure, not merely being slow.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_dataset(_registration(), _source())
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(_registration(), _source())
 
     def _trap(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("reading a persisted span must not open the source")
@@ -558,10 +582,94 @@ def test_persistence_refuses_a_registration_whose_span_was_never_measured(
         grain="rows",
         key_fields=("session_date", "instrument"),
         fields={"close": "close"},
+        field_types={"close": "INTEGER"},
     )
 
-    with pytest.raises(VqaprError) as refused:
-        workspace.register_dataset(unmeasured, _source())
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_dataset(unmeasured, _source())
 
-    assert refused.value.failures[0].code == "dataset.register.span.absent"
+    assert refused.value.failures[0].code == "dataset.span_absent"
     assert "register_dataset" in (refused.value.retry_precondition or "")
+
+
+def test_a_workspace_reads_a_datasets_instants_and_hashes_its_file_once_per_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record `238`: the judgments and the freeze both derive the run's schedule from the execution
+    table's distinct instants, and both verify the file's digest. The sample project's `vqapr
+    run` scanned that column twice for the schedule and three times for the horizon, and a changed
+    file was hashed once by the judgment that refused it and again by preflight
+    (`experiments/exp_238`). A workspace object is one command's snapshot, so each fact is read
+    once for its life -- including the digest of a file whose compare FAILS."""
+    import duckdb
+
+    from vqapr.data.verification import verify_source
+    from vqapr.workspace import registry as store_module
+
+    path = tmp_path / "prices.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT * FROM (VALUES
+                (TIMESTAMPTZ '2024-01-02 15:30:00+00', 'A', 1.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+00', 'A', 2.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+00', 'B', 3.0::DOUBLE)
+            ) AS t(available_at, instrument, close))
+            TO '{path.as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+    registration = DatasetRegistration.of(
+        "prices",
+        "prices-source",
+        instrument_field="instrument",
+        available_at="available_at",
+        grain="instrument_instant",
+        key_fields=("available_at", "instrument"),
+        fields={"close": "close"},
+        field_types={"close": "DOUBLE"},
+    )
+    source = SourceSpec.of("prices-source", path)
+    diagnosis, _, measured = verify_source(registration, source)
+    diagnosis.raise_if_failed()
+    with Workspace.transaction(tmp_path) as t:
+        t.register_dataset(measured, source)
+
+    scans: list[str] = []
+    original_scan = store_module.scan.distinct_values
+
+    def counted_scan(spec, field, **kwargs):
+        scans.append(field)
+        return original_scan(spec, field, **kwargs)
+
+    hashes: list[str] = []
+    original_hash = store_module.physical_digest
+
+    def counted_hash(target):
+        hashes.append(str(target))
+        return original_hash(target)
+
+    monkeypatch.setattr(store_module.scan, "distinct_values", counted_scan)
+    monkeypatch.setattr(store_module, "physical_digest", counted_hash)
+
+    workspace = Workspace.open(tmp_path)
+    instants = workspace.evaluation_times("prices")
+    assert [moment.astimezone(UTC).isoformat() for moment in instants] == [
+        "2024-01-02T15:30:00+00:00",
+        "2024-01-03T15:30:00+00:00",
+    ]
+    assert workspace.evaluation_times("prices") is instants
+    assert scans == ["available_at"], f"the instants were scanned {len(scans)} times"
+    workspace.require_verified("prices")
+    workspace.require_verified("prices")
+    assert len(hashes) == 1, f"the file was hashed {len(hashes)} times"
+
+    # The compare fails on other bytes -- and still hashes once, however many doors ask.
+    path.write_bytes(path.read_bytes() + b"\n")
+    changed = Workspace.open(tmp_path)
+    hashes.clear()
+    for _ in range(2):
+        with pytest.raises(VqaprError) as refused:
+            changed.require_verified("prices")
+        assert refused.value.failures[0].code == "dataset.source_changed"
+    assert len(hashes) == 1, f"a failed compare hashed the file {len(hashes)} times"

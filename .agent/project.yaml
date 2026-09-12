@@ -13,8 +13,55 @@ canonical_documents:
   diagnostics: docs/diagnostics/README.md
   # 그 진단에 대해 무엇을 어떤 순서로 할 것인가. 단계·인수조건·게이트·위험.
   # 2026-09-03: 수렴 캠페인(09-02)은 완료. 현행은 삭제 캠페인 — Step 0-7, ExecPlan은 Step 4·7.
-  # 2026-09-04: 삭제 캠페인 완료(records 141-150). 현행은 한 모양 캠페인 — Step 0-7, ExecPlan은 .agent/plans/active/one-shape-campaign.md
-  active_campaign: docs/refactoring/2026-09-04-the-one-shape-campaign.md
+  # 2026-09-04: 삭제 캠페인 완료(records 141-150). 한 모양 캠페인도 완료.
+  # 2026-09-08: 레이어링 캠페인(M0-M8, records 190-198) 완료. import 그래프는 DAG이고
+  # tests/boundaries/test_the_layers_hold.py가 그것을 지킨다. 순환 4개 -> 0, 평면 모듈 9 -> 1.
+  # 2026-09-09: 두 시계 캠페인 — Stage 0-5. 레이어링이 "경계가 선명한가"를 닫았고
+  # 이것은 "경계가 옳은가"를 묻는다. 설계 근거는 아래 wiring_design, 착수 순서는 이 파일.
+  # 2026-09-10: 두 시계 캠페인 완료(records 201-214). 설계 §8은 PRD·architecture에 흡수됐다 —
+  # 현행 계약은 그 두 문서가 authority이고 wiring_design은 결정의 근거 기록이다. 현행 캠페인 없음.
+  # 2026-09-10: 0.9.0.dev1 testbed 보고 7건(docs/issues/089-095) 처리, records 215-220. develop은
+  # 0.11.0.dev0 (record 215가 run identity를 바꿈; docs/releases/0.11.0.md).
+  # 2026-09-10: 한 루프 캠페인 착수 (branch redesign/one-loop). 시장 시계 한 점의 비용(P1-P5)을 먼저,
+  # 그 위에서 루프 하나(L1-L5). 측정은 experiments/exp_221_the_market_clock_cost/.
+  # 2026-09-10: 한 루프 캠페인 완료(records 221-229). 3,000 종목 분봉 하루 117 s -> 34 s, 보유 Mark 1.17M -> 3k,
+  # 루프 하나(RunLoop·Part·MarketClock), Compliance.observe(call). 현행 캠페인 없음.
+  # 2026-09-10: 한 문 캠페인 완료(records 231-234, branch redesign/one-door; 0.11.0 척추 트레이스에서 오너가
+  # 연 095-097). EventLoop 삭제, PanelWindow.matrix(), data/validation.py 한 문(등록이 digest를 두고 이후는
+  # identity 대조). 0.12.0 (등록 문서 모양이 바뀜; docs/releases/0.12.0.md). 현행 캠페인 없음.
+  # 2026-09-10: 한 cube 캠페인 완료(records 235-236, branch redesign/one-cube; testbed 보고 098 — datamodel run 메모리가
+  # 종목 수에 비례). panel은 run horizon + 숫자 필드 한 벌(235); --jobs 배치가 dataset마다 cube를 굽고 worker가 mmap,
+  # 끝나면 삭제(236). 측정 experiments/exp_236_the_panel_memory/. 0.13.0 (깨지는 변화 없음; docs/releases/0.13.0.md). 현행 캠페인 없음.
+  # 2026-09-10: 0.13.0 stamped 뒤 testbed 보고 099 닫음(record 237): ordering 판단이 derived agenda의 날짜 상위집합 대신
+  # inclusive_slice(start, end)를 묻는다 — 체결과 결정 사이의 end가 500 대신 통과. 0.13.1 (깨지는 변화 없음; docs/releases/0.13.1.md). 현행 캠페인 없음.
+  # 2026-09-10: 한 문(run) 캠페인 완료(records 240-241, branch redesign/one-door-run; 그 앞에 238-239). verify_run 문 하나를
+  # check · run · execute · --jobs worker가 지나고(worker가 판정을 받게 됨), RunFacts가 사실을 명령당 한 번 읽는다. 0.14.0
+  # (깨지는 변화 없음; docs/releases/0.14.0.md). 남긴 것: RunResources(설계 §5). 현행 캠페인 없음.
+  # 2026-09-10: RunResources (record 242, branch redesign/run-resources): 검증이 load한 전략·거래소·규칙과 자른 horizon을
+  # run이 그대로 쓴다 — run 시작 때의 재import·재스캔 없음. 0.14.1 (깨지는 변화 없음; docs/releases/0.14.1.md). 현행 캠페인 없음.
+  # 2026-09-10: 0.14.2 hotfix (records 243-245, develop 위): 2026-09-10 testbed 보고 셋을 닫음 — dataset.unverified가
+  # run이 publish한 dataset에 vqapr run <id> --force를 말함(243); every 거절문이 문법을 말함, y는 12M(244); --limit 0은 0행,
+  # show dataset·--table 둘 다(245, 깨지는 변화; docs/releases/0.14.2.md). 현행 캠페인 없음.
+  # 2026-09-11: 한 콜백 캠페인 완료(records 246-248, branch redesign/one-callback; 0.14.2 stepper 트레이스를 중복으로 읽은 결과).
+  # 콜백이 읽은 것(source refs · inputs)을 한 번 만들고, 세션은 run 기간 ± 1일만 읽고(TIMESTAMPTZ 리터럴), heartbeat는 초당 한 번.
+  # 0.14.3 (깨지는 변화 없음; docs/releases/0.14.3.md). 현행 캠페인 없음.
+  # 2026-09-11: 0.14.2 testbed 보고 아홉 중 일곱을 records 249-257로 닫음(develop 위, 오너 지시): --jobs run.json · usage 거절 ·
+  # strategy calendar scaffold · register kind/옆 모듈 · agenda `on: last` · 메모리 넷(envelope streaming · seal · record 있는 run의
+  # 증거 · 워커 BLAS 1스레드). 0.14.4 (선언 문서에 `agenda.on` 추가, 깨지는 변화 없음; docs/releases/0.14.4.md). 현행 캠페인 없음.
+  # 2026-09-11: records 258-263(develop 위, 다른 세션: skill 설치 루트 · 체결 없는 결정은 원인별 한 번 · of()가 0을 받음 ·
+  # fill.sized_quantity · 선언 YAML 1.2 불리언 · win32 tzdata)과 한 읽기 캠페인(records 264-267, branch redesign/one-reading:
+  # record의 숫자는 Decimal · 주소 하나 · `vqapr export` · strategy scaffold가 부품을 보임; --recipe는 오너가 거절). 0.15.0
+  # (깨지는 변화: reader가 fill/weight 숫자를 Decimal로, skill 설치 루트, 선언의 yes/no/on/off는 말; docs/releases/0.15.0.md,
+  # tag v0.15.0). 현행 캠페인 없음.
+  # 2026-09-12: 개념 트리 캠페인(records 268-279, branch redesign/concept-tree): src/가 고리의 개념을 따른다 --
+  # domain · data · record · signals · portfolio · component · workspace · run(preflight · engine) · report, 저자
+  # 표면은 vqapr.public 하나(`from vqapr import public as vq`), 루프는 DES의 말(schedule · ScheduledEvent · event_id
+  # · call.at), 계좌가 자기 보유를 곱한다. 0.16.0 (깨지는 변화: run 선언 `agenda:` -> `schedule:`, vqapr.authoring
+  # 삭제, 옛 run 기록은 다시 run; docs/releases/0.16.0.md, tag v0.16.0). 현행 캠페인 없음.
+  active_campaign: docs/refactoring/2026-09-12-the-concept-tree-campaign.md
+  # 두 시계(시장/전략)와 다섯 역할의 배선표. 확장점·시계·목적지·통장의 계약이 어디서 왔는가.
+  # 배선표 자체는 domain/wiring.py, 현행 설명은 architecture §3.2·§10.2.
+  wiring_design: docs/design/two-clocks-and-the-wiring-table.md
   # 세션 1~3 인수인계. §7(어디서 막혔는가)만 유효하며, 그 한 절은 값어치가 크다 — 두 번 revert된
   # 마이그레이션이 남긴 "한 단위" 발견이 거기 있다. 나머지, 특히 §8의 작업 순서는 record 104/124가
   # 뒤집었다. 파일 맨 위 경고가 절별 판정을 싣는다. 시작점은 위의 `diagnostics`다.
@@ -29,8 +76,10 @@ commands:
   install: uv sync
   import: uv run python -c "import vqapr"
   build: uv build
-  # Iteration check. Deselects `slow` by default via pyproject's addopts: thirteen end-to-end
-  # journeys are 77% of a 466s suite while the other ~1,300 tests take 106s combined.
+  # Iteration check. Deselects `slow` by default via pyproject's addopts: the slow set is the
+  # sample-driven journeys and the showcases, about four minutes of the six-minute whole
+  # (record 169: test_all is 1453 tests in 375 s alone, 2026-09-08). The sample panel is
+  # shipped synthetic data since record 172; nothing builds it in the suite any more.
   test: uv run pytest tests/ -q
   # Everything, including those thirteen. Required before handoff, release, or any change to
   # run assembly, the record shape, or the scaffolds -- that is what the slow set covers.
@@ -42,6 +91,15 @@ commands:
   # findings stood while no declared command ran the check. A configured gate nobody invokes is
   # not a gate, so it is declared here and the tree is clean as of record 105.
   lint: uv run ruff check src/
+  # Static type gate (redesign campaign 2026-09-08, step 0). Scope and mode are in
+  # pyproject `[tool.pyright]`; the finding count is the campaign's progress metric.
+  typecheck: uv run pyright
+  # Release-only gate. The skills a release ships must have their content hashes recorded in
+  # `_shipped.json` BEFORE the build, or the next release tells untouched installs they were
+  # edited (PRD 11.3). Not part of `test`: between releases the tree ships content that has not
+  # been handed out, and this check is meant to fail then.
+  # Run `uv run python scripts/record_shipped_skills.py` (no flag) to make it pass.
+  release_check: uv run python scripts/record_shipped_skills.py --check
   # Cross-module dead-code pass; ruff is file-local and cannot answer "is this called
   # anywhere". Configuration and the reasoning are in pyproject's `[tool.vulture]`.
   # Not a gate: a report is a candidate, not a verdict, and only a human knows whether a

@@ -17,19 +17,15 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.execution_table import ExecutionTable, ExecutionTableSpec, exact_execution_snapshot
 from vqapr.data.lookback import RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
-from vqapr.domain.timestamps import LocalInstantDeclaration
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import (
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    exact_execution_snapshot,
-)
+from vqapr.data.window import ModelWindow
+from vqapr.domain.fill import FillRule
+from vqapr.domain.instants import LocalInstantDeclaration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
@@ -230,10 +226,11 @@ def test_real_observations_stay_point_in_time(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
+        fields={"close": "CAST(close AS DOUBLE)"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(1))
     cutoff_session = _sessions(observation_path)[3]
     morning = _instant(cutoff_session, time(8, 30))
 
@@ -250,7 +247,7 @@ def test_real_observations_stay_point_in_time(
     for row in batch.rows:
         assert row["available_at"] < morning
         assert row["available_at"].astimezone(morning.tzinfo).date() < cutoff_session
-        assert isinstance(row["close"], Decimal)
+        assert isinstance(row["close"], float)
     assert batch.access.source_id == "krx-observation"
     assert len(batch.access.source_digest) == 64
 
@@ -258,7 +255,7 @@ def test_real_observations_stay_point_in_time(
 def test_real_execution_snapshot_selects_the_exact_close(
     observation_path: Path, execution_path: Path, instruments: tuple[str, ...]
 ) -> None:
-    registration = ExecutionInputRegistration.of(
+    registration = ExecutionTable.of(
         "krx-daily",
         ExecutionTableSpec(
             source=SourceSpec.of("krx-execution", execution_path),
@@ -267,14 +264,14 @@ def test_real_execution_snapshot_selects_the_exact_close(
             is_tradable_field="is_tradable",
             price_fields={"close": "close"},
         ),
-        FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+        FillRule("close", VENUE, at=time(15, 30)),
     )
     sessions = _sessions(observation_path)
     decision_session = sessions[3]
     decision = _instant(decision_session, time(8, 30))
     horizon = _instant(sessions[-1], time(23, 0))
 
-    target = registration.fill.select_target(registration, decision_time=decision, end_time=horizon)
+    target = registration.select_target(decision_time=decision, end_time=horizon)
     assert target is not None
     assert target.target_at > decision
     assert target.target_at.astimezone(decision.tzinfo).date() == decision_session
@@ -306,10 +303,11 @@ def test_real_close_is_visible_exactly_at_the_venue_close(
         available_at="available_at",
         grain="instrument_instant",
         key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
+        fields={"close": "CAST(close AS DOUBLE)"},
+        field_types={"close": "DOUBLE"},
     )
     source = SourceSpec.of("krx-observation", observation_path)
-    requirement = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(1))
+    requirement = DataRequirement.of("price_daily", "close", lookback=RowsLookback(1))
     session = _sessions(observation_path)[3]
     cutoff = _instant(session, time(15, 30))
 

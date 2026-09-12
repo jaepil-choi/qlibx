@@ -33,7 +33,7 @@ Records 087-097, no gaps, no reuse; 015a and 015b share 087. Docs-only changes c
 at a registered path still hashes to the digest a run recorded: `matches` / `differs` / `absent`.
 
 *Why it is held:* it is a product decision, not an edit, and it sits directly against
-`docs/issues/009`, which removed the fingerprint gates deliberately and whose "What not to do"
+`docs/issues/archive/009`, which removed the fingerprint gates deliberately and whose "What not to do"
 forbids replacing a removed gate with a warning that is really a gate. 023 itself does not propose a
 gate — it proposes a receipt being read back — but the distance between those two is a judgement
 call about the product, not about the code.
@@ -110,7 +110,7 @@ standing. Both deviations were found by review, not self-reported.
 ## What this campaign says about itself
 
 Two of the regressions this campaign introduced were caught by audit rather than by the suite:
-`docs/issues/028` (a module below the CLI importing the facade — the tripwire lived in prose) and the
+`docs/issues/archive/028` (a module below the CLI importing the facade — the tripwire lived in prose) and the
 untested materialization refusal (deleting it left ~1,419 tests green). Both are now tests, and both
 were proven to fail on the defect before being kept. The pattern is the campaign's own lesson:
 **an invariant that lives in a document is an invariant nobody is checking.**

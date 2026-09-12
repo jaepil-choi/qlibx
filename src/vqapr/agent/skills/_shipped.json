@@ -1,0 +1,269 @@
+{
+  "analyze-result/SKILL.md": {
+    "0dd4ff9047b1942d7844893df834b4fdf6f2e72647e619e9ac7c34b24d8d6259": "0.10.0",
+    "16abd0dcbd396d252f8a498dac2685eab85ff53396357d822d8c07ebabb4e24a": "0.14.4",
+    "32c6ea7523982d073dea28e6cbe7d89447e3d36bd9a38365204d73c92edb7ade": "0.15.0",
+    "b512da792ac08d63846f127c43f5e3a03bba6b12515b4cd65b3335bdd92554ba": "0.8.0",
+    "c39266b8f14cac865c798069be7092980dd5a7b7e22e31db523be95f40a11c6a": "0.11.0"
+  },
+  "analyze-result/references/panels-from-tables.md": {
+    "98aa59a635344be545d9fda8054e74ca3ac93556f32ed14982bf034c7c27a927": "0.15.0",
+    "fa2c33ea62bf007711b12972dd9c9316208fc9b7256a2773a3a9b5c33bfed219": "0.14.4"
+  },
+  "analyze-result/references/paper-figures.md": {
+    "6fdd9e0e0697a17bf4bb9cc0ce37c2576cf416837dbd2175637dc0a59f22266c": "0.10.0",
+    "a4a376e4c764c65509e97a0ca1487c88a8af587ef174a95ce49a3269314ec4bb": "0.14.4",
+    "bc96df8120d12ece6e79070a247cfd136bba028b07b42a687ed6663ddac99993": "0.8.0"
+  },
+  "analyze-result/references/plotting-environment.md": {
+    "0755727d4020d96869fd125306100cdd16de105c4796df51dec1e8ed44113239": "0.14.4",
+    "3ef824999c0774a27cc1dde84588ccb5e5ff5904f67c7ec1824f346b60fa2e2f": "0.8.0"
+  },
+  "analyze-result/references/reading-a-record.md": {
+    "3355a1552d87735c99357c88c285f9025ffc480de19ddece8a83238a98abc90b": "0.15.0",
+    "cd85d428341b89bcea89af192100afd59ffacedaed90f1773c73396168f775b4": "0.10.0",
+    "ce7a89d13df86bb48c6fcc50bd13a74ffc907301a2e4408754efd86815198a4e": "0.14.2",
+    "d7202466b6a2993c5d501e410b82632be8e419b97090cfa0b58adb47b26997de": "0.8.0"
+  },
+  "analyze-result/references/report-sections.md": {
+    "3178053843a6bf0a24ab21ad8d89234f406dc35cb42906b3e2b5b3840bfdc20d": "0.8.0",
+    "5d0be40c6a2f963d7b263cd8025dd1a8adcd16244b0a1317a225755e691740e0": "0.14.4",
+    "cf82917bf2cccc37faf9ce0a71093bd1f3a67fc4a3ee1a3090a2932ad0e72bd5": "0.10.0"
+  },
+  "analyze-result/references/result-tables.md": {
+    "6183b8626f360d2b8f0a6f0faff6ee86c8a9e4a2732d3a76df4a460c6ac65c41": "0.14.4",
+    "b6a2a13be5fd9f3204ed4ffec6b0195d58bece6e3cd48210652a3aaf498ce018": "0.8.0",
+    "c402e1c9478d3a212edab89eb46be553de1b2f91572e1776fcc45a9759784e5e": "0.10.0",
+    "e1bef4368d9c4aac7a55a9e0e0dee92a772a77e303748fd368e0928c8622c123": "0.15.0"
+  },
+  "analyze-result/scripts/check_plotting_env.py": {
+    "1c099f314755b5069c64cecc7775b01d0459237f8f9c8524b4f11a389d9d5317": "0.14.4",
+    "9b437bc625e9d852efe1565ca69630d1d3792a252a05f6f66344ae977ff739bb": "0.8.0"
+  },
+  "inspect-workspace/SKILL.md": {
+    "1cabac6e207f6761ed154941acd9eabca7e7f79e1d101f797b05870ba9534a55": "0.14.2",
+    "36e73b5e6f64a24ca3d92d07fa751c487c5ebd65d1075fe35ef067bb22c093a8": "0.11.0",
+    "521eff2c2614c32e584f05ddcff7cf8988c142d009791c4fd71e7cbb8e3218ef": "0.8.0",
+    "be17bfaf2b79f31dbe364f45082c404015eb6655f8aa88bf81a13e3a59eb6d42": "0.10.0"
+  },
+  "inspect-workspace/references/deleting.md": {
+    "33d6c4ab81e4981c47d77a3cb5f224a1ba9e6afe402787198f86aef041a61791": "0.16.0",
+    "4bac2bc8f832771aaa0efbd1165d3fabd9d7033a22d1883a66a80cc3ea4201e8": "0.10.0",
+    "6f5657a4bbe40b65e208b167d8cc1162bd469e39cf8fbf486085e616e4db1982": "0.8.0"
+  },
+  "inspect-workspace/references/reuse-judgement.md": {
+    "35d13c293882742075a4d72fbc9b338585bc29fe1f46b4030d7a3c7da6bd147a": "0.8.0"
+  },
+  "introduce-vqapr/SKILL.md": {
+    "0a12deda6a0295b2d9a2b653e4567abae102de409967ff1bae04aae0cc84363d": "0.8.0",
+    "0cd651bf892804edd9022d688b270922bc2e96cbce287bc9b03840fd7eeec1e6": "0.10.0",
+    "20cf6afd4929db37ac83c32ebae2c9aeb28846497a18a61335012f133ea048f6": "0.14.4",
+    "6bb8362b34a047d78ec2351156fcbca1f2d4233e9c12577afdb340319e1e2a09": "0.16.0",
+    "dbac118645b2cd9c9dbc921c435e5814f63712064363b39b181a14ebd750239b": "0.11.0",
+    "fff93d3aee7e38d620daea8a865780607df0c4a5ac49324b3071bd6d78246ec3": "0.9.0.dev1"
+  },
+  "introduce-vqapr/references/install-and-environment.md": {
+    "20da6408a9edf188448d4bc42f202a5c2eb06111fac8c6fe86b3ace262cbb9bf": "0.15.0",
+    "b1f5b73f00eb4a902e5f634b4f9651c480c1547196a54637376bc081dd98b3c5": "0.8.0"
+  },
+  "introduce-vqapr/references/mental-model.md": {
+    "6b6254a01457963bbb85517903fd035c0f4a5d93e61279f4e3437685f64bc28e": "0.8.0",
+    "e0318a6e4f1dc905e6d48739943cf2840faf737e65735bcc92bbd6ffc2c2dc9b": "0.10.0"
+  },
+  "introduce-vqapr/references/reading-the-envelope.md": {
+    "281460eec14305eb72adeb8242785affffcda6a6dcde7a9be7c9e5e9d881392f": "0.8.0",
+    "4e8630444ec4a3e704876597d951fc4befb3823365dca4ab65ce9e6af6478c8e": "0.11.0",
+    "79055a14f547c43c14226320db225337d257e534f468dcde0bcdd044989c6dd9": "0.16.0"
+  },
+  "introduce-vqapr/references/sample-journey.md": {
+    "0a51f7bea509ebc7960a37a3c40b23fd43ef3e57699ab4adcbdcd9f903535bbd": "0.8.0",
+    "4fc72a9604869c92311ffca82265428a9df1fc01c75f14916bd2c0d06cb6b7df": "0.16.0",
+    "8110a7f58635e2d16a7ae9407e376390b35f98a0234175916e855c0e7b29a74f": "0.14.2"
+  },
+  "make-compliance/SKILL.md": {
+    "330e4c02877ad61831e49820ac379af543bcaffe978240c0cb162f5ea191065d": "0.10.0",
+    "ce3b6f88898350f519831d058a4a8c22960d5987fd835766acb467f11c99c0e0": "0.11.0",
+    "fbcbdf8de40d5c648c3076b2bf2c8f4e2e3f0ba27164f2c4fbe312485f8b943b": "0.16.0"
+  },
+  "make-compliance/references/declaring-data.md": {
+    "c1324a254368607a5a7704c3239e8dd93f3b65eca7b255e0a062233b29d3d6e4": "0.10.0"
+  },
+  "make-compliance/references/observe.md": {
+    "60220169a9c94699eba252b58a440003fa948506b2ef1e02cb8079d7be3a1bd3": "0.10.0",
+    "69ab7a25aba9896e22e8535d6a117524c7a9c2fa249ca4fadc1096d87cd238fc": "0.11.0"
+  },
+  "make-compliance/references/the-box.md": {
+    "c5b745342d46d5b7f8ea7e493d705e2700e3a9c480877735840215b31bfb921c": "0.11.0",
+    "e355a858ad9658014d9c6a24cb0af3c5408a192adc5e28fc2e8315b185cb7232": "0.10.0"
+  },
+  "make-compliance/references/tolerance.md": {
+    "277727c2f79d4e5d64b795aa4965861d0f89898065a4a72fe9746195b9e2d540": "0.10.0"
+  },
+  "make-constraint/SKILL.md": {
+    "d969395d752d64957741bc2507e5fe375045552b22992df9de1d1f0040c378af": "0.8.0"
+  },
+  "make-constraint/references/declaring-data.md": {
+    "3f9c738e073bff8ff95a1d556fb8747d3276f85dbe296ab36110c1e604e05a13": "0.8.0"
+  },
+  "make-constraint/references/project-and-monitor.md": {
+    "d48d904d34199d204aafadfa6c23a686de3be86f0f1ab5ad1245bf987170069c": "0.8.0"
+  },
+  "make-constraint/references/tolerance.md": {
+    "3b7f8892b5a0b9a3f95f2361ca7debab80c489217a50707c38caa95e94cbed9b": "0.8.0"
+  },
+  "make-datamodel/SKILL.md": {
+    "00780f63ebe0e8a74adb7e77818bbbb0c31e7c226486a8da60d614d3b35c11f5": "0.14.4",
+    "5752b61165140d42bfe7cd259608f40b8ec4ce27bc58ac3c09b1ea548ab4aaf4": "0.10.0",
+    "609e1f7a959c7953a93f605b96550898744f54e2383c69d737a3e8746d2649cf": "0.11.0",
+    "c00c898a8bd66724b6ce2abab0821df99a258ffe18bd9a84c4882472f90e1f46": "0.8.0"
+  },
+  "make-datamodel/references/datamodel-or-strategy.md": {
+    "474ec0b562319267aae8655bd736ec010af3cba9fa4dbaa02047ae31e6d10196": "0.8.0",
+    "b3da0a2471e2406b26d1b85ace84e0c57192e87ea8ec9c2966afa7a52f944a1a": "0.14.4"
+  },
+  "make-datamodel/references/output-schema.md": {
+    "75af009b704d5522b8636692b54b9ab59a682a77f6f7c15d52fb3962151aa273": "0.8.0",
+    "a8cc99836dc134e3f9b71de4a5e3d5e25bf56324042999e4d6bad4365e8bdd32": "0.11.0"
+  },
+  "make-datamodel/references/reading-inputs.md": {
+    "0a814f0fe054a6dadc608a5fdb7346348ea97a95458b97c9b342544856d69db2": "0.13.0",
+    "495769c865f32f403dbc61eadaae6e9f4f51c4c14928a90f06ceea86ee610bcb": "0.8.0",
+    "7fd7c2f2d843648791d377abb643b1c3467f4542d9aa0f1466e7bdc1b1e4dbc8": "0.16.0",
+    "dceb6a4e53a2588c705c262d6c7ac9ea63b9ba573bdddb4d4b53f1b6d18f73c7": "0.12.0"
+  },
+  "make-datamodel/references/running-a-datamodel.md": {
+    "06969cb4db1eb3a92e8bac607e983572d3a079b5b97864b3fb94cd76442ab39b": "0.10.0",
+    "57d579591deac96917cd3a29547960cc3135c92cc04be8e95e00d30594de212e": "0.14.2",
+    "7ed5fd5e9ee31ee243b2f80e974188cc3fb509af278cda9eb21d1816a2be3ea7": "0.11.0",
+    "92560340b3fa6117f4355a3f0640f87d0d14892198fda4bb9399ca411d6e3cf5": "0.8.0",
+    "f00349552244d431cd2805b3de3e487c0d323d1702c52e860a40822221512f2a": "0.16.0"
+  },
+  "make-exchange/SKILL.md": {
+    "2a7fd6065ed15a19f7a82a2fde653026a629eb75e8f6699c6b212a837daf7e6a": "0.10.0",
+    "3f3aedc2af43b7a1f7e508a22cb3ec0c2d17984877d4f94eb4da811c1b6e1754": "0.8.0",
+    "c87c19cdd7d13fa85458d47acc85a382e743069098e8dea4e142fece5fecbb59": "0.11.0"
+  },
+  "make-exchange/references/access-and-account.md": {
+    "d4f4a9bc3ee3f12d4864ece4b46c13208caf0761c902c562ec9d327c0620af89": "0.8.0"
+  },
+  "make-exchange/references/cost-model.md": {
+    "bf0cabc109fad25075dde886859608648b3f3ada6573a15cbca267264e555a7e": "0.8.0"
+  },
+  "make-exchange/references/execution-profiles.md": {
+    "b8ec7415002e448c1d6996abaed4394fb8a4a37b8975cc6e03a0acccc58e1836": "0.8.0",
+    "c833fccea84eca173966bcbc708490db201f89e33f70063458908ab124924e23": "0.15.0",
+    "e8bc59712f221335a797e908190311cfdba1bc913a047566bcdbe58b41cc3a97": "0.10.0"
+  },
+  "make-exchange/references/fill-timing.md": {
+    "1b303aa9a32616e06ab2c7a50a05d5475dac67a0f7d57e4c22660fd730ea0819": "0.8.0"
+  },
+  "make-strategy/SKILL.md": {
+    "02895a4545f6fb49ed4650bbbe1491d310f93a7d8fb2db23656f79e951b0d757": "0.15.0",
+    "279649bea0c91a7b433508357233b2cb3a2d89deab19dbe179248fe4722521bf": "0.14.4",
+    "541e46f9041a7ba3678fa992f26dab1dbe67e695bf2ba6a88f33cf125f3a0b59": "0.11.0",
+    "7ac1a6d4244e19308aeb7543e556bf214fec2556ae315680e216b4008df7dcd8": "0.16.0",
+    "fd570362c354edd089af796dedc73bb67ce26b35bfad2afb1f032168bf4f8b60": "0.8.0"
+  },
+  "make-strategy/references/composition-and-budget.md": {
+    "9338d7dc7f3c2b47ccffb153c556b21e53e4af56c69ffb938e30781eb66bf65f": "0.8.0"
+  },
+  "make-strategy/references/factor-portfolios.md": {
+    "3acb707a3a8880734e23879dd4aa110879fa1173afb96fdf97806621429fb5b8": "0.16.0",
+    "60e375b279ac9c8c710eb08e98b9c88d2bdf00e19183060579145635bb42822b": "0.14.4"
+  },
+  "make-strategy/references/memory-and-payload.md": {
+    "5cb2473443628daf196af870d0ef7c6c1ed465f2b22fdb039f467862fc014708": "0.8.0",
+    "805624bfce9dcc5f424eb48efbae5270fb3d5e5fec9b9d2f5bee6d7dcae29988": "0.16.0",
+    "b438c58428f05889e5d42652f4a446c05f23ca2b812bfdd14d394dd9dba792c3": "0.11.0"
+  },
+  "make-strategy/references/public-helpers.md": {
+    "2e37bb1f593be2185841b68fdae660baa615bc83906b96cbdb1fa7362e4ed1a7": "0.10.0",
+    "30042906d2fa185a979addcd3206865f41071efbea2bc0ecaac7e9569f14d2e4": "0.8.0"
+  },
+  "make-strategy/references/reading-inputs.md": {
+    "0bb1100ab8d1290f0033395426092f98844cb8ecc14fb824c47487ea7cf59754": "0.8.0",
+    "23a2e6446f851b2c3ae60f05279fe513d4acc91a45739d3eab75a6e35f58dcd2": "0.16.0",
+    "eb369ff17671e0edebba8280d800d9d6b18f632f525412eddf4e1f8254f80590": "0.12.0"
+  },
+  "make-strategy/references/rebalance.md": {
+    "73b394fdb0b64cc75ad8902f67b8c0b5821d4ad93747b3359f1213a4b4e5f7b7": "0.8.0",
+    "ee0b9cf5e17a85cc7b0a6dd89f0cb009177057de5468eed2f3e8c437e6ca8c34": "0.16.0"
+  },
+  "register-dataset/SKILL.md": {
+    "3744c4b026b14ecc260646504695fa3efbf25959fe84cb37e0069ea717335968": "0.8.0",
+    "b9868103a59b04d950125aff3b397c2bb2e14f87d62f1cc167de4132855b30ed": "0.11.0"
+  },
+  "register-dataset/references/correcting-a-registration.md": {
+    "101616d267618abc77279f28fba7a1e70ea48b481c3a9e7ae1c3e80d8026c86c": "0.16.0",
+    "1e32723c859f23da65d8bc023d7ad5d2c06fc35cb953579367f46b4f08d064d2": "0.10.0",
+    "96a7a2791e4a15d69e77b54bcc7466e80eede39e8edda9e55196ff59fc4caaf8": "0.8.0"
+  },
+  "register-dataset/references/discouraged-preparation.md": {
+    "3f933641a7625e022850b9df8cba295fdd07ed9fae42c905edfcd418f548eddd": "0.8.0"
+  },
+  "register-dataset/references/grain-and-cost.md": {
+    "f92b6dfdb48330cfa0dbb4099ddaedbe542e1962eacc04b5f95d03f41856e591": "0.8.0"
+  },
+  "register-dataset/references/point-in-time.md": {
+    "0fd71a580c230e2dc73617ad10d76997d294ba149c7a3c62fdc1faab17de28a4": "0.8.0"
+  },
+  "register-dataset/references/price-axis.md": {
+    "9b4a6e59c86a3847537b92c10dddcc3577c33eae17a7a39fe351d3c021b13c15": "0.8.0"
+  },
+  "register-dataset/references/timezone-proof.md": {
+    "0b6d474df865c03adf31559304a712e5061be95231edf26e53674449719e1d54": "0.8.0"
+  },
+  "register-dataset/references/universe-and-tradability.md": {
+    "168657ab44e8100f1a2f683654e4e46c6d9e27a583aad1074831eed2d6456612": "0.8.0"
+  },
+  "register-dataset/scripts/profile_source.py": {
+    "6f0682395416906b33d373cb02d712c562bf5ff7018c87b210b0b06cfe5ff6ba": "0.8.0"
+  },
+  "report-issue-dev/SKILL.md": {
+    "9d2bef759e4167b07e63e782ee5ff9384eeb60b7b3870c26a82f7e76dad5c6eb": "0.11.0",
+    "a86edf6e66b7209e6cf5b7eb2473e9d0edd76e78b7c67b71b59766befbd482ca": "0.9.0.dev1"
+  },
+  "report-issue-dev/references/report-template.md": {
+    "79b8d39b2fd0dadab9fccc2854bdf1053339a7bf201d5d9f2947afac764ff6fc": "0.16.0",
+    "93d16dd846bfc30ad4f7c1015d8de9e1163343eef73d20823f45a598f2010134": "0.9.0.dev1"
+  },
+  "report-issue-dev/references/what-counts-as-a-defect.md": {
+    "10b14eeb15ba49b36b3bab0cd5184d1ca89bf0de15f641c6316f55e9f7cd9242": "0.11.0",
+    "476d2613e1bfb81107a9e5970052fa25943c26603636e036e25d5a52422269c6": "0.9.0.dev1"
+  },
+  "run-backtest/SKILL.md": {
+    "0383343485cbabf54db7075a8a36e8ed29d59df7f6196854d87354e7480dc901": "0.8.0",
+    "335a4c80015d491d8473fe12443607af539874fa6684361d3112afe5ead88a3d": "0.14.2",
+    "4fdc21dbd174e18ae4a807231d12cb607241368bd6c85e3d6d4ceff31dd2af6b": "0.14.4",
+    "8bef17630a9c2a59c81df5de64dc4266e3fb1e8febd069face957643e151698f": "0.11.0",
+    "8f49db5b695a877643ce092d7a1f4c86c7ae168722c7e29f820a724a2b718100": "0.10.0",
+    "ada0b9e28135eb27f677c944019707b3dec57f7038f04384206d786739249585": "0.12.0",
+    "ca4f7e74d2d36c049e9b614d36b5cac7f783e944efc0f6cb9a7a7975fd62601c": "0.13.0",
+    "d195004b322cda7d1441275c542124bbb18e7fb7a80404c2620f3f3871cb77fe": "0.16.0"
+  },
+  "run-backtest/references/check-before-run.md": {
+    "05885ffca204a102fa232ca552c8509803833c71776a7a7f9b6d9d6b9e90d9d7": "0.14.0",
+    "bedc547dce75939d1545936bb80ed01598df051bd79a951f8bfa335970562a1d": "0.8.0"
+  },
+  "run-backtest/references/feeding-the-next-run.md": {
+    "9585bb08e676c3ce773fad13e736b09ac7d2b47709c93f788b79fd6e88d83332": "0.8.0"
+  },
+  "run-backtest/references/records-and-tweaks.md": {
+    "6e1fa59dbd60755cacdf0296196c23f2cfcfb5f87fcc48d4831e44d276263ae8": "0.16.0",
+    "b5156872ec40b9a6ff728dc975e1c96e222253f198e671c2e05e1ad15c161182": "0.8.0",
+    "c30079f94e183ecaa276758960bac532ebaf98305a1a9d670acc3afbddb1e4ee": "0.11.0",
+    "c4e1cada9f524313c571047347996b834dbd3dcbd0e5ff64e5927ff3ee4e4076": "0.10.0"
+  },
+  "run-backtest/references/run-declaration.md": {
+    "3cf72544752b3c5107ca871310251c43c0deef5dd35a87d2ba8eaa0cfeb8e9f1": "0.8.0",
+    "89ffea3b9dbbc04b1e16aca47c704ac3466e1161d088184497a88d3b72f231c8": "0.14.4",
+    "cc9fa55dff37106f895229b3ac23eb5e97fdd4ff92aefbfed1055a5948395186": "0.14.2",
+    "cff5740e67c7505477d1e1206cee13fbb54739e13d36e279dfe030fb4afb3a79": "0.15.0",
+    "eaafcdb0ff228f2e35d3f5826214284252fd6029d69ce0c2cf8ac1c24248857e": "0.16.0",
+    "ec3fea404ee4694c5b5b365eaa17ad1b36f41fc59a3b2317fb60421fd71101df": "0.10.0"
+  },
+  "run-backtest/references/watching-and-failures.md": {
+    "2d03405e8146e56ff66299699d728ec03d67244793c4cd0313743c7ee05f5b76": "0.8.0",
+    "531ba12b21b34b6cfef45881c1318ca36fff6b0b14e449faddbd090dfeae7c8f": "0.14.4"
+  }
+}

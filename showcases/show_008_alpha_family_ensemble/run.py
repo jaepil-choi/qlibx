@@ -1,16 +1,16 @@
 """Three signed alphas, a family ensemble, and a signal measured on what the run stored.
 
-    reversal member  (Academic)  -> publish_run_allocation -> reversal_allocation
-    momentum member  (Academic)  -> publish_run_allocation -> momentum_allocation
-    low-vol member   (Academic)  -> publish_run_allocation -> lowvol_allocation
+    reversal member  (Academic)  -> its recorded vqapr.weight, registered -> reversal_allocation
+    momentum member  (Academic)  -> its recorded vqapr.weight, registered -> momentum_allocation
+    low-vol member   (Academic)  -> its recorded vqapr.weight, registered -> lowvol_allocation
                                                                      |
                                                                      + --> ensemble run (KRX)
                                                                            subscribes to all three,
                                                                            nets per ticker,
                                                                            equal-weights,
                                                                            rescales to budget,
-                                                                           projects onto NoShort
-                                                                           and SingleNameCap
+                                                                           builds inside no_short
+                                                                           and single_name_cap
 
 This is show_006's two-member shape carried to three, which is the point: `UC-ENSEMBLE-001` is
 stated for "여러 stored alpha-weight result", and two members cannot distinguish a helper that
@@ -47,43 +47,41 @@ import argparse
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 from statistics import stdev
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     QUANTUM,
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AccountMode,
     AccountSnapshot,
-    AllocationPublicationSpec,
-    ComponentKind,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
-    component_ref,
     export_roster,
+    freeze,
     information_coefficient,
-    preflight_run,
-    publish_run_allocation,
     rank_information_coefficient,
-    register_component,
+    register_compliance,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -94,7 +92,8 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
-"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
+"""Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
+the shipped compliance rule of the same name observes the book against its own copy of it."""
 
 MEMBER_BUDGET = Decimal("0.04")
 """Total absolute active weight each member is allowed to express."""
@@ -112,7 +111,7 @@ LOWVOL_LOOKBACK = 11
 """Eleven closes span ten simple returns, whose sample spread is the realised volatility.
 
 Deliberately equal to the momentum window so the family's warm-up is set by one number: the three
-members become visible on the same occurrence, and the netting measurement is never comparing a
+members become visible on the same event, and the netting measurement is never comparing a
 member that has history against one that does not.
 """
 
@@ -123,8 +122,8 @@ Shorter than the ten returns the lookback yields, so the direct trailing slice d
 the whole history.
 """
 
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:
@@ -132,7 +131,9 @@ def _read_published(path: Path) -> list[dict[str, object]]:
     con = duckdb.connect()
     try:
         cursor = con.execute(
-            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+            "SELECT *, event_time AS available_at "
+            f"FROM read_parquet('{path.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY available_at, instrument"
         )
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
@@ -269,14 +270,15 @@ class {class_name}(StrategyModel):
 
     def decide(self, context):
         history = dict(self.memory or {{}})
-        history["occurrences"] = int(history.get("occurrences", 0)) + 1
+        history["events"] = int(history.get("events", 0)) + 1
         self.memory = history
 
         rows = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[Decimal]] = {{}}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # A DOUBLE field arrives as a float; cross to Decimal once, through str.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
         eligible = {{
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
@@ -378,14 +380,15 @@ class LowVolMember(StrategyModel):
 
     def decide(self, context):
         history = dict(self.memory or {{}})
-        history["occurrences"] = int(history.get("occurrences", 0)) + 1
+        history["events"] = int(history.get("events", 0)) + 1
         self.memory = history
 
         rows = context.window.observations(self.requirements()[0]).rows
         closes: dict[str, list[Decimal]] = {{}}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # A DOUBLE field arrives as a float; cross to Decimal once, through str.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
         eligible = {{
             name: values for name, values in closes.items() if len(values) == LOOKBACK
         }}
@@ -444,9 +447,12 @@ from vqapr.public import (
     StrategyModel,
     TableSpec,
     equal_weight,
+    intersect,
     net_members,
+    no_short,
     optimize,
     rescale,
+    single_name_cap,
     validate_allocation,
 )
 
@@ -467,7 +473,8 @@ BUDGET = Budget(
 
 class FamilyEnsembleStrategy(StrategyModel):
     """desired = equal-weight(reversal, momentum, low-vol) rescaled to budget, projected onto the
-    shipped constraint set. Long-only is emergent: no member is filtered before combination."""
+    box this strategy builds itself -- no short, single-name cap above the index weight (design
+    §7.1). Long-only is emergent: no member is filtered before combination."""
 
     def __init__(
         self,
@@ -475,12 +482,18 @@ class FamilyEnsembleStrategy(StrategyModel):
         reversal_dataset_id: str,
         momentum_dataset_id: str,
         lowvol_dataset_id: str,
+        benchmark_dataset_id: str,
+        cap: str,
+        benchmark_tolerance: str,
     ) -> None:
         self._member_dataset_ids = (
             reversal_dataset_id,
             momentum_dataset_id,
             lowvol_dataset_id,
         )
+        self._benchmark_dataset_id = benchmark_dataset_id
+        self._cap = Decimal(cap)
+        self._benchmark_tolerance = Decimal(benchmark_tolerance)
 
     def tables(self):
         return (
@@ -498,22 +511,31 @@ class FamilyEnsembleStrategy(StrategyModel):
         )
 
     def requirements(self):
-        return tuple(
-            DataRequirement.of(dataset_id, "weight", lookback=RowsLookback(1))
-            for dataset_id in self._member_dataset_ids
+        return (
+            *(
+                DataRequirement.of(dataset_id, "weight", lookback=RowsLookback(1))
+                for dataset_id in self._member_dataset_ids
+            ),
+            # The cap is relative to the index, so the index is this strategy's own subscription
+            # (design §7.1).
+            DataRequirement.of(
+                self._benchmark_dataset_id, "benchmark_weight", lookback=RowsLookback(1)
+            ),
         )
 
     def _panel(self, context, requirement):
         field = requirement.field_id
+        # A DOUBLE field arrives as a float; cross to Decimal once, through str.
         return {
-            str(row["instrument"]): row[field]
+            str(row["instrument"]): Decimal(str(row[field]))
             for row in context.window.observations(requirement).rows
             if row[field] is not None
         }
 
     def decide(self, context):
-        requirements = self.requirements()
-        panels = [self._panel(context, requirement) for requirement in requirements]
+        *member_requirements, benchmark_requirement = self.requirements()
+        panels = [self._panel(context, requirement) for requirement in member_requirements]
+        benchmark = self._panel(context, benchmark_requirement)
         if not all(panels):
             return Hold(reason="every member allocation input must be visible before netting them")
 
@@ -560,8 +582,21 @@ class FamilyEnsembleStrategy(StrategyModel):
         combined = equal_weight(net_signal)
         desired_active = rescale(combined, long=ENSEMBLE_BUDGET, short=-ENSEMBLE_BUDGET)
 
-        bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower_weights))
+        # The benchmark is validated before it becomes a bound, the way the members are.
+        validate_allocation(
+            benchmark,
+            AllocationInvariants.of(
+                sign=AllocationSign.LONG_ONLY,
+                tolerance=self._benchmark_tolerance,
+                required_coverage=(),
+            ),
+            label="subscribed benchmark allocation",
+        )
+        # The box, built here by the strategy (design §7.1).
+        instruments = tuple(sorted(context.window.instruments))
+        lower, upper = intersect(
+            no_short(instruments), single_name_cap(instruments, benchmark, self._cap)
+        )
         desired = {
             name: desired_active.get(name, Decimal(0)).quantize(QUANTUM) for name in instruments
         }
@@ -569,8 +604,8 @@ class FamilyEnsembleStrategy(StrategyModel):
         result = optimize(
             desired=desired,
             current={},
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozenset(),
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -718,7 +753,81 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
 
 
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    events: int
+    first_day: date
+    """The venue-local day of the first row, which is the first day a reader can read it."""
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+    field_types: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
+    `CAST` in the registration -- to DOUBLE, the one numeric type a field may be declared as
+    (issue 088). A weight on the `1e-12` grid has at most twelve significant digits, so the reader
+    gets it back exactly through `Decimal(str(...))`.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+            field_types=field_types,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, events, first = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time), min(event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    first_day = (
+        first.astimezone(ZoneInfo(VENUE)) if first.tzinfo is not None else first
+    ).date()
+    return _Registered(dataset_id, directory, int(rows), int(events), first_day)
 
 
 def _measure_published_signal(
@@ -728,7 +837,7 @@ def _measure_published_signal(
 
     This is the `analysis/` half record 016 left open. The signal is read back from the *published
     artifact* — not from the run's in-memory objects — and scored against the next session's return
-    computed from the committed close panel. Only occurrences where a forward return exists are
+    computed from the committed close panel. Only events where a forward return exists are
     scored; a missing outcome is skipped rather than filled, because filling it would be an
     invention this package refuses elsewhere.
     """
@@ -776,11 +885,11 @@ def _measure_published_signal(
 
     if not scored:
         raise AssertionError(
-            "no published occurrence could be scored against a forward return; "
+            "no published event could be scored against a forward return; "
             "the measurement half of this showcase proved nothing"
         )
 
-    # An independent oracle on the first scored occurrence. Record 016's first defect was a
+    # An independent oracle on the first scored event. Record 016's first defect was a
     # headline test that reimplemented the product in pandas and then compared the reimplementation
     # against itself; the difference here is that `information_coefficient` is what produced every
     # number in the trace, and this recomputation only checks it. The oracle runs in exact
@@ -814,10 +923,10 @@ def _measure_published_signal(
 
     mean_ic = sum(Decimal(entry["ic"]) for entry in scored) / len(scored)
     return {
-        "scored_occurrences": len(scored),
+        "scored_events": len(scored),
         "mean_ic": str(mean_ic),
         "oracle_checked_session": first["session"],
-        "per_occurrence": scored,
+        "per_event": scored,
     }
 
 
@@ -871,7 +980,7 @@ def _check_lowvol_orientation(
         # a member that was correct on every session.
         #
         # What must hold: every name the member is short is at least as volatile as every name it
-        # is long. A member that preferred high volatility inverts this on every occurrence.
+        # is long. A member that preferred high volatility inverts this on every event.
         longs = [name for name in shared if weights[name] > 0]
         shorts = [name for name in shared if weights[name] < 0]
         if not longs or not shorts:
@@ -888,7 +997,7 @@ def _check_lowvol_orientation(
 
     if sessions_checked == 0:
         raise AssertionError(
-            "no published low-vol occurrence could be checked for orientation; "
+            "no published low-vol event could be checked for orientation; "
             "the sign of this member is unproven"
         )
     return {"orientation_sessions_checked": sessions_checked}
@@ -907,19 +1016,23 @@ def _member_run(
 ) -> Any:
     definition = RunDefinition(
         run_id=str(strategy_ref.component_id),
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        at=at,
+        schedule=RunSchedule(every="1d", at=(at,)),
         exchange=academic_ref.component_id,
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes=f"{str(strategy_ref.component_id)}-weights",
     )
-    return run(project, preflight_run(project, definition)).result()
+    return run(project, freeze(project, definition), store_root=project / ".vqapr")
 
 
 def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -934,7 +1047,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # The momentum and low-vol members both need an eleven-close history; the reversal member
     # needs six. All members and the ensemble share one callback calendar, so only sessions where
     # every member has enough history produce an ensemble decision -- the rest decline. This is
-    # asserted below rather than hidden by trimming the agenda to fit the signal.
+    # asserted below rather than hidden by trimming the schedule to fit the signal.
     callback_days = all_days
 
     register_dataset(
@@ -946,7 +1059,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
+            # The committed fixture stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here, and cross back with Decimal(str(...)) on read.
+            fields={"close": "CAST(close AS DOUBLE)"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
@@ -959,23 +1075,29 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"benchmark_weight": "benchmark_weight"},
+            # DECIMAL(18, 8) in the fixture; the same cast, for the same reason.
+            fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+            field_types={"benchmark_weight": "DOUBLE"},
         ),
         SourceSpec.of("krx-benchmark", benchmark_path),
     )
-    register_execution_input(
+    register_dataset(
         project,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     # The project declares what each id IS, once, before anything trades. `KrxExchange` resolves
@@ -992,62 +1114,55 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     register_cli(argparse.Namespace(declaration=str(roster_declaration)), project_root=project)
 
     paths = _write_components(project, universe)
-    reversal_ref = component_ref(
-        "show008-reversal", ComponentKind.STRATEGY_MODEL, paths["reversal"], "ReversalMember"
+    reversal_ref = register_strategy_model(
+        project, "show008-reversal", paths["reversal"], "ReversalMember",
     )
-    momentum_ref = component_ref(
-        "show008-momentum", ComponentKind.STRATEGY_MODEL, paths["momentum"], "MomentumMember"
+    momentum_ref = register_strategy_model(
+        project, "show008-momentum", paths["momentum"], "MomentumMember",
     )
-    lowvol_ref = component_ref(
-        "show008-lowvol", ComponentKind.STRATEGY_MODEL, paths["lowvol"], "LowVolMember"
+    lowvol_ref = register_strategy_model(
+        project, "show008-lowvol", paths["lowvol"], "LowVolMember",
     )
-    academic_ref = component_ref(
-        "show008-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
+    academic_ref = register_exchange(
+        project, "show008-academic", paths["academic"], "ShowcaseAcademicExchange",
     )
-    krx_ref = component_ref(
-        "show008-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
-    )
-    ensemble_ref = component_ref(
+    register_exchange(project, "show008-krx", paths["krx"], "ShowcaseKrxExchange")
+    register_strategy_model(
+        project,
         "show008-ensemble",
-        ComponentKind.STRATEGY_MODEL,
         paths["ensemble"],
         "FamilyEnsembleStrategy",
         config={
             "reversal_dataset_id": "reversal_allocation",
             "momentum_dataset_id": "momentum_allocation",
             "lowvol_dataset_id": "lowvol_allocation",
+            "benchmark_dataset_id": "benchmark_weight_daily",
+            "cap": CAP,
+            "benchmark_tolerance": tolerance,
         },
     )
-    no_short_ref = component_ref(
+    # The shipped compliance rules enter through the same door as any user component: a resolved
+    # path, a fingerprint and a config. Their parameters are their own -- the cap below is the
+    # rule's copy, not the strategy's (design §7.2).
+    register_compliance(
+        project,
         "no-short",
-        ComponentKind.CONSTRAINT,
-        shipped_constraint_path("no_short"),
+        shipped_compliance_path("no_short"),
         "NoShort",
-        config={"constraint_id": "no-short"},
+        config={"compliance_id": "no-short"},
     )
-    cap_ref = component_ref(
+    register_compliance(
+        project,
         "single-name-cap",
-        ComponentKind.CONSTRAINT,
-        shipped_constraint_path("single_name_cap"),
+        shipped_compliance_path("single_name_cap"),
         "SingleNameCap",
         config={
             "cap": CAP,
             "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
-            "constraint_id": "single-name-cap",
+            "compliance_id": "single-name-cap",
         },
     )
-    for reference in (
-        reversal_ref,
-        momentum_ref,
-        lowvol_ref,
-        ensemble_ref,
-        academic_ref,
-        krx_ref,
-        no_short_ref,
-        cap_ref,
-    ):
-        register_component(project, reference)
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
@@ -1060,7 +1175,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ("momentum", momentum_ref, time(8, 15), "momentum_allocation"),
         ("lowvol", lowvol_ref, time(8, 30), "lowvol_allocation"),
     ):
-        result = _member_run(
+        member_run = _member_run(
             project,
             strategy_ref=ref,
             at=at,
@@ -1070,26 +1185,49 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             end=end,
             universe=universe,
         )
-        published[label] = publish_run_allocation(
-            project, AllocationPublicationSpec.of(dataset_id), callback_evidence(result)
+        result = member_run.result()
+        published[label] = _register_run_table(
+            project,
+            member_run,
+            run_id=str(ref.component_id),
+            component_id=str(ref.component_id),
+            dataset_id=dataset_id,
+            table="vqapr.weight",
+            fields={"weight": "CAST(weight AS DOUBLE)"},
+            field_types={"weight": "DOUBLE"},
         )
         memories[label] = _memory(result)
 
+    # The ensemble reads what its members published, so its horizon opens on the first day EVERY
+    # member has a weight on record. A member declines until its lookback fills, and a decline
+    # records no weight, so the allocation datasets begin days after the members' own schedule
+    # does; an ensemble opening with the members would ask its first decision to read an empty
+    # window, which `vqapr check` refuses (`check.lookback.uncovered`) -- and since record 168
+    # `freeze` asks the same judgments, so this script was refused too. The members'
+    # declines above are still asserted, not trimmed; only the ensemble waits for its inputs.
+    ensemble_opens = max(member.first_day for member in published.values())
+    ensemble_days = [day for day in callback_days if day >= ensemble_opens]
+    ensemble_start = datetime.fromisoformat(f"{ensemble_days[0].isoformat()}T00:00:00{OFFSET}")
     ensemble_definition = RunDefinition(
         run_id="show008-ensemble",
-        strategies=(StrategyEntry("show008-ensemble", ("no-short", "single-name-cap")),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("show008-ensemble"),
+        compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        at=time(9, 0),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="show008-krx",
-        execution_input_id="krx-daily",
-        start=start,
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
+        start=ensemble_start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes="show008-ensemble-weights",
     )
-    ensemble_result = run(project, preflight_run(project, ensemble_definition)).result()
+    ensemble_result = run(project, freeze(project, ensemble_definition)).result()
     ensemble_memory = _memory(ensemble_result)
     ensemble_replay = _replay(ensemble_result)
 
@@ -1111,10 +1249,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         ("momentum", "momentum_allocation"),
         ("lowvol", "lowvol_allocation"),
     ):
-        if str(published[label].registration.dataset_id) != dataset_id:
-            raise AssertionError(f"{label} member did not publish under {dataset_id}")
+        if published[label].dataset_id != dataset_id:
+            raise AssertionError(f"{label} member's table is not registered as {dataset_id}")
 
-    # Assertion 2: the netting measurement ran on three members and at least one ticker-occurrence
+    # Assertion 2: the netting measurement ran on three members and at least one ticker-event
     # showed a genuine offset.
     netting_rows = ensemble_result.final_state.recorder_rows.get("ensemble.netting", ())
     if not netting_rows:
@@ -1125,7 +1263,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     # `member_count` is self-reported, so on its own it certifies nothing: a netting call that
     # silently dropped a member would still print 3. The gross weight is not self-reported. Every
-    # member is rescaled to MEMBER_BUDGET long and -MEMBER_BUDGET short, so each occurrence must
+    # member is rescaled to MEMBER_BUDGET long and -MEMBER_BUDGET short, so each event must
     # carry sum(long) + sum(|short|) == members * 2 * MEMBER_BUDGET exactly. Two members netted
     # instead of three lands on 0.16 where 0.24 is required, and no self-report can hide it.
     expected_gross = 3 * 2 * MEMBER_BUDGET
@@ -1150,9 +1288,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     max_offset = max(Decimal(row["offset_weight"]) for row in netting_rows)
     if max_offset <= 0:
         raise AssertionError(
-            "no ticker-occurrence showed a non-zero offset_weight; the members never disagreed"
+            "no ticker-event showed a non-zero offset_weight; the members never disagreed"
         )
-    crossing_occurrences = len(
+    crossing_events = len(
         {row["event_time"] for row in netting_rows if Decimal(row["offset_weight"]) > 0}
     )
 
@@ -1176,7 +1314,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             )
 
     # Assertion 4: a name genuinely split the family -- some members long, others short -- on at
-    # least one occurrence. This is what three members buy over two, so it is demanded, not hoped.
+    # least one event. This is what three members buy over two, so it is demanded, not hoped.
     split_rows = [
         row
         for row in netting_rows
@@ -1184,7 +1322,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     ]
     if not split_rows:
         raise AssertionError(
-            "no ticker-occurrence had members on both sides; the family never actually split"
+            "no ticker-event had members on both sides; the family never actually split"
         )
 
     # Assertion 5: the fill-journal replay already aborted inside _replay() if it disagreed;
@@ -1203,14 +1341,14 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # Assertion 6: the published low-vol signal is measured against what followed it. This is the
     # `analysis/` half of record 016's open follow-up, run on a published artifact.
     closes = _closes_by_instrument(observation_path)
-    measurement = _measure_published_signal(published["lowvol"].output_path, closes)
+    measurement = _measure_published_signal(published["lowvol"].directory, closes)
 
     # Assertion 7: the low-vol member is actually a *low* volatility tilt. Nothing above can see
     # its sign -- netting, gross weight and the information coefficient are all sign-agnostic, so a
     # member that preferred the most volatile name would pass every other gate in this file. The
     # published weights are checked against realised volatility recomputed here from the committed
-    # closes, and the ordering must be strictly inverse on every published occurrence.
-    sign_check = _check_lowvol_orientation(published["lowvol"].output_path, closes)
+    # closes, and the ordering must be strictly inverse on every published event.
+    sign_check = _check_lowvol_orientation(published["lowvol"].directory, closes)
 
     trace = {
         "status": "current",
@@ -1219,16 +1357,17 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "universe": list(universe),
         "sessions": len(sessions),
         "callbacks": len(callback_days),
-        "crossing_occurrences": crossing_occurrences,
+        "ensemble_callbacks": len(ensemble_days),
+        "crossing_events": crossing_events,
         "max_offset_weight": str(max_offset),
-        "split_ticker_occurrences": len(split_rows),
+        "split_ticker_events": len(split_rows),
         "members": {
             label: {
                 "exchange": "Academic (fractional, zero cost)",
                 "account_mode": AccountMode.SIGNED.value,
-                "occurrences": memories[label].get("occurrences"),
-                "published_dataset": str(published[label].registration.dataset_id),
-                "published_occurrences": published[label].occurrences,
+                "events": memories[label].get("events"),
+                "published_dataset": published[label].dataset_id,
+                "published_events": published[label].events,
                 "published_rows": published[label].row_count,
             }
             for label in ("reversal", "momentum", "lowvol")
@@ -1239,7 +1378,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
             "account_mode": AccountMode.LONG_ONLY.value,
             "subscribed_allocation_inputs": sorted(subscribed),
-            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "member_count": 3,
             "rebalances": ensemble_memory.get("rebalances"),
@@ -1247,15 +1386,9 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         },
     }
     digests = {
-        f"{label}_allocation.parquet": _digest(published[label].output_path)
+        f"{label}_allocation": _digest(published[label].directory)
         for label in ("reversal", "momentum", "lowvol")
     }
-    digests.update(
-        {
-            f"{label}_allocation.lineage.json": _digest(published[label].lineage_path)
-            for label in ("reversal", "momentum", "lowvol")
-        }
-    )
     return trace, digests
 
 
@@ -1285,19 +1418,19 @@ def main() -> None:
     for label in ("reversal", "momentum", "lowvol"):
         member = trace["members"][label]
         print(
-            f"{label:<12} published      : {member['published_occurrences']} occurrences, "
+            f"{label:<12} published      : {member['published_events']} events, "
             f"{member['published_rows']} rows -> {member['published_dataset']}"
         )
     print(f"subscribed inputs           : {', '.join(ensemble['subscribed_allocation_inputs'])}")
     print(f"members netted              : {ensemble['member_count']}")
-    print(f"crossing occurrences        : {trace['crossing_occurrences']}")
+    print(f"crossing events        : {trace['crossing_events']}")
     print(f"max ticker offset_weight    : {trace['max_offset_weight']}")
-    print(f"split ticker-occurrences    : {trace['split_ticker_occurrences']}")
+    print(f"split ticker-events    : {trace['split_ticker_events']}")
     print(
         f"low-vol IC                  : mean {measurement['mean_ic']} over "
-        f"{measurement['scored_occurrences']} scored occurrences"
+        f"{measurement['scored_events']} scored events"
     )
-    print(f"shipped constraints         : {', '.join(ensemble['shipped_constraints'])}")
+    print(f"shipped compliance          : {', '.join(ensemble['shipped_compliance'])}")
     print(f"rebalances                  : {ensemble['rebalances']}")
     print(f"dealt fills                 : {ensemble['dealt_fills']} (whole shares)")
     print(f"commission / sale tax       : {ensemble['commission']} / {ensemble['sale_tax']}")

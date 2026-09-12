@@ -5,9 +5,9 @@
     Registrations are immutable identities, not editable configuration rows. Re-registering changed
     content under the same id is refused because an old run may depend on the original declaration.
 
-**That refusal was removed on purpose.** `docs/issues/009` argued the component fingerprint should
+**That refusal was removed on purpose.** `docs/issues/archive/009` argued the component fingerprint should
 report rather than refuse, because editing a registered component is the ordinary development loop,
-and `tests/flow/test_edit_loop.py` is the acceptance test it asked for. So the skill was describing
+and `tests/run/test_edit_loop.py` is the acceptance test it asked for. So the skill was describing
 a gate the package had deliberately stopped having, and sending readers to invent a new component id
 for every edit.
 
@@ -26,9 +26,19 @@ from vqapr.cli.main import main
 
 
 def _installed(tmp_path: Path) -> str:
-    (tmp_path / ".git").mkdir()
+    """Every markdown byte actually written into the project, as one string.
+
+    Reads what landed on disk rather than what the package holds: these assertions are about the
+    promise a reader of the *installed* copy is given. Since PRD §11.2 made the skill a set, that
+    copy is nine directories, so the whole tree is read rather than one named file.
+    """
     main(["--project-root", str(tmp_path), "skill", "install"])
-    return (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    installed = tmp_path / ".agents" / "skills"
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(installed.rglob("*.md"))
+        if path.is_file()
+    )
 
 
 def test_the_skill_no_longer_claims_re_registration_is_refused(tmp_path: Path) -> None:
@@ -36,7 +46,7 @@ def test_the_skill_no_longer_claims_re_registration_is_refused(tmp_path: Path) -
     collapsed = " ".join(_installed(tmp_path).split())
 
     assert "Re-registering changed content under the same id is refused" not in collapsed, (
-        "the skill still promises the gate docs/issues/009 removed"
+        "the skill still promises the gate docs/issues/archive/009 removed"
     )
 
 
@@ -44,7 +54,7 @@ def test_the_skill_names_the_edit_loop_that_actually_exists(tmp_path: Path) -> N
     """Two commands, same id: what 009's acceptance test proves and the skill hid."""
     collapsed = " ".join(_installed(tmp_path).split())
 
-    # `docs/issues/067`: the loop is the same command again, and no `--force` is promised.
+    # `docs/issues/archive/067`: the loop is the same command again, and no `--force` is promised.
     assert "run the same `vqapr register <kind> <id> <file.py>` again" in collapsed
     assert "there is no `register --force`" in collapsed
     assert "The id stays" in collapsed or "id stays" in collapsed

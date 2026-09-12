@@ -6,7 +6,7 @@ Record `111`. `public.py` was 776 lines, of which **450 were function bodies** �
 consequences were not theoretical:
 
 * every module below it that needed one of those functions had to import the top-level facade to
-  get it, which is the fan-in `docs/issues/028` records;
+  get it, which is the fan-in `docs/issues/archive/028` records;
 * `cli/run.py` imported `_registered_roster` — a **private** name — from the documented surface,
   which is the shape that tells you a module has outgrown its role.
 
@@ -92,7 +92,7 @@ def test_no_function_in_the_facade_holds_a_body_of_work() -> None:
         + "\n  ".join(f"{name}: {count} statements" for name, count in heavy)
         + f"\n\nThe limit is {MAX_BODY_STATEMENTS}. `public.py` is the documented surface; work "
         "belongs in the layer that owns it and is re-exported here. Record 111 moved 450 lines "
-        "out for this reason, and the fan-in it caused is docs/issues/028."
+        "out for this reason, and the fan-in it caused is docs/issues/archive/028."
     )
 
 
@@ -105,7 +105,7 @@ def test_the_relocated_names_are_still_exported() -> None:
 
     for name in (
         "run",
-        "preflight_run",
+        "freeze",
         "freeze_strategy_record",
         "contract_report",
         "registered_roster",

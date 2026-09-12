@@ -1,4 +1,4 @@
-"""`docs/issues/060`: `vqapr rm dataset <id>` exists, and does what the skill promised.
+"""`docs/issues/archive/060`: `vqapr rm dataset <id>` exists, and does what the skill promised.
 
 The skill told the user to remove a dataset registration to replace a materialization's output;
 `rm` had eight kinds and a dataset was not one of them. Three throw-away outputs (1.3 GB) stayed
@@ -27,7 +27,7 @@ def _panel(path: Path) -> Path:
     con = duckdb.connect()
     try:
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
               (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
               (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B',  50.0),
@@ -50,20 +50,25 @@ def _dataset_block(dataset_id: str, source_id: str, path: Path) -> str:
     key_fields: [available_at, instrument]
     fields:
       close: close
+    field_types:
+      close: DOUBLE
 """
 
 
 @pytest.fixture
 def project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Path:
     """One dataset at the user's own path, one under `.vqapr/materialized/`, one run reading
-    its sessions from the first."""
+    its trading days from the first."""
     mine = _panel(tmp_path / "data" / "price_daily.parquet")
     written = _panel(tmp_path / ".vqapr" / "materialized" / "derived" / "part-000.parquet")
     (tmp_path / "models.py").write_text(
-        "from vqapr import authoring as va\n\n"
-        "class Never(va.StrategyModel):\n"
-        "    def decide(self, call):\n"
-        "        return va.Hold(reason='never')\n",
+        "from vqapr import public as vq\n\n"
+        "class Never(vq.DataModel):\n"
+        "    def inputs(self):\n"
+        "        return {'prices': vq.DatasetInput(dataset_id='price_daily', fields=('close',),"
+        " lookback=vq.RowsLookback(rows=1))}\n"
+        "    def compute(self, context):\n"
+        "        return []\n",
         encoding="utf-8",
     )
     declaration = tmp_path / "declaration.yaml"
@@ -73,7 +78,7 @@ def project(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Path:
         + _dataset_block("derived", "materialized-derived", written.parent)
         + f"""components:
   never:
-    kind: strategy
+    kind: datamodel
     path: {(tmp_path / "models.py").as_posix()}
     object_name: Never
 runs:
@@ -81,11 +86,11 @@ runs:
     instruments: [A, B]
     start: "2024-03-05T00:00:00+09:00"
     end: "2024-03-07T00:00:00+09:00"
-    sessions_from: price_daily
     timezone: Asia/Seoul
-    at: "09:00"
-    strategies:
-      never: {{}}
+    schedule: {{every: 1d, at: "09:00", days_from: price_daily}}
+    writes: daily-values
+    datamodels:
+      never: {{value_fields: [value]}}
 """,
         encoding="utf-8",
     )
@@ -94,13 +99,13 @@ runs:
     return tmp_path
 
 
-def test_a_dataset_a_run_takes_its_sessions_from_is_refused_naming_the_run(
+def test_a_dataset_a_run_takes_its_trading_days_from_is_refused_naming_the_run(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     code, refused = _cli(capsys, "--project-root", str(project), "rm", "dataset", "price_daily")
     assert code == 1, refused
-    assert refused["failures"][0]["code"] == "workspace.remove.referenced"
-    assert "run 'daily' (sessions_from)" in refused["failures"][0]["observed"]
+    assert refused["failures"][0]["code"] == "remove.referenced"
+    assert "run 'daily' (schedule.days_from)" in refused["failures"][0]["observed"]
     code, listed = _cli(capsys, "--project-root", str(project), "list", "datasets")
     assert {row["dataset_id"] for row in listed["items"]} == {"price_daily", "derived"}
 

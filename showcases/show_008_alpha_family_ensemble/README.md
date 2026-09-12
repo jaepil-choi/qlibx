@@ -30,15 +30,15 @@ trailing window is consumed, so the member computes that statistic directly with
 
 | | |
 |---|---|
-| sessions / callbacks | 22 / 21 |
-| reversal published | 16 occurrences, 64 rows |
-| momentum published | 11 occurrences, 44 rows |
-| low-vol published | 11 occurrences, 44 rows |
+| sessions / member callbacks / ensemble callbacks | 22 / 21 / 11 |
+| reversal published | 16 events, 64 rows |
+| momentum published | 11 events, 44 rows |
+| low-vol published | 11 events, 44 rows |
 | members netted | 3 |
-| crossing occurrences | 11 |
+| crossing events | 11 |
 | max ticker `offset_weight` | 0.04 |
-| split ticker-occurrences | 38 |
-| low-vol mean IC | **0.0162** over 10 scored occurrences |
+| split ticker-events | 38 |
+| low-vol mean IC | **0.0162** over 10 scored events |
 | rebalances | 11 |
 | dealt fills | 20 (whole shares) |
 | commission / sale tax | 71,784.69 / 199,170.20 |
@@ -47,13 +47,16 @@ trailing window is consumed, so the member computes that statistic directly with
 | any short position | False |
 
 **The mean information coefficient is 0.0162, which is indistinguishable from zero.** Four names
-over ten occurrences cannot support a claim about whether low-volatility predicts returns, and this
+over ten events cannot support a claim about whether low-volatility predicts returns, and this
 showcase does not make one. What is demonstrated is that the measurement runs on a published
 artifact and is checked by an independent oracle — not that the alpha works.
 
-Both members with an eleven-close lookback publish 11 occurrences; reversal, needing six, publishes
-16. The agenda is not trimmed to fit the signal: sessions without enough history decline, and that
-is asserted rather than hidden.
+Both members with an eleven-close lookback publish 11 events; reversal, needing six, publishes
+16. The members' schedule is not trimmed to fit the signal: sessions without enough history decline,
+and that is asserted rather than hidden. The ensemble's horizon opens on the first day all three
+members have a weight on record, because a decision that reads an empty window is what
+`vqapr check` refuses (`check.lookback.uncovered`) and, since record 168, what `freeze`
+refuses as well.
 
 ## What is checked, and what each check would catch
 
@@ -65,9 +68,9 @@ gates were rewritten until all six were killed.
 |---|---|
 | all three members published and subscribed | — |
 | `member_count == 3` on every netting row | member count misreported |
-| gross weight per occurrence == 3 × 2 × budget, within a quantum-derived tolerance | netting silently drops a member |
+| gross weight per event == 3 × 2 × budget, within a quantum-derived tolerance | netting silently drops a member |
 | `net == long + short`, `offset == min(long, |short|)` per row | netting arithmetic |
-| some ticker-occurrence has members on both sides | the family never actually split |
+| some ticker-event has members on both sides | the family never actually split |
 | low-vol shorts are all at least as volatile as its longs | the sign flipped — high vol preferred |
 | IC recomputed by an independent exact-rational oracle | IC replaced by a constant |
 | forward return is strictly the next session | lookahead in the measurement |

@@ -1,7 +1,7 @@
 # 101 — Both members of the lookback pair are reachable, and each says what it does
 
-**Closes:** `docs/issues/033-the-scaffolded-lookback-is-the-wrong-member-of-a-correct-pair.md`, and
-the runnable half of `docs/issues/030-the-skills-stop-condition-is-a-command-the-cli-refuses.md`.
+**Closes:** `docs/issues/archive/033-the-scaffolded-lookback-is-the-wrong-member-of-a-correct-pair.md`, and
+the runnable half of `docs/issues/archive/030-the-skills-stop-condition-is-a-command-the-cli-refuses.md`.
 **Branch:** `fix/033-the-lookback-pair-is-reachable`.
 
 ## Why this change exists
@@ -53,7 +53,7 @@ discarded.
 than a second copy of a forty-line file that would drift. What differs between the two is exactly
 what an author has to understand.
 
-## Also closed here: `docs/issues/030`, the runnable half
+## Also closed here: `docs/issues/archive/030`, the runnable half
 
 Rung 1's stop condition read *"`vqapr list` shows all required elements"*. `kind` is a required
 positional with no all-kinds form, so the first command of a first-time journey returned

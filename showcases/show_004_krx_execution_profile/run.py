@@ -6,7 +6,7 @@ One frozen strategy, one real KRX price history, two execution profiles::
     KRX-shaped whole shares, 3bp commission both sides, 20bp sale tax on sells, long only
 
 The two runs differ **only** by the registered exchange component -- everything else (the
-materialized score, the strategy, the execution input, the agendas) is byte-identical, so
+materialized score, the strategy, the execution dataset, the agendas) is byte-identical, so
 the difference in outcome is exactly the declared venue friction.
 
 **Both venues are the shipped ones.** ``ShowcaseKrxExchange`` extends ``KrxExchange``, so the
@@ -49,24 +49,21 @@ from vqapr.cli.register import run as register_cli
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     ComponentRef,
     DataModelEntry,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
-    component_ref,
     export_roster,
-    preflight_run,
-    register_component,
+    freeze,
     register_data_model,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_strategy_model,
     run,
 )
 
@@ -77,7 +74,7 @@ ROOT = Path(__file__).resolve().parent
 MODELS = Path(models.__file__).resolve()
 """Resolved through the imported module, not by name.
 
-`MomentumLongOnly` is authored against `vqapr.authoring`, so the loader adapts it and the
+`MomentumLongOnly` is authored against `vqapr.public`, so the loader adapts it and the
 adapter re-imports the authored class by module name. Importing it here is what gives that
 name something to resolve to.
 """
@@ -87,14 +84,14 @@ PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 KRX_COMMISSION_RATE = Decimal("0.0003")
-"""Brokerage commission charged on both sides -- matches vqapr.exchange.venues.krx."""
+"""Brokerage commission charged on both sides -- matches vqapr.component.exchange.krx."""
 
 KRX_SALE_TAX_RATE = Decimal("0.002")
-"""Securities transaction tax charged on sells only -- matches vqapr.exchange.venues.krx."""
+"""Securities transaction tax charged on sells only -- matches vqapr.component.exchange.krx."""
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)
 
@@ -131,21 +128,25 @@ def _definition(
     """The two runs' one difference, isolated into one argument.
 
     Everything else is shared by construction rather than by copy: the same registered
-    strategy, the same sessions and wall time, the same execution input id, the same account.
+    strategy, the same sessions and wall time, the same execution dataset and fill, the same account.
     """
     return RunDefinition(
         run_id=exchange.component_id,
-        strategies=(StrategyEntry(str(strategy_ref.component_id)),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry(str(strategy_ref.component_id)),
         timezone=VENUE,
-        at=time(8, 30),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         exchange=exchange.component_id,
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes=f"{exchange.component_id}-weights",
     )
 
 
@@ -349,23 +350,30 @@ def main() -> None:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close", "is_supervised": "is_supervised"},
+            # The extracted slice stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here; the model already reads it as float.
+            fields={"close": "CAST(close AS DOUBLE)", "is_supervised": "is_supervised"},
+            field_types={"close": "DOUBLE", "is_supervised": "BOOLEAN"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
-    register_execution_input(
+    register_dataset(
         PROJECT,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     # The materialized score registers itself as an ordinary dataset, so the strategy declares
@@ -373,16 +381,15 @@ def main() -> None:
     register_data_model(PROJECT, "momentum-model", MODELS, "MomentumModel")
     score_definition = RunDefinition(
         run_id="momentum-score",
-        strategies=(),
         instruments=universe,
-        datamodels=(DataModelEntry("momentum-model", "momentum_score", ("score", "eligible")),),
+        datamodel=DataModelEntry("momentum-model", ("score", "eligible")),
         timezone=VENUE,
-        at=time(16, 0),
-        sessions=tuple(score_days),
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        writes="momentum_score",
     )
-    run(PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
+    run(PROJECT, freeze(PROJECT, score_definition), store_root=PROJECT / ".vqapr")
 
     # The project declares what each id IS, once, before anything trades. KrxExchange resolves
     # what a fill COSTS from this roster rather than from the venue, which is why the KRX profile
@@ -400,20 +407,13 @@ def main() -> None:
     register_cli(argparse.Namespace(declaration=str(declaration)), project_root=PROJECT)
 
     exchanges = _write_exchanges(universe)
-    strategy_ref = component_ref(
-        "momentum-strategy", ComponentKind.STRATEGY_MODEL, MODELS, "MomentumLongOnly"
+    strategy_ref = register_strategy_model(
+        PROJECT, "momentum-strategy", MODELS, "MomentumLongOnly",
     )
-    academic_ref = component_ref(
-        "show004-academic",
-        ComponentKind.EXCHANGE,
-        exchanges["academic"],
-        "ShowcaseAcademicExchange",
+    academic_ref = register_exchange(
+        PROJECT, "show004-academic", exchanges["academic"], "ShowcaseAcademicExchange",
     )
-    krx_ref = component_ref(
-        "show004-krx", ComponentKind.EXCHANGE, exchanges["krx"], "ShowcaseKrxExchange"
-    )
-    for reference in (strategy_ref, academic_ref, krx_ref):
-        register_component(PROJECT, reference)
+    krx_ref = register_exchange(PROJECT, "show004-krx", exchanges["krx"], "ShowcaseKrxExchange")
 
 
     def _outcome(exchange: ComponentRef) -> dict[str, Any]:
@@ -423,7 +423,7 @@ def main() -> None:
             strategy_ref=strategy_ref,
             callback_days=callback_days,
         )
-        return _profile_outcome(run(PROJECT, preflight_run(PROJECT, definition)).result())
+        return _profile_outcome(run(PROJECT, freeze(PROJECT, definition)).result())
 
     academic = _outcome(academic_ref)
     krx = _outcome(krx_ref)
@@ -475,7 +475,7 @@ def main() -> None:
             if krx["traded_notional"]
             else None,
             "claim": (
-                "The two runs share one frozen strategy, dataset and execution input. The NAV "
+                "The two runs share one frozen strategy, dataset and execution table. The NAV "
                 "gap therefore combines the declared KRX cost with the whole-share rounding "
                 "residual; it is not a separate signal."
             ),

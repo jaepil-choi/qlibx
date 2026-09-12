@@ -1,6 +1,6 @@
 # 098 — One door into `_internal`, and a note that outlives the next renumbering
 
-**Closes:** `docs/issues/029-two-doors-into-internal-and-an-expired-deletion-promise.md`, the two
+**Closes:** `docs/issues/archive/029-two-doors-into-internal-and-an-expired-deletion-promise.md`, the two
 bypass sites and the expired label that record 097 left open.
 **Branch:** `fix/029-one-door-into-internal`.
 
@@ -65,7 +65,7 @@ A second test pins that the adapter forwards `as_loaded_fingerprint` **as the sa
 merely that the name resolves. Two implementations that agree today is not one authority.
 
 A third asserts the eight docstrings carry no goal id and do name the design document. That is the
-half of `docs/issues/029` a boundary count cannot see, and it is the half that expired.
+half of `docs/issues/archive/029` a boundary count cannot see, and it is the half that expired.
 
 `tests/` are out of scope by design. They may import the physical home directly, and
 `tests/extension/test_agent_first_internal_routes.py` exists to do precisely that.

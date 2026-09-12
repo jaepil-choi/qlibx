@@ -1,6 +1,6 @@
 """Writing to an undeclared table says how to declare it.
 
-`docs/issues/019`. The refusal named the breach -- *"decide() emitted undeclared diagnostic tables:
+`docs/issues/archive/019`. The refusal named the breach -- *"decide() emitted undeclared diagnostic tables:
 ['ff3.formation']"* -- and not the repair. The skill's *"Every run records three tables, plus any
 the model formed"* reads as *form one and it is recorded*, so an author who had not declared one
 learned the gate existed only when it fired, and it fires mid-simulation.
@@ -17,8 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from vqapr.evidence.recorder import InvocationRecorder
-from vqapr.evidence.tables import TableSpec
+from vqapr.component.strategy.recorder import InvocationRecorder, TableSpec
 
 _NOW = datetime(2026, 1, 5, tzinfo=UTC)
 

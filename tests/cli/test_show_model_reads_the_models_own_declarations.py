@@ -1,4 +1,4 @@
-"""`docs/issues/055`: `show model` answers from `inputs()`, `tables()` and `account_history()`.
+"""`docs/issues/archive/055`: `show model` answers from `inputs()`, `tables()` and `account_history()`.
 
 It read three private attributes nothing in the tree assigned -- `_aliases`, `_authored_tables`,
 `_authored_history` -- behind `getattr` defaults, so `reads` was always empty, `records` never
@@ -13,49 +13,132 @@ from pathlib import Path
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.workspace import Workspace
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
+from vqapr.domain.wiring import Role
+from vqapr.workspace.registry import Workspace
 
 STRATEGY = '''
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Wide(va.StrategyModel):
+class Wide(vq.StrategyModel):
     def inputs(self):
         return {
-            "resid": va.DatasetInput(
+            "resid": vq.DatasetInput(
                 dataset_id="ff6-resid-values",
                 fields=("resid", "beta_mkt", "beta_smb"),
-                lookback=va.RowsLookback(rows=30),
+                lookback=vq.RowsLookback(rows=30),
             ),
-            "px": va.DatasetInput(
-                dataset_id="kr-daily", fields=("close",), lookback=va.RowsLookback(rows=2)
+            "px": vq.DatasetInput(
+                dataset_id="kr-daily", fields=("close",), lookback=vq.RowsLookback(rows=2)
             ),
         }
 
     def tables(self):
-        return (va.TableSpec("ou_summary", ("instrument", "z")),)
+        return (vq.TableSpec("ou_summary", ("instrument", "z")),)
 
     def account_history(self):
-        return va.AccountHistoryInput(fields=("nav",), lookback=va.RowsLookback(rows=5))
+        return vq.AccountHistoryInput(fields=("nav",), lookback=vq.RowsLookback(rows=5))
 
     def decide(self, call):
-        return va.Hold(reason="never called here")
+        return vq.Hold(reason="never called here")
 '''
 
 
-def _register(root: Path, component_id: str, source: Path) -> None:
-    kind = ComponentKind.STRATEGY_MODEL
-    Workspace.create(root).register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            "Wide",
-            fingerprint=fingerprint_component(source, kind=kind, object_name="Wide"),
+def _register(
+    root: Path,
+    component_id: str,
+    source: Path,
+    *,
+    kind: Role = Role.STRATEGY_MODEL,
+    object_name: str = "Wide",
+) -> None:
+    space = Workspace.create(root) if not (root / ".vqapr").exists() else Workspace.open(root)
+    with Workspace.transaction(space) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
+
+
+EXCHANGE = """
+from decimal import Decimal
+from vqapr.public import AcademicExchange, TradeRule
+from vqapr.public import ListingAccess
+
+
+class Venue(AcademicExchange):
+    def __init__(self):
+        super().__init__(
+            {"A": TradeRule("A", Decimal("1"), Decimal("1"), False, ListingAccess.SIGNED)}
+        )
+"""
+
+
+def test_a_registered_component_of_a_kind_this_verb_does_not_describe_is_refused_by_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`docs/issues/archive/083`. Feeding `list components` to `show model` broke on the exchange with
+
+        {"stage": "unhandled", "failures": [], "error": "TypeError: ref must identify a
+         strategy_model component"}
+
+    which is false -- this verb reads three kinds and had just shown a datamodel -- and
+    unstructured. The neighbouring mistake, an unregistered id, gets a `argument.value_invalid`
+    naming what is registered; the wrong kind is the same mistake and gets the same answer.
+    """
+    source = tmp_path / "wide.py"
+    source.write_text(STRATEGY, encoding="utf-8")
+    _register(tmp_path, "wide", source)
+    venue = tmp_path / "venue.py"
+    venue.write_text(EXCHANGE, encoding="utf-8")
+    _register(tmp_path, "venue", venue, kind=Role.EXCHANGE, object_name="Venue")
+
+    code = main(["--project-root", str(tmp_path), "show", "model", "venue"])
+    refused = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    assert code != 0
+    assert refused["stage"] != "unhandled", refused
+    (failure,) = refused["failures"]
+    assert failure["code"] == "argument.value_invalid"
+    assert "strategy, datamodel, compliance" in failure["requirement"]
+    assert failure["observed"] == "'venue' is registered as exchange"
+    assert "list components --kind" in refused["retry_precondition"]
+
+
+def test_list_components_filters_by_kind_so_the_wrong_ref_is_never_assembled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of `083` (and of `082`): `--kind`, spelled the way `list` reports it."""
+    source = tmp_path / "wide.py"
+    source.write_text(STRATEGY, encoding="utf-8")
+    _register(tmp_path, "wide", source)
+    venue = tmp_path / "venue.py"
+    venue.write_text(EXCHANGE, encoding="utf-8")
+    _register(tmp_path, "venue", venue, kind=Role.EXCHANGE, object_name="Venue")
+
+    def listed(*argv: str) -> dict:
+        main(["--project-root", str(tmp_path), "list", *argv])
+        return json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    assert [row["component_id"] for row in listed("components")["items"]] == ["venue", "wide"]
+    assert [row["component_id"] for row in listed("components", "--kind", "strategy")["items"]] == [
+        "wide"
+    ]
+    assert [row["component_id"] for row in listed("components", "--kind", "exchange")["items"]] == [
+        "venue"
+    ]
+    assert listed("components", "--kind", "datamodel")["count"] == 0
+
+    wrong = listed("runs", "--kind", "strategy")
+    assert wrong["ok"] is False
+    assert wrong["failures"][0]["code"] == "argument.value_invalid"
 
 
 def test_reads_decides_forms_and_records_come_from_the_model(

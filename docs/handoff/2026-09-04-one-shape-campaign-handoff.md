@@ -10,20 +10,68 @@
 
 | | |
 |---|---|
-| `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected** |
-| 브랜치 | 없음 — 다음은 `step-04-delete-materialize` |
+| `develop` | **`b4bef34b` — Step 0·1·2·2b·3 병합됨.** fast **1,417 passed / 22 deselected**. **2026-09-05 갱신: 그 위에 캠페인 밖 브랜치 넷이 병합됐다** — records `155`(`078`)·`156`(`079`·`083`·`084`·`085`)·`157`(`080`·`081`)·`158`(`086`), 마지막 것은 §0b 참조. 전체 스위트 `test_all` 기준 **1,452 passed** (`157` 병합 시점) |
+| 브랜치 | 없음 — **Step 7 완료(record `162`), 캠페인 종료. 0.5.0 릴리스 2026-09-07; 0.6.0 릴리스 2026-09-07; 0.7.0 릴리스 2026-09-08 (breaking: records 170-173 — status/stage/cause 봉투, field_types 필수, public 문 정리, `vqapr new sample`; 노트 `docs/releases/0.7.0.md`; test_all 1492 passed, show_003 exit 0, 시나리오 stepper 0.7.0판)**(records 163·164·165: report API, write-once 기록, kill test; stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.6.0.html`, full suite 1443 passed, show_003 exit 0, 태그 `v0.6.0`)(stamp `pyproject`·`uv.lock`·showcase ×8·README ×2, stepper `docs/walkthroughs/2026-09-07-spine-stepper-0.5.0.html`, show_003 수동 exit 0, 태그 `v0.5.0`). 남은 이슈는 `023`(HELD) 하나 |
 | baseline | `dd55822b`에서 fast **1,387 passed / 22 deselected** |
 | 모듈 수 | 134 → **127** / 31,557 → 31,461줄 (Step 0 뒤) |
-| record 번호 | 다음은 **`155`**. 캠페인 문서의 계획 번호는 155–158 |
-| 열린 이슈 | **둘** — `023`·`027` (77파일 / 75닫힘). testbed run 4가 낸 넷은 전부 닫혔다 |
+| record 번호 | 다음은 **`155`**. **계획서·§3에 적힌 번호는 무시하고, 브랜치를 딸 때 그 시점의 다음 미사용 번호를 쓴다** — 2026-09-05 판정으로 캠페인 밖 작업 넷이 앞에 끼어들어 계획 번호가 밀렸다 |
+| 열린 이슈 | **열하나** — `023`·`027` + 실환경 아홉 `078`~`086` (86파일 / 75닫힘). 아홉은 이 핸드오프가 쓰인 **뒤**에 접수됐다(`4bdfc4cf`) — 색인은 `docs/issues/README.md` §1 |
 
 **첫 행동:** `git checkout develop && git checkout -b step-04-delete-materialize`, 그리고 §3 Step 4.
 **Step 4 전에 SLOW 스위트를 한 번 돌린다** — showcase 005–008을 이 단계가 다시 쓴다.
 
 > **§3의 record 번호는 이 갱신 전에 쓰인 것이다.** Step 2·2b·3은 닫혔다(records `152`·`153`·`154`).
-> §3 Step 4 이후의 record 번호에 각각 1을 더해 읽는다: 4→`155`, 5→`156`, 6→`157`. 손 위치는 유효하다.
+> **§3의 record 번호는 전부 무효로 읽는다** — 번호는 브랜치를 딸 때 정한다. 손 위치는 유효하다.
 
-## 1. 소유자 결정 (2026-09-04, 전부 확정 — 다시 묻지 말 것)
+## 0b. 2026-09-05 세션이 남긴 것 — 캠페인 밖 브랜치 넷
+
+전부 `develop`에 `--no-ff`로 병합·푸시됐다. 각 record가 무엇·왜·검증을 든다.
+
+| record | 브랜치 | 닫은 이슈 | 한 줄 |
+|---|---|---|---|
+| `155` | `fix/078-size-down-and-leave-cash` | `078` | 지불 가능 수량이 **청구하는 채널**(`ExchangeRulesView.charge`)에서 rate를 읽고, 보정은 청구된 값으로 다시 풀고, 못 맞추면 거부 대신 현금을 남긴다. 척추 인접(`orders/planning.py`)이라 캠페인 밖 |
+| `156` | `fix/refusals-and-summaries-tell-the-truth` | `079`·`083`·`084`·`085` (+`082`의 `--kind` 절반) | datamodel 거부가 pyarrow 문장+확정 스키마를 인용하고 원인을 단정 안 함(`type_drift`→`schema_mismatch`); `show model`의 구조화 거부와 `list components --kind`; run conflict `fix`가 `rm run-definition`을 대고 같은 문서의 producer run을 거부가 이름으로 댐(`declaration.read.run_fed_by_sibling`); `fill_summary.never_filled` |
+| `157` | `fix/080-081-enumerate-then-cascade` | `080`·`081` | datamodel 쪽 `unfinished`/`running` 열거와 `rm datamodel`이 record 없는 디렉터리를 댐; `list runs`의 `orphaned` 행; `rm run-definition`의 `records_remaining`; **`rm run <id> --cascade`** (record → 정의 → materialized 출력 → component, 다른 run이 이름 대는 것은 `kept`+`held_by`) |
+| `159`·`160` | `step-04-delete-materialize` · `step-05-document-is-the-domain` | — · `027`·`082` | 캠페인 Step 4·5. Step 5가 찾은 것: §1.3의 `declarations.py` 행이 틀림(6/7이 adapter 구현); `model_copy`는 재검증 안 함(`RunDefinition.replace()`가 검증을 거침); `instruments:` 오타가 퇴역 shape 조언을 받던 결함; 문 하나가 지켜야 했던 보장 셋(호출자 객체 갱신·fresh 프로젝트의 첫 등록이 문서를 씀·사라진 문서는 `open.missing`으로 거부) |
+| `158` | `fix/086-tolerance-and-three-buckets` | `086` | `StampedConstraintFinding`이 `excess`를 `max(bound×1%, 10bp)`(또는 `Constraint.tolerance`)로 판정해 `held`/`within_tolerance`/`breached`; contract 블록이 셋을 나눠 세고 `ok`는 `breached`만 봄; monitoring 행에 `verdict`·`tolerance`. **constraint·scaffold 코드 변경 0** |
+
+**함정 하나, 기록해 둔다.** (2026-09-07 추가: 같은 파일의 `test_a_process_killed_mid_write_leaves_rows_and_no_record`도 타이머로 worker를 죽여서, 프로세스 시작이 느리면 첫 parquet part 전에 죽는다 — 격리 6회 중 1회, develop에서도 남. record `162` Validation. **닫힘, record `165`**: 이제 시계 대신 증거를 기다린다 — kill 테스트는 첫 spill part가 디스크에 나타날 때까지, interrupt 테스트는 자식이 열 번째 append 뒤 남기는 마커까지 폴링. 20/20·20/20. 아래 five-process 테스트는 시계가 없어 같은 처리가 안 되며, record `165`에 이유를 적었다.) `tests/qa/test_run_records_survive_and_race.py::test_five_processes_racing_...`은
+문서화된 ~1/12 flake이고, `157`의 전체 스위트에서 한 번 실패했다(1,452 passed / 1 failed). 격리 재실행
+5/6, `develop`에서 5/5. **소스를 막 고친 직후에 돌리면 더 자주 실패한다** — 다섯 자식 프로세스가 바뀐
+모듈을 동시에 바이트컴파일하느라 창이 넓어진다(3/5 관측). 실패하면 두어 번 다시 돌려 보고, 세 번 연속이면
+그때 의심한다.
+
+**Step 4가 남긴 함정 둘 (record `159`).** ① `run(..., store_root=...)`를 준 run은 행을 메모리에
+**안 남긴다** — `final_state.recorder_rows`가 비어 있다(sink로 넘기고 root는 보관 안 함). 저장된 run의
+표를 읽으려면 record 디렉터리에서 다시 읽는다(showcase의 `_recorded_rows`). ② record는 세션마다 part
+하나이고, 그 세션에 값이 없던 컬럼은 `null` 타입으로 써진다 — 여러 part를 읽는 쪽이 스키마를 **union**해야
+하고, 패키지의 `scan._relation`이 이제 그렇게 한다(`union_by_name=true`). 직접 duckdb로 읽을 때도 같은
+옵션이 필요하다. ③ 모듈을 지운 뒤에는 전체 스위트 전에 `pytest --collect-only`부터 — 1초면 import 누락이 잡힌다.
+④ **문(door)을 지울 때는 호출자 수가 리라이트 범위가 아니다.** Step 5 M5a에서 `public.py`의 헬퍼 둘이 지운 문을 계속 부르고 있었고, 타깃 테스트는 전부 통과했으며(그 헬퍼를 안 씀), 첫 전체 스위트에서 showcase·slow 여정 34개가 한꺼번에 죽었다. 문을 지운 뒤에는 `grep`으로 남은 호출자 0을 확인하고 showcase 게이트를 전체 스위트 **앞에** 돌린다.
+
+**남은 실환경 이슈는 `082` 하나** — `--reads` 인덱스와 dataset의 producer `run_id`. 캠페인 Step 5에서 dataset
+문서를 다시 쓸 때 접는다. 원래부터 열려 있던 `023`·`027`은 그대로.
+
+## 1. 소유자 결정 (전부 확정 — 다시 묻지 말 것)
+
+### 1b. 2026-09-05 판정 다섯 — 실환경 아홉 중 다섯
+
+이슈 파일의 `**Status:**` 줄이 authority이고, ledger §1의 「2026-09-05 소유자 판정」이 색인이다.
+**같은 날 전부 구현됐다** — records `155`–`158`, 아래 §0b. 판정 자체는 그대로 유효하고, 다시 묻지 않는다.
+
+| | 결정 | 메모리 파일 |
+|---|---|---|
+| `079` | **데이터와 타입은 사용자 책임.** 스키마를 선언하게 하지 않고, precision을 지목하지도 않는다. 구분 못 하는 자리에서는 pyarrow 문장을 그대로 낸다 | `data-and-types-are-the-users-responsibility.md` |
+| `086`·`085` | **허용오차는 후하게, 대신 기록을 나눈다.** 기본 `max(bound × 1%, 10bp)` · override 가능 · 판정은 `constraints/evaluation.py` 한 자리(저자 코드 변경 0) · 기록은 `held`/`within_tolerance`/`breached` + 각 worst excess · `ok`는 `breached > 0`일 때만 false | `generous-tolerance-split-the-record.md` |
+| `081`·`080` | **삭제는 쉬워야 한다 — cascade를 만든다.** `rm run --cascade`. `080`(열거 완비)이 선행. 부분 실패는 되돌리지 않고 남은 것을 이름으로 보고 | `deletion-must-be-easy.md` |
+| `078` | 두 번째 절반: **거부하지 않는다.** 지불 가능 수량이 안 맞으면 한 단위 덜 사고 잔액은 현금. 첫 번째 절반(청구 채널에서 비용 읽기)은 그대로 버그 | 위 `generous-tolerance...`와 같은 뿌리 |
+
+**기각된 안들** (다시 제안하지 말 것): `079`의 선언 스키마와 precision 지목 · `086`의 절대 금액
+기본값(vqapr에 통화 개념이 없다 — 돈은 단위 없는 `Decimal`)과 lot 유도(`ConstraintCall`이 최소
+권한으로 venue를 못 본다) · `086`의 tolerance를 `ConstraintBounds`에 두는 안(`project`로 새어
+feasible set을 넓힌다).
+
+### 1a. 2026-09-04 판정 (캠페인)
 
 | | 결정 | 메모리 파일 |
 |---|---|---|
@@ -112,7 +160,7 @@ load → save)를 상수 문자열 하나로 감싼다.
 
 ### ~~Step 3 — `075`~~ — **완료**, record `154`.
 
-### Step 4 — `flow/materialize.py` 삭제 (record `155`) ← **다음 손**
+### ~~Step 4 — `flow/materialize.py` 삭제~~ — **완료 2026-09-05, record `159`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 5**(§3의 다음 절, record `160`).
 
 - `src/vqapr/authoring.py:573-720` `Rebalance.of`. 647-690의 quantise+settle 블록이
   `src/vqapr/portfolio/weighting.py:161 rescale(weights, long=, short=, grid=QUANTUM)`의 사본이다.
@@ -181,7 +229,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 6. `tests/characterization/refusal_codes.py` inventory에서 `materialize.*` 코드 제거(재생성).
    `scripts/vulture_whitelist.py` 확인.
 
-### Step 5 — 문서가 도메인이다 (ExecPlan 필요, record `155`)
+### ~~Step 5 — 문서가 도메인이다~~ — **완료 2026-09-07, record `160`.** 아래는 당시의 손 위치로, 기록으로만 남긴다. 다음 손은 **Step 6**(record `161`), 그 첫 마일스톤 6a = `Frozen*` → frozen pydantic(Step 5의 M5d를 여기로 연기).
 
 캠페인 §1.3 표가 계약이다. 손 위치:
 - `src/vqapr/workspace_document.py`: `RunDocument.to_domain(:412)`, `DatasetDocument`·`ExecutionInputDocument`·
@@ -206,7 +254,7 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
   `cli/register.py:73`이 `apply()`의 반환(`dict[str, list[str]]`, id 목록)을 envelope에 넣는다 → 문장 리스트를
   더한다. "One sentence per PIT-bearing field, or nothing" (`027` §What to settle).
 
-### Step 6 — 기록 family 7 → 3 (record `156`)
+### ~~Step 6 — 기록 family 7 → 3~~ — **완료 2026-09-07, record `161`.** 아래는 당시의 손 위치. 다음 손은 **Step 7**(record `162`): 남은 순환은 정확히 셋 — `data.store↔data.windows`, `exchange.conventions↔exchange.execution_table`, `cli↔cli.main`.
 
 캠페인 §1.3 표의 마지막 행. `flow/run_records.py`의 `_RUN_FIELDS`(:109)·`_STRATEGY_FIELDS`(:145)·
 `_DATAMODEL_FIELDS`(:168)·`RUN_JSON_FIELDS`(:188)와 `flow/records.py`의 lambda builder 셋이 record 모델
@@ -215,9 +263,11 @@ win.panel([req], "weight").latest()   # {'A': 0.25, 'B': 0.75}; t1+1h에서는 t
 import하는 순환은 둘 다 `FlowContext`만 보게. 확인 대상: `run_state.prepare/publish_valuation_only`가
 148 뒤에도 `valuation.py:194,221`에서 불리는데 실제 도달하는지(record 104 tracer).
 
-### Step 7 — 패키지 접기
+### ~~Step 7 — 패키지 접기~~ — **완료 2026-09-07, record `162`. 캠페인의 마지막 단계.**
 
-캠페인 §2 표 그대로. 마지막에.
+순환 3→0(`cli↔cli.main`은 entry point를 `vqapr.cli.main:main`으로, `store↔windows`는 두 shape을 store로, `conventions↔execution_table`은 convention이 `source`·`trade_at_field`·`execution_input_id`를 받고 registration이 위임). `domain/` 10→**5**(`errors`·`identifiers`·`instruments`·`values`·`agendas`), `constraints/` 7→**5**, `valuation/`·`runtime/` 삭제(`flow/marking.py`, `domain/values.py`, `domain/agendas.py`, `flow/loop.py`로). ratchet 18→13. 표의 숫자와 다른 곳은 record `162` "Corrections"에 이유가 있다.
+
+**0.5.0 릴리스 완료(2026-09-07).** 순서였던 것: (1) `pyproject`·`uv.lock`·showcase `VERIFIED_AGAINST` stamp(0.4.1 때 `080a275b` 참조), (2) spine stepper를 실제 트레이스로 재생성(메모리 규칙), (3) `show_003`을 손으로 실행(DW 창고, 릴리스 전 수동), (4) 태그·푸시 뒤 testbed(kwam-enhanced-index)와 Reporting 세션에 갱신 안내. 0.4.1 대비 변경 요약은 이 세션의 보고에 있고, record `151`~`162`가 전부다.
 
 ## 4. 열린 질문 (소유자에게, 막지는 않음)
 

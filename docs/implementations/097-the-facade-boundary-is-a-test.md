@@ -1,7 +1,7 @@
 # 097 — The facade boundary is a test, not a paragraph
 
-**Closes:** `docs/issues/028-a-module-below-the-cli-reaches-up-through-the-facade.md`, and the
-`flow/judgments.py` row of `docs/issues/029-two-doors-into-internal-and-an-expired-deletion-promise.md`.
+**Closes:** `docs/issues/archive/028-a-module-below-the-cli-reaches-up-through-the-facade.md`, and the
+`flow/judgments.py` row of `docs/issues/archive/029-two-doors-into-internal-and-an-expired-deletion-promise.md`.
 **Branch:** `fix/023-narrow-the-provenance-promise` (the audit landed mid-branch; see below).
 
 ## Why this change exists
@@ -52,7 +52,7 @@ recorded here rather than quietly edited away.**
 What actually happened:
 
 - `f31d1e1e`, on `fix/023-narrow-the-provenance-promise`, carried **only the two audit issue
-  documents** (`docs/issues/028`, `029`) alongside the 023 docs work. No source, no test, no record.
+  documents** (`docs/issues/archive/028`, `029`) alongside the 023 docs work. No source, no test, no record.
 - The 028 fix itself — the `judgments.py` import change, the new boundary test, this record, and the
   regenerated baseline — landed in **`c0a1c75d`, whose parent is `e816b18c`, the merge commit.**
 - The completion-gate fix (`ad38957d`, the materialization refusal tests plus lint parity) landed the

@@ -2,7 +2,7 @@
 
 Chain proved here, using only ``vqapr.public``::
 
-    data/DW CSV -> parquet slice -> register_dataset / register_execution_input
+    data/DW CSV -> parquet slice -> register_dataset (observations and the venue table)
       -> DataModel -> materialize reversal_score (derived dataset)
       -> StrategyModel reads the derived dataset -> signed long/short intent
       -> AcademicExchange fills -> Account commit -> mark -> monitoring -> finalize
@@ -29,26 +29,26 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from pydantic import BaseModel
 
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DataModelEntry,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
-    component_ref,
-    preflight_run,
-    register_component,
+    freeze,
+    register_compliance,
     register_data_model,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_instruments,
+    register_strategy_model,
     run,
 )
 
@@ -61,8 +61,8 @@ INPUTS = OUTPUTS / "inputs"
 PROJECT = OUTPUTS / "project"
 VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 SPEC = FixtureSpec(asof="20260331", start="20260401", end="20260529", universe_size=6)
 
@@ -96,18 +96,18 @@ def _write_components() -> dict[str, Path]:
     model.write_text(
         '''from __future__ import annotations
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 LOOKBACK = 6
 
 
-class ReversalModel(va.DataModel):
+class ReversalModel(vq.DataModel):
     """Cross-sectionally demeaned 5-session reversal on real closes."""
 
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="price_daily", fields=("close",), lookback=va.RowsLookback(rows=LOOKBACK)
+            "prices": vq.DatasetInput(
+                dataset_id="price_daily", fields=("close",), lookback=vq.RowsLookback(rows=LOOKBACK)
             )
         }
 
@@ -188,7 +188,7 @@ class ReversalLongShort(StrategyModel):
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
-        history["last_occurrence"] = context.occurrence.occurrence_id
+        history["last_event"] = context.event.event_id
         self.memory = history
 
         return Rebalance(
@@ -230,42 +230,36 @@ class ShowcaseExchange(AcademicExchange):
         encoding="utf-8",
     )
 
-    constraint = components / "constraint.py"
-    constraint.write_text(
+    compliance = components / "compliance.py"
+    compliance.write_text(
         '''from __future__ import annotations
 
 from decimal import Decimal
 
-from vqapr.public import Constraint, ConstraintBounds, ConstraintFinding, Rebalance
+from vqapr.public import Compliance, ComplianceFinding
 
 CAP = Decimal("0.30")
 
 
-class SingleNameCap(Constraint):
-    """One shared absolute single-name cap for projection, intent and monitoring."""
+class SingleNameCap(Compliance):
+    """An absolute single-name cap, observed on the marked book at every market-clock instant."""
 
     @property
-    def constraint_id(self):
-        return "showcase-constraint"
+    def compliance_id(self):
+        return "showcase-cap"
 
     def inputs(self):
         return {}
 
-    def project(self, call):
-        return ConstraintBounds(
-            lower_weights={instrument: -CAP for instrument in call.instruments},
-            upper_weights={instrument: CAP for instrument in call.instruments},
-        )
-
-    def monitor(self, call, account, bounds):
-        # `account.weights()` is each name's marked value over NAV, and NAV is cash plus the
+    def observe(self, call):
+        # `call.account.weights()` is each name's marked value over NAV, and NAV is cash plus the
         # marked total. The arithmetic used to be written out here from a MarkBatch; doing it in
         # one place is what keeps every rule measuring the same book the same way.
-        weights = account.weights() if account.nav else {}
+        weights = call.account.weights() if call.account.nav else {}
         measured = max((abs(w) for w in weights.values()), default=Decimal("0"))
         excess = measured - CAP if measured > CAP else Decimal("0")
         offenders = tuple(sorted(n for n, w in weights.items() if abs(w) > CAP))
-        return ConstraintFinding(
+        return ComplianceFinding(
             passed=not offenders,
             measured=measured,
             bound=CAP,
@@ -276,12 +270,14 @@ class SingleNameCap(Constraint):
 ''',
         encoding="utf-8",
     )
-    return {"model": model, "strategy": strategy, "exchange": exchange, "constraint": constraint}
+    return {"model": model, "strategy": strategy, "exchange": exchange, "compliance": compliance}
 
 
 def _json_value(value: Any) -> Any:
     if is_dataclass(value) and not isinstance(value, type):
         return {f.name: _json_value(getattr(value, f.name)) for f in fields(value)}
+    if isinstance(value, BaseModel):
+        return {name: _json_value(getattr(value, name)) for name in type(value).model_fields}
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, Mapping):
@@ -369,23 +365,31 @@ def main() -> None:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close", "volume": "volume"},
+            # The extracted slice stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here; the model already reads it as float. Volume is
+            # a BIGINT in the same slice.
+            fields={"close": "CAST(close AS DOUBLE)", "volume": "volume"},
+            field_types={"close": "DOUBLE", "volume": "INTEGER"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
-    register_execution_input(
+    register_dataset(
         PROJECT,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     paths = _write_components()
@@ -401,48 +405,47 @@ def main() -> None:
     # strategy run below, no venue and no account, one registered dataset at the end.
     score_definition = RunDefinition(
         run_id="showcase-score",
-        strategies=(),
         instruments=tuple(universe),
-        datamodels=(DataModelEntry("showcase-model", "reversal_score", ("score",)),),
+        datamodel=DataModelEntry("showcase-model", ("score",)),
         timezone=VENUE,
-        at=time(16, 0),
-        sessions=tuple(score_days),
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.fromisoformat(f"{score_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{score_days[-1].isoformat()}T23:00:00{OFFSET}"),
+        writes="reversal_score",
     )
     materialization = run(
-        PROJECT, preflight_run(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
+        PROJECT, freeze(PROJECT, score_definition), store_root=PROJECT / ".vqapr"
     ).result()
 
-    strategy_ref = component_ref(
-        "showcase-strategy", ComponentKind.STRATEGY_MODEL, paths["strategy"], "ReversalLongShort"
-    )
-    exchange_ref = component_ref(
-        "showcase-exchange", ComponentKind.EXCHANGE, paths["exchange"], "ShowcaseExchange"
-    )
-    constraint_ref = component_ref(
-        "showcase-constraint", ComponentKind.CONSTRAINT, paths["constraint"], "SingleNameCap"
-    )
-    for reference in (strategy_ref, exchange_ref, constraint_ref):
-        register_component(PROJECT, reference)
+    register_strategy_model(PROJECT, "showcase-strategy", paths["strategy"], "ReversalLongShort")
+    # What each id IS, declared by the project before anything orders it (design §6.2). The
+    # universe is index constituents, so every name is a share.
+    register_instruments(PROJECT, {name: "stock" for name in universe})
+    register_exchange(PROJECT, "showcase-exchange", paths["exchange"], "ShowcaseExchange")
+    register_compliance(PROJECT, "showcase-cap", paths["compliance"], "SingleNameCap")
 
 
     definition = RunDefinition(
         run_id="show003",
-        strategies=(StrategyEntry("showcase-strategy", ("showcase-constraint",)),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("showcase-strategy"),
+        compliance=("showcase-cap",),
         timezone=VENUE,
-        at=time(8, 30),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         exchange="showcase-exchange",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"{callback_days[-1].isoformat()}T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000000000"), {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=tuple(universe),
+        writes="show003-weights",
     )
 
-    frozen = preflight_run(PROJECT, definition)
+    frozen = freeze(PROJECT, definition)
     result = run(PROJECT, frozen).result()
 
     final_state = result.final_state
@@ -516,9 +519,9 @@ def main() -> None:
             "first_session": fixture["first_session"],
             "last_session": fixture["last_session"],
             "materialized_score_rows": materialization.rows,
-            "materialized_evaluations": len(materialization.occurrences),
+            "materialized_evaluations": len(materialization.events),
             "strategy_callbacks": len(callback_days),
-            "occurrences_dispatched": len(result.occurrences),
+            "events_dispatched": len(result.events),
             "dealt_fills": len(dealt),
             "final_nav": None if nav is None else str(nav),
             "final_cash": str(account.snapshot.cash),

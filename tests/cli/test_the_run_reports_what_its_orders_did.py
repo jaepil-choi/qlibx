@@ -1,6 +1,6 @@
 """`run.complete` says what the orders did, not only that the simulation executed.
 
-`docs/issues/039`. A market-neutral run returned `{"ok": true, "occurrences": 732,
+`docs/issues/archive/039`. A market-neutral run returned `{"ok": true, "events": 732,
 "account_version": 244}`. Its long side landed on 0.500 at every rebalance; its short side never
 did, and by December the book carried **+9.1% of NAV in unintended net long exposure** -- a strategy
 whose whole premise is neutrality running a material directional bet.
@@ -22,10 +22,10 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
-from vqapr.analysis.execution import fill_summary
-from vqapr.flow.reporting import FRAMEWORK_TABLES, recorded
-from vqapr.flow.run_state import AcceptedRunState
-from vqapr.flow.simulation import SimulationResult
+from vqapr.record.schema import FRAMEWORK_TABLES
+from vqapr.report.metrics import fill_summary
+from vqapr.run.engine.loop import SimulationResult
+from vqapr.run.engine.run_state import AcceptedRunState
 
 
 def _result(*tables: tuple[str, tuple[dict[str, object], ...]]) -> SimpleNamespace:
@@ -60,6 +60,7 @@ def test_the_reporters_run_would_have_named_its_own_cause() -> None:
         "partial": 0,
         "zero_dealt": 4,
         "reasons": {"no_trade": 1, "nontradable": 3},
+        "never_filled": [],
     }
 
 
@@ -96,6 +97,33 @@ def test_reasons_stay_separate_because_they_are_not_one_fact() -> None:
     assert summary["reasons"] == {"absent": 1, "nontradable": 1, "unfunded": 1}
 
 
+def test_a_name_that_never_filled_once_is_named_rather_than_folded_into_absent() -> None:
+    """`docs/issues/archive/085`. A 20% ETF sleeve was in the run's instruments, the listing and the
+    roster, and missing from the execution input's price table. Every one of 82 rebalances
+    ordered it and every fill dealt zero -- correct -- and the summary said `absent: 82` beside
+    `ok: true`, a number that cannot be told apart from one missing row on each of 82 names.
+    The reporter found it thirty minutes later, from a -4.45%p shortfall that matched 20% of
+    the book sitting in cash. It is the axis `reasons` cannot see, and it is stated by name.
+    """
+    rows = (
+        *(_fill(requested="10", dealt="10") for _ in range(82)),
+        *(
+            {**_fill(requested="7", dealt="0", reason="absent"), "instrument": "A069500"}
+            for _ in range(82)
+        ),
+        # One ordinary absence on an ordinary name: market behaviour, not a configuration error.
+        {**_fill(requested="1", dealt="0", reason="absent"), "instrument": "A000660"},
+        {**_fill(requested="1", dealt="1"), "instrument": "A000660"},
+    )
+
+    summary = fill_summary(rows)
+
+    assert summary["reasons"] == {"absent": 83}, "the fold this file is about, still there"
+    assert summary["never_filled"] == [
+        {"instrument": "A069500", "orders": 82, "dealt": 0, "reason": "absent"}
+    ], "and the name that never dealt once, beside it"
+
+
 def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
     """A run with no fill rows is an answer, not an absent field."""
     assert fill_summary(()) == {
@@ -104,6 +132,7 @@ def test_a_run_that_traded_nothing_reports_zeroes_rather_than_nothing() -> None:
         "partial": 0,
         "zero_dealt": 0,
         "reasons": {},
+        "never_filled": [],
     }
 
 
@@ -111,7 +140,7 @@ def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
     """The bug this file's helper was written to stop repeating.
 
     The envelope's table readers used to read `result.tables`. `SimulationResult` has no such attribute -- it
-    has `occurrences` and `final_state` -- so the component-declared half of `docs/issues/024`
+    has `events` and `final_state` -- so the component-declared half of `docs/issues/archive/024`
     reported nothing in production, while its unit test passed a `SimpleNamespace(tables=...)` and
     stayed green for a week. Both envelope fields now read one helper, and this pins the path that
     helper walks against the real types.
@@ -129,7 +158,7 @@ def test_the_envelope_reads_the_shape_the_real_result_has() -> None:
 
 
 def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
-    """`docs/issues/024`'s own case, now driven through the attribute the real object has."""
+    """`docs/issues/archive/024`'s own case, now driven through the attribute the real object has."""
     result = _result(
         ("vqapr.account", ()),
         ("vqapr.fill", ()),
@@ -137,11 +166,11 @@ def test_a_table_the_model_declared_and_formed_is_reported_again() -> None:
         ("ff3.formation", ()),
     )
 
-    declared = [table for table in recorded(result) if table not in FRAMEWORK_TABLES]
+    declared = [
+        table for table in result.final_state.recorder_rows if table not in FRAMEWORK_TABLES
+    ]
     assert declared == ["ff3.formation"]
 
 
 def test_the_helper_returns_an_empty_mapping_for_a_result_that_recorded_nothing() -> None:
     """No rows is not a crash, and not a `None` the callers would have to test for."""
-    assert recorded(SimpleNamespace()) == {}
-    assert recorded(SimpleNamespace(final_state=SimpleNamespace())) == {}

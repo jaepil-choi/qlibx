@@ -127,14 +127,14 @@ The note and the field agree.
 
 ## One finding filed rather than fixed
 
-`docs/issues/013` — a venue's own `UNIVERSE` and the project's registered roster are two
+`docs/issues/archive/013` — a venue's own `UNIVERSE` and the project's registered roster are two
 independent statements about instrument category, compared nowhere. A run was produced where the
 fill's `kind` said `stock` while the tax charged followed the venue's `etf`. Repairing it means
 deciding which statement wins, and a `check`-side cross-check means a ninth judgment, which
 `tests/cli/test_check.py` pins at eight with its own message saying that is a decision. Not Slice
 B's to make.
 
-A second was filed after this record was first written: `docs/issues/014`. The constraint
+A second was filed after this record was first written: `docs/issues/archive/014`. The constraint
 scaffold's corrected semantics cited `SingleNameCap` as the shipped size-only precedent, and the
 cleaner lane checked the citation rather than the claim -- `SingleNameCap`'s `project` floors at
 `0`, its `validate_intended` measures raw signed weight, and its `evaluate` measures `abs`. It has

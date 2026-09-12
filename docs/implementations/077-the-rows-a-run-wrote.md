@@ -57,7 +57,7 @@ The distinction is load-bearing rather than pedantic: `RunRecordSpec.availabilit
 because the two clocks differ, and its docstring records a factor correlation moving from 0.93 to
 0.02 when one was mislabelled as the other.
 
-The skill also states the split `docs/issues/013` records: a fill's `kind` is what the **roster**
+The skill also states the split `docs/issues/archive/013` records: a fill's `kind` is what the **roster**
 said, while what it was **charged** as follows the venue's own terms, and nothing compares the two.
 A reader summing cost by category needs to know that before they trust the sum.
 

@@ -7,7 +7,7 @@ transaction as everything else, refused when it names anything the workspace doe
 read back as the same value.
 
 Record `148`: a run declares its own sessions and the one wall time `at` every strategy is called
-at, so there is no agenda or strategy binding left for it to name. What a run still names is
+at, so there is no schedule or strategy binding left for it to name. What a run still names is
 components, an execution input, and -- when it takes its sessions from a dataset -- that dataset.
 """
 
@@ -20,17 +20,17 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
-from vqapr.data.sources import SourceSpec
-from vqapr.declarations import apply
+from vqapr.component.reference import ComponentRef
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import RunDefinition, RunExecution, RunFill, StrategyEntry
 
 KST = ZoneInfo("Asia/Seoul")
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))
@@ -39,30 +39,35 @@ _RUN_READY: dict[str, object] = {
     "start": None,
     "end": None,
     "timezone": "Asia/Seoul",
-    "at": "15:29",
-    "sessions": ["2024-03-05"],
+    "schedule": {"every": "1d", "at": "15:29"},
     "exchange": None,
-    "execution_input": None,
+    "execution": None,
     "initial_account": {"cash": "1000", "mode": "long_only", "positions": {}},
+    "writes": "krx-2024-weights",
     "strategies": {"ou-k0": None},
 }
 """A `runs.<id>` body every model rule accepts, for the malformed cases to break one key of."""
 
 
-def _component(name: str, kind: ComponentKind, root: Path) -> ComponentRef:
+def _component(name: str, kind: Role, root: Path) -> ComponentRef:
     return ComponentRef.of(name, kind, root / f"{name}.py", "Thing", fingerprint="a" * 64)
 
 
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "krx-2024",
-        "strategies": (StrategyEntry("ou-k0", ("no-short",)), StrategyEntry("ou-ff5")),
+        "writes": "krx-2024-weights",
+        "strategy": StrategyEntry("ou-k0"),
+        "compliance": ("no-short",),
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
-        "at": time(15, 29),
-        "sessions": SESSIONS,
+        "schedule": {"every": "1d", "at": time(15, 29)},
         "exchange": "venue",
-        "execution_input_id": "venue-daily",
+        "execution": RunExecution(
+            dataset="venue-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         "start": datetime(2024, 3, 5, tzinfo=KST),
         "end": datetime(2024, 3, 8, 15, 30, tzinfo=KST),
         "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {"A": Decimal("2")}),
@@ -74,119 +79,119 @@ def _definition(**overrides: object) -> RunDefinition:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
-    """Everything a run names, registered: four components and an execution input."""
+    """Everything a run names, registered: four components and a venue dataset."""
     space = Workspace.create(tmp_path)
     for name, kind in (
-        ("ou-k0", ComponentKind.STRATEGY_MODEL),
-        ("ou-ff5", ComponentKind.STRATEGY_MODEL),
-        ("no-short", ComponentKind.CONSTRAINT),
-        ("venue", ComponentKind.EXCHANGE),
+        ("ou-k0", Role.STRATEGY_MODEL),
+        ("ou-ff5", Role.STRATEGY_MODEL),
+        ("no-short", Role.COMPLIANCE),
+        ("venue", Role.EXCHANGE),
     ):
-        space.register_component(_component(name, kind, tmp_path))
+        with Workspace.transaction(space) as t:
+            t.register_component(_component(name, kind, tmp_path))
     execution = tmp_path / "execution.parquet"
     execution.write_bytes(b"")
-    space.register_execution_input(
-        ExecutionInputRegistration.of(
-            "venue-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("venue-source", execution),
-                trade_at_field="trade_at",
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                'venue-daily',
+                'venue-source',
                 instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
+                available_at="trade_at",
+                grain="instrument_instant",
+                key_fields=("trade_at", "instrument"),
+                fields={"close": "close", "is_tradable": "is_tradable"},
+                field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+                execution={"is_tradable": "is_tradable"},
+            ).with_span(
+                datetime(2024, 3, 5, 15, 30, tzinfo=KST), datetime(2024, 3, 8, 15, 30, tzinfo=KST)
             ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), "Asia/Seoul", "close"),
+            SourceSpec.of("venue-source", execution),
         )
-    )
     return Workspace.open(tmp_path)
 
 
 def test_a_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> None:
     definition = _definition()
 
-    assert workspace.register_run(definition) is True
-    assert workspace.register_run(definition) is False, "the same run again changes nothing"
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is False, "the same run again changes nothing"
 
     reopened = Workspace.open(workspace.project_root)
     assert reopened.run_definition("krx-2024") == definition
     assert [run.run_id for run in reopened.run_definitions] == ["krx-2024"]
     document = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))
     written = document["runs"]["krx-2024"]
-    assert set(written["strategies"]) == {"ou-k0", "ou-ff5"}
-    assert written["strategies"]["ou-k0"] == {"constraints": ["no-short"]}
+    assert written["writes"] == "krx-2024-weights"
+    assert written["strategy"] == {"component": "ou-k0"}
+    assert written["compliance"] == ["no-short"], "the rules are the run's, beside the venue"
+    assert "strategies" not in written, "the singular block replaced the keyed mapping"
     # The sessions and the one wall time are the run's own keys, in the shape an author writes.
     assert written["timezone"] == "Asia/Seoul"
-    assert written["at"] == "15:29:00"
-    assert [str(day) for day in written["sessions"]] == ["2024-03-05", "2024-03-06", "2024-03-07"]
-    assert "sessions_from" not in written
+    assert written["schedule"] == {"every": "1d", "at": ["15:29:00"]}
+    assert "at" not in written and "sessions" not in written and "sessions_from" not in written
     assert "valuation" not in written and "monitoring" not in written
 
 
-def test_a_run_may_take_its_sessions_from_a_registered_dataset_instead(
-    workspace: Workspace, tmp_path: Path
-) -> None:
-    """`sessions_from` names a dataset whose days are the sessions; exactly one of the two."""
-    from vqapr.data.datasets import DatasetRegistration
-
-    prices = DatasetRegistration.of(
-        "prices",
-        "price-source",
-        instrument_field="instrument",
-        available_at="available_at",
-        key_fields=("available_at", "instrument"),
-        fields={"close": "close"},
-        grain="instrument_instant",
-    ).with_span(datetime(2024, 3, 5, tzinfo=KST), datetime(2024, 3, 7, tzinfo=KST))
-    workspace.register_dataset(prices, SourceSpec.of("price-source", tmp_path / "prices.parquet"))
-    definition = _definition(sessions=(), sessions_from="prices")
-
-    assert workspace.register_run(definition) is True
-
-    reopened = Workspace.open(workspace.project_root)
-    assert reopened.run_definition("krx-2024") == definition
-    written = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))["runs"]["krx-2024"]
-    assert written["sessions_from"] == "prices"
-    assert "sessions" not in written
+def test_a_strategy_run_names_no_day_source(workspace: Workspace) -> None:
+    """Design §3.3: a strategy run's trading days are the days its execution table has rows
+    for, so `schedule.days_from` is a datamodel run's word and is refused here by name."""
+    with pytest.raises(ValueError, match="declares no schedule.days_from"):
+        _definition(schedule={"every": "1d", "at": "15:29", "days_from": "prices"})
 
 
 def test_a_changed_run_under_an_existing_id_is_refused_naming_the_run(
     workspace: Workspace,
 ) -> None:
-    workspace.register_run(_definition())
+    with Workspace.transaction(workspace) as t:
+        t.register_run(_definition())
 
-    with pytest.raises(VqaprError) as refused:
-        workspace.register_run(_definition(instruments=("A",)))
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(_definition(instruments=("A",)))
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.conflict"
+    assert failure["code"] == "run.registered"
     assert "run_id 'krx-2024'" in failure["requirement"]
+    # `docs/issues/archive/084`: the two options the fix used to list were the two things an author
+    # editing a run during setup did not want. The third ships, and the refusal names it.
+    assert "vqapr rm run-definition krx-2024" in failure["fix"]
 
 
 @pytest.mark.parametrize(
     ("override", "names"),
     [
-        ({"strategies": (StrategyEntry("absent"),)}, "strategy 'absent'"),
-        ({"strategies": (StrategyEntry("venue"),)}, "strategy 'venue'"),
-        ({"strategies": (StrategyEntry("ou-k0", ("ou-ff5",)),)}, "constraint 'ou-ff5'"),
+        ({"strategy": StrategyEntry("absent")}, "strategy 'absent'"),
+        ({"strategy": StrategyEntry("venue")}, "strategy 'venue'"),
+        ({"compliance": ("ou-ff5",)}, "compliance rule 'ou-ff5'"),
         ({"exchange": "ou-k0"}, "exchange 'ou-k0'"),
-        ({"execution_input_id": "nope"}, "execution input 'nope'"),
-        ({"sessions": (), "sessions_from": "nope"}, "dataset 'nope'"),
+        (
+            {
+                "execution": RunExecution(
+                    dataset="nope",
+                    trade_price="close",
+                    fill=RunFill(at=time(15, 30)),
+                )
+            },
+            "dataset 'nope'",
+        ),
     ],
 )
 def test_a_run_naming_anything_unregistered_is_refused_by_name(
     workspace: Workspace, override: dict[str, object], names: str
 ) -> None:
     """Refused at registration, so `vqapr run <id>` never meets an id it cannot resolve."""
-    with pytest.raises(VqaprError) as refused:
-        workspace.register_run(_definition(**override))
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(_definition(**override))
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.reference"
+    assert failure["code"] == "run.reference_invalid"
     assert names in failure["requirement"], failure["requirement"]
 
 
 def test_a_run_holds_what_it_names_so_removal_is_refused_by_name(workspace: Workspace) -> None:
-    workspace.register_run(_definition())
+    with Workspace.transaction(workspace) as t:
+        t.register_run(_definition())
 
-    assert workspace.references_to("component", "ou-ff5") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "no-short") == ("run 'krx-2024'",)
     assert workspace.references_to("component", "venue") == ("run 'krx-2024'",)
     assert workspace.references_to("run", "krx-2024") == (), "nothing names a run"
@@ -208,12 +213,16 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
                 "start": "2024-03-05T00:00:00+09:00",
                 "end": "2024-03-08T15:30:00+09:00",
                 "timezone": "Asia/Seoul",
-                "at": "15:29",
-                "sessions": ["2024-03-05", "2024-03-06", "2024-03-07"],
+                "schedule": {"every": "1d", "at": "15:29"},
                 "exchange": "venue",
-                "execution_input": "venue-daily",
+                "execution": {
+                    "dataset": "venue-daily",
+                    "trade_price": "close", "fill": {"at": "15:30"},
+                },
                 "initial_account": {"cash": "1000", "mode": "long_only", "positions": {"A": "2"}},
-                "strategies": {"ou-k0": {"constraints": ["no-short"]}, "ou-ff5": None},
+                "writes": "krx-2024-weights",
+                "strategies": {"ou-k0": {}},
+                "compliance": ["no-short"],
             }
         }
     }
@@ -230,16 +239,12 @@ def test_a_declaration_document_registers_a_run_in_the_same_transaction(
         # A key-set fault names the keys the run lacks: the model is refused before any rule
         # about the values can run, so the clock keys are what a 0.3.0-shaped run hears first.
         ({"instruments": ["A"], "strategies": {}}, "timezone: Field required"),
-        ({**_RUN_READY, "strategies": {}}, "must name at least one model"),
+        ({**_RUN_READY, "strategies": {}}, "exactly one of"),
         (
-            {
-                **_RUN_READY,
-                "sessions": ["2024-03-05"],
-                "sessions_from": "prices",
-            },
-            "exactly one of sessions_from",
+            {**_RUN_READY, "schedule": {"every": "1d"}},
+            "needs at",
         ),
-        ({**_RUN_READY, "sessions": []}, "at least one date"),
+        ({**_RUN_READY, "schedule": {"every": "5m", "at": "15:29"}}, "not at"),
     ],
 )
 def test_a_malformed_run_declaration_is_refused_with_its_own_code(
@@ -250,7 +255,7 @@ def test_a_malformed_run_declaration_is_refused_with_its_own_code(
     with pytest.raises(VqaprError) as refused:
         apply(document, workspace.project_root, base=workspace.project_root)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert failure["source"]["key_path"] == "runs.bad"
     assert said in failure["observed"], failure["observed"]
 
@@ -260,24 +265,28 @@ def test_a_malformed_run_declaration_is_refused_with_its_own_code(
     [
         ({"timezone": ""}, ValueError, "timezone must be a non-empty IANA timezone name"),
         ({"timezone": "Mars/Olympus"}, ValueError, "unknown IANA timezone"),
-        ({"at": None}, ValueError, "at must be declared"),
-        ({"at": "15:29"}, TypeError, "at must be a datetime.time"),
-        ({"at": time(15, 29, tzinfo=KST)}, ValueError, "timezone-naive wall time"),
-        ({"sessions": ()}, ValueError, "exactly one of sessions_from or sessions"),
-        ({"sessions_from": "prices"}, ValueError, "exactly one of sessions_from or sessions"),
-        ({"sessions": (datetime(2024, 3, 5, tzinfo=KST),)}, TypeError, "tuple of dates"),
+        ({"schedule": None}, ValidationError, "schedule"),
+        ({"schedule": {"every": "1d", "at": object()}}, ValidationError, "at"),
+        (
+            {"schedule": {"every": "1d", "at": time(15, 29, tzinfo=KST)}},
+            ValueError,
+            "timezone-naive wall time",
+        ),
+        ({"schedule": {"every": "1d"}}, ValueError, "needs at"),
+        ({"schedule": {"every": "1x", "at": "15:29"}}, ValueError, "count and a unit"),
+        ({"schedule": {"every": "1h", "at": "15:29"}}, ValueError, "declare from/to, not at"),
     ],
 )
 def test_the_run_definition_refuses_a_half_declared_clock(
     override: dict[str, object], error: type[Exception], said: str
 ) -> None:
-    """The zone, the wall time and the sessions are the run's whole clock; each is checked."""
+    """The zone and the schedule are the run's whole clock; each half is checked."""
     with pytest.raises(error, match=said):
         _definition(**override)
 
 
-def test_the_run_names_the_one_agenda_preflight_derives() -> None:
-    assert _definition().agenda_id == "krx-2024.sessions"
+def test_the_run_names_the_one_schedule_preflight_derives() -> None:
+    assert _definition().schedule_id == "krx-2024.schedule"
 
 
 def test_a_run_without_an_initial_account_reopens(workspace: Workspace) -> None:
@@ -287,6 +296,7 @@ def test_a_run_without_an_initial_account_reopens(workspace: Workspace) -> None:
     to make `Workspace.open()` refuse the whole workspace on the next command.
     """
     definition = _definition(initial_account_snapshot=None, initial_account_mode=None)
-    assert workspace.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
 
     assert Workspace.open(workspace.project_root).run_definition("krx-2024") == definition

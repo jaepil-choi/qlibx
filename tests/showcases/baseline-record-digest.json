@@ -1,0 +1,992 @@
+{
+  "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/absolute-run/datamodels/absolute-scores@b52fa43e/datamodel.json": {
+    "digest": "fe0d7196911dff6a",
+    "kind": "facts"
+  },
+  "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/absolute-run/run.json": {
+    "digest": "d38ed2b08c3453e1",
+    "kind": "facts"
+  },
+  "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/forging-run/run.json": {
+    "digest": "1131522cc9def185",
+    "kind": "facts"
+  },
+  "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/reversal-run/datamodels/reversal-features@0bf02c5f/datamodel.json": {
+    "digest": "1ca3d887ced5b966",
+    "kind": "facts"
+  },
+  "showcases/show_002_datamodel_materialization/outputs/project/.vqapr/runs/reversal-run/run.json": {
+    "digest": "619569f161035e7e",
+    "kind": "facts"
+  },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/datamodels/showcase-model@ba796be0/datamodel.json": {
+    "digest": "91c096e98ea883a1",
+    "kind": "facts"
+  },
+  "showcases/show_003_real_data_long_short/outputs/project/.vqapr/runs/showcase-score/run.json": {
+    "digest": "146972da3396a656",
+    "kind": "facts"
+  },
+  "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/datamodels/momentum-model@78e6d510/datamodel.json": {
+    "digest": "6f7b4af712514680",
+    "kind": "facts"
+  },
+  "showcases/show_004_krx_execution_profile/outputs/project/.vqapr/runs/momentum-score/run.json": {
+    "digest": "9eaef767d8b5a2d5",
+    "kind": "facts"
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/run.json": {
+    "digest": "076d8833bafd215d",
+    "kind": "facts"
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
+    "digest": "89213eea7c18edd5",
+    "kind": "facts"
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "signal",
+      "stage"
+    ],
+    "digest": "ede8ef0747d4de5a",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "722de11e74f763d8",
+    "kind": "table",
+    "rows": 126
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "5a87158a01785ff5",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-a/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "be5c31204dace397",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/run.json": {
+    "digest": "076d8833bafd215d",
+    "kind": "facts"
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/strategy.json": {
+    "digest": "9deff0bd3247af73",
+    "kind": "facts"
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/alpha.signal/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "signal",
+      "stage"
+    ],
+    "digest": "ede8ef0747d4de5a",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "722de11e74f763d8",
+    "kind": "table",
+    "rows": 126
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "5a87158a01785ff5",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_005_enhanced_index/outputs/replicate-b/.vqapr/runs/show005-alpha/strategies/show005-alpha@e2076749/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "be5c31204dace397",
+    "kind": "table",
+    "rows": 105
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/run.json": {
+    "digest": "1314ace041b4aa91",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
+    "digest": "86dc2c908403b145",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "d6bec2a80ce9a1da",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "52a6b9fb36e531ff",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "5331a97d3bf42cc5",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/run.json": {
+    "digest": "239f00c5a41a4070",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/strategy.json": {
+    "digest": "74adda92d971acbc",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "9be9ec1ac9f34b7b",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "e77b19b0b3756fa6",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-a/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "96ce173d3c6a8e18",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/run.json": {
+    "digest": "1314ace041b4aa91",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/strategy.json": {
+    "digest": "5c8a386ea2e37b90",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "d6bec2a80ce9a1da",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "52a6b9fb36e531ff",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-momentum/strategies/show006-momentum@6d742c82/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "5331a97d3bf42cc5",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/run.json": {
+    "digest": "239f00c5a41a4070",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/strategy.json": {
+    "digest": "4552fa19a5e8b593",
+    "kind": "facts"
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "9be9ec1ac9f34b7b",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "e77b19b0b3756fa6",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_006_ensemble_netting/outputs/replicate-b/.vqapr/runs/show006-reversal/strategies/show006-reversal@a81a533c/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "96ce173d3c6a8e18",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/run.json": {
+    "digest": "21b6bddf7e5a78bf",
+    "kind": "facts"
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/strategy.json": {
+    "digest": "6fb05339c96e9de6",
+    "kind": "facts"
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/signal.measurement/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "neutralized_signal",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "signal_before_weighting",
+      "stage"
+    ],
+    "digest": "18a205ebbfef8c5c",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "9f7d6a3f6e2ebd11",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "5a5faa1698cc2eb4",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-a/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "3808ecf33a4744f1",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/run.json": {
+    "digest": "21b6bddf7e5a78bf",
+    "kind": "facts"
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/strategy.json": {
+    "digest": "9202135684a7a89e",
+    "kind": "facts"
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/signal.measurement/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "neutralized_signal",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "signal_before_weighting",
+      "stage"
+    ],
+    "digest": "18a205ebbfef8c5c",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "9f7d6a3f6e2ebd11",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "5a5faa1698cc2eb4",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_007_signal_measurement/outputs/replicate-b/.vqapr/runs/show007/strategies/show007-signal@d57afbe1/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "3808ecf33a4744f1",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/run.json": {
+    "digest": "3d19d75e3c6f8588",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/strategy.json": {
+    "digest": "12a050c3f190bf7f",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "afd430a52f5c7913",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "abedbd0eed0264d0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "c5bf70d8c36361d0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/run.json": {
+    "digest": "db098f9f27b06094",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/strategy.json": {
+    "digest": "9896a937aa087e53",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "1da8ab4803865fdc",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "72fe0695d5ffe055",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "1f56814adf42e4f0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/run.json": {
+    "digest": "4db905483e67ae3d",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/strategy.json": {
+    "digest": "f5a0e323bdede8f5",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "125db064458cbc17",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "0117eb99323b217a",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-a/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "06309e2b1b50f9c8",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/run.json": {
+    "digest": "3d19d75e3c6f8588",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/strategy.json": {
+    "digest": "ee7f62a2397b0a9f",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "afd430a52f5c7913",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "abedbd0eed0264d0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-lowvol/strategies/show008-lowvol@36e09951/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "c5bf70d8c36361d0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/run.json": {
+    "digest": "db098f9f27b06094",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/strategy.json": {
+    "digest": "f8def516ed4db70b",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "1da8ab4803865fdc",
+    "kind": "table",
+    "rows": 65
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "72fe0695d5ffe055",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-momentum/strategies/show008-momentum@69a7eca5/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "1f56814adf42e4f0",
+    "kind": "table",
+    "rows": 44
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/run.json": {
+    "digest": "4db905483e67ae3d",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/strategy.json": {
+    "digest": "48aef52d21a7c33d",
+    "kind": "facts"
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.account/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash",
+      "event_time",
+      "instrument",
+      "nav",
+      "observed_at",
+      "price",
+      "producer_id",
+      "quantity",
+      "run_id",
+      "sequence",
+      "stage"
+    ],
+    "digest": "125db064458cbc17",
+    "kind": "table",
+    "rows": 85
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.fill/all.parquet": {
+    "columns": [
+      "account_version",
+      "cash_delta",
+      "commission",
+      "dealt_quantity",
+      "event_time",
+      "instrument",
+      "kind",
+      "price",
+      "producer_id",
+      "reason",
+      "requested_quantity",
+      "run_id",
+      "sequence",
+      "sized_quantity",
+      "stage",
+      "tax"
+    ],
+    "digest": "0117eb99323b217a",
+    "kind": "table",
+    "rows": 64
+  },
+  "showcases/show_008_alpha_family_ensemble/outputs/replicate-b/.vqapr/runs/show008-reversal/strategies/show008-reversal@a81a533c/tables/vqapr.weight/all.parquet": {
+    "columns": [
+      "event_time",
+      "instrument",
+      "producer_id",
+      "run_id",
+      "sequence",
+      "stage",
+      "weight"
+    ],
+    "digest": "06309e2b1b50f9c8",
+    "kind": "table",
+    "rows": 64
+  }
+}

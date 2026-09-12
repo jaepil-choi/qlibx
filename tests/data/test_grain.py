@@ -17,18 +17,13 @@ import pytest
 import yaml
 
 from vqapr.data import scan
-from vqapr.data.datasets import (
-    GRAIN_STAGE,
-    DatasetRegistration,
-    Grain,
-    check_key,
-    require_grain,
-)
-from vqapr.data.sources import SourceSpec
-from vqapr.declarations import apply
+from vqapr.data.dataset import DatasetRegistration, Grain, require_declared
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import check_key
 from vqapr.domain.errors import VqaprError
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import Workspace
 
 
 def _registration(grain: object = Grain.INSTRUMENT_INSTANT, **overrides) -> DatasetRegistration:
@@ -37,6 +32,8 @@ def _registration(grain: object = Grain.INSTRUMENT_INSTANT, **overrides) -> Data
         "available_at": "available_at",
         "key_fields": ("available_at", "instrument"),
         "fields": {"close": "close"},
+        # `conftest._ROWS` writes `close` as an integer literal, so `hive_parquet` holds INTEGER.
+        "field_types": {"close": "INTEGER"},
         "grain": grain,
     }
     kwargs.update(overrides)
@@ -64,7 +61,12 @@ def test_an_unknown_grain_is_refused_the_same_way() -> None:
 
 def test_a_grain_may_be_spelled_as_its_name() -> None:
     assert _registration(grain="rows").grain is Grain.ROWS
-    assert _registration(grain=Grain.INSTANT, instrument_field=None, key_fields=("available_at",)).grain is Grain.INSTANT
+    assert (
+        _registration(
+            grain=Grain.INSTANT, instrument_field=None, key_fields=("available_at",)
+        ).grain
+        is Grain.INSTANT
+    )
 
 
 def test_the_grain_and_the_instrument_axis_must_agree() -> None:
@@ -111,7 +113,7 @@ def test_a_grouped_projection_on_a_panel_grain_is_unique_by_construction(
     """`GROUP BY` yields one row per pair; there is nothing to scan for."""
     monkeypatch.setattr(scan, "key_check", lambda *a, **k: pytest.fail("scanned"))
     spec = SourceSpec.of("s", hive_parquet, hive_partitioned=True)
-    grouped = _registration().with_schema(scan.ProjectionSchema({"close": scan.ColumnType.DOUBLE}, True))
+    grouped = _registration().with_aggregation(True)
 
     assert check_key(grouped, spec).ok
 
@@ -129,6 +131,7 @@ def _dataset_body(parquet: Path, *, grain: str | None) -> dict[str, object]:
         "available_at": "available_at",
         "key_fields": ["available_at", "instrument"],
         "fields": {"close": "close"},
+        "field_types": {"close": "DOUBLE"},
     }
     if grain is not None:
         body["grain"] = grain
@@ -139,10 +142,14 @@ def test_a_declaration_document_without_grain_is_refused_with_its_own_code(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     with pytest.raises(VqaprError) as refused:
-        apply({"datasets": {"px": _dataset_body(model_price_parquet, grain=None)}}, tmp_path, base=tmp_path)
+        apply(
+            {"datasets": {"px": _dataset_body(model_price_parquet, grain=None)}},
+            tmp_path,
+            base=tmp_path,
+        )
     payload = refused.value.as_dict()
     codes = [failure["code"] for failure in payload["failures"]]
-    assert codes == ["declaration.read.grain_undeclared"]
+    assert codes == ["declaration.grain_undeclared"]
     fix = payload["failures"][0]["fix"]
     assert "instrument_instant" in fix and "rows" in fix and "RowsLookback" in fix
     assert not (tmp_path / ".vqapr").exists(), "a refused document creates nothing"
@@ -172,6 +179,7 @@ def test_a_workspace_written_before_grain_still_opens_and_refuses_reads(
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("src", model_price_parquet),
@@ -186,10 +194,10 @@ def test_a_workspace_written_before_grain_still_opens_and_refuses_reads(
     assert registration.grain is None, "decoded as undeclared, never as rows"
 
     with pytest.raises(VqaprError) as refused:
-        require_grain(registration)
+        require_declared(registration)
     payload = refused.value.as_dict()
-    assert payload["stage"] == GRAIN_STAGE
-    assert [f["code"] for f in payload["failures"]] == [f"{GRAIN_STAGE}.undeclared"]
+    assert payload["stage"] == "register"
+    assert [f["code"] for f in payload["failures"]] == ["dataset.grain_undeclared"]
     assert "RowsLookback" in payload["failures"][0]["fix"]
 
     # Registering it again, with a grain, is the repair -- and it is an ordinary registration.
@@ -202,6 +210,7 @@ def test_a_workspace_written_before_grain_still_opens_and_refuses_reads(
             available_at="available_at",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
             grain="instrument_instant",
         ),
         SourceSpec.of("src", model_price_parquet),

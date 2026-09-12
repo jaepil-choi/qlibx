@@ -40,7 +40,7 @@ a preimage that gates nothing; the gating preimage never carried one.
 
 ## What is open
 
-### `docs/issues/011` — the documented surface cannot reach a cost
+### `docs/issues/archive/011` — the documented surface cannot reach a cost
 
 Nine findings from two independent first-time-user journeys (`testbed/`, `testbed-claude/`), run
 against the installed package with no source access. **Both journeys completed** — every gap below

@@ -244,7 +244,7 @@ D 절이 계약이고, 여기서는 **왜 이 순서인지만** 적는다.
 그 캠페인 §4의 세 가지 측정 차단 요인(testbed `probes.py` 동기화, `+inf` 82행, wall-time 흔들림)을
 **측정 전에** 확인한다.
 
-> **경로 하나를 먼저 고쳐야 한다.** 캠페인 문서와 `docs/issues/047`이 재현 하네스를
+> **경로 하나를 먼저 고쳐야 한다.** 캠페인 문서와 `docs/issues/archive/047`이 재현 하네스를
 > `kwam-enhanced-index/vqapr-performance-testbed/`에서 찾으라고 적는데 **그 디렉터리는 존재하지
 > 않는다.** 실제 경로를 확인해 두 문서를 고치는 것이 이 단계의 첫 작업이다.
 >
@@ -396,7 +396,7 @@ Step 2(트랜잭션) · Step 6(`040`) 완료. **가장 마지막인 이유는 �
 | 위험 | 가장 이른 신호 | 대응 |
 |---|---|---|
 | **Step 1을 쪼개고 싶어진다.** 여덟 접촉면이 한 커밋에 들어가는 것이 불편해 보인다 | "scaffold만 먼저" 또는 "loader만 먼저"라는 문장이 나온다 | **gjc가 그것을 두 번 시도해 두 번 revert했다**(`gjc-handoff/README.md` §7.1·§7.2). ExecPlan에 그 인용을 박아 둔다 |
-| **green tree, 옮겨진 지표, 틀린 숫자.** 이 repo에 세 번 기록돼 있다(`docs/issues/041`, `cli/run.py:170`, record `115` erratum) | 인수조건 tolerance가 느슨해지거나 numeric baseline이 재생성된다 | 어떤 단계도 `settle_contract_hml.fixture.json`이나 showcase baseline을 재생성하지 않는다. 필요해 보이면 멈추고 escalate |
+| **green tree, 옮겨진 지표, 틀린 숫자.** 이 repo에 세 번 기록돼 있다(`docs/issues/archive/041`, `cli/run.py:170`, record `115` erratum) | 인수조건 tolerance가 느슨해지거나 numeric baseline이 재생성된다 | 어떤 단계도 `settle_contract_hml.fixture.json`이나 showcase baseline을 재생성하지 않는다. 필요해 보이면 멈추고 escalate |
 | **`RowsLookback`이 조용히 뜻을 바꾼다** — 균형 잡힌 패널에서는 두 뜻의 결과가 같다 | Step 5에서 `grain` 거절 없이 이름만 바뀐다 | 설계 §7-3. **분리 불가.** 같은 릴리스에 같이 넣는다 |
 | **열리지 않는 workspace** — Step 5/7이 문서를 마이그레이션한 뒤 revert하면 모든 명령이 실패한다 | 마이그레이션이 copy가 아니라 move | write-forward, 이전 shape 한 릴리스 decode 가능, copy |
 | **Step 3의 포맷 변경이 기존 run 기록을 못 읽게 만든다** | 이전 shape 읽기 경로 없이 병합 | 두 shape를 한 릴리스 동안 읽는다. `analysis/performance.py`가 그 증인이다 |

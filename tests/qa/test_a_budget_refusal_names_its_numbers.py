@@ -1,9 +1,9 @@
 """A `Rebalance` refusal names the value it saw and the bound it crossed.
 
-`docs/issues/071`: `cash_weight is outside the declared budget` was the whole message for a book
+`docs/issues/archive/071`: `cash_weight is outside the declared budget` was the whole message for a book
 whose quantised shorts summed to `-1.000000000001`, so cash was `2.000000000001` against a
 `cash_upper` of `2`. The author reasoned both numbers out by hand. All five refusals in
-`Rebalance.__post_init__` had the same shape: the rule, never the numbers.
+`Rebalance`'s validator had the same shape: the rule, never the numbers.
 """
 
 from __future__ import annotations
@@ -11,18 +11,25 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
-from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import Budget, PortfolioDirection
+from vqapr.domain.intent import Budget, PortfolioDirection
+from vqapr.public import Rebalance
 
 SIGNED = Budget(PortfolioDirection.SIGNED, Decimal(-1), Decimal(2), Decimal(-1), Decimal(1))
 LONG_ONLY = Budget(PortfolioDirection.LONG_ONLY, Decimal(0), Decimal(1), Decimal(0), Decimal(1))
 
 
 def _refusal(**kw: object) -> str:
-    with pytest.raises(ValueError) as refused:
+    """The sentence the validator wrote, out of the envelope pydantic wraps it in.
+
+    `Rebalance` is a pydantic model, so the refusal reaches an author as a `ValidationError`
+    carrying the validator's own `ValueError`; what this file pins is that sentence.
+    """
+    with pytest.raises(ValidationError) as refused:
         Rebalance(**kw)  # type: ignore[arg-type]
-    return str(refused.value)
+    (error,) = refused.value.errors()
+    return str(error["ctx"]["error"])
 
 
 def test_the_cash_refusal_carries_the_cash_and_both_bounds() -> None:

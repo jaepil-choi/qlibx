@@ -1,6 +1,6 @@
 # 143 — a window column is converted when it is asked for
 
-**Closes:** `docs/issues/061`. **Step:** 2b of `docs/refactoring/2026-09-03-the-deletion-campaign.md`
+**Closes:** `docs/issues/archive/061`. **Step:** 2b of `docs/refactoring/2026-09-03-the-deletion-campaign.md`
 -- a bounded step taken between Step 2 and Step 3 because the finding arrived from the `0.3.0`
 scenario testbed while Step 2 was on the same read path, and the fix is small.
 **Authority:** record `137` (the panel is a slice, not a copy) and the `035` ruling.

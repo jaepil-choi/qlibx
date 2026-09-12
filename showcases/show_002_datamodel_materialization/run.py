@@ -16,8 +16,9 @@ from vqapr.public import (
     DataModelEntry,
     DatasetRegistration,
     RunDefinition,
+    RunSchedule,
     SourceSpec,
-    preflight_run,
+    freeze,
     register_data_model,
     register_dataset,
     run,
@@ -27,8 +28,8 @@ ROOT = Path(__file__).resolve().parent
 MODELS = ROOT / "show002_models.py"
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-LAST_VERIFIED_AT = "2026-09-03"
-VERIFIED_AGAINST = "vqapr-0.4.1"
+LAST_VERIFIED_AT = "2026-09-10"
+VERIFIED_AGAINST = "vqapr-0.16.0"
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -42,9 +43,11 @@ def _write_input() -> Path:
     target = OUTPUTS / "price_daily.parquet"
     con = duckdb.connect()
     try:
+        # The close is a DOUBLE on purpose: a bare `100.0` literal is DECIMAL to duckdb, and a
+        # DECIMAL column cannot be declared as a dataset field (issue 088).
         con.execute(
             f"""COPY (
-                SELECT * FROM (VALUES
+                SELECT available_at, instrument, CAST(close AS DOUBLE) AS close FROM (VALUES
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
                   (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'B',  50.0),
                   (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
@@ -235,16 +238,15 @@ def _datamodel_run(
     """Register one datamodel run, freeze it, execute it; the result and its record."""
     definition = RunDefinition(
         run_id=run_id,
-        strategies=(),
         instruments=INSTRUMENTS,
-        datamodels=(DataModelEntry(component_id, dataset_id, value_fields),),
+        datamodel=DataModelEntry(component_id, value_fields),
         timezone="Asia/Seoul",
-        at=time(16, 0),
-        sessions=sessions,
+        schedule=RunSchedule(every="1d", at=(time(16, 0),), days_from="price_daily"),
         start=datetime.combine(sessions[0], time(0), tzinfo=KST),
         end=datetime.combine(sessions[-1], time(23), tzinfo=KST),
+        writes=dataset_id,
     )
-    frozen = preflight_run(PROJECT, definition)
+    frozen = freeze(PROJECT, definition)
     outcome = run(PROJECT, frozen, store_root=PROJECT / ".vqapr")
     record = {key: _json_value(value) for key, value in outcome.records[component_id].items()}
     return outcome.result(), record
@@ -271,6 +273,7 @@ def main() -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("show002-prices", input_path),
     )
@@ -397,7 +400,7 @@ def main() -> None:
         },
         "sha256": {name: _sha256(path) for name, path in paths.items()},
         "limitations": [
-            "No StrategyModel, execution input, venue or account participates in a datamodel run.",
+            "No StrategyModel, execution dataset, venue or account participates in a datamodel run.",
             "No orders, fills, Account mutation, valuation, or performance are claimed.",
         ],
     }

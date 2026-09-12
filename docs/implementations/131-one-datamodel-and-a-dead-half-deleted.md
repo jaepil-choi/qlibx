@@ -1,6 +1,6 @@
 # 131 — one DataModel, and a dead half deleted
 
-**Advances:** `docs/issues/036` (the DataModel third; `StrategyModel` remains).
+**Advances:** `docs/issues/archive/036` (the DataModel third; `StrategyModel` remains).
 **Step:** M1.2 of `docs/refactoring/2026-09-02-the-convergence-campaign.md`.
 **Authority:** `docs/vqapr-architecture.md` §4.4 · `docs/design/agent-first-surface.md` Principle 5.
 
@@ -12,7 +12,7 @@ run**: `load_data_model` refused it, and the adapter that would have invoked it 
 `prepare_data_model_invocation` in `_internal/models/agent_first.py` — had **no caller anywhere in
 `src/`**. Only its own tests reached it. The datamodel scaffold sidestepped this by emitting the
 engine class in the older declaration shape, so the package shipped two authoring idioms for one
-job and taught both (`docs/issues/036`, R5 and R6 of the post-Step-07 review).
+job and taught both (`docs/issues/archive/036`, R5 and R6 of the post-Step-07 review).
 
 So, unlike M1.1, this was not a live-path rewrite. The authoring DataModel path was dead code
 wearing a public name, and the engine path was the only one that had ever run. The work was to put
@@ -89,7 +89,7 @@ PYTHONUTF8=1 uv run pytest tests/ -q -m slow -rs  14 passed
 Branch parent `develop @ d5e2ebab`, measured: **1295 passed / 14 deselected** fast; **1309** full.
 
 **Showcases: 6 of 9, up from 4.** `show_002` and `show_004` were two of the five in
-`docs/issues/052`, broken because their DataModels declared reads in a shape the current requirement
+`docs/issues/archive/052`, broken because their DataModels declared reads in a shape the current requirement
 contract no longer accepted. Converging the contract brought them back without a showcase-specific
 fix. The three that remain (`show_005`, `show_006`, `show_008`) construct the shipped cap without
 the benchmark dataset it now requires, which is neither this milestone's nor this contract's.

@@ -1,6 +1,6 @@
 """`Workspace.remove()` checked its references outside the lock it then took.
 
-`docs/issues/043`. The sequence was:
+`docs/issues/archive/043`. The sequence was:
 
     blockers = self.references_to(kind, identity)   # its own _read(), no lock
     if blockers:
@@ -30,17 +30,18 @@ registered is derived from the run now, so a run is what names a component.
 from __future__ import annotations
 
 import threading
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.public import AccountMode, AccountSnapshot, RunSchedule, RunDefinition, StrategyEntry
+from vqapr.workspace.registry import Workspace
 
 pytestmark = pytest.mark.concurrency
 
@@ -52,31 +53,32 @@ def _seed(tmp_path: Path) -> Workspace:
     workspace = Workspace.create(tmp_path)
     source = tmp_path / "alpha.py"
     source.write_text("class S:\n    pass\n", encoding="utf-8")
-    workspace.register_component(
-        ComponentRef(
-            component_id="alpha",
-            kind=ComponentKind.STRATEGY_MODEL,
-            path=source,
-            object_name="S",
-            config={},
-            fingerprint=fingerprint_component(
-                source, kind=ComponentKind.STRATEGY_MODEL, object_name="S", config={}
-            ),
+    with Workspace.transaction(workspace) as t:
+        t.register_component(
+            ComponentRef(
+                component_id="alpha",
+                kind=Role.STRATEGY_MODEL,
+                path=source,
+                object_name="S",
+                config={},
+                fingerprint=fingerprint_component(
+                    source, kind=Role.STRATEGY_MODEL, object_name="S", config={}
+                ),
+            )
         )
-    )
     return workspace
 
 
 def _run_naming_alpha() -> RunDefinition:
     return RunDefinition(
         run_id="cadence",
-        strategies=(StrategyEntry("alpha"),),
+        strategy=StrategyEntry("alpha"),
         instruments=("A",),
         timezone=ZONE,
-        at=time(9, 0),
-        sessions=(date(2026, 4, 1),),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        writes="cadence-weights",
     )
 
 
@@ -97,7 +99,8 @@ def test_a_removal_and_a_registration_cannot_produce_an_unopenable_workspace(
     def register_the_reference() -> None:
         """A second, entirely well-behaved caller. It takes the lock like anyone else."""
         try:
-            competitor.register_run(_run_naming_alpha())
+            with Workspace.transaction(competitor) as t:
+                t.register_run(_run_naming_alpha())
         except BaseException as error:
             failed.append(error)
         finally:

@@ -1,0 +1,39 @@
+# Scenario ⑥: an enhanced index that reads the factor run's published weights as an input.
+# Decides at 09:00, after the factor run's 08:00 weight is knowable.
+components:
+  sample-enhanced:
+    kind: strategy
+    path: enhanced.py
+    object_name: SampleEnhancedIndex
+runs:
+  sample-enhanced-run:
+    instruments:
+    - K000001
+    - K000002
+    - K000003
+    - K000004
+    - K000005
+    - K000006
+    - K000007
+    - K000008
+    - K000009
+    - K000010
+    start: '2022-01-13T00:00:00+09:00'
+    end: '2022-01-25T23:59:59+09:00'
+    timezone: Asia/Seoul
+    agenda:
+      every: 1d
+      at: '09:00'
+    exchange: sample-exchange
+    execution:
+      dataset: sample-execution
+      trade_price: close
+      fill:
+        at: '15:30'
+    initial_account:
+      cash: '100000000'
+      mode: LONG_ONLY
+      positions: {}
+    writes: sample-enhanced-weights
+    strategy:
+      component: sample-enhanced

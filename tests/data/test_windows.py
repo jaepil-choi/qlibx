@@ -6,15 +6,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from vqapr.data.datasets import DatasetRegistration
+from vqapr.data.dataset import DatasetRegistration
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
-from vqapr.data.sources import SourceSpec
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
-from vqapr.domain.errors import VqaprError
+from vqapr.data.window import ModelWindow
+from vqapr.domain.errors import Stage, VqaprError
 from vqapr.public import register_dataset
-from vqapr.workspace import Workspace
+from vqapr.workspace.registry import Workspace
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -31,6 +31,7 @@ def _workspace(
         grain=grain,
         key_fields=("available_at", "instrument"),
         fields={"close": "close", "volume": "volume"},
+        field_types={"close": "DOUBLE", "volume": "DOUBLE"},
     )
     # Registered through the public entry point, which measures the span persistence requires.
     register_dataset(tmp_path, registration, source)
@@ -55,20 +56,16 @@ def test_rows_window_is_pit_bounded_and_counts_per_field(
         consumer_id="reversal",
     )
 
-    close = DataRequirement.of('price_daily', 'close', lookback=InstantsLookback(2))
-    volume = DataRequirement.of('price_daily', 'volume', lookback=InstantsLookback(2))
+    close = DataRequirement.of("price_daily", "close", lookback=InstantsLookback(2))
+    volume = DataRequirement.of("price_daily", "volume", lookback=InstantsLookback(2))
     closes = window_for(close).observations(close)
     volumes = window_for(volume).observations(volume)
 
     assert [
-        (row["available_at"].day, row["close"])
-        for row in closes.rows
-        if row["instrument"] == "A"
+        (row["available_at"].day, row["close"]) for row in closes.rows if row["instrument"] == "A"
     ] == [(6, 103.0), (7, 105.0)]
     assert [
-        (row["available_at"].day, row["volume"])
-        for row in volumes.rows
-        if row["instrument"] == "A"
+        (row["available_at"].day, row["volume"]) for row in volumes.rows if row["instrument"] == "A"
     ] == [(5, 10.0), (7, 12.0)]
     # The 8th is past the evaluation time for both.
     assert all(row["available_at"].day != 8 for row in (*closes.rows, *volumes.rows))
@@ -85,7 +82,9 @@ def test_calendar_window_uses_local_midnight_not_session_count(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    requirement = DataRequirement.of('price_daily', 'close', lookback=CalendarLookback(days=1, timezone='Asia/Seoul'))
+    requirement = DataRequirement.of(
+        "price_daily", "close", lookback=CalendarLookback(days=1, timezone="Asia/Seoul")
+    )
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),
@@ -104,8 +103,8 @@ def test_window_rejects_an_undeclared_requirement(
     tmp_path: Path, model_price_parquet: Path
 ) -> None:
     workspace = _workspace(tmp_path, model_price_parquet)
-    declared = DataRequirement.of('price_daily', 'close', lookback=RowsLookback(2))
-    undeclared = DataRequirement.of('price_daily', 'volume', lookback=RowsLookback(2))
+    declared = DataRequirement.of("price_daily", "close", lookback=RowsLookback(2))
+    undeclared = DataRequirement.of("price_daily", "volume", lookback=RowsLookback(2))
     window = ModelWindow(
         evaluation_time=datetime(2024, 3, 7, 16, tzinfo=KST),
         instruments=("A",),
@@ -117,5 +116,5 @@ def test_window_rejects_an_undeclared_requirement(
     with pytest.raises(VqaprError) as caught:
         window.observations(undeclared)
 
-    assert caught.value.stage == "model_window.requirement"
+    assert caught.value.stage is Stage.RUN
     assert caught.value.mutation is False

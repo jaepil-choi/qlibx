@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-`docs/issues/036` is a table a first-time user had to build before they could get through the
+`docs/issues/archive/036` is a table a first-time user had to build before they could get through the
 package. It lists ten ways that authoring a DataModel differs from authoring a StrategyModel —
 different import, different declaration method, different requirement type, different entry point,
 different way to get rows, different row type, different name for the instrument, different name
@@ -39,7 +39,7 @@ against the same window, so a tree part-way through the migration behaves identi
 
 ## What lane C settled first, and what that removed from this record
 
-Lane C landed `docs/issues/049` while this was in flight, and two of its rulings changed the work:
+Lane C landed `docs/issues/archive/049` while this was in flight, and two of its rulings changed the work:
 
 - **`DataRequirement` names `(dataset_id, field_id, lookback)`.** An alias declaring three fields
   is three requirements, so the fan-out and the join are needed rather than optional —

@@ -1,0 +1,13 @@
+# The agent skills are product data whose BYTES are their identity.
+#
+# `vqapr skill install` judges an installed file by comparing its sha256 against the hashes this
+# package has released (PRD §11.3). With `core.autocrlf=true` -- the Windows default, and what
+# this repository is developed under -- git stores LF and checks out CRLF, so a wheel built on
+# Windows and a wheel built on Linux ship different bytes for the same commit. Every hash in
+# `_shipped.json` would then be true on one platform and wrong on the other, and a user who had
+# touched nothing would be told their skills were edited.
+#
+# Forcing LF in the working tree makes the shipped bytes the same everywhere, which is what the
+# release history assumes. `tests/agent/test_every_shipped_skill_obeys_the_contract.py` asserts
+# it, so a checkout that ignores this file fails the suite rather than the next release.
+src/vqapr/agent/skills/** text eol=lf

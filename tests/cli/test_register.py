@@ -37,7 +37,7 @@ def _prices(root: Path) -> Path:
     return _parquet(
         root,
         "prices.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
              (TIMESTAMPTZ '2024-03-06 03:00:00+09', 'A', 101.0)
            ) AS t(available_at, instrument, close)""",
@@ -53,6 +53,7 @@ def _dataset_document(observation: Path, **overrides: str) -> str:
         "key_fields": "[available_at, instrument]",
         "grain": "instrument_instant",
         "fields": "{close: close}",
+        "field_types": "{close: DOUBLE}",
     }
     fields.update(overrides)
     body = "\n".join(f"    {key}: {value}" for key, value in fields.items())
@@ -77,7 +78,7 @@ def test_a_duplicated_logical_key_is_refused_with_the_offending_group(
     duplicated = _parquet(
         tmp_path,
         "dup.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 100.0),
              (TIMESTAMPTZ '2024-03-05 03:00:00+09', 'A', 999.0)
            ) AS t(available_at, instrument, close)""",
@@ -87,9 +88,9 @@ def test_a_duplicated_logical_key_is_refused_with_the_offending_group(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "dataset.register.key"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "dataset.register.key.duplicate"
+    assert failure["code"] == "dataset.key_duplicate"
     assert "must be unique" in failure["requirement"]
     assert failure["examples"], "the duplicated group must be shown, not merely counted"
     assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
@@ -106,9 +107,9 @@ def test_a_column_that_does_not_exist_is_refused_against_the_real_file(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "dataset.register.schema"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "dataset.register.schema.field_missing"
+    assert failure["code"] == "dataset.field_missing"
     assert "NOT_A_COLUMN" in failure["requirement"]
     # The columns that do exist are the evidence a user needs to fix the declaration.
     assert "close" in failure["observed"]
@@ -121,7 +122,7 @@ def test_a_naive_available_at_is_refused(
     naive = _parquet(
         tmp_path,
         "naive.parquet",
-        """SELECT * FROM (VALUES
+        """SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
              (TIMESTAMP '2024-03-05 03:00:00', 'A', 100.0)
            ) AS t(available_at, instrument, close)""",
     )
@@ -130,7 +131,63 @@ def test_a_naive_available_at_is_refused(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["failures"][0]["code"].startswith("dataset.register.schema.available_at")
+    assert payload["failures"][0]["code"].startswith("dataset.available_at")
+
+
+def test_a_dataset_that_omits_field_types_is_refused_naming_the_missing_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`field_types` is the author's statement since `docs/issues/archive/088`, not a measurement.
+
+    A dataset that leaves it out is refused by the declaration model the way any missing key
+    is: the key is named, the entry's own keys are listed beside it, and nothing is written.
+    """
+    complete = _dataset_document(_prices(tmp_path))
+    without = "".join(
+        line
+        for line in complete.splitlines(keepends=True)
+        if not line.startswith("    field_types:")
+    )
+    assert without != complete, "the fixture must actually drop the key, or this proves nothing"
+    document = _write(tmp_path, "w.yaml", without)
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "register"
+    (failure,) = payload["failures"]
+    assert failure["code"] == "declaration.key_missing"
+    assert failure["requirement"].startswith("datasets.prices must declare field_types")
+    assert failure["source"]["key_path"] == "datasets.prices"
+    assert "field_types" in failure["fix"]
+    assert "fields" in failure["observed"], "the keys the entry does declare are listed"
+    assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
+
+
+def test_a_field_typed_decimal_is_refused_at_field_types_with_the_permitted_types(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`DECIMAL` is a type a file can hold and a declaration cannot (`docs/issues/archive/088`).
+
+    The refusal is the declaration's own -- `value_invalid`, sourced at `field_types` rather
+    than at `grain`, which is the other key that can object at the same point -- and it names
+    the types that are permitted, so the author learns to cast rather than to respell.
+    """
+    document = _write(
+        tmp_path, "w.yaml", _dataset_document(_prices(tmp_path), field_types="{close: DECIMAL}")
+    )
+
+    code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
+
+    assert code == 1
+    assert payload["stage"] == "register"
+    (failure,) = payload["failures"]
+    assert failure["code"] == "declaration.value_invalid"
+    assert failure["source"]["key_path"] == "datasets.prices.field_types"
+    assert failure["source"]["key_path"].endswith(".field_types")
+    assert "DECIMAL" in failure["observed"]
+    assert "DOUBLE" in failure["requirement"], "the permitted types are named"
+    assert not (tmp_path / ".vqapr" / "workspace.yaml").exists(), "nothing may be written"
 
 
 def test_the_first_registration_creates_the_workspace(
@@ -156,23 +213,21 @@ def test_a_component_declaration_resolves_its_path_beside_the_document(
     nested = tmp_path / "components"
     nested.mkdir()
     (nested / "limit.py").write_text(
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call):\n"
         "        return None\n",
         encoding="utf-8",
     )
     document = _write(
         nested.parent / "components",
         "declare.yaml",
-        "components:\n  limit:\n    kind: constraint\n    path: limit.py\n    object_name: Limit\n",
+        "components:\n  limit:\n    kind: compliance\n    path: limit.py\n    object_name: Limit\n",
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -186,31 +241,29 @@ def test_a_component_that_cannot_receive_the_call_is_refused(
 ) -> None:
     """Registration runs `conformance()`, so a component that cannot be called never lands."""
     (tmp_path / "broken.py").write_text(
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         "        return 'limit'\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, account, marks):\n"  # the contract passes four
+        "    def observe(self):\n"  # the contract passes one
         "        return None\n",
         encoding="utf-8",
     )
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  limit:\n    kind: constraint\n"
+        "components:\n  limit:\n    kind: compliance\n"
         "    path: broken.py\n    object_name: Limit\n",
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "component.conformance"
-    assert payload["failures"][0]["code"] == "component.conformance.signature_invalid"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "component.signature_invalid"
 
 
 def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an_id(
@@ -224,26 +277,27 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     same lie, as the constraint-identity crash this slice exists to remove.
 
     Driven per section because the first fix covered only `components:` and red-teaming found
-    `datasets:` and `execution_inputs:` still crashing. A per-handler check is a list you can be
-    one short of — and the first version of this test was one short of the table that replaced it.
-    The table is `_DECLARED_IDS`; since record `148` retired `agendas` and `strategy_configs` it
-    is these three, and the test asserts that rather than restating it.
+    `datasets:` (and, then, `execution_inputs:`) still crashing. A per-handler check is a list
+    you can be one short of — and the first version of this test was one short of the table
+    that replaced it. The table is `_DECLARED_IDS`; record `148` retired `agendas` and
+    `strategy_configs`, record `185` folded `execution_inputs` into `datasets`, so it is these
+    two, and the test asserts that rather than restating it.
     """
-    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    (tmp_path / "limit.py").write_text(_rule_source("'limit'"), encoding="utf-8")
     sections = {
         "datasets": (
             "datasets:\n  {key}:\n    source_id: s\n    path: x.parquet\n"
             "    instrument_field: instrument\n    available_at: available_at\n"
             "    grain: instrument_instant\n"
             "    key_fields: [available_at, instrument]\n    fields: {{close: close}}\n"
+            "    field_types: {{close: DOUBLE}}\n"
         ),
-        "execution_inputs": "execution_inputs:\n  {key}:\n    dataset_id: prices\n",
         "components": (
-            "components:\n  {key}:\n    kind: constraint\n"
+            "components:\n  {key}:\n    kind: compliance\n"
             "    path: limit.py\n    object_name: Limit\n"
         ),
     }
-    from vqapr.declarations import _DECLARED_IDS
+    from vqapr.workspace.registration import _DECLARED_IDS
 
     assert set(sections) == set(_DECLARED_IDS), "a section became an id and this table missed it"
     for section, template in sections.items():
@@ -255,9 +309,9 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
                 capsys, "--project-root", str(tmp_path), "register", document
             )
             assert code == 1, (section, spelling, payload)
-            assert payload["stage"] == "declaration.read", (section, spelling)
+            assert payload["stage"] == "register", (section, spelling)
             assert [failure["code"] for failure in payload["failures"]] == [
-                "declaration.read.value_invalid"
+                "declaration.value_invalid"
             ], (section, spelling)
             assert payload["failures"][0]["source"]["key_path"] == section
 
@@ -268,7 +322,7 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
         'datasets:\n  " ":\n    source_id: s\n    path: x.parquet\n'
         "    instrument_field: i\n    available_at: a\n    key_fields: [a]\n"
         "    fields: {c: c}\n"
-        'components:\n  "":\n    kind: constraint\n    path: limit.py\n'
+        'components:\n  "":\n    kind: compliance\n    path: limit.py\n'
         "    object_name: Limit\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
@@ -281,28 +335,26 @@ def test_an_unusable_declaration_key_is_refused_in_every_section_that_becomes_an
     }
 
 
-def _constraint_source(returns: str) -> str:
+def _rule_source(returns: str) -> str:
     return (
-        "from vqapr.public import Constraint, ConstraintBounds\n"
-        "class Limit(Constraint):\n"
+        "from vqapr.public import Compliance\n"
+        "class Limit(Compliance):\n"
         "    @property\n"
-        "    def constraint_id(self):\n"
+        "    def compliance_id(self):\n"
         f"        return {returns}\n"
         "    def requirements(self):\n"
         "        return ()\n"
-        "    def project(self, call):\n"
-        "        return ConstraintBounds(lower_weights={}, upper_weights={})\n"
-        "    def monitor(self, call, account, bounds):\n"
+        "    def observe(self, call):\n"
         "        return None\n"
     )
 
 
-def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
+def test_a_rule_registered_under_an_id_it_does_not_answer_to_is_refused(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The crash `check` could not see, moved to the door that can.
 
-    `SimulationFlow` has always required the loaded constraints to carry exactly the ids the run
+    `strategy_loop` has always required the loaded constraints to carry exactly the ids the run
     froze, and enforced it with a bare `ValueError`. Nothing before it looked, so `check` returned
     `ok:true` on all five phases and `run` then died with `stage: "unhandled"` and an empty
     `failures` list -- the framework reporting itself broken when the registration was wrong.
@@ -310,11 +362,11 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
     A refusal here is worth more than a refusal at `check`, because it costs the user nothing: the
     mismatch cannot enter the workspace, so no spec can be written against it.
     """
-    (tmp_path / "limit.py").write_text(_constraint_source("'limit'"), encoding="utf-8")
+    (tmp_path / "limit.py").write_text(_rule_source("'limit'"), encoding="utf-8")
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  position-cap:\n    kind: constraint\n"
+        "components:\n  position-cap:\n    kind: compliance\n"
         "    path: limit.py\n    object_name: Limit\n",
     )
 
@@ -322,7 +374,7 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.load.constraint_id_mismatch"
+    assert failure["code"] == "component.compliance_id_mismatch"
     # Both strings, in the refusal itself. A reader must not have to open the file to learn which
     # two ids disagreed.
     assert "'position-cap'" in failure["observed"]
@@ -334,22 +386,22 @@ def test_a_constraint_registered_under_an_id_it_does_not_answer_to_is_refused(
     ).read_text(encoding="utf-8")
 
 
-def test_a_constraint_id_computed_at_runtime_is_still_checked(
+def test_a_compliance_id_computed_at_runtime_is_still_checked(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The loaded object is asked, not the source text.
 
-    A `constraint_id` assembled at runtime is invisible to any static read of the file, so a check
+    A `compliance_id` assembled at runtime is invisible to any static read of the file, so a check
     that parsed the source would pass this and leave the crash exactly where it was. Asking the
     constructed object is what makes the guard total rather than merely usual.
     """
     (tmp_path / "limit.py").write_text(
-        _constraint_source("'-'.join(['position', 'cap'])"), encoding="utf-8"
+        _rule_source("'-'.join(['position', 'cap'])"), encoding="utf-8"
     )
     document = _write(
         tmp_path,
         "w.yaml",
-        "components:\n  limit:\n    kind: constraint\n"
+        "components:\n  limit:\n    kind: compliance\n"
         "    path: limit.py\n    object_name: Limit\n",
     )
 
@@ -357,7 +409,7 @@ def test_a_constraint_id_computed_at_runtime_is_still_checked(
 
     assert code == 1
     failure = payload["failures"][0]
-    assert failure["code"] == "component.load.constraint_id_mismatch"
+    assert failure["code"] == "component.compliance_id_mismatch"
     assert "'position-cap'" in failure["observed"], "the computed id must be reported as computed"
 
 
@@ -370,24 +422,24 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     `no-short` ran clean, with nothing anywhere saying why. `NoShort` takes its id as a constructor
     argument defaulting to `no-short`, so config is a real third repair and the refusal says so.
     """
-    from vqapr.constraints.builtin import shipped_constraint_path
+    from vqapr.component.compliance.shipped import shipped_compliance_path
 
-    source = shipped_constraint_path("no_short").as_posix()
+    source = shipped_compliance_path("no_short").as_posix()
 
     refused = _write(
         tmp_path,
         "bad.yaml",
-        f"components:\n  noshort:\n    kind: constraint\n"
+        f"components:\n  noshort:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", refused)
     assert code == 1
-    assert payload["failures"][0]["code"] == "component.load.constraint_id_mismatch"
+    assert payload["failures"][0]["code"] == "component.compliance_id_mismatch"
 
     accepted = _write(
         tmp_path,
         "good.yaml",
-        f"components:\n  no-short:\n    kind: constraint\n"
+        f"components:\n  no-short:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", accepted)
@@ -397,9 +449,9 @@ def test_the_shipped_no_short_registers_under_the_id_it_answers_to(
     configured = _write(
         tmp_path,
         "configured.yaml",
-        f"components:\n  noshort:\n    kind: constraint\n"
+        f"components:\n  noshort:\n    kind: compliance\n"
         f"    path: {source}\n    object_name: NoShort\n"
-        f"    config:\n      constraint_id: noshort\n",
+        f"    config:\n      compliance_id: noshort\n",
     )
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", configured)
     assert code == 0, payload
@@ -433,8 +485,8 @@ def test_an_unknown_section_is_named_rather_than_ignored(
 
     assert code == 1
     assert payload["ok"] is False
-    assert payload["stage"] == "declaration.read"
-    assert payload["failures"][0]["code"] == "declaration.read.unknown_section"
+    assert payload["stage"] == "register"
+    assert payload["failures"][0]["code"] == "declaration.unknown_section"
     assert "dataset" in payload["failures"][0]["observed"]
 
 
@@ -448,12 +500,14 @@ def _run_document(**overrides: str) -> str:
         "instruments": "[A]",
         "start": '"2024-03-05T00:00:00+09:00"',
         "end": '"2024-03-06T23:00:00+09:00"',
-        "sessions_from": "prices",
         "timezone": "Asia/Seoul",
-        "at": '"04:00"',
+        "schedule": '{every: 1d, at: "04:00"}',
         "exchange": "venue",
-        "execution_input": "venue-daily",
+        "execution": (
+            "{dataset: venue-daily, trade_price: close, fill: {}}"
+        ),
         "initial_account": '{cash: "1000", mode: long_only}',
+        "writes": "r-weights",
         "strategies": "{alpha: {}}",
     }
     fields.update(overrides)
@@ -461,33 +515,33 @@ def _run_document(**overrides: str) -> str:
     return f"runs:\n  r:\n{body}\n"
 
 
-def test_a_run_must_declare_exactly_one_source_of_sessions(
+def test_an_schedule_rule_must_be_consistent(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Both, or neither, is a question the command must not answer by guessing.
 
     Pinned as a *structured* failure, not merely a non-zero exit. When the sessions lived on an
-    agenda this was an unhandled `ValueError`: it reached the envelope with `family: null`, an
+    schedule this was an unhandled `ValueError`: it reached the envelope with `family: null`, an
     empty `failures[]`, and a traceback file, so the only machine-readable thing about it was
     the exit code. The run carries the sessions since record 148, and the same rule holds.
     """
-    document = _write(tmp_path, "w.yaml", _run_document(sessions='["2024-03-05"]'))
+    document = _write(tmp_path, "w.yaml", _run_document(schedule="{every: 1d}"))
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
-    assert payload["family"] == "DATA"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
-    assert "exactly one of sessions_from" in failure["observed"]
+    assert failure["code"] == "declaration.run_invalid"
+    assert failure["status"] == 400
+    assert "needs at" in failure["observed"]
     assert failure["source"]["key_path"] == "runs.r"
 
-    neither = _write(tmp_path, "neither.yaml", _run_document(sessions_from="null"))
+    neither = _write(tmp_path, "neither.yaml", _run_document(schedule='{every: 5m, at: "04:00"}'))
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", neither)
 
     assert code == 1
-    assert "exactly one of sessions_from" in payload["failures"][0]["observed"]
+    assert "not at" in payload["failures"][0]["observed"]
 
 
 def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
@@ -497,7 +551,7 @@ def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
 
     `apply` opens the workspace lazily for exactly this reason. Passing `workspace()` rather than
     `workspace` into a section's builder once defeated it: Python evaluates the argument first,
-    so a declaration with a bad entry reported `workspace.open.missing` and sent the reader to
+    so a declaration with a bad entry reported `workspace.missing` and sent the reader to
     inspect a directory that was fine.
     """
     document = _write(tmp_path, "w.yaml", 'runs:\n  r:\n    at: "04:00"\n')
@@ -505,8 +559,8 @@ def test_a_malformed_run_blames_the_file_not_the_missing_workspace(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read", "the file is what is wrong, not the workspace"
-    assert payload["failures"][0]["code"] == "declaration.read.run_invalid"
+    assert payload["stage"] == "register", "the file is what is wrong, not the workspace"
+    assert payload["failures"][0]["code"] == "declaration.run_invalid"
 
 
 def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
@@ -518,28 +572,28 @@ def test_a_component_kind_that_is_not_permitted_names_the_permitted_ones(
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.value_not_permitted"
+    assert failure["code"] == "declaration.value_not_permitted"
     assert failure["observed"] == "model"
-    assert set(failure["examples"]) == {"datamodel", "strategy", "constraint", "exchange"}
+    assert set(failure["examples"]) == {"datamodel", "strategy", "compliance", "exchange"}
 
 
-def test_a_sessions_list_that_is_not_a_list_is_refused_with_a_stage(
+def test_an_schedule_wall_time_that_is_not_a_time_is_refused_with_a_stage(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """One date, written without brackets, is the easiest version of this mistake to make."""
     document = _write(
-        tmp_path, "w.yaml", _run_document(sessions_from="null", sessions='"2024-03-05"')
+        tmp_path, "w.yaml", _run_document(schedule="{every: 1d, at: nope}")
     )
 
     code, payload = _cli(capsys, "--project-root", str(tmp_path), "register", document)
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
-    assert "sessions" in failure["observed"], "the key that was mistyped is named"
+    assert failure["code"] == "declaration.run_invalid"
+    assert "at" in failure["observed"], "the key that was mistyped is named"
     assert failure["source"]["key_path"] == "runs.r"
 
 

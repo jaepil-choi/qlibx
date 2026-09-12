@@ -1,10 +1,10 @@
 # 119 — The read path validates nothing, and the question moved to registration
 
-**Closes:** [`044`](../issues/044-the-read-path-revalidates-eight-column-names-once-per-row.md) —
+**Closes:** [`044`](../issues/archive/044-the-read-path-revalidates-eight-column-names-once-per-row.md) —
 lane A of the read-path campaign
 ([`2026-09-01-the-read-path-campaign.md`](../refactoring/2026-09-01-the-read-path-campaign.md) §2),
 applying the owner ruling recorded in
-[`049`](../issues/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
+[`049`](../issues/archive/049-following-the-packages-own-data-guidance-costs-six-hundred-times.md).
 **Branch:** `read-044-no-validation-on-read`. **Merges first**, before lanes B, C and D.
 
 ## Why this change exists

@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from vqapr.data import scan
-from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import MAX_EXAMPLES, VqaprError
+from vqapr.data.source import SourceSpec
+from vqapr.domain.errors import MAX_EXAMPLES, Stage, Status, VqaprError
 
 
 def test_describe_normalises_types_and_keeps_tz_distinct(hive_parquet: Path) -> None:
@@ -88,7 +88,7 @@ def test_missing_path_is_machine_readable(tmp_path: Path) -> None:
     err = caught.value
     assert err.mutation is False
     assert err.retry_precondition
-    assert [f.code for f in err.failures] == ["source.scan.path_missing"]
+    assert [f.code for f in err.failures] == ["source.path_missing"]
     assert err.as_dict()["failures"][0]["observed"] == str(spec.path)
 
 
@@ -97,7 +97,14 @@ def test_unreadable_source_is_machine_readable(tmp_path: Path) -> None:
     junk.write_text("definitely not parquet", encoding="utf-8")
     with pytest.raises(VqaprError) as caught:
         scan.describe(SourceSpec.of("junk", junk))
-    assert [f.code for f in caught.value.failures] == ["source.scan.unreadable"]
+    assert caught.value.stage is Stage.READ
+    failure = caught.value.failures[0]
+    assert [f.code for f in caught.value.failures] == ["source.unreadable"]
+    assert failure.status is Status.UNAVAILABLE
+    # The duckdb exception rides on the failure whole, not as a first line of its message.
+    assert failure.cause is not None
+    assert failure.cause.type is not None
+    assert failure.cause.traceback and "Traceback" in failure.cause.traceback
 
 
 @pytest.mark.real_data
@@ -206,3 +213,17 @@ def test_both_connection_factories_route_through_configure(flat_parquet: Path) -
         assert _progress_bar(session.connection(spec)) is False
     finally:
         session.close()
+
+
+def test_distinct_values_reads_only_the_bounded_values(flat_parquet: Path) -> None:
+    """Record `247`: a caller that wants one period's values names it, and the scan keeps to it
+    (inclusive on both ends); with no bound the whole column is read as before."""
+    from datetime import UTC, datetime
+
+    spec = SourceSpec.of("s", flat_parquet)
+    lower, upper = datetime(2024, 1, 3, tzinfo=UTC), datetime(2024, 12, 31, tzinfo=UTC)
+    within = scan.distinct_values(spec, "available_at", not_before=lower, not_after=upper)
+    everything = scan.distinct_values(spec, "available_at")
+    assert len(everything) == 3
+    assert within == tuple(value for value in everything if lower <= value <= upper)
+    assert 0 < len(within) < len(everything), (within, everything)

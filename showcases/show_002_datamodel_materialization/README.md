@@ -12,7 +12,7 @@ This showcase demonstrates the production DataModel path:
 - consume that derived dataset through a second ordinary `DataRequirement`;
 - reject timestamp forgery without changing the workspace or publishing partial output.
 
-It does **not** demonstrate StrategyModel callbacks, execution inputs, orders, fills, Account
+It does **not** demonstrate StrategyModel callbacks, venue tables, orders, fills, Account
 mutation, valuation, or performance.
 
 ## Reproduce
@@ -37,4 +37,4 @@ Environment assumptions: repository `uv` environment, Python 3.12+, DuckDB 1.5+,
 
 Last verified at: 2026-09-03
 
-Verified against: `vqapr-0.4.1`
+Verified against: `vqapr-0.10.0`

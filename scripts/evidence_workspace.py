@@ -14,10 +14,11 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from vqapr.data.datasets import DatasetRegistration, validate
-from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import VqaprError
 from vqapr.workspace import Workspace
+
+from vqapr.data.dataset import DatasetRegistration, validate
+from vqapr.data.source import SourceSpec
+from vqapr.domain.errors import VqaprError
 
 DEV = Path("data/vqapr-dev/price_daily")
 

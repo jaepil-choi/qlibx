@@ -1,7 +1,7 @@
 # 092 — A closed-set refusal names the set
 
 **Closes:** the message half of
-`docs/issues/017-the-template-offers-an-account-mode-that-does-not-exist.md`, and with it the whole
+`docs/issues/archive/017-the-template-offers-an-account-mode-that-does-not-exist.md`, and with it the whole
 issue. The template half is `docs/implementations/091`.
 **Branch:** `fix/017-closed-set-refusal`.
 

@@ -23,16 +23,18 @@ _._print_message  # src/vqapr/cli/main.py
 
 
 # --- Resolved from a string, invisible to a name-based pass ---------------------------
-# `agent/sample/journey.py` registers this by the literal "SampleExchange".
+# `src/vqapr/agent/sample/materialize.py` writes the literal "SampleExchange" into the
+# declaration it materializes, and the loader resolves the class from that string
+# (record 172 moved the sample into the package).
 SampleExchange  # src/vqapr/agent/sample/exchange.py
 
 
 # --- Frozen dataclass fields: written at construction, read by serialization ----------
-# src/vqapr/evidence/artifacts.py, class FailureObservation
+# src/vqapr/run/engine/failure.py, class FailureObservation
 exception_type
 arguments
 
-# src/vqapr/evidence/artifacts.py, class AccountCommitEvidence
+# src/vqapr/run/engine/evidence.py, class AccountCommitEvidence
 planning_nav
 planning_cash_target
 planning_budget
@@ -41,10 +43,10 @@ requested_orders
 account_version_before
 account_version_committed
 
-# src/vqapr/evidence/artifacts.py, class MarkEvidence
+# src/vqapr/run/engine/evidence.py, class MarkEvidence
 limitations
 
-# src/vqapr/flow/simulation.py, class DueExecutionResult; built in `_execute_due`.
+# src/vqapr/run/engine/context.py, class DueExecutionResult; built in `_execute_due`.
 post_account_result
 
 
@@ -54,12 +56,22 @@ pytestmark
 
 # `@pytest.fixture` definitions are covered by `ignore_decorators` in pyproject, but a test
 # requesting one names it as a parameter, and that parameter has no reader in the body.
-bound_every_source  # tests/flow/test_hot_path_costs.py
+bound_every_source  # tests/run/test_hot_path_costs.py
 
 # --- pydantic fields the model reads and drops, or a test model reads only by key ------
-# `WorkspaceDocument` admits the two sections record 144 retired so a 0.3.0 document opens;
-# nothing reads their value, by design.
+# `WorkspaceDocument` admits the four sections records 144 and 148 retired so a 0.3.0 document
+# opens; nothing reads their value, by design. (`agendas` shares its name with a live module
+# and so never shows up.)
 _.valuation_configs  # src/vqapr/workspace_document.py
 _.monitoring_policies  # src/vqapr/workspace_document.py
+_.strategy_configs  # src/vqapr/workspace_document.py
+# The run record's identity field: set by `freeze_run_record`, read back BY KEY from the dumped
+# `run.json` in `_write_run_json`, where a second run under the same id is compared against it.
+_.declared_digest  # src/vqapr/record/schema.py
+# The same test's closed-set enum: pydantic matches a payload's string against the MEMBERS,
+# and the test asserts the refusal lists them (`"strategy_callback, valuation"`), so both
+# are load-bearing and neither is ever named in code.
+STRATEGY_CALLBACK  # tests/test_a_validation_error_is_a_refusal.py, class Role
+VALUATION  # tests/test_a_validation_error_is_a_refusal.py, class Role
 # The adapter test's throwaway model: pydantic reads its fields from a payload by key.
 _.when  # tests/test_a_validation_error_is_a_refusal.py

@@ -1,6 +1,6 @@
 # 094 — A run reports the tables it declared, and the counter says what it counts
 
-**Closes:** `docs/issues/024-a-run-that-declared-a-table-reports-none.md`.
+**Closes:** `docs/issues/archive/024-a-run-that-declared-a-table-reports-none.md`.
 **Branch:** `fix/024-tables-declared-and-counter`. Cut only after `fix/022-fill-envelope` merged,
 because the counter half is not explicable until fills carry a clock.
 

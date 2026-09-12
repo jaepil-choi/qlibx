@@ -100,10 +100,10 @@ t2 행이 안 보임(PIT 유지). materialize만 하던 것 셋과 처리:
 | **2** | preflight 거절 렌더 한 곳(`__cause__`를 `observed`에), `run`의 `preflight_run`을 try 안으로, `_validate_initial_model_state`가 세 단계 중 어느 것인지 말한다, `save/load_payload` docstring + scaffold 문장 | `076` | `152` |
 | **2b** | **답하지 못한 판정은 통과가 아니다.** `judgments.py`의 helper 다섯(`_decide_agenda`·`_judge_execution_ordering`·`_judge_datasets_and_fields`·`_judge_account`·`_instant`)이 dispatcher의 `blocked` wrapper보다 먼저 잡는 `try`를 걷어낸다. `check`가 `passed`/`blocked`/실패 셋을 다시 구별하게 된다. **설계 결정 하나 남음: 중복 보고를 허용하는가**(blocked 한 줄 + preflight 거절 한 줄) | `077` | `153` |
 | **3** | `Rebalance.of`가 `rescale(grid=QUANTUM)`을 부른다. `Rebalance.signed(weights, *, gross=1)`. `Budget`·`Rebalance` docstring | `075` | `154` |
-| **4** | `flow/materialize.py` 삭제, public에서 이름 넷, `stamping.py`→`datamodel.py`. showcase 005–008을 "member run → 표 등록 → ensemble run"으로. skill에 "run의 표를 등록한다" | — | `155` |
-| **5** | **문서가 도메인이다** (D1·D2·D3, ExecPlan). `to_domain` 층·`flow/run.py` 앞 373줄·`Workspace.register_*`·`declarations.py`의 문장 생성기 삭제. `Frozen*`는 frozen pydantic | `027`(문서 메서드 한 줄) | `156` |
-| **6** | **기록 family 7 → 3** (ExecPlan): `flow/frozen.py`·`flow/record.py`(모델 셋 + layout + writer/lock + reader)·`flow/run_state.py`(+`model_state`). `reporting`→`cli/run`. `valuation↔callback` 순환 절단 | — | `157` |
-| **7** | 작은 패키지 접기: `domain/` 10→4, `constraints/` 7→3, `valuation/`→`flow/valuation` 옆, `runtime/`→`flow/`. 남은 순환 셋 | — | `158` |
+| **4** | `flow/materialize.py` 삭제, public에서 이름 넷, `stamping.py`→`datamodel.py`. showcase 005–008을 "member run → 표 등록 → ensemble run"으로. skill에 "run의 표를 등록한다" | — | **`159`** (2026-09-05 완료; `155`–`158`은 캠페인 밖 브랜치가 가져갔다) |
+| **5** | **문서가 도메인이다** (D1·D2·D3, ExecPlan). `to_domain` 층·`flow/run.py` 앞 373줄·`Workspace.register_*`·`declarations.py`의 문장 생성기 삭제. `Frozen*`는 frozen pydantic | `027`(문서 메서드 한 줄) | **`160`** (2026-09-07 완료. §1.3의 `declarations.py` 행은 **틀렸다** — 7개 중 6개가 `refusals_from`의 구현이라 남김; `Dataset`/`ExecutionInput` 문서는 codec이라 남김; `Frozen*` pydantic화는 Step 6의 첫 마일스톤으로 연기. record `160` §M5b·M5c·M5d) |
+| **6** | **기록 family 7 → 3** (ExecPlan): `flow/frozen.py`·`flow/record.py`(모델 셋 + layout + writer/lock + reader)·`flow/run_state.py`(+`model_state`). `reporting`→`cli/run`. `valuation↔callback` 순환 절단 | — | **`161`** (2026-09-07 완료. `valuation↔callback`은 이미 끊겨 있었다 — 남은 순환 셋을 Step 7에 실측으로 넘김; `Frozen*` pydantic화는 **불필요**로 판정) |
+| **7** | 작은 패키지 접기: `domain/` 10→4, `constraints/` 7→3, `valuation/`→`flow/valuation` 옆, `runtime/`→`flow/`. 남은 순환 셋 | — | **`162`** (2026-09-07 완료. 순환 3→0, ratchet 18→13, 모듈 123→111. 실측 정정: `domain/` **5**(`agendas`는 `calls.py`가 읽는 값), `constraints/` **5**(shipped constraint는 파일이라 `builtin/` 둘은 못 합침), `marking`은 `flow/marking.py`로 **옆에**(접으면 `context`를 거쳐 순환), `events`는 `flow/loop.py`로) |
 
 순서의 제약: 2b는 어디에든 놓을 수 있지만 **3 앞**에 둔다 — 재현 픽스처 둘이 `077`을 접수한 세션에서 이미
 확인됐고, 판정 계층의 같은 병(`076`의 판정 층 형태)이라 한 흐름으로 읽힌다. 4가 5 앞 — materialize가

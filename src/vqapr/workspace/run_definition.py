@@ -1,0 +1,867 @@
+"""Closed declarations that establish operation ownership for a run.
+
+**A run is configuration; a strategy is what it tries** (record `139`, design
+`docs/design/the-panel-the-surface-and-the-run.md` §4). A `RunDefinition` names its universe,
+period, venue, execution dataset and fill, initial account and the one model it runs -- by id,
+because it is a registered document, and the workspace is what resolves an id. Preflight freezes
+the run layer into a `FrozenRun` and its model into a `FrozenStrategy`; the run layer's identity
+and the model's identity are separate.
+
+**One model per run** (2026-09-09, `docs/design/two-clocks-and-the-wiring-table.md` §2.3). Record
+`139` had made it several so that a comparison across factor models would share one frozen layer.
+Determinism already gives that -- two runs declaring the same inputs freeze identically -- so the
+sharing bought an optimisation and cost two things: parallelism lived inside a run rather than
+across independent runs, and strategies run on different days could not be compared at all.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, time
+from decimal import Decimal
+from typing import Annotated, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+from pydantic.dataclasses import dataclass as pydantic_dataclass
+
+from vqapr.component.reference import ComponentRef
+from vqapr.data.requirement import DataRequirement
+from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.fill import FillRule
+from vqapr.domain.identifiers import ModelStateRef, ScheduleId
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.memory import ModelMemory, opening_memory, prepare_model_state
+from vqapr.domain.schedule import ScheduleRule
+from vqapr.domain.wiring import Role
+
+FINGERPRINT_PREFIX = 8
+"""How much of a component fingerprint names a strategy record's directory: `<id>@<fp8>`.
+
+Eight hex characters is 32 bits, and a strategy is edited tens of times, not billions. The full
+fingerprint is inside `strategy.json`; the directory name only has to tell tweaks apart.
+"""
+
+
+def _identity(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _model_state_ref(memory: ModelMemory, payload: bytes) -> ModelStateRef:
+    return prepare_model_state(memory, payload).ref
+
+
+def _require_id(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise TypeError(f"{name} must be a non-empty identifier")
+    return value
+
+
+def _require_timezone(value: object) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("timezone must be a non-empty IANA timezone name")
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError(f"unknown IANA timezone: {value!r}") from error
+
+
+def _require_period(start: datetime | None, end: datetime | None, verb: str) -> None:
+    if (start is None) != (end is None):
+        raise ValueError(f"start and end must be {verb} together")
+    if start is not None and end is not None:
+        require_tz_aware(start, name="start")
+        require_tz_aware(end, name="end")
+        if start.astimezone(UTC) > end.astimezone(UTC):
+            raise ValueError("start must not be after end")
+
+
+def _require_account(
+    snapshot: AccountSnapshot | None, mode: AccountMode | None, verb: str
+) -> AccountSnapshot | None:
+    if (snapshot is None) != (mode is None):
+        raise ValueError(
+            f"initial_account_snapshot and initial_account_mode must be {verb} together"
+        )
+    if snapshot is None:
+        return None
+    if not isinstance(snapshot, AccountSnapshot):
+        raise TypeError("initial_account_snapshot must be an AccountSnapshot or None")
+    if not isinstance(mode, AccountMode):
+        raise TypeError("initial_account_mode must be an AccountMode or None")
+    return AccountSnapshot(snapshot.version, snapshot.cash, snapshot.positions)
+
+
+def _require_instruments(instruments: object) -> frozenset[str]:
+    if not isinstance(instruments, tuple) or not instruments:
+        raise ValueError("instruments must be a non-empty tuple")
+    if any(not isinstance(value, str) or not value for value in instruments):
+        raise ValueError("instruments must contain non-empty strings")
+    unique = frozenset(instruments)
+    if len(unique) != len(instruments):
+        raise ValueError("instruments must be unique")
+    return unique
+
+
+def _require_requirements(name: str, requirements: object) -> None:
+    if not isinstance(requirements, tuple) or not all(
+        isinstance(requirement, DataRequirement) for requirement in requirements
+    ):
+        raise TypeError(f"{name} must be a tuple of DataRequirement values")
+
+
+def _encoded_requirements(requirements: tuple[DataRequirement, ...]) -> list[tuple[str, str, str]]:
+    return [
+        (requirement.dataset_id, requirement.field_id, repr(requirement.lookback))
+        for requirement in requirements
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class ComplianceSet:
+    """The run's declared Compliance rules, resolved to registered components (design §7.2)."""
+
+    rules: tuple[ComponentRef, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.rules, tuple):
+            raise TypeError("rules must be a tuple of ComponentRef values")
+        for rule in self.rules:
+            if not isinstance(rule, ComponentRef):
+                raise TypeError("rules must contain ComponentRef values")
+            if rule.kind is not Role.COMPLIANCE:
+                raise ValueError("rules must identify COMPLIANCE components")
+        if len({rule.component_id for rule in self.rules}) != len(self.rules):
+            raise ValueError("rules must not contain duplicate component references")
+
+
+@dataclass(frozen=True, slots=True)
+class StrategyConfig:
+    """Strategy component and its independently owned callback schedule."""
+
+    component: ComponentRef
+    schedule_id: ScheduleId
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.component, ComponentRef):
+            raise TypeError("component must be a ComponentRef")
+        if self.component.kind is not Role.STRATEGY_MODEL:
+            raise ValueError("component must identify a STRATEGY_MODEL")
+        if not isinstance(self.schedule_id, str) or not self.schedule_id:
+            raise TypeError("schedule_id must be an ScheduleId")
+
+
+# ---------------------------------------------------------------------------------------------
+# The run family is one shape (one-shape campaign Step 5, record 160). `RunDefinition` and its
+# two entry types are what `workspace.yaml` stores under `runs:`, what a declaration registers
+# and what preflight freezes -- the same object, so there is no `RunDocument.to_domain()` to
+# keep in step with a `RunDefinition.__post_init__`. pydantic owns the shape (key sets, scalar
+# types, enums, dates); the rules that are this package's -- one kind of model per run, ids
+# named once, a venue declared whole, a period declared whole -- are validators on the model.
+# The YAML spelling (strategies keyed by id, an `execution` block, one `initial_account` block) is
+# accepted by a before-validator and emitted by the serializer, so the stored bytes did not move.
+# ---------------------------------------------------------------------------------------------
+
+_ENTRY_CONFIG = ConfigDict(extra="forbid", strict=False)
+
+
+def _no_repeats(values: Sequence[str], what: str) -> None:
+    if len(set(values)) != len(values):
+        raise ValueError(f"{what} must not repeat a component id")
+
+
+@pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
+class StrategyEntry:
+    """One strategy a run executes: the component and its opening memory.
+
+    Ids, not refs: the entry is part of a registered document, and the component it names is
+    looked up by preflight, which also binds it to the run's own sessions (record `148`).
+    A pydantic dataclass rather than a `BaseModel` so it keeps its positional constructor --
+    `StrategyEntry("ou-k0")` is how every showcase and test spells it.
+
+    The rules that watch the run's book are the run's, not the strategy's -- `compliance:` on
+    the run (design §7.2: a watcher does not inherit the target of the thing it watches). The
+    `constraints:` list that used to sit here is refused by name.
+    """
+
+    component_id: Annotated[str, Field(min_length=1)]
+    initial_model_memory: Any = Field(default_factory=dict)
+    """The memory the model finds on its first callback. A mapping, `{}` unless declared: the
+    authoring reference promises `self.memory.setdefault(...)` works on session one, and it did
+    not while an undeclared opening memory was `None` (`docs/issues/089`). A declared `null` is
+    read as the same empty mapping, because "nothing declared" and "declared nothing" are one
+    opening state."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_constraints(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "constraints" in raw:
+            raise ValueError(
+                "`constraints:` left the strategy entry (design §7.1-7.2): the box a strategy "
+                "builds inside is its own kit call (`no_short`, `single_name_cap`, `intersect`), "
+                "and the rules that watch the committed book are declared on the RUN as "
+                "`compliance: [rule-component-id, ...]`"
+            )
+        return raw
+
+    @field_validator("initial_model_memory")
+    @classmethod
+    def _memory(cls, value: object) -> ModelMemory:
+        return opening_memory(value)
+
+
+_OUTPUT_OWNED_FIELDS = frozenset({"available_at", "instrument"})
+"""Columns of a datamodel's output the package writes itself; a value field may not be one."""
+
+
+def _require_value_fields(value: object) -> tuple[str, ...]:
+    if not isinstance(value, tuple) or not value:
+        raise ValueError("value_fields must name at least one output field")
+    if any(
+        not isinstance(name, str) or not name or any(character.isspace() for character in name)
+        for name in value
+    ):
+        raise TypeError("value_fields must be non-empty strings without whitespace")
+    if len(set(value)) != len(value):
+        raise ValueError("value_fields must be unique")
+    owned = sorted(set(value) & _OUTPUT_OWNED_FIELDS)
+    if owned:
+        raise ValueError(f"value_fields are package-owned: {owned}")
+    return value
+
+
+@pydantic_dataclass(frozen=True, config=_ENTRY_CONFIG)
+class DataModelEntry:
+    """One datamodel a run computes: the component, its output fields, its opening memory.
+
+    The output's shape is declared here and not by the model (architecture 4.4): the model
+    computes rows, and what fields those rows carry is configuration of the run that produces it
+    (record `148`). **Which dataset they become is the run's `writes`**, not this entry's: what a
+    run puts in the warehouse is a property of the run, the same for a strategy as for a
+    datamodel (`docs/design/two-clocks-and-the-wiring-table.md` §2).
+    """
+
+    component_id: Annotated[str, Field(min_length=1)]
+    value_fields: tuple[str, ...]
+    initial_model_memory: Any = Field(default_factory=dict)
+    """`{}` unless declared, as for a strategy (`docs/issues/089`)."""
+
+    @field_validator("value_fields")
+    @classmethod
+    def _fields(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        return _require_value_fields(tuple(value))
+
+    @field_validator("initial_model_memory")
+    @classmethod
+    def _memory(cls, value: object) -> ModelMemory:
+        return opening_memory(value)
+
+
+class _InitialAccount(BaseModel):
+    """`runs.<id>.initial_account` on disk: the YAML spelling of two `RunDefinition` fields.
+
+    Not a domain type -- the domain is an `AccountSnapshot` and an `AccountMode` -- and not a
+    document/domain pair either: it is the one block whose stored shape differs from the two
+    fields it carries, so the codec for it is written once, here, as the model that reads and
+    writes that block. Written and read by member NAME (`LONG_ONLY`), which is what the template
+    shows; the enum's value is the lower-case spelling.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+    cash: Decimal
+    mode: AccountMode
+    positions: dict[str, Decimal] = {}
+    version: int = 0
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _by_name_as_written(cls, value: object) -> object:
+        if isinstance(value, str):
+            try:
+                return AccountMode[value.upper()]
+            except KeyError:
+                return value
+        return value
+
+    @field_serializer("mode")
+    def _name(self, mode: AccountMode) -> str:
+        return mode.name
+
+    @field_serializer("cash")
+    def _cash(self, cash: Decimal) -> str:
+        return str(cash)
+
+    @field_serializer("positions")
+    def _positions(self, positions: dict[str, Decimal]) -> dict[str, str]:
+        return {name: str(quantity) for name, quantity in sorted(positions.items())}
+
+
+class RunFill(BaseModel):
+    """`runs.<id>.execution.fill`: the optional handles on when a decision fills (design §3.5).
+
+    Absent, a decision fills at the first market-clock instant after it. `at` keeps only the
+    instants whose venue-local wall time (the run's zone) is this one; `after` is a minimum
+    elapsed time; `within` a maximum gap -- a decision with no candidate inside it has no target,
+    which preflight refuses. Durations share `schedule.every`'s grammar: `10m`, `2h`, `1d`, and are
+    wall-clock time, not sessions: a weekend counts (record `259`).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+    at: time | None = None
+    after: str | None = None
+    within: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _the_retired_shape(cls, raw: object) -> object:
+        if isinstance(raw, Mapping):
+            retired = [key for key in ("selector", "timezone", "trade_price") if key in raw]
+            if retired:
+                raise ValueError(
+                    f"{', '.join(retired)} left `fill:` (design §3.5): a decision fills at the "
+                    "first execution instant after it, narrowed by `at`, `after`, `within`; "
+                    "`trade_price` sits on `execution:` beside `dataset`, and the run's "
+                    "`timezone` reads `at`"
+                )
+        return raw
+
+    @field_validator("at")
+    @classmethod
+    def _wall_time(cls, value: time | None) -> time | None:
+        return None if value is None else _naive_wall_time(value)
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if self.at is not None:
+            body["at"] = self.at.isoformat()
+        if self.after is not None:
+            body["after"] = self.after
+        if self.within is not None:
+            body["within"] = self.within
+        return body
+
+
+class RunSchedule(BaseModel):
+    """`runs.<id>.schedule`: the schedule clock, as a trading-day filter and a within-day rule.
+
+    Design §3.4: `every` (`1d`, `2d`, `1w`, `1M` select days and pair with `at`; `1m`, `5m`,
+    `1h` select instants inside each day between `from` and `to`). Which days are trading days
+    comes from data (§3.3): for a strategy run, the days its execution table has rows for --
+    nothing to declare; for a datamodel run, which has no venue, the dataset named by
+    `days_from`. The rule is validated by the domain's `ScheduleRule`, which is also what
+    preflight expands.
+
+    `on: last` fires a `w` or `M` rule on the last trading day of each week or month instead of
+    the first (record `253`). It is stored only when given as `last`: `first` is what every run
+    before it meant, so a run that says nothing and a run that says `on: first` are the same
+    declaration and keep the identity they had.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False, populate_by_name=True)
+
+    every: Annotated[str, Field(min_length=2)]
+    at: tuple[time, ...] = ()
+    from_: time | None = Field(default=None, alias="from")
+    to: time | None = None
+    on: str = "first"
+    days_from: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_or_many(cls, raw: object) -> object:
+        if isinstance(raw, Mapping) and "at" in raw and not isinstance(raw["at"], (list, tuple)):
+            body = dict(raw)
+            body["at"] = () if body["at"] is None else (body["at"],)
+            return body
+        return raw
+
+    @field_validator("at", "from_", "to")
+    @classmethod
+    def _wall_times(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, tuple):
+            return tuple(_naive_wall_time(item) for item in value)
+        return _naive_wall_time(value)
+
+    @field_validator("days_from")
+    @classmethod
+    def _dataset_name(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("days_from must be a non-empty dataset id")
+        return value
+
+    @model_validator(mode="after")
+    def _a_rule(self) -> RunSchedule:
+        self.rule  # noqa: B018 -- the domain refuses an inconsistent every/at/from/to here
+        return self
+
+    @property
+    def rule(self) -> ScheduleRule:
+        return ScheduleRule(self.every, self.at, self.from_, self.to, self.on)
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"every": self.every}
+        if self.at:
+            body["at"] = [value.isoformat() for value in self.at]
+        if self.from_ is not None:
+            body["from"] = self.from_.isoformat()
+        if self.to is not None:
+            body["to"] = self.to.isoformat()
+        if self.on != "first":
+            body["on"] = self.on
+        if self.days_from is not None:
+            body["days_from"] = self.days_from
+        return body
+
+
+class RunExecution(BaseModel):
+    """`runs.<id>.execution`: the registered execution dataset, the price this run fills at, and
+    the optional fill handles."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=False)
+
+    dataset: Annotated[str, Field(min_length=1)]
+    trade_price: Annotated[str, Field(min_length=1)]
+    fill: RunFill | None = None
+
+    @model_serializer(mode="plain")
+    def _stored(self) -> dict[str, Any]:
+        body: dict[str, Any] = {"dataset": self.dataset, "trade_price": self.trade_price}
+        if self.fill is not None:
+            stored = self.fill.model_dump(mode="json")
+            if stored:
+                body["fill"] = stored
+        return body
+
+    def rule(self, timezone: str) -> FillRule:
+        """The domain rule, read in the run's zone; refuses an inconsistent `after`/`within`."""
+        fill = self.fill or RunFill()
+        return FillRule(
+            trade_price=self.trade_price,
+            timezone=timezone,
+            at=fill.at,
+            after=fill.after,
+            within=fill.within,
+        )
+
+
+def _naive_wall_time(value: object) -> time:
+    if not isinstance(value, time):
+        raise ValueError("at must be a datetime.time")
+    if value.tzinfo is not None:
+        raise ValueError("at must be a timezone-naive wall time; the run declares the zone")
+    return value
+
+
+def _singular_block(body: dict[str, Any], singular: str, plural: str) -> object:
+    """The member block under either spelling, normalised to `{component_id: fields}`.
+
+    Stored today as `strategy: {component: id, ...}` / `datamodel: {component: id, ...}` -- one
+    model, named as a block. Read yesterday's `strategies: {id: {...}}` too, so a workspace written
+    before 2026-09-09 opens; `_the_one_member` refuses it if it named two.
+    """
+    if plural in body:
+        return body.pop(plural)
+    block = body.get(singular)
+    if isinstance(block, Mapping) and ("component" in block or "component_id" in block):
+        fields = dict(block)
+        name = fields.pop("component", None) or fields.pop("component_id")
+        fields.pop("component_id", None)
+        return {str(name): fields}
+    return block
+
+
+def _the_one_member[Entry](
+    declared: object,
+    *,
+    build: Callable[[str, dict[str, Any]], Entry],
+    plural: str,
+) -> Entry | None:
+    """The single member a run names, from any of the spellings a document may carry it in.
+
+    A run is one arrow of the project's dataset graph and so runs one model
+    (`docs/design/two-clocks-and-the-wiring-table.md` §2.3). The stored block is still the
+    `plural: {component_id: {...}}` mapping it has always been, holding exactly one entry, so a
+    workspace written before this rule reads back unchanged unless it actually declared two --
+    and then it is refused by name rather than half-run.
+    """
+    if declared is None:
+        return None
+    if isinstance(declared, Mapping):
+        items = list(declared.items())
+    elif isinstance(declared, (tuple, list)):
+        items = [(getattr(entry, "component_id", ""), entry) for entry in declared]
+    else:
+        return declared  # type: ignore[return-value]
+    if not items:
+        return None
+    if len(items) > 1:
+        named = ", ".join(sorted(str(name) for name, _ in items))
+        raise ValueError(
+            f"a run names exactly one model; `{plural}:` named {len(items)} ({named}). "
+            "Register one run per model -- they share nothing a run has to hold them together "
+            "for, and independent runs parallelise where a run's members could not"
+        )
+    name, entry = items[0]
+    if isinstance(entry, (StrategyEntry, DataModelEntry)):
+        return entry  # type: ignore[return-value]
+    if entry is None:
+        return build(str(name), {})
+    if not isinstance(entry, Mapping):
+        raise ValueError(f"`{plural}.{name}` must be a block of fields")
+    return build(str(name), dict(entry))
+
+
+class RunDefinition(BaseModel):
+    """A registered run: what every model in it shares, and which models it runs.
+
+    A run runs ONE model of one kind (record `148`; `docs/design/two-clocks-and-the-wiring-table.md`
+    §2.3): a `strategy`, with its own account and venue, or a `datamodel`, writing one dataset and
+    touching no account. Everything here is an id or a value; the workspace resolves ids at
+    preflight. Pairing rules are enforced here so a document cannot half-declare a venue or a
+    period.
+
+    **One model, because a run is one arrow of the project's dataset graph.** It held several
+    until 2026-09-09. The reason given was that members must share a frozen layer to be
+    comparable -- but determinism already guarantees that two runs declaring the same inputs
+    freeze identically, so sharing was an optimisation and not a meaning. What it cost was real:
+    parallelism lived inside a run instead of across independent runs, and two strategies run on
+    different days could not be compared at all.
+
+    This is also the `runs.<run_id>` entry of `workspace.yaml` and of a declaration, read and
+    written through `model_validate` / `model_dump(mode="json")`. The stored spelling differs
+    from the field names in four places, and the before-validator and serializer below are the
+    one place that difference is written: `strategy`/`datamodel` are a block naming its
+    `component` on disk and an entry here (the pre-2026-09-09 `strategies: {id: {...}}` mapping
+    is still read); `execution` on disk is a `RunExecution`; one `initial_account` block is a
+    snapshot and a mode; and `run_id` is the key the entry sits under, not a field of it.
+    `writes` is spelled the same in both.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=False, arbitrary_types_allowed=True
+    )
+
+    run_id: Annotated[str, Field(min_length=1)]
+    writes: Annotated[str, Field(min_length=1)]
+    """The dataset this run puts in the warehouse. Required: a run is one arrow of the project's
+    dataset graph, and an arrow that makes nothing is not a rule of it. A strategy publishes its
+    allocation under this name; a datamodel its computed rows. The name only -- the schema is
+    what the consumer declares (`DataRequirement`), and saying it twice would let it disagree."""
+    strategy: StrategyEntry | None = None
+    """The one strategy this run executes, when it is a strategy run. Never beside `datamodel`."""
+    instruments: tuple[Annotated[str, Field(min_length=1)], ...]
+    datamodel: DataModelEntry | None = None
+    """The one dataset this run computes, when it is a datamodel run. Never beside `strategy`."""
+    timezone: str
+    """The venue zone every wall time below is expressed in. Required: a run without one is not
+    run-ready, and the dataclass's `""` default only deferred that refusal to the zone check."""
+    schedule: RunSchedule
+    """When the model is called: the schedule clock (design §3.4). The trading days it is
+    expanded over come from the execution table for a strategy run and from `days_from` for a
+    datamodel run; the book is valued at the instant the venue fills and monitored right after
+    each commit, so this is the one clock a run declares."""
+    exchange: str | None = None
+    execution: RunExecution | None = None
+    """Which registered execution dataset the run fills against, and how: the session instant
+    and the price (record `185`). The table is registered once; the price is this run's."""
+    compliance: tuple[Annotated[str, Field(min_length=1)], ...] = ()
+    """The registered Compliance rules that observe this run's committed book at every
+    market-clock instant (design §7.2). On the run, beside the venue, because a rule's parameters
+    are its own and not the strategy's. A datamodel run has no book and declares none."""
+    start: datetime | None = None
+    end: datetime | None = None
+    initial_account_snapshot: AccountSnapshot | None = None
+    initial_account_mode: AccountMode | None = None
+
+    # ---- the stored spelling in, and out ----------------------------------------------------
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_the_stored_spelling(cls, raw: object) -> object:
+        """Accept the `runs.<id>` block as `workspace.yaml` and a declaration write it."""
+        if not isinstance(raw, Mapping):
+            return raw
+        body = dict(raw)
+        if "agenda" in body:
+            raise ValueError(
+                "`agenda:` is `schedule:` since vqapr 0.16.0 -- the loop's vocabulary is "
+                "discrete-event simulation's, and a schedule produces the events a model is "
+                "called at. Declare `schedule: {every: 1d, at: HH:MM}` and register the run again"
+            )
+        retired = [key for key in ("at", "sessions", "sessions_from") if key in body]
+        if retired:
+            raise ValueError(
+                f"{', '.join(retired)} moved into `schedule:` (design §3.4): declare "
+                "`schedule: {every: 1d, at: HH:MM}`; a strategy run takes its trading days from "
+                "its execution table, a datamodel run names them with `schedule.days_from`"
+            )
+        strategy = _singular_block(body, "strategy", "strategies")
+        if isinstance(strategy, Mapping):
+            for entry in strategy.values():
+                if isinstance(entry, Mapping) and "constraints" in entry:
+                    raise ValueError(
+                        "`constraints:` left the strategy entry (design §7.1-7.2): the box a "
+                        "strategy builds inside is its own kit call (`no_short`, "
+                        "`single_name_cap`, `intersect`), and the rules that watch the committed "
+                        "book are declared on the RUN as `compliance: [rule-component-id, ...]`"
+                    )
+        datamodel = _singular_block(body, "datamodel", "datamodels")
+        # A datamodel block written before `writes` moved to the run carried `dataset_id`
+        # inside the entry. Hoist it, so a workspace from then reads back unchanged.
+        if isinstance(datamodel, Mapping):
+            for name, entry in datamodel.items():
+                if isinstance(entry, Mapping) and "dataset_id" in entry:
+                    entry = dict(entry)
+                    hoisted = entry.pop("dataset_id")
+                    declared = body.get("writes")
+                    if declared is not None and declared != hoisted:
+                        raise ValueError(
+                            f"writes {declared!r} and the datamodel's dataset_id {hoisted!r} "
+                            "disagree; `dataset_id` moved to the run as `writes` -- declare it once"
+                        )
+                    body["writes"] = hoisted
+                    # Replace this entry only. Collapsing the mapping to it would hide a second
+                    # member from the one-model rule below.
+                    datamodel = {**datamodel, name: entry}
+                    break
+        body["strategy"] = _the_one_member(
+            strategy,
+            build=lambda name, fields: StrategyEntry(component_id=name, **fields),
+            plural="strategies",
+        )
+        body["datamodel"] = _the_one_member(
+            datamodel,
+            build=lambda name, fields: DataModelEntry(component_id=name, **fields),
+            plural="datamodels",
+        )
+        if "execution_table" in body or "execution_input_id" in body:
+            raise ValueError(
+                "execution_table is retired (record 185): register the venue table as a dataset "
+                "with an `execution:` role and declare `execution: {dataset, fill}` on the run"
+            )
+        if "initial_account" in body:
+            account = body.pop("initial_account")
+            if account is not None:
+                declared = (
+                    account
+                    if isinstance(account, _InitialAccount)
+                    else _InitialAccount.model_validate(account)
+                )
+                body["initial_account_snapshot"] = AccountSnapshot(
+                    version=declared.version, cash=declared.cash, positions=declared.positions
+                )
+                body["initial_account_mode"] = declared.mode
+        if "instruments" in body and body["instruments"] is None:
+            body["instruments"] = ()
+        return body
+
+    @model_serializer(mode="plain")
+    def _to_the_stored_spelling(self) -> dict[str, Any]:
+        """Emit the `runs.<id>` block exactly as it has been written since record `148`.
+
+        Built from the fields rather than from pydantic's own pass, because the snapshot's
+        `positions` is a `MappingProxyType` pydantic cannot serialize and the block does not
+        carry the snapshot as such anyway; `run_id` is the key the block sits under.
+        """
+        ordered: dict[str, Any] = {
+            "instruments": list(self.instruments),
+            "start": None if self.start is None else self.start.isoformat(),
+            "end": None if self.end is None else self.end.isoformat(),
+            "timezone": self.timezone,
+            "schedule": self.schedule.model_dump(mode="json"),
+            "writes": self.writes,
+            "exchange": self.exchange,
+            "execution": None if self.execution is None else self.execution.model_dump(mode="json"),
+        }
+        if self.compliance:
+            ordered["compliance"] = list(self.compliance)
+        if self.initial_account_snapshot is not None and self.initial_account_mode is not None:
+            ordered["initial_account"] = _InitialAccount(
+                cash=self.initial_account_snapshot.cash,
+                mode=self.initial_account_mode,
+                positions=dict(self.initial_account_snapshot.positions),
+                version=self.initial_account_snapshot.version,
+            ).model_dump(mode="json")
+        if self.strategy is not None:
+            ordered["strategy"] = {
+                "component": self.strategy.component_id,
+                **_entry_body(self.strategy, ("initial_model_memory",)),
+            }
+        if self.datamodel is not None:
+            ordered["datamodel"] = {
+                "component": self.datamodel.component_id,
+                **_entry_body(self.datamodel, ("value_fields", "initial_model_memory")),
+            }
+        return ordered
+
+    # ---- this package's rules ----------------------------------------------------------------
+
+    @field_validator("start", "end")
+    @classmethod
+    def _one_instant(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError(
+                "must be timezone-aware: include a UTC offset, a naive datetime is not one instant"
+            )
+        return value
+
+    @field_validator("compliance")
+    @classmethod
+    def _unique_rules(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        _no_repeats(value, "compliance")
+        return value
+
+    @model_validator(mode="after")
+    def _whole_declaration(self) -> RunDefinition:
+        if (self.strategy is None) == (self.datamodel is None):
+            raise ValueError(
+                "must name one model under exactly one of `strategies:` or `datamodels:` -- a "
+                "run runs one strategy or one datamodel, not both and not neither "
+                "(record 148: a run holds one kind; a run is one arrow of the graph)"
+            )
+        if self.schedule.days_from is not None and self.writes == self.schedule.days_from:
+            raise ValueError(
+                f"writes {self.writes!r} is also schedule.days_from: a run cannot take its trading "
+                "days from the dataset it is about to write"
+            )
+        if self.strategy is not None and self.schedule.days_from is not None:
+            raise ValueError(
+                "a strategy run declares no schedule.days_from: its trading days are the days its "
+                "execution table has rows for (design §3.3)"
+            )
+        if self.datamodel is not None and self.schedule.days_from is None:
+            raise ValueError(
+                "a datamodel run declares schedule.days_from: it has no execution table, so it "
+                "names the dataset whose days are its trading days (design §3.3)"
+            )
+        if self.execution is not None:
+            self.execution.rule(self.timezone)  # refuses an after/within pair no instant satisfies
+        if self.execution is not None and self.writes == self.execution.dataset:
+            raise ValueError(
+                f"writes {self.writes!r} is also the execution dataset: a run cannot fill "
+                "against the dataset it is about to write"
+            )
+        if self.datamodel is not None and self.compliance:
+            raise ValueError(
+                "a datamodel run declares no compliance: it has no account for a rule to observe"
+            )
+        if self.datamodel is not None:
+            declared = [
+                key
+                for key, value in (
+                    ("exchange", self.exchange),
+                    ("execution", self.execution),
+                    ("initial_account", self.initial_account_snapshot),
+                    ("initial_account", self.initial_account_mode),
+                )
+                if value is not None
+            ]
+            if declared:
+                raise ValueError(
+                    f"a datamodel run declares no {', '.join(dict.fromkeys(declared))}: a "
+                    "datamodel run declares no exchange, execution or initial_account, "
+                    "because a datamodel sees no account and passes through no venue"
+                )
+        _require_timezone(self.timezone)
+        if self.exchange is not None and not self.exchange:
+            raise ValueError("exchange must be a non-empty identifier")
+        if (self.exchange is None) != (self.execution is None):
+            raise ValueError("exchange and execution must be declared together")
+        _require_period(self.start, self.end, "declared")
+        _require_account(self.initial_account_snapshot, self.initial_account_mode, "declared")
+        _require_instruments(self.instruments)
+        return self
+
+    # ---- what the flow asks a run ------------------------------------------------------------
+
+    def spoken(self) -> list[str]:
+        """The point-in-time meaning of this declaration, in one sentence
+        (`docs/issues/archive/027`).
+        """
+        when = f" {self.schedule.rule.describe()} {self.timezone}"
+        sentences: list[str] = []
+        if self.execution is not None:
+            rule = self.execution.rule(self.timezone)
+            sentences.append(
+                f"run {self.run_id!r} fills against dataset {self.execution.dataset!r}: "
+                f"{rule.describe()}, at its {rule.trade_price!r} price"
+            )
+        days = (
+            "the days its execution table has rows for"
+            if self.schedule.days_from is None
+            else f"the days dataset {self.schedule.days_from!r} has rows for"
+        )
+        sentences.append(
+            f"run {self.run_id!r}: the model is called{when}, over {days}, and sees only rows "
+            "knowable before each instant; the book fills later, at the execution dataset's own "
+            "instant"
+        )
+        return sentences
+
+    def replace(self, **changes: Any) -> RunDefinition:
+        """A copy with some fields changed, **validated again**.
+
+        pydantic's `model_copy(update=...)` does not re-run validators -- a copy with a naive
+        `start` or a half-declared account would come back looking valid. `dataclasses.replace`
+        re-ran `__post_init__`, and every caller that reached for it relied on that; this keeps
+        the promise by rebuilding the definition from its fields through `model_validate`.
+        """
+        fields = {name: getattr(self, name) for name in type(self).model_fields}
+        return type(self).model_validate({**fields, **changes})
+
+    @property
+    def schedule_id(self) -> str:
+        """The id of the one schedule preflight derives from `schedule:` (design §3.4)."""
+        return f"{self.run_id}.schedule"
+
+    @property
+    def kind(self) -> str:
+        """`"strategy"` or `"datamodel"`: which kind of model this run holds."""
+        return "datamodel" if self.datamodel is not None else "strategy"
+
+    @property
+    def member(self) -> StrategyEntry | DataModelEntry:
+        """The one model the run names, whichever kind it holds."""
+        one = self.strategy if self.strategy is not None else self.datamodel
+        if one is None:  # pragma: no cover -- `_whole_declaration` refuses this
+            raise ValueError(f"run {self.run_id!r} names no model")
+        return one
+
+
+def _entry_body(entry: object, names: Sequence[str]) -> dict[str, Any]:
+    """An entry's declared fields as its stored block: only what was declared, in the stored
+    order, `initial_model_memory` omitted when empty (as the document always wrote it: an
+    undeclared opening memory is `{}` and is not spelled)."""
+    body: dict[str, Any] = {}
+    for name in names:
+        value = getattr(entry, name)
+        if name == "initial_model_memory" and value in (None, {}):
+            continue
+        body[name] = list(value) if isinstance(value, tuple) else value
+    return body

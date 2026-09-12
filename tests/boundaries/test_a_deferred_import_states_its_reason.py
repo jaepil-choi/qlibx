@@ -23,8 +23,31 @@ from __future__ import annotations
 import ast
 import pathlib
 
-CEILING = 18  # record `149` removed `cli/run.py`'s `_registered_roster_for_report` (`070`)
-"""Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+CEILING = 7  # record `277`: `cli/show.py` loads a component through the workspace's one door
+"""Was 9 after record `234`. Record `277` (the CLI reads through the surfaces) replaced
+`cli/show.py`'s function-local component loaders -- one per kind, two in `_model` and one in the
+compliance branch -- with one `workspace.registry.load_registered` imported beside the names it
+now takes from `vqapr.public`.
+
+Was 10 after record `191`. Record `234` (one validation door) replaced `cli/list_.py`'s deferred
+`build_roster`/`read_roster_table` pair with module-level imports of `data/validation.verify_roster`
+and `domain/instruments.build_roster`: `workspace/registry.py` already imports the door at the top, so
+there was no cycle to hide.
+
+Was 12 after record `186` (the lazy roster import in `exchange/listings.py` moved to the top).
+Record `191` (layering campaign M2) hoisted the two `accepted_requests` guards in
+`exchange/execution_table.py`: they deferred `account.snapshot` and `orders.batches` because
+`exchange` importing either at module level was a cycle, and both types are now
+`domain/account_state.py` and `domain/orders.py`. The cycle is gone rather than deferred.
+
+Measured at record `126`: 37 in total, with `JUSTIFIED` now empty.
+Was 18 after record `149`. Record `162` (one-shape Step 7) removed `data/store.py`'s
+`_window_types` and the two `ExecutionTable` guards in `exchange/conventions.py`:
+each deferred an import that was a cycle, and the cycle is gone rather than deferred.
+Then 15 -> 13 in the same record: `domain/roster.py` and `roster_export.py` folded into
+`domain/instruments.py`, so the two deferred `build_roster`/`read_roster_table` pairs in
+`cli/list_.py` and `declarations.py` became one statement each. The deferrals stayed; the count
+is statements.
 
 Was 23 after record `132`. Record `134` removed the function-local `Workspace` import in
 `declarations._instruments`: the roster is staged on the transaction `_apply` already holds.
@@ -44,10 +67,10 @@ ratchet was counting — `project.py` alone deferred nearly all of its own. Reco
 more out of `strategy_bridge`, which stopped importing `vqapr.public` at all once the Flow took
 over stamping the intent. Lowering the constant in the same commit is what this ratchet is for.
 
-Was 104 before that. Record `115` hoisted five function-local imports out of `flow/roster.py` and
+Was 104 before that. Record `115` hoisted five function-local imports out of `run/roster.py` and
 `flow/records.py` that had been deferred inside `vqapr.public`, where the facade sits above
 everything; that justification did not travel when the code moved to `flow/`, and
-`flow/orchestration.py` already imports `vqapr.workspace` eagerly.
+`run/assemble.py` already imports `vqapr.workspace` (now `vqapr.workspace.registry`) eagerly.
 
 This number may go DOWN freely; it may not go up.
 

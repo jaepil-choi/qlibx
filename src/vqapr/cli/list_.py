@@ -23,24 +23,34 @@ from typing import Any
 
 from vqapr.cli.envelope import success
 from vqapr.cli.register import cli_kind
-from vqapr.flow.run import RunDefinition
-from vqapr.flow.run_records import (
+from vqapr.domain.errors import VALUE_INVALID, InputError
+from vqapr.public import Role
+from vqapr.record import (
     STATUS_COMPLETED,
+    datamodel_progress,
     datamodel_refs,
     read_datamodel_record,
     read_strategy_record,
+    recorded_run_ids,
     strategy_progress,
     strategy_refs,
+    unfinished_datamodel_refs,
     unfinished_strategy_refs,
 )
-from vqapr.inputs import VALUE_INVALID, InputError
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME, Workspace
+from vqapr.run.roster import read_roster_tables
+from vqapr.workspace.registration import AUTHORED_KINDS
+from vqapr.workspace.registry import (
+    WORKSPACE_DIRECTORY,
+    WORKSPACE_FILENAME,
+    Workspace,
+    load_registered,
+)
+from vqapr.workspace.run_definition import RunDefinition
 
 KINDS = (
     "datasets",
     "sources",
     "components",
-    "execution-inputs",
     # The roster was registrable and unlistable: `list` covered eight kinds and not this one, so a
     # registered roster could not be inspected from the CLI at all.
     "instruments",
@@ -49,11 +59,19 @@ KINDS = (
     "datamodels",
 )
 
+COMPONENT_KINDS = (*AUTHORED_KINDS, "exchange")
+"""What `--kind` accepts: the three kinds an author registers by name, plus the one declared.
+
+Spelled the way `new` and `register` spell them and the way `list` reports them (`cli_kind`), so the
+value a reader copies off one row filters the next call. `docs/issues/archive/083` is a reader
+handing `list components` to `show model` and breaking on the exchange because nothing could say
+"the strategies and datamodels only".
+"""
+
 _ACCESSORS = {
     "datasets": "datasets",
     "sources": "sources",
     "components": "components",
-    "execution-inputs": "execution_inputs",
     "runs": "run_definitions",
 }
 
@@ -61,7 +79,6 @@ _IDENTITY_FIELDS = (
     "dataset_id",
     "source_id",
     "component_id",
-    "execution_input_id",
     "run_id",
 )
 
@@ -73,7 +90,14 @@ def _summarize(item: object) -> dict[str, Any]:
         value = getattr(item, field, None)
         if value is not None:
             summary[field] = str(value)
-    for field in ("kind", "fingerprint", "object_name", "timezone"):
+    for field in (
+        "kind",
+        "fingerprint",
+        "object_name",
+        "timezone",
+        "produced_by",
+        "produced_by_record",
+    ):
         value = getattr(item, field, None)
         if value is None:
             continue
@@ -81,11 +105,14 @@ def _summarize(item: object) -> dict[str, Any]:
         # value gave a reader `data_model`, which they cannot type at any verb.
         summary[field] = cli_kind(value) if field == "kind" else str(value)
     if isinstance(item, RunDefinition):
-        summary["strategies"] = [entry.component_id for entry in item.strategies]
+        summary["model"] = item.member.component_id
+        summary["writes"] = item.writes
         summary["start"] = None if item.start is None else item.start.isoformat()
         summary["end"] = None if item.end is None else item.end.isoformat()
         summary["exchange"] = item.exchange
-        summary["execution_input_id"] = item.execution_input_id
+        summary["execution"] = (
+            None if item.execution is None else item.execution.model_dump(mode="json")
+        )
     if not summary:
         summary["repr"] = repr(item)
     return summary
@@ -102,6 +129,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="identifier",
         default=None,
         help="substring filter applied to the declaration identity",
+    )
+    parser.add_argument(
+        "--kind",
+        dest="component_kind",
+        choices=COMPONENT_KINDS,
+        default=None,
+        help="`components` only: keep components of this kind, spelled as `new` and `register` "
+        "spell it",
+    )
+    parser.add_argument(
+        "--reads",
+        dest="reads",
+        default=None,
+        help=(
+            "`components` only: keep the strategies, datamodels and constraints whose `inputs()` "
+            "name this dataset id. Loads each component to ask it, in this one process"
+        ),
     )
     parser.add_argument(
         "--store-root",
@@ -146,11 +190,11 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
     """Every strategy record of one run, finished or not, filtered on record fields.
 
     Finished records first, each `status: completed`. Then every strategy directory that has no
-    record yet (`docs/issues/074`): `status: running` while its writer keeps touching its lock,
-    with `chunks`, `last_event_time` and `lock.refreshed_ago` so a reader can see whether it is
-    still advancing; `status: unfinished` once the lock is stale or gone, which is what a killed
-    or refused strategy leaves. Those rows have no `fingerprint` beyond the `<fp8>` in their ref,
-    no `period` and no contract, so `--failed-contract` never keeps them and `--since` reads their
+    record yet (`docs/issues/archive/074`): `status: running` while its writer keeps touching its
+    lock, with `chunks`, `last_event_time` and `lock.refreshed_ago` so a reader can see whether it
+    is still advancing; `status: unfinished` once the lock is stale or gone, which is what a killed
+    or refused strategy leaves. Those rows have no `fingerprint` beyond the `<fp8>` in their ref, no
+    `period` and no contract, so `--failed-contract` never keeps them and `--since` reads their
     `last_event_time`.
     """
     since = _instant(getattr(args, "since", None), name="--since")
@@ -214,7 +258,14 @@ def _strategies(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
 
 
 def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[str, Any]]:
-    """Every finished datamodel record of one run (record `148`): what it wrote, and when."""
+    """Every datamodel record of one run (record `148`), finished or not
+    (`docs/issues/archive/080`).
+
+    Finished records first, `status: completed`. Then every datamodel directory without a
+    record, the way `_strategies` lists them: `running` while its lock is fresh, `unfinished`
+    once it is stale -- a datamodel run that died inside a callback, which used to leave a
+    directory nothing listed and `rm datamodel` could not name.
+    """
     since = _instant(getattr(args, "since", None), name="--since")
     rows: list[dict[str, Any]] = []
     for ref in datamodel_refs(root, run_id):
@@ -227,6 +278,7 @@ def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             "fingerprint": record.get("fingerprint"),
             "dataset_id": record.get("dataset_id"),
             "rows": record.get("rows"),
+            "status": STATUS_COMPLETED,
             "period": period,
         }
         wanted = getattr(args, "strategy", None)
@@ -240,7 +292,63 @@ def _datamodels(root: Path, run_id: str, args: argparse.Namespace) -> list[dict[
             if ended is None or ended < since:
                 continue
         rows.append(row)
+    wanted = getattr(args, "strategy", None)
+    prefix = getattr(args, "fingerprint", None)
+    for ref in unfinished_datamodel_refs(root, run_id):
+        datamodel_id, _, fp8 = ref.rpartition("@")
+        if wanted and datamodel_id != wanted:
+            continue
+        if prefix and not fp8.startswith(prefix):
+            continue
+        progress = datamodel_progress(root, run_id, ref)
+        if since is not None:
+            last = _instant(progress.get("last_event_time"), name="last_event_time")
+            if last is None or last < since:
+                continue
+        rows.append(
+            {
+                "run_id": run_id,
+                "datamodel_ref": ref,
+                "datamodel_id": datamodel_id,
+                "fingerprint": None,
+                "dataset_id": None,
+                "rows": None,
+                **progress,
+            }
+        )
     return rows
+
+
+def _reading(
+    project_root: Path, workspace: Workspace, rows: list[dict[str, Any]], dataset_id: str
+) -> list[dict[str, Any]]:
+    """The components whose declared reads name `dataset_id`, and what each reads from it.
+
+    The reverse of `show model` (`docs/issues/archive/082`): "who reads this dataset" had no verb,
+    so it was `list components` then `show model` per component -- 41 processes and 36 seconds on a
+    forty-component workspace. The cost was the process starts, not the loads: this asks every
+    component in this one process, the way `show model` asks one. An exchange declares no reads and
+    is not asked.
+    """
+    readers = (Role.STRATEGY_MODEL, Role.DATA_MODEL, Role.COMPLIANCE)
+    by_id = {str(ref.component_id): ref for ref in workspace.components}
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        ref = by_id.get(str(row.get("component_id")))
+        if ref is None or ref.kind not in readers:
+            continue
+        declared = load_registered(ref, project_root=project_root).inputs()
+        fields = sorted(
+            {
+                field
+                for declaration in declared.values()
+                if str(declaration.dataset_id) == dataset_id
+                for field in declaration.fields
+            }
+        )
+        if fields:
+            kept.append({**row, "reads": {dataset_id: fields}})
+    return kept
 
 
 def _instant(value: object, *, name: str) -> datetime | None:
@@ -279,20 +387,16 @@ def _instruments(project_root: Path) -> list[dict[str, Any]]:
     pointer = Workspace.open(project_root).registered_instruments()
     if pointer is None:
         return []
+    tables = pointer["tables"]
+    if not isinstance(tables, dict):
+        # `registered_instruments` refuses a pointer whose `tables` is not a JSON object.
+        raise RuntimeError("registered_instruments admitted a roster pointer without tables")
     row: dict[str, Any] = {
         "digest": str(pointer["digest"]),
-        "tables": {str(kind): str(path) for kind, path in sorted(dict(pointer["tables"]).items())},
+        "tables": {str(kind): str(path) for kind, path in sorted(tables.items())},
     }
-    from vqapr.domain.roster import build_roster
-    from vqapr.domain.roster_export import read_roster_table
-
     try:
-        roster = build_roster(
-            {
-                str(kind): read_roster_table(Path(str(path)))
-                for kind, path in dict(pointer["tables"]).items()
-            }
-        )
+        roster = read_roster_tables(tables)
     except Exception as unreadable:
         row["unreadable"] = str(unreadable)
         return [row]
@@ -339,9 +443,29 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
         # 계속 시끄럽게 실패해야 하기 때문이다 — `Workspace.open`을 넓게 catch하면 그 구분이
         # 사라지고 손상이 "항목 0개"로 조용히 보고된다.
         return success("workspace.list", kind=args.kind, count=0, items=[])
+    component_kind = getattr(args, "component_kind", None)
+    if component_kind is not None and args.kind != "components":
+        raise InputError(
+            VALUE_INVALID,
+            requirement="`--kind` filters `list components`",
+            observed=f"--kind {component_kind!r} given with `list {args.kind}`",
+            retry="run `vqapr list components --kind <kind>`",
+        )
     workspace = Workspace.open(project_root)
     items = getattr(workspace, _ACCESSORS[args.kind])
     rows = [_summarize(item) for item in items]
+    if component_kind is not None:
+        rows = [row for row in rows if row.get("kind") == component_kind]
+    reads = getattr(args, "reads", None)
+    if reads is not None:
+        if args.kind != "components":
+            raise InputError(
+                VALUE_INVALID,
+                requirement="`--reads` filters `list components`",
+                observed=f"--reads {reads!r} given with `list {args.kind}`",
+                retry="run `vqapr list components --reads <dataset-id>`",
+            )
+        rows = _reading(project_root, workspace, rows, reads)
     if args.kind == "runs":
         # Beside each registered run, the member records the store holds for it: what ran, by
         # `<id>@<fp8>`, so a reader sees which tweaks of which models have been tried. A run
@@ -352,6 +476,30 @@ def run(args: argparse.Namespace, *, project_root: Path) -> dict[str, Any]:
                 *strategy_refs(store_root, run_id),
                 *datamodel_refs(store_root, run_id),
             ]
+            row["status"] = "registered"
+        # And every run the STORE holds that the workspace no longer registers
+        # (`docs/issues/archive/081`): withdrawing a definition left its records readable but not
+        # findable, because this walked the registrations only. An orphan is an entry point to
+        # `list strategies|datamodels --run` and to `rm run`, which is all that was missing.
+        registered = {str(row["run_id"]) for row in rows}
+        for run_id in recorded_run_ids(store_root):
+            if run_id in registered:
+                continue
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "status": "orphaned",
+                    "definition": None,
+                    "recorded": [
+                        *strategy_refs(store_root, run_id),
+                        *datamodel_refs(store_root, run_id),
+                    ],
+                    "unfinished": [
+                        *unfinished_strategy_refs(store_root, run_id),
+                        *unfinished_datamodel_refs(store_root, run_id),
+                    ],
+                }
+            )
     if args.identifier:
         needle = args.identifier
         rows = [row for row in rows if any(needle in str(value) for value in row.values())]

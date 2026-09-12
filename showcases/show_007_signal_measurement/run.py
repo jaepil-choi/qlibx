@@ -14,7 +14,7 @@
                                                        v
                                               EconomicPortfolioIntent -> Academic exchange (SIGNED)
 
-Every occurrence that computes a signal records it — the value **before** weighting (the ranked
+Every event that computes a signal records it — the value **before** weighting (the ranked
 reversal view) and the value **after** neutralisation — on a declared recorder table. Nothing here
 constructs that table by hand: the rows come from the real callback the Flow actually dispatched.
 
@@ -44,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -54,25 +55,21 @@ import duckdb
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     Mark,
     MarkBatch,
     RunDefinition,
-    RunRecordSpec,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     callback_evidence,
-    component_ref,
-    preflight_run,
-    publish_run_record,
-    register_component,
+    freeze,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_instruments,
+    register_strategy_model,
     run,
 )
 
@@ -89,8 +86,8 @@ LOOKBACK = 6
 ACTIVE_BUDGET = Decimal("0.02")
 """Total absolute active weight the signal is rescaled to after sizing."""
 
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 
 def _read_published(path: Path) -> list[dict[str, object]]:
@@ -98,7 +95,9 @@ def _read_published(path: Path) -> list[dict[str, object]]:
     con = duckdb.connect()
     try:
         cursor = con.execute(
-            f"SELECT * FROM read_parquet('{path.as_posix()}') ORDER BY available_at, instrument"
+            "SELECT *, event_time AS available_at "
+            f"FROM read_parquet('{path.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY available_at, instrument"
         )
         columns = [description[0] for description in cursor.description]
         return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
@@ -156,7 +155,7 @@ _SIGNAL_SOURCE = (
     '''"""A short-horizon reversal view: ranked, neutralised, sized, and rescaled to a fixed budget.
 
 The signal before weighting (the ranked reversal) and the signal after neutralisation are both
-recorded on every occurrence that computes one, so the record a later run reads back is exactly
+recorded on every event that computes one, so the record a later run reads back is exactly
 what this callback saw -- never a value reconstructed after the fact.
 """
 
@@ -217,7 +216,8 @@ class ReversalSignalStrategy(StrategyModel):
         closes: dict[str, list[Decimal]] = {}
         for row in rows:
             if row["close"] is not None:
-                closes.setdefault(str(row["instrument"]), []).append(row["close"])
+                # A DOUBLE field arrives as a float; cross to Decimal once, through str.
+                closes.setdefault(str(row["instrument"]), []).append(Decimal(str(row["close"])))
         eligible = {name: values for name, values in closes.items() if len(values) == LOOKBACK}
         if len(eligible) < 2:
             return Hold(reason="a cross-sectional signal needs at least two names with full history")
@@ -298,7 +298,7 @@ class ShowcaseAcademicExchange(AcademicExchange):
     return {"signal": signal, "academic": academic}
 
 
-def _replay(result: Any) -> dict[str, Any]:
+def _replay(result: Any, fills: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Rebuild cash and positions from the fill journal and demand an exact match."""
     account = result.final_state.account
     cash = INITIAL_CASH
@@ -306,7 +306,7 @@ def _replay(result: Any) -> dict[str, Any]:
     commission = Decimal(0)
     tax = Decimal(0)
     dealt = 0
-    for row in _recorded_fills(result):
+    for row in _recorded_fills(result) if fills is None else fills:
         if Decimal(row["dealt_quantity"]) == 0:
             continue
         dealt += 1
@@ -349,8 +349,101 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
+def _recorded_rows(
+    project: Path, run_result: Any, *, run_id: str, component_id: str, table: str
+) -> list[dict[str, Any]]:
+    """The rows a stored run recorded for one table, read back from its record in commit order.
+
+    A run given a store streams every chunk to `tables/<table>/` and keeps none on its roots, so
+    `final_state.recorder_rows` is empty for it; this is the same rows from the place they went.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        return []
+    con = duckdb.connect()
+    try:
+        cursor = con.execute(
+            f"SELECT * FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY event_time, sequence"
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    finally:
+        con.close()
+
+
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    events: int
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+    field_types: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as decimal-marked text, so a
+    numeric field reads back as VARCHAR unless the registration `CAST`s it -- and the only numeric
+    type a field may be declared as is DOUBLE (issue 088). Nothing here reads these registrations
+    numerically; the assertions below cross back with `Decimal(str(...))` from the raw parquet.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+            field_types=field_types,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, events = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    return _Registered(dataset_id, directory, int(rows), int(events))
 
 
 def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> dict[str, Any]:
@@ -372,9 +465,9 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
         raise AssertionError("the published account table carries no account-level rows")
 
     # Keyed by (version, event_time) rather than by version alone. The account version is no
-    # longer unique per mark: a valuation occurrence measures the book on its own clock without
+    # longer unique per mark: a valuation event measures the book on its own clock without
     # trading, so several marks legitimately share one version and are told apart only by the
-    # occurrence that took them. Grouping by version alone re-collects every instrument once per
+    # event that took them. Grouping by version alone re-collects every instrument once per
     # valuation and builds a batch holding the same name several times.
     rehydrated: dict[int, MarkBatch] = {}
     for row in account_rows:
@@ -396,7 +489,7 @@ def _rehydrate_marks(result: Any, replayed_account: list[dict[str, object]]) -> 
         )
         if not marks:
             continue
-        # The latest occurrence at a version wins, so the retained batch is the most recent
+        # The latest event at a version wins, so the retained batch is the most recent
         # measurement of that book rather than the first one taken of it.
         rehydrated[version] = MarkBatch(marks, sum((mark.value for mark in marks), Decimal("0")))
 
@@ -431,8 +524,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     benchmark_path = FIXTURE / str(manifest["benchmark_path"])
     universe = _universe(benchmark_path)
     sessions = _sessions(benchmark_path)
-    # The first session is the lookback base; the run's own agenda declines occurrences until the
-    # six-close reversal window fills, exactly as canon requires -- nothing here trims the agenda
+    # The first session is the lookback base; the run's own schedule declines events until the
+    # six-close reversal window fills, exactly as canon requires -- nothing here trims the schedule
     # to fit the signal.
     callback_days = sessions[1:]
 
@@ -445,34 +538,37 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
+            # The committed fixture stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here, and cross back with Decimal(str(...)) on read.
+            fields={"close": "CAST(close AS DOUBLE)"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
-    register_execution_input(
+    register_dataset(
         project,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", execution_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", execution_path),
     )
 
     paths = _write_components(project, universe)
-    signal_ref = component_ref(
-        "show007-signal", ComponentKind.STRATEGY_MODEL, paths["signal"], "ReversalSignalStrategy"
-    )
-    academic_ref = component_ref(
-        "show007-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
-    )
-    for reference in (signal_ref, academic_ref):
-        register_component(project, reference)
+    register_strategy_model(project, "show007-signal", paths["signal"], "ReversalSignalStrategy")
+    # Benchmark constituents are shares; the project says so before the run orders them.
+    register_instruments(project, {name: "stock" for name in universe})
+    register_exchange(project, "show007-academic", paths["academic"], "ShowcaseAcademicExchange")
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
@@ -480,62 +576,80 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     definition = RunDefinition(
         run_id="show007",
-        strategies=(StrategyEntry("show007-signal"),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("show007-signal"),
         timezone=VENUE,
-        at=time(8, 0),
+        schedule=RunSchedule(every="1d", at=(time(8, 0),)),
         exchange="show007-academic",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes="show007-weights",
     )
-    result = run(project, preflight_run(project, definition)).result()
+    run_result = run(project, freeze(project, definition), store_root=project / ".vqapr")
+    result = run_result.result()
 
     evidence = callback_evidence(result)
-    signal_published = publish_run_record(
+    # Both tables the run recorded -- the one the strategy declared and the package's own account
+    # series -- registered as datasets from the run's record, the way a later run would read them.
+    signal_published = _register_run_table(
         project,
-        RunRecordSpec.of(
-            "signal_measurement",
-            table_id="signal.measurement",
-            value_fields=(
-                "signal_before_weighting",
-                "neutralized_signal",
-                "run_id",
-                "producer_id",
-                "stage",
-                "event_time",
-                "sequence",
-            ),
-        ),
-        result,
+        run_result,
+        run_id="show007",
+        component_id="show007-signal",
+        dataset_id="signal_measurement",
+        table="signal.measurement",
+        fields={
+            "signal_before_weighting": "signal_before_weighting",
+            "neutralized_signal": "neutralized_signal",
+        },
+        # Both are appended as `str(...)` by the strategy, so the record holds text.
+        field_types={"signal_before_weighting": "VARCHAR", "neutralized_signal": "VARCHAR"},
     )
-    account_published = publish_run_record(
+    account_published = _register_run_table(
         project,
-        RunRecordSpec.of(
-            "run_account",
-            table_id="vqapr.account",
-            value_fields=(
-                "cash",
-                "nav",
-                "quantity",
-                "price",
-                "observed_at",
-                "account_version",
-                "run_id",
-                "producer_id",
-                "stage",
-                "event_time",
-                "sequence",
-            ),
-        ),
-        result,
+        run_result,
+        run_id="show007",
+        component_id="show007-signal",
+        dataset_id="run_account",
+        table="vqapr.account",
+        fields={
+            "cash": "cash",
+            "nav": "nav",
+            "quantity": "quantity",
+            "price": "price",
+            "account_version": "account_version",
+        },
+        # The four Decimal columns are decimal-marked text in the record (`_arrow_type`).
+        field_types={
+            "cash": "VARCHAR",
+            "nav": "VARCHAR",
+            "quantity": "VARCHAR",
+            "price": "VARCHAR",
+            "account_version": "INTEGER",
+        },
     )
 
-    recorded_signal = result.final_state.recorder_rows["signal.measurement"]
-    recorded_account = result.final_state.recorder_rows["vqapr.account"]
+    recorded_signal = _recorded_rows(
+        project,
+        run_result,
+        run_id="show007",
+        component_id="show007-signal",
+        table="signal.measurement",
+    )
+    recorded_account = _recorded_rows(
+        project,
+        run_result,
+        run_id="show007",
+        component_id="show007-signal",
+        table="vqapr.account",
+    )
 
     # Assertion: published row counts match what the run's own recorder holds.
     if signal_published.row_count != len(recorded_signal):
@@ -550,33 +664,42 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         )
 
     # Assertion: reading the published parquet back agrees with the recorder rows, row for row.
-    replayed_signal = _read_published(signal_published.output_path)
-    replayed_account = _read_published(account_published.output_path)
+    replayed_signal = _read_published(signal_published.directory)
+    replayed_account = _read_published(account_published.directory)
     if len(replayed_signal) != len(recorded_signal):
         raise AssertionError("the published signal table does not read back row for row")
     if len(replayed_account) != len(recorded_account):
         raise AssertionError("the published account series does not read back row for row")
 
     # Assertion: the neutralised signal is exactly orthogonal to a market column, on every
-    # occurrence -- recomputed from the published table alone, never assumed from the transform.
-    by_occurrence: dict[object, list[Decimal]] = {}
+    # event -- recomputed from the published table alone, never assumed from the transform.
+    by_event: dict[object, list[Decimal]] = {}
     for row in replayed_signal:
-        by_occurrence.setdefault(row["available_at"], []).append(Decimal(row["neutralized_signal"]))
-    if not by_occurrence:
+        by_event.setdefault(row["available_at"], []).append(Decimal(row["neutralized_signal"]))
+    if not by_event:
         raise AssertionError("the run never recorded a signal measurement")
-    for available_at, values in by_occurrence.items():
+    for available_at, values in by_event.items():
         if sum(values) != 0:
             raise AssertionError(
                 f"neutralised signal at {available_at} is not orthogonal to the market "
                 f"column: sum={sum(values)}"
             )
 
-    # Assertion: at least one occurrence carries a genuinely non-flat signal.
-    if all(value == 0 for values in by_occurrence.values() for value in values):
+    # Assertion: at least one event carries a genuinely non-flat signal.
+    if all(value == 0 for values in by_event.values() for value in values):
         raise AssertionError("every recorded signal was flat; nothing was ever measured")
 
     memory = _rehydrate_marks(result, replayed_account)
-    replay = _replay(result)
+    replay = _replay(
+        result,
+        _recorded_rows(
+            project,
+            run_result,
+            run_id="show007",
+            component_id="show007-signal",
+            table="vqapr.fill",
+        ),
+    )
     if replay["replayed_cash"] != replay["committed_cash"]:
         raise AssertionError("fill-journal replay diverged from the committed Account")
     if int(replay["dealt_fills"]) == 0:
@@ -589,11 +712,12 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "universe": list(universe),
         "sessions": len(sessions),
         "callbacks": len(callback_days),
-        "signal_occurrences": len(by_occurrence),
+        "signal_events": len(by_event),
         "signal_run_record": {
             "dataset": "signal_measurement",
             "rows": signal_published.row_count,
             "read_back": len(replayed_signal),
+            "directory": str(signal_published.directory.relative_to(project)),
         },
         "account_run_record": {
             "dataset": "run_account",
@@ -609,10 +733,8 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
         "callback_evidence_count": len(evidence),
     }
     digests = {
-        "signal_measurement.parquet": _digest(signal_published.output_path),
-        "signal_measurement.lineage.json": _digest(signal_published.lineage_path),
-        "run_account.parquet": _digest(account_published.output_path),
-        "run_account.lineage.json": _digest(account_published.lineage_path),
+        "signal_measurement": _digest(signal_published.directory),
+        "run_account": _digest(account_published.directory),
     }
     return trace, digests
 
@@ -639,7 +761,7 @@ def main() -> None:
 
     execution = trace["execution"]
     print(f"sessions / callbacks         : {trace['sessions']} / {trace['callbacks']}")
-    print(f"signal occurrences            : {trace['signal_occurrences']}")
+    print(f"signal events            : {trace['signal_events']}")
     print(
         f"signal run record             : {trace['signal_run_record']['rows']} rows published "
         f"and read back from a real run"

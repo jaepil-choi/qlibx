@@ -56,7 +56,7 @@ no longer costs the record, one that a `TypeError` still escapes"* and tallied t
 with `Bad file descriptor`; the file's pre-existing parametrised count of 7 was mistaken for
 evidence they had landed; and the fix for the batch's most severe defect shipped **entirely
 unexercised**. Nothing would have failed if `except VqaprError` were widened to `except Exception` —
-the exact over-broad catch `docs/issues/042` exists to prevent.
+the exact over-broad catch `docs/issues/archive/042` exists to prevent.
 
 `tests/flow/test_a_completed_run_survives_a_broken_roster.py` now exists: five tests, including one
 that reads the source to assert `roster_report` is not evaluated back inside the guard, because

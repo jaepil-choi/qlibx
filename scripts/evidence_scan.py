@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from vqapr.data import scan
-from vqapr.data.sources import SourceSpec
+from vqapr.data.source import SourceSpec
 from vqapr.domain.errors import VqaprError
 from vqapr.domain.identifiers import instrument_id
 

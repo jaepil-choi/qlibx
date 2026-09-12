@@ -1,6 +1,6 @@
 # 133 — the surface, the scaffolds and the claim
 
-**Closes:** `docs/issues/036`. **Advances:** `docs/issues/052` (the three showcases; the gate half
+**Closes:** `docs/issues/archive/036`. **Advances:** `docs/issues/archive/052` (the three showcases; the gate half
 stays open). **Step:** M1.4, the last slice of M1 in
 `docs/refactoring/2026-09-02-the-convergence-campaign.md`.
 **Authority:** `docs/design/the-panel-the-surface-and-the-run.md` §3 · records `130`–`132`.

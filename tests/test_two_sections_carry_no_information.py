@@ -1,9 +1,9 @@
 """The retired sections of `workspace.yaml` are read and dropped, never refused.
 
 Record `144` (deletion campaign Step 3) retired `valuation_configs` and `monitoring_policies`:
-each restated an agenda's own `role` under a second key. Record `148` retired `agendas` and
+each restated an schedule's own `role` under a second key. Record `148` retired `agendas` and
 `strategy_configs` with them: a run declares its sessions and the one wall time `at` itself, every
-strategy is called on every session, and the agenda preflight runs on is derived from the run. Four
+strategy is called on every session, and the schedule preflight runs on is derived from the run. Four
 sections, one rule, asserted here:
 
 - a `workspace.yaml` written by 0.3.0 still opens, and the next write that changes the document
@@ -18,59 +18,67 @@ sections, one rule, asserted here:
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 import yaml
 
+from vqapr.component.reference import ComponentRef
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.public import AccountMode, AccountSnapshot, RunDefinition, StrategyEntry, register_run
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.public import (
+    AccountMode,
+    AccountSnapshot,
+    RunSchedule,
+    RunDefinition,
+    StrategyEntry,
+    register_run,
+)
+from vqapr.workspace.registry import Workspace
 
 RETIRED_SECTIONS = """valuation_configs:
   daily-valuation:
-    agenda_role: VALUATION
+    schedule_role: VALUATION
 monitoring_policies:
   daily-valuation:
-    agenda_role: MONITORING
+    schedule_role: MONITORING
 agendas:
   daily-valuation:
     role: VALUATION
     timezone: Asia/Seoul
     provenance: test
-    occurrences:
-    - occurrence_id: daily-valuation-2024-01-02
+    events:
+    - event_id: daily-valuation-2024-01-02
       date: '2024-01-02'
       time: '15:31:00'
       fold: 0
       offset: '+09:00'
 strategy_configs:
   alpha:
-    agenda_id: daily-valuation
-    agenda_role: STRATEGY_CALLBACK
+    schedule_id: daily-valuation
+    schedule_role: STRATEGY_CALLBACK
 """
 RETIRED_KEYS = ("valuation_configs", "monitoring_policies", "agendas", "strategy_configs")
 
 
 def _strategy(name: str, root: Path) -> ComponentRef:
     return ComponentRef.of(
-        name, ComponentKind.STRATEGY_MODEL, root / f"{name}.py", "Strategy", fingerprint="a" * 64
+        name, Role.STRATEGY_MODEL, root / f"{name}.py", "Strategy", fingerprint="a" * 64
     )
 
 
 def _run(run_id: str, strategy: str) -> RunDefinition:
     return RunDefinition(
         run_id=run_id,
-        strategies=(StrategyEntry(strategy),),
+        strategy=StrategyEntry(strategy),
         instruments=("A",),
         timezone="Asia/Seoul",
-        at=time(15, 29),
-        sessions=(date(2024, 1, 2),),
+        schedule=RunSchedule(every="1d", at=(time(15, 29),)),
         initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
+        writes=f"{run_id}-weights",
     )
 
 
@@ -78,23 +86,26 @@ def test_a_workspace_written_by_0_3_0_opens_and_the_next_write_drops_the_four_se
     tmp_path: Path,
 ) -> None:
     workspace = Workspace.create(tmp_path)
-    workspace.register_component(_strategy("alpha", tmp_path))
-    # What 0.3.0 wrote beside that component: an agenda, the strategy's binding to it, and the
-    # agenda's role restated twice more.
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_strategy("alpha", tmp_path))
+    # What 0.3.0 wrote beside that component: an schedule, the strategy's binding to it, and the
+    # schedule's role restated twice more.
     path = workspace.path
     path.write_text(path.read_text(encoding="utf-8") + RETIRED_SECTIONS, encoding="utf-8")
     assert set(RETIRED_KEYS) <= set(yaml.safe_load(path.read_text(encoding="utf-8")))
 
     reopened = Workspace.open(tmp_path)
     assert [str(ref.component_id) for ref in reopened.components] == ["alpha"]
-    for retired in ("agendas", "strategy_configs", "valuation_configs", "register_agenda"):
+    for retired in ("agendas", "strategy_configs", "valuation_configs", "register_schedule"):
         assert not hasattr(reopened, retired), f"the workspace still exposes {retired}"
 
     # An idempotent re-registration writes nothing, so the sections outlive it; the next write
     # that changes the document rewrites all of it, and they are gone.
-    assert reopened.register_component(_strategy("alpha", tmp_path)) is False
+    with Workspace.transaction(reopened) as t:
+        assert t.register_component(_strategy("alpha", tmp_path)) is False
     assert set(RETIRED_KEYS) <= set(yaml.safe_load(path.read_text(encoding="utf-8")))
-    reopened.register_run(_run("daily", "alpha"))
+    with Workspace.transaction(reopened) as t:
+        t.register_run(_run("daily", "alpha"))
     rewritten = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert not set(RETIRED_KEYS) & set(rewritten), sorted(set(RETIRED_KEYS) & set(rewritten))
     assert set(rewritten["runs"]) == {"daily"}
@@ -109,7 +120,8 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
     and 0.3.0 did not write them.
     """
     workspace = Workspace.create(tmp_path)
-    workspace.register_component(_strategy("alpha", tmp_path))
+    with Workspace.transaction(workspace) as t:
+        t.register_component(_strategy("alpha", tmp_path))
     path = workspace.path
     path.write_text(
         path.read_text(encoding="utf-8")
@@ -118,9 +130,9 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
         + "    instruments: [A]\n"
         + "    start: '2024-01-02T00:00:00+09:00'\n"
         + "    end: '2024-01-03T00:00:00+09:00'\n"
-        + "    valuation: {agenda_id: daily-valuation}\n"
+        + "    valuation: {schedule_id: daily-valuation}\n"
         + "    exchange: null\n"
-        + "    execution_input: null\n"
+        + "    execution: null\n"
         + "    initial_account: null\n"
         + "    strategies: {alpha: {}}\n",
         encoding="utf-8",
@@ -129,7 +141,7 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
     with pytest.raises(VqaprError) as refused:
         Workspace.open(tmp_path)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.open.invalid"
+    assert failure["code"] == "workspace.invalid"
     assert "krx-2024" in failure["observed"], failure["observed"]
 
 
@@ -137,10 +149,10 @@ def test_a_0_3_0_run_that_named_agendas_is_refused_at_open_naming_the_run(tmp_pa
 def test_a_declaration_that_still_carries_a_retired_section_is_refused_by_name(
     tmp_path: Path, section: str
 ) -> None:
-    from vqapr.declarations import SECTIONS, apply
+    from vqapr.workspace.registration import SECTIONS, apply
 
     assert section not in SECTIONS
-    document = {"datasets": {}, section: {"daily": {"agenda_id": "daily"}}}
+    document = {"datasets": {}, section: {"daily": {"schedule_id": "daily"}}}
     with pytest.raises(VqaprError) as refused:
         apply(document, tmp_path, base=tmp_path)
     failure = refused.value.as_dict()["failures"][0]
@@ -154,11 +166,11 @@ def test_register_run_is_a_public_name_and_the_retired_registrars_and_types_are_
 
     assert callable(register_run)
     for retired in (
-        "register_agenda",
+        "register_schedule",
         "register_strategy_config",
         "register_valuation_config",
         "register_monitoring_policy",
-        "OperationAgenda",
+        "Schedule",
         "StrategyConfig",
         "ValuationConfig",
         "MonitoringPolicy",

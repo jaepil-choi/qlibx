@@ -90,6 +90,6 @@ so the showcase would fail if `vqapr register` were broken.
 
 ## Follow-ups
 
-`docs/issues/010` (two writers share one account table) is unaffected and still open. The account
+`docs/issues/archive/010` (two writers share one account table) is unaffected and still open. The account
 axis — margin, expiry settlement, cash flows that are not fills — remains deferred, and is what an
 attribute-bearing category needs before it can arrive.

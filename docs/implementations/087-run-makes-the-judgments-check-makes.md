@@ -1,6 +1,6 @@
 # 087 — `run` makes the judgments `check` makes
 
-**Closes:** `docs/issues/015-run-does-not-make-the-judgments-check-makes.md`.
+**Closes:** `docs/issues/archive/015-run-does-not-make-the-judgments-check-makes.md`.
 **Branches:** `fix/015a-extract-judgments` (the move) and `fix/015b-run-refuses` (the refusal). Both
 land in this record, because the move exists only to make the refusal possible and neither is
 independently meaningful.
@@ -21,7 +21,7 @@ a green `run` means what a green `check` means."*
 
 ## The decision, and who made it
 
-Three options were on the table (`docs/issues/015`, "The decision this needs"). The issue file and
+Three options were on the table (`docs/issues/archive/015`, "The decision this needs"). The issue file and
 the planning pass both recommended option 2 — perform the judgments, record the verdict on the
 artifact, refuse unless a flag says otherwise.
 
@@ -33,7 +33,7 @@ no artifact left needing a verdict field. The issue file's "whichever is chosen,
 carry the verdict" is a requirement conditional on an escape hatch existing; removing the hatch
 dissolves it rather than working around it.
 
-A consequence recorded in the plan's favour: `docs/issues/009`'s "What not to do" warns against *"a
+A consequence recorded in the plan's favour: `docs/issues/archive/009`'s "What not to do" warns against *"a
 refusal the caller must pass a flag to bypass, on an event that is ordinary"*. Option 2 would have
 had exactly that shape. Option 1 is more consistent with this codebase's own governing precedent than
 the option both the issue file and the planner recommended.

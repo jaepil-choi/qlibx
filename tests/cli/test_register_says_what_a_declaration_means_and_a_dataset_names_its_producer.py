@@ -1,0 +1,325 @@
+"""`register` speaks the point-in-time convention (`027`); a dataset names the run that wrote
+it and a component list can be asked who reads a dataset (`082`).
+
+`027`, reopened by the owner: nothing made a convention be spoken aloud. `available_at`,
+`trade_at`, `at`, `timezone`, the fill handles and `trade_price` are the fields whose whole content is
+their meaning, and an author who typed them had never been told what they commit to. The rule
+settled there: **one sentence per PIT-bearing concept, or nothing** -- a restatement long enough
+to scroll past is the paragraph it was meant to replace.
+
+`082`: "who reads this dataset" took 41 processes and 36 seconds because the only verb was
+`show model`, one component per process; and a materialized dataset could not say which run
+wrote it although the run knew at registration. One-shape campaign Step 5, M5e.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import duckdb
+import pytest
+
+from vqapr.cli.main import main
+
+_MODELS = """from vqapr import public as vq
+
+class Reads(vq.DataModel):
+    def inputs(self):
+        return {"prices": vq.DatasetInput(
+            dataset_id='price_daily', fields=('close',), lookback=vq.RowsLookback(rows=2)
+        )}
+
+    def compute(self, context):
+        window = context.read("prices", "close")
+        return [{"instrument": name, "score": 1.0} for name in window.instruments]
+
+
+class ReadsNothingHere(vq.DataModel):
+    def inputs(self):
+        return {"other": vq.DatasetInput(
+            dataset_id='elsewhere', fields=('x',), lookback=vq.RowsLookback(rows=1)
+        )}
+
+    def compute(self, context):
+        return []
+
+
+class Holds(vq.StrategyModel):
+    def inputs(self):
+        return {}
+
+    def decide(self, call):
+        return vq.Hold(reason='says')
+
+
+from decimal import Decimal
+from vqapr.public import AcademicExchange, TradeRule
+from vqapr.public import ListingAccess
+
+
+class Venue(AcademicExchange):
+    def __init__(self):
+        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,
+            ListingAccess.SIGNED)})
+"""
+
+
+def _cli(capsys: pytest.CaptureFixture[str], project: Path, *argv: str) -> tuple[int, dict]:
+    code = main(["--project-root", str(project), *argv])
+    return code, json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+
+def _prices(root: Path) -> Path:
+    parquet = root / "price_daily.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT available_at, instrument, close::DOUBLE AS close FROM (VALUES
+              (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
+              (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
+              (TIMESTAMPTZ '2024-03-07 15:30:00+09', 'A', 105.0)
+            ) AS t(available_at, instrument, close))
+            TO '{parquet.as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+    return parquet
+
+
+def _execution(root: Path) -> Path:
+    parquet = root / "execution.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close
+            FROM (VALUES
+              (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 100.0),
+              (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', true, 103.0)
+            ) AS t(trade_at, instrument, is_tradable, close))
+            TO '{parquet.as_posix()}' (FORMAT PARQUET)"""
+        )
+    finally:
+        con.close()
+    return parquet
+
+
+def _declaration(root: Path) -> Path:
+    models = root / "models.py"
+    models.write_text(_MODELS, encoding="utf-8")
+    path = root / "declaration.yaml"
+    path.write_text(
+        f"""datasets:
+  price_daily:
+    source_id: prices
+    path: {_prices(root).as_posix()}
+    instrument_field: instrument
+    available_at: available_at
+    grain: instrument_instant
+    key_fields: [available_at, instrument]
+    fields:
+      close: close
+    field_types:
+      close: DOUBLE
+  krx-daily:
+    source_id: execution
+    path: {_execution(root).as_posix()}
+    instrument_field: instrument
+    available_at: trade_at
+    grain: instrument_instant
+    key_fields: [trade_at, instrument]
+    fields:
+      close: close
+      is_tradable: is_tradable
+    field_types:
+      close: DOUBLE
+      is_tradable: BOOLEAN
+    execution:
+      is_tradable: is_tradable
+components:
+  reads:
+    kind: datamodel
+    path: {models.as_posix()}
+    object_name: Reads
+  reads-nothing-here:
+    kind: datamodel
+    path: {models.as_posix()}
+    object_name: ReadsNothingHere
+  holds:
+    kind: strategy
+    path: {models.as_posix()}
+    object_name: Holds
+  venue:
+    kind: exchange
+    path: {models.as_posix()}
+    object_name: Venue
+runs:
+  alpha:
+    instruments: [A]
+    start: "2024-03-06T00:00:00+09:00"
+    end: "2024-03-08T00:00:00+09:00"
+    timezone: Asia/Seoul
+    schedule: {{every: 1d, at: "16:00", days_from: price_daily}}
+    datamodels:
+      reads:
+        dataset_id: alpha_values
+        value_fields: [score]
+  beta:
+    instruments: [A]
+    start: "2024-03-06T00:00:00+09:00"
+    end: "2024-03-08T00:00:00+09:00"
+    timezone: Asia/Seoul
+    schedule: {{every: 1d, at: "09:00"}}
+    exchange: venue
+    execution:
+      dataset: krx-daily
+      trade_price: close
+      fill:
+        at: "15:30"
+    initial_account: {{cash: "1000", mode: long_only, positions: {{}}}}
+    writes: beta-weights
+    strategies: {{holds: {{}}}}
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_register_says_what_each_pit_bearing_declaration_means_once(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, registered = _cli(capsys, tmp_path, "register", str(_declaration(tmp_path)))
+
+    assert code == 0, registered
+    spoken = registered["spoken"]
+    # Two dataset sentences (the prices; the venue table, whose clock is `trade_at`), one
+    # datamodel-run sentence, then the strategy run's two: its fill (whose four fields mean
+    # nothing apart, record 185) and its callback. Nothing for the components: they carry
+    # no point-in-time field of their own.
+    assert len(spoken) == 5, spoken
+    dataset, clock, run, fill, beta = spoken
+    assert dataset.startswith("dataset 'price_daily':") and "'available_at'" in dataset
+    assert "never earlier" in dataset
+    assert clock.startswith("dataset 'krx-daily':") and "'trade_at'" in clock
+    assert fill.startswith("run 'beta' fills against dataset 'krx-daily':")
+    for word in ("first execution instant", "15:30:00", "Asia/Seoul", "'close'"):
+        assert word in fill, (word, fill)
+    assert run.startswith("run 'alpha':") and "16:00:00 Asia/Seoul" in run
+    assert "knowable before" in run
+    assert beta.startswith("run 'beta':") and "09:00:00 Asia/Seoul" in beta
+
+
+def test_a_declaration_with_no_pit_field_says_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models = tmp_path / "models.py"
+    models.write_text(_MODELS, encoding="utf-8")
+    declaration = tmp_path / "components.yaml"
+    declaration.write_text(
+        f"components:\n  reads:\n    kind: datamodel\n    path: {models.as_posix()}\n"
+        "    object_name: Reads\n",
+        encoding="utf-8",
+    )
+
+    code, registered = _cli(capsys, tmp_path, "register", str(declaration))
+
+    assert code == 0, registered
+    assert registered["spoken"] == [], "or nothing -- the rule's other half"
+
+
+def test_a_materialized_dataset_names_the_run_that_wrote_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, _ = _cli(capsys, tmp_path, "register", str(_declaration(tmp_path)))
+    assert code == 0
+    code, ran = _cli(capsys, tmp_path, "run", "alpha")
+    assert code == 0, ran
+
+    code, shown = _cli(capsys, tmp_path, "show", "dataset", "alpha_values")
+    assert code == 0, shown
+    assert shown["produced_by"] == "alpha", "known at registration; a fact, not a guess"
+
+    code, mine = _cli(capsys, tmp_path, "show", "dataset", "price_daily")
+    assert code == 0, mine
+    assert mine["produced_by"] is None, "a dataset from the author's own file names no run"
+
+    code, listed = _cli(capsys, tmp_path, "list", "datasets")
+    by_id = {row["dataset_id"]: row for row in listed["items"]}
+    assert by_id["alpha_values"]["produced_by"] == "alpha"
+    assert "produced_by" not in by_id["price_daily"]
+
+    # And the RECORD that wrote it (`docs/issues/091`): the run id says which run, only the
+    # `<id>@<fp8>` ref says which version of the component -- the ref `list datamodels` and
+    # `rm datamodel` address.
+    code, records = _cli(capsys, tmp_path, "list", "datamodels", "--run", "alpha")
+    assert code == 0, records
+    (record,) = records["items"]
+    assert shown["produced_by_record"] == record["datamodel_ref"]
+    assert by_id["alpha_values"]["produced_by_record"] == record["datamodel_ref"]
+    assert mine["produced_by_record"] is None
+    assert "produced_by_record" not in by_id["price_daily"]
+
+
+def test_check_reports_an_output_written_by_another_version_of_the_component(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`run.output_stale`: the parquet on disk was written by a component version that is not
+    the one registered now (`docs/issues/091`).
+
+    The reporting testbed swept a constant per alpha, restored each file to its best version and,
+    seeing the dataset directory present, did not re-run -- so five of eight pooled alphas held a
+    version other than the file on disk, each with a plausible number, and nothing in vqapr could
+    say so because the dataset did not claim a version. Now it does, and `check` compares.
+    """
+    declaration = _declaration(tmp_path)
+    code, _ = _cli(capsys, tmp_path, "register", str(declaration))
+    assert code == 0
+    code, ran = _cli(capsys, tmp_path, "run", "alpha")
+    assert code == 0, ran
+    code, clean = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 0 and clean["ok"] is True, clean
+    code, shown = _cli(capsys, tmp_path, "show", "dataset", "alpha_values")
+    written_by = shown["produced_by_record"]
+
+    # A new version of the component: the same file with one more line, re-registered in place.
+    models = tmp_path / "models.py"
+    models.write_text(models.read_text(encoding="utf-8") + "\nTUNED = 2\n", encoding="utf-8")
+    code, _ = _cli(capsys, tmp_path, "register", str(declaration))
+    assert code == 0
+
+    code, stale = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 1, stale
+    (failure,) = [f for f in stale["failures"] if f["code"] == "run.output_stale"]
+    assert failure["status"] == 412
+    assert written_by in failure["observed"]
+    assert written_by not in failure["observed"].split("registered component is")[1]
+    assert "vqapr run alpha --force" in failure["fix"]
+
+    # `--force` rewrites the dataset from the current version, and `check` is clean again.
+    code, rerun = _cli(capsys, tmp_path, "run", "alpha", "--force")
+    assert code == 0, rerun
+    code, fresh = _cli(capsys, tmp_path, "check", "alpha")
+    assert code == 0 and fresh["ok"] is True, fresh
+    code, shown_again = _cli(capsys, tmp_path, "show", "dataset", "alpha_values")
+    assert shown_again["produced_by_record"] != written_by
+
+
+def test_list_components_can_be_asked_who_reads_a_dataset_in_one_process(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, _ = _cli(capsys, tmp_path, "register", str(_declaration(tmp_path)))
+    assert code == 0
+
+    code, readers = _cli(capsys, tmp_path, "list", "components", "--reads", "price_daily")
+
+    assert code == 0, readers
+    assert [row["component_id"] for row in readers["items"]] == ["reads"]
+    assert readers["items"][0]["reads"] == {"price_daily": ["close"]}
+    assert readers["count"] == 1
+
+    code, nobody = _cli(capsys, tmp_path, "list", "components", "--reads", "unheard-of")
+    assert code == 0 and nobody["count"] == 0
+
+    code, refused = _cli(capsys, tmp_path, "list", "runs", "--reads", "price_daily")
+    assert code != 0
+    assert refused["failures"][0]["code"] == "argument.value_invalid"

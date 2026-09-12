@@ -2,6 +2,6 @@
 
 import sys
 
-from vqapr.cli import main
+from vqapr.cli.main import main
 
 sys.exit(main())

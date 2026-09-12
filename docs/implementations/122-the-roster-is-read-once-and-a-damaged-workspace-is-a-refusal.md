@@ -1,11 +1,11 @@
 # 122 — The roster is read once, and a damaged workspace is a refusal
 
 **Closes:**
-[`050`](../issues/050-a-damaged-workspace-reads-as-no-roster-and-the-report-reads-the-pointer-twice.md)
+[`050`](../issues/archive/050-a-damaged-workspace-reads-as-no-roster-and-the-report-reads-the-pointer-twice.md)
 — both halves, in one commit, because they are one read.
 **Branch:** `fix-050-roster-reads-once` (from `develop@602e1b3c`).
 **Sibling:** [`103`](103-the-audits-two-correctness-findings.md), which closed the same defect at the
-pointer door ([`042`](../issues/042-a-damaged-roster-pointer-reads-as-no-roster.md)) and whose own
+pointer door ([`042`](../issues/archive/042-a-damaged-roster-pointer-reads-as-no-roster.md)) and whose own
 closing text named this one: *"only `Workspace.open` itself is guarded."*
 
 ## Why this change exists
@@ -21,7 +21,7 @@ half-written; the guard turned that into `None`.
 `None` is not a refusal. It means *no roster is registered*, which is legal, so the run continued
 and every fill recorded `kind: None`. On a KRX-shaped venue that charges the ETF sleeve at the
 share rate and collapses `cost_by_kind()` to one unlabelled bucket — the report that would expose it
-is the one the gap erases. That is [`007`](../issues/007-an-undeclared-instrument-is-silently-a-share.md)
+is the one the gap erases. That is [`007`](../issues/archive/007-an-undeclared-instrument-is-silently-a-share.md)
 returning through a `try/except` written for a different case, exactly as `042` was.
 
 Four lines below the swallow the module already stated the principle it was breaking: *"'no roster'
@@ -95,7 +95,7 @@ because they monkeypatch `roster_report` and assert the absorber's behaviour rat
 
 - **The roster is still not a gate.** It is read fresh, its digest stated and compared against
   nothing. A roster grows as a matter of course, so a gate here refuses every morning
-  ([`009`](../issues/009-a-fingerprint-is-a-receipt-not-a-gate.md)).
+  ([`009`](../issues/archive/009-a-fingerprint-is-a-receipt-not-a-gate.md)).
 - **`Workspace.open`'s own guards are untouched.** The three refusals it raises were already
   correctly distinguished; the defect was entirely on the reading side.
 - **No end-to-end run test was added for half two.** The mid-run re-registration is exercised at the

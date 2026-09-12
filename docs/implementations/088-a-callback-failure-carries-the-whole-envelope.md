@@ -1,6 +1,6 @@
 # 088 — A callback failure carries the whole envelope
 
-**Closes:** `docs/issues/016-a-callback-failure-drops-half-the-envelope.md`.
+**Closes:** `docs/issues/archive/016-a-callback-failure-drops-half-the-envelope.md`.
 **Branch:** `fix/016-callback-envelope`.
 
 ## Why this change exists
@@ -36,7 +36,7 @@ It now produces all six, through three additions:
   arbitrary exception carries no repair advice, so the best available instruction is *where to
   look*: the author's callback for a callback stage, the run's own record otherwise. It names the
   exception type, and it states that re-registration replaces in place, so an author does not
-  conclude they need a new component id to retry (`docs/issues/009`).
+  conclude they need a new component id to retry (`docs/issues/archive/009`).
 - **`_EXPLAIN_BY_STAGE`** — maps the callback stages onto **existing** topics:
   `COMPONENT_CONTRACT` for state/window/intent, `PUBLICATION` for publication. Anything unmapped
   falls back to `RUN_PRECONDITION`.

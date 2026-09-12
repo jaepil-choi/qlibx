@@ -1,6 +1,6 @@
 # 138 — an agenda is shareable: a strategy config is keyed by the strategy
 
-**Closes:** `docs/issues/040`. **Step:** 6 of
+**Closes:** `docs/issues/archive/040`. **Step:** 6 of
 `docs/refactoring/2026-09-02-the-convergence-campaign.md` (M6).
 **Authority:** the owner's ruling of 2026-08-31 in `040` (an agenda is shareable); design
 `docs/design/the-panel-the-surface-and-the-run.md` §4.1, which names `040` as the prerequisite of

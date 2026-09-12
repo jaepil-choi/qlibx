@@ -2,7 +2,7 @@
 
 Two claims are worth testing and one is worth being careful about.
 
-**Collecting.** `preflight_run` stops at the first refusal, which is right for a gate in front of a
+**Collecting.** `freeze` stops at the first refusal, which is right for a gate in front of a
 run. `check` was asked a different question -- is this ready -- so it answers about every
 independent judgment at once. The test that matters is not that it reports A failure; it is that it
 reports the SECOND one too, because a verb that collects and a verb that stops look identical
@@ -18,8 +18,8 @@ exercised here are the ones a registrable run can still fail -- a look-ahead, a 
 a long-only book, a field the dataset does not expose, a first decision before the data begins.
 
 **The run carries its own sessions and wall time since record `148`.** A look-ahead or an early
-decision is therefore declared on the run (`sessions`, `at`) rather than through an agenda and a
-binding, and the judgments derive the one agenda the run fires on from exactly those keys.
+decision is therefore declared on the run (`sessions`, `at`) rather than through an schedule and a
+binding, and the judgments derive the one schedule the run fires on from exactly those keys.
 """
 
 from __future__ import annotations
@@ -30,20 +30,22 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
+import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import CODES, check
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.data.verification import verify_source
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import FailureSource
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import RunDefinition, StrategyEntry
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.domain.wiring import Role
+from vqapr.public import register_instruments
+from vqapr.run.preflight.checks import JUDGMENT_CODES
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.run_definition import RunDefinition, RunExecution, RunFill, StrategyEntry
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 RUN = "probe"
@@ -66,17 +68,18 @@ def _fingerprint(root: Path) -> dict[str, str]:
     }
 
 
-def _register_component(root: Path, component_id: str, kind: ComponentKind, source: Path) -> None:
+def _register_component(root: Path, component_id: str, kind: Role, source: Path) -> None:
     object_name = source.read_text(encoding="utf-8").split("class ", 1)[1].split("(", 1)[0]
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            component_id,
-            kind,
-            source,
-            object_name,
-            fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                component_id,
+                kind,
+                source,
+                object_name,
+                fingerprint=fingerprint_component(source, kind=kind, object_name=object_name),
+            )
         )
-    )
 
 
 def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str) -> None:
@@ -86,55 +89,86 @@ def _strategy_reading(root: Path, component_id: str, dataset_id: str, field: str
     load is a different refusal, and a fixture that fails to load would make these judgments look
     dead again for a new reason.
     """
-    from vqapr.extension.scaffold import render
+    from vqapr.agent.scaffold import render
 
     source = root / f"{component_id}.py"
     source.write_text(
         render(
-            ComponentKind.STRATEGY_MODEL, component_id, dataset_id=dataset_id, field=field,
+            Role.STRATEGY_MODEL, component_id, dataset_id=dataset_id, field=field,
             lookback=3,
         ),
         encoding="utf-8",
     )
-    _register_component(root, component_id, ComponentKind.STRATEGY_MODEL, source)
+    _register_component(root, component_id, Role.STRATEGY_MODEL, source)
 
 
 def _exchange(root: Path, component_id: str = "venue", access: str = "SIGNED") -> None:
     source = root / f"{component_id}.py"
     source.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,"
         f" ListingAccess.{access})}})\n",
         encoding="utf-8",
     )
-    _register_component(root, component_id, ComponentKind.EXCHANGE, source)
+    _register_component(root, component_id, Role.EXCHANGE, source)
 
 
-def _execution_input(root: Path, fill_at: str = "15:30") -> None:
-    exec_dir = root / "exec"
+def _venue_dataset(
+    root: Path, days: tuple[date, ...] = (date(2023, 12, 1),), dataset_id: str = "my-exec"
+) -> None:
+    """The venue table as a dataset with an execution role (record 185); the fill is the run's.
+
+    A REAL table since the two-clocks campaign (design §3.3): the run's trading days are the
+    days this table has rows for, so the days a test wants the probe to decide on are written
+    here, one 15:30 UTC row each.
+    """
+    exec_dir = root / dataset_id
     exec_dir.mkdir(exist_ok=True)
-    (exec_dir / "placeholder").write_text("x", encoding="utf-8")
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime.fromisoformat(f"2024-01-01T{fill_at}").time(),
-                timezone="UTC",
-                trade_price="close",
-            ),
+    rows = ",\n".join(
+        f"(TIMESTAMPTZ '{day.isoformat()} 15:30:00+00', 'A', true, 100.0::DOUBLE)" for day in days
+    )
+    con = duckdb.connect()
+    try:
+        con.execute(
+            f"""COPY (SELECT * FROM (VALUES
+{rows}
+            ) AS t(trade_at, instrument, is_tradable, close))
+            TO '{(exec_dir / "e.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
+    finally:
+        con.close()
+    # A real table is measured through the one door (record `234`): the run that reads it asks
+    # for the digest registration kept, and a hand-registered table would be refused as
+    # `dataset.unverified` before the ordering judgment could look at its rows.
+    source = SourceSpec.of(f"{dataset_id}-src", exec_dir)
+    diagnosis, _, measured = verify_source(
+        DatasetRegistration.of(
+            dataset_id,
+            f'{dataset_id}-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        source,
+    )
+    diagnosis.raise_if_failed()
+    with Workspace.transaction(root) as t:
+        t.register_dataset(measured, source)
+
+
+def _fill(fill_at: str = "15:30", dataset: str = "my-exec") -> RunExecution:
+    return RunExecution(
+        dataset=dataset,
+        trade_price="close",
+        fill=RunFill(at=datetime.fromisoformat(f"2024-01-01T{fill_at}").time()),
     )
 
 
@@ -142,13 +176,13 @@ def _definition(**overrides: object) -> RunDefinition:
     """The probe run: one strategy deciding on 2023-12-01 at 15:30 UTC, unless overridden."""
     declared: dict[str, object] = {
         "run_id": RUN,
+        "writes": f"{RUN}-weights",
         "strategies": (StrategyEntry("model"),),
-        "sessions": (date(2023, 12, 1),),
         "timezone": "UTC",
-        "at": time(15, 30),
+        "schedule": {"every": "1d", "at": time(15, 30)},
         "instruments": ("A",),
         "exchange": "venue",
-        "execution_input_id": "my-exec",
+        "execution": _fill(),
         "start": datetime(2023, 12, 1, tzinfo=UTC),
         "end": _SPAN[1],
         "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {"A": Decimal("-5")}),
@@ -170,30 +204,36 @@ def workspace(tmp_path: Path) -> Path:
     `_definition` carries them as defaults.
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("available_at", "instrument"),
-            fields={"volume": "volume"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("available_at", "instrument"),
+                fields={"volume": "volume"},
+                field_types={"volume": "INTEGER"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
     _exchange(tmp_path)
-    _execution_input(tmp_path)
-    Workspace.open(tmp_path).register_run(_definition())
+    _venue_dataset(tmp_path)
+    # Declared so the four defects above are the ONLY findings: an undeclared roster is a fifth
+    # (`roster.absent`), asked by its own judge, and tested on its own.
+    register_instruments(tmp_path, {"A": "stock"})
+    with Workspace.transaction(tmp_path) as t:
+        t.register_run(_definition())
     return tmp_path
 
 
 FOUR = {
-    "check.execution.not_after_decision",
-    "check.lookback.uncovered",
-    "check.field.absent",
-    "check.weights.mode_conflict",
+    "execution.not_after_decision",
+    "lookback.uncovered",
+    "field.absent",
+    "weights.mode_conflict",
 }
 
 
@@ -202,8 +242,8 @@ def test_a_missing_run_is_reported_rather_than_raised(workspace: Path) -> None:
     body = check("nope", workspace)
 
     assert body["ok"] is False
-    assert [entry["code"] for entry in body["failures"]] == ["workspace.run.register.missing"]
-    assert body["stage"] == "run.check"
+    assert [entry["code"] for entry in body["failures"]] == ["run.unregistered"]
+    assert body["stage"] == "check"
 
 
 def test_every_check_that_ran_is_named_alongside_every_one_that_could_not(
@@ -219,12 +259,12 @@ def test_every_check_that_ran_is_named_alongside_every_one_that_could_not(
 
     assert set(body["checked"]) == {"workspace", "run", "judgments", "preflight"}
     assert body["passed"] == ["workspace"]
-    blocked_names = {entry["check"] for entry in body["blocked"]}
-    assert {"judgments", "preflight"} <= blocked_names, (
-        "judgments that could not run must be reported as blocked, not silently omitted"
+    skipped_names = {entry["check"] for entry in body["skipped"]}
+    assert {"judgments", "preflight"} <= skipped_names, (
+        "phases that could not run must be reported as skipped, not silently omitted"
     )
-    for entry in body["blocked"]:
-        assert entry["blocked_by"], f"{entry['check']} is blocked by nothing, which cannot be"
+    for entry in body["skipped"]:
+        assert entry["blocked_by"], f"{entry['check']} is skipped for no reason, which cannot be"
 
 
 def test_an_unopenable_workspace_blocks_everything_that_needs_it_and_says_so(
@@ -234,8 +274,8 @@ def test_an_unopenable_workspace_blocks_everything_that_needs_it_and_says_so(
     body = check("missing", tmp_path / "no-such-project")
 
     assert body["ok"] is False
-    assert [entry["code"] for entry in body["failures"]] == ["workspace.open.missing"]
-    assert {entry["check"] for entry in body["blocked"]} == {"run", "judgments", "preflight"}
+    assert [entry["code"] for entry in body["failures"]] == ["workspace.missing"]
+    assert {entry["check"] for entry in body["skipped"]} == {"run", "judgments", "preflight"}
 
 
 def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: Path) -> None:
@@ -251,14 +291,41 @@ def test_four_simultaneous_problems_return_four_failures_in_one_call(workspace: 
     assert reported >= FOUR, f"a judgment did not report its own defect: {sorted(reported)}"
 
 
-def test_each_judgment_carries_the_five_fields_a_reader_acts_on(workspace: Path) -> None:
+def test_check_reads_no_file_content(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Record `234`: `check` judged the execution table by scanning it again for the schema, the
+    key and the price -- 11.8 s of the sample project's `check` trace (`docs/issues/095`). Every
+    fact it needs was measured at registration; what it verifies now is the file's identity."""
+    from vqapr.data import verification
+
+    scans: list[str] = []
+    for name in ("describe", "describe_projection", "key_check", "span_check", "finite_check",
+                 "positive_finite_when_true"):
+        original = getattr(verification.scan, name)
+
+        def counting(*args, _name=name, _original=original, **kwargs):
+            scans.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(verification.scan, name, counting)
+
+    body = check(RUN, workspace)
+
+    assert {entry["code"] for entry in body["failures"]} >= FOUR
+    assert scans == [], "check scanned a file registration had already measured"
+
+
+def test_each_judgment_carries_the_fields_a_reader_acts_on(workspace: Path) -> None:
     """AC-C4. A refusal without `fix` is a diagnosis, which is what this envelope replaced."""
     for entry in check(RUN, workspace)["failures"]:
-        for field in ("code", "source", "requirement", "observed", "fix", "explain"):
+        for field in (
+            "code", "status", "source", "requirement", "observed", "fix", "cause",
+            "examples", "example_total",
+        ):
             assert field in entry, f"{entry['code']} lost {field}"
         assert entry["fix"], f"{entry['code']} says what is wrong but not what to do"
-        assert entry["explain"], f"{entry['code']} points at no recovery guidance"
-        if entry["code"].startswith("check."):
+        assert entry["status"] >= 400, f"{entry['code']} says nothing about who must act"
+        assert entry["cause"]["where"], f"{entry['code']} does not say where it was decided"
+        if entry["code"] in JUDGMENT_CODES:
             assert str(entry["source"]["key_path"]).startswith(f"runs.{RUN}"), (
                 f"{entry['code']} does not name the run it refused, so the reader must guess"
             )
@@ -271,17 +338,18 @@ def test_repairing_one_defect_leaves_the_others_reported(workspace: Path) -> Non
     closes the short position and asserts the other three refusals survive untouched.
     """
     before = {entry["code"] for entry in check(RUN, workspace)["failures"]}
-    Workspace.open(workspace).register_run(
-        _definition(
-            run_id="repaired",
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+    with Workspace.transaction(workspace) as t:
+        t.register_run(
+            _definition(
+                run_id="repaired",
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+            )
         )
-    )
     after = {entry["code"] for entry in check("repaired", workspace)["failures"]}
 
-    assert "check.weights.mode_conflict" in before
-    assert "check.weights.mode_conflict" not in after, "the repair was not observed"
-    assert FOUR - {"check.weights.mode_conflict"} <= after, (
+    assert "weights.mode_conflict" in before
+    assert "weights.mode_conflict" not in after, "the repair was not observed"
+    assert FOUR - {"weights.mode_conflict"} <= after, (
         "repairing one judgment changed what another reported, so they are not independent"
     )
 
@@ -294,13 +362,13 @@ def test_a_period_that_is_a_point_is_reported_and_a_real_one_across_offsets_is_a
     a gate contradicting the thing it gates. A registered run cannot be reversed (the definition
     refuses it) but it can be a point, and a point has no room to decide in.
     """
-    from vqapr.flow.judgments import _judge_period
+    from vqapr.run.preflight.checks import _judge_period
 
     at = FailureSource(key_path="runs.x")
     point = datetime(2024, 1, 2, tzinfo=UTC)
     definition = _definition(start=point, end=point)
     assert [failure.code for failure in _judge_period(definition, at)] == [
-        "check.period.uncovered"
+        "period.uncovered"
     ]
 
     across = _definition(
@@ -310,14 +378,14 @@ def test_a_period_that_is_a_point_is_reported_and_a_real_one_across_offsets_is_a
     assert _judge_period(across, at) == [], "a valid one-hour period was refused"
 
 
-def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> None:
+def test_a_blocked_judgment_carries_its_cause_separately(workspace: Path) -> None:
     """A framework bug and a routine block must not read the same.
 
-    `blocked_by` is one sentence; `error_type` is the field a reader filters on. Without it a
-    `KeyError` -- which almost certainly means this verb is wrong -- looks exactly like a
-    `VqaprError`, which means the framework declined to answer.
+    `observed` is one sentence; `cause` is the structure a reader filters on, and `status` says
+    whose fault it is. Without them a `KeyError` -- which almost certainly means this verb is
+    wrong -- looks exactly like a `VqaprError`, which means the framework declined to answer.
     """
-    import vqapr.flow.judgments as judgments_module
+    import vqapr.run.preflight.checks as judgments_module
 
     original = judgments_module._judge_universe
     judgments_module._judge_universe = lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -328,30 +396,38 @@ def test_a_blocked_judgment_names_its_error_type_separately(workspace: Path) -> 
     finally:
         judgments_module._judge_universe = original
 
-    entry = next(item for item in body["blocked"] if item["check"] == "universe")
-    assert entry["error_type"] == "KeyError"
-    assert entry["blocked_by"].startswith("KeyError:")
+    entry = next(
+        item for item in body["blocked"] if item["observed"].startswith("universe could not")
+    )
+    assert entry["code"] == "judgment.blocked"
+    assert entry["cause"]["type"] == "KeyError"
+    assert entry["cause"]["message"] == "'a judgment read a key nobody wrote'"
+    assert "KeyError" in entry["cause"]["traceback"]
+    # The stand-in judge is defined in THIS file, so the innermost frame is not the package's:
+    # 502, the way a user's own code crashing reads. The framework's own bug would be 500.
+    assert entry["status"] == 502
 
 
 def _judge(root: Path, definition: RunDefinition) -> list[str]:
     """Every dataset code the run's members produce, the way `judgments` dispatches them.
 
-    One judge per member since `docs/issues/077`, so this loops where it used to make one call.
-    `_agenda_once` is a CALL, not a value: an agenda that cannot be derived raises to the judge
-    that asked, which is what makes the judgment block instead of reading as passed.
+    One judge per member since `docs/issues/archive/077`, so this loops where it used to make one call.
+    A fact of `RunFacts` is a CALL, not a value: an schedule that cannot be derived raises to the
+    judge that asked, which is what makes the judgment block instead of reading as passed.
     """
-    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.run.preflight.checks import _judge_member_datasets, _members
+    from vqapr.run.preflight.facts import RunFacts
 
     space = Workspace.open(root)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    # Derived at most once per `check` and reached by every judge that needs it
-    # (`docs/issues/069`).
-    agenda = _agenda_once(space, definition)
+    # Read at most once per `check` and reached by every judge that needs it
+    # (`docs/issues/archive/069`, record `241`).
+    facts = RunFacts(space, definition)
     return [
         failure.code
         for member in _members(definition)
         for failure in _judge_member_datasets(
-            definition, member, space, registered, FailureSource(key_path="runs.x"), agenda
+            definition, member, space, registered, FailureSource(key_path="runs.x"), facts
         )
     ]
 
@@ -366,27 +442,30 @@ def test_the_dataset_judgments_read_the_loaded_model_not_its_reference(tmp_path:
     reports nothing, which is exactly what a passing judgment reports.
     """
     Workspace.create(tmp_path)
+    _venue_dataset(tmp_path)  # the trading days come from the execution table (design §3.3)
     _strategy_reading(tmp_path, "model", "absent_dataset", "close")
 
-    assert _judge(tmp_path, _definition()) == ["check.dataset.unregistered"]
+    assert _judge(tmp_path, _definition()) == ["dataset.unregistered"]
 
 
 def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
     tmp_path: Path,
 ) -> None:
-    """`docs/issues/056`: seven fields from one missing dataset were seven identical failures.
+    """`docs/issues/archive/056`: seven fields from one missing dataset were seven identical failures.
 
     `requirements()` fans a `DatasetInput` out to one requirement per field; the judgment used
     to emit per requirement. The skill promises every INDEPENDENT problem at once, and one
     registration is one problem: the fields it wanted ride along as examples.
     """
-    from vqapr.extension.scaffold import render
-    from vqapr.flow.judgments import _agenda_once, _judge_member_datasets, _members
+    from vqapr.agent.scaffold import render
+    from vqapr.run.preflight.checks import _judge_member_datasets, _members
+    from vqapr.run.preflight.facts import RunFacts
 
     Workspace.create(tmp_path)
+    _venue_dataset(tmp_path)
     source = tmp_path / "wide.py"
     scaffold = render(
-        ComponentKind.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
+        Role.STRATEGY_MODEL, "wide", dataset_id="absent_dataset", field="close",
         lookback=3,
     )
     assert 'fields=("close",)' in scaffold
@@ -394,11 +473,11 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
         scaffold.replace('fields=("close",)', 'fields=("close", "volume", "turnover")'),
         encoding="utf-8",
     )
-    _register_component(tmp_path, "wide", ComponentKind.STRATEGY_MODEL, source)
+    _register_component(tmp_path, "wide", Role.STRATEGY_MODEL, source)
 
     space = Workspace.open(tmp_path)
     registered = {str(item.dataset_id): item for item in space.datasets}
-    definition = replace(_definition(), strategies=(StrategyEntry("wide"),))
+    definition = _definition().replace(strategy=StrategyEntry('wide'))
     (member,) = _members(definition)
     failures = _judge_member_datasets(
         definition,
@@ -406,38 +485,41 @@ def test_one_unregistered_dataset_is_one_failure_however_many_fields_are_read(
         space,
         registered,
         FailureSource(key_path="runs.x"),
-        _agenda_once(space, definition),
+        RunFacts(space, definition),
     )
 
-    assert [failure.code for failure in failures] == ["check.dataset.unregistered"]
+    assert [failure.code for failure in failures] == ["dataset.unregistered"]
     assert failures[0].examples == ("close", "volume", "turnover")
     assert failures[0].example_total == 3
     assert "3 field(s)" in failures[0].observed
 
 
 def test_a_dataset_missing_a_field_the_model_reads_is_named(tmp_path: Path) -> None:
-    """`check.field.absent`, reachable only once the model is loaded."""
+    """`field.absent`, reachable only once the model is loaded."""
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"volume": "volume"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"volume": "volume"},
+                field_types={"volume": "INTEGER"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
+    # On a trading day the data covers, so the absent field is the only thing wrong.
+    _venue_dataset(tmp_path, days=(date(2024, 6, 3),))
 
-    # On a session the data covers, so the absent field is the only thing wrong.
-    assert _judge(tmp_path, _definition(sessions=(date(2024, 6, 3),))) == ["check.field.absent"]
+    assert _judge(tmp_path, _definition()) == ["field.absent"]
 
 
 def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -> None:
-    """`check.lookback.uncovered`, measured at the first instant that actually READS.
+    """`lookback.uncovered`, measured at the first instant that actually READS.
 
     Not at the run's `start`. Nothing reads there -- `start` bounds the horizon, and the strategy
     reads at the run's sessions inside it. Measuring at `start` refused any run whose dataset's
@@ -446,40 +528,94 @@ def test_a_decision_that_lands_before_its_data_begins_is_named(tmp_path: Path) -
     (issue 012).
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"close": "close"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
     begins = _SPAN[0]
 
-    # Deciding a day BEFORE the data begins: the window really is short, and it is named.
+    # Deciding a day BEFORE the data begins: the window really is short, and it is named. The
+    # trading days are the execution table's (design §3.3), so the day is written there.
     early = begins.date().replace(day=1)
     start = datetime.combine(early, time(0), tzinfo=UTC)
-    assert _judge(tmp_path, _definition(start=start, sessions=(early,), at=time(4, 0))) == [
-        "check.lookback.uncovered"
-    ]
+    _venue_dataset(tmp_path, days=(early,))
+    at_four = {"every": "1d", "at": time(4, 0)}
+    assert _judge(tmp_path, _definition(start=start, schedule=at_four)) == ["lookback.uncovered"]
 
     # The same run, deciding on a day the data covers, is not refused -- even though `start` is
     # still earlier than the dataset's first observation. That difference is the whole fix.
     covered = date(2024, 6, 3)
-    assert _judge(tmp_path, _definition(start=start, sessions=(covered,), at=time(4, 0))) == []
+    _venue_dataset(tmp_path, days=(covered,), dataset_id="my-exec-covered")
+    assert (
+        _judge(
+            tmp_path,
+            _definition(start=start, schedule=at_four, execution=_fill(dataset="my-exec-covered")),
+        )
+        == []
+    )
+
+
+def _order(root: Path, definition: RunDefinition) -> list[str]:
+    """Every code the ordering judgment produces, the way `judgments` dispatches it."""
+    from vqapr.run.preflight.checks import _judge_execution_ordering
+    from vqapr.run.preflight.facts import RunFacts
+
+    space = Workspace.open(root)
+    return [
+        failure.code
+        for failure in _judge_execution_ordering(
+            definition, FailureSource(key_path="runs.x"), RunFacts(space, definition)
+        )
+    ]
+
+
+def test_an_end_between_the_last_fill_and_the_last_decision_is_answered(tmp_path: Path) -> None:
+    """The ordering judgment asks about the events inside `[start, end]`, not the superset.
+
+    A decide-after-close, fill-next-close run (`at: 16:30`, `fill.at: 15:30`) has exactly one
+    correct kind of `end`: between the last day's fill and that day's decision. `derived_schedule`
+    cuts on dates and keeps that day's 16:30 (`docs/issues/archive/069`); handed to
+    `select_target` it broke the "decision not after end" contract, and `check` reported a 500
+    `judgment.blocked` where a reader looks for problems -- for the one `end` that was right
+    (`docs/issues/099`). Sliced the way preflight freezes it, the judgment answers.
+    """
+    Workspace.create(tmp_path)
+    first, last = date(2023, 12, 1), date(2023, 12, 4)
+    _venue_dataset(tmp_path, days=(first, last))
+    after_close = {"every": "1d", "at": time(16, 30)}
+    start = datetime.combine(first, time(0), tzinfo=UTC)
+
+    def judged(end: datetime) -> list[str]:
+        return _order(tmp_path, _definition(start=start, end=end, schedule=after_close))
+
+    # `end` between the last fill and the last decision: the 12-01 decision fills at 12-04
+    # 15:30, inside the run; the 12-04 decision lies after `end` and is not the run's.
+    assert judged(datetime.combine(last, time(16, 0), tzinfo=UTC)) == []
+    # `end` AT the last fill is the same run.
+    assert judged(datetime.combine(last, time(15, 30), tzinfo=UTC)) == []
+    # `end` after the last decision: that decision has no fill, and it is NAMED, as a 412.
+    assert judged(datetime.combine(last, time(23, 59), tzinfo=UTC)) == [
+        "execution.not_after_decision"
+    ]
 
 
 def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> None:
-    """No sessions, no agenda, no answer -- and it SAYS so. No guess either.
+    """No trading days, no schedule, no answer -- and it SAYS so. No guess either.
 
     This test used to assert the opposite half of the same fact: that the judgment stayed silent,
-    on the reasoning that registration and preflight both refuse a `sessions_from` naming an
-    unregistered dataset, so answering here would report one defect twice. `docs/issues/077`
+    on the reasoning that registration and preflight both refuse a day source naming an
+    unregistered dataset, so answering here would report one defect twice. `docs/issues/archive/077`
     established what that cost -- a silent judgment is returned as an empty result, which
     `judgments` cannot tell from "asked and found nothing", so `check` reported the run as judged
     when the question was never asked. The owner settled it on 2026-09-04: the defect is named
@@ -491,34 +627,38 @@ def test_the_lookback_judgment_blocks_when_it_cannot_answer(tmp_path: Path) -> N
     refusing what `run` accepts.
     """
     space = Workspace.create(tmp_path)
-    space.register_dataset(
-        DatasetRegistration.of(
-            "prices",
-            "prices-source",
-            instrument_field="instrument",
-            available_at="available_at",
-            grain="instrument_instant",
-            key_fields=("instrument",),
-            fields={"close": "close"},
-        ).with_span(*_SPAN),
-        SourceSpec.of("prices-source", "prepared/prices"),
-    )
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("instrument",),
+                fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
+            ).with_span(*_SPAN),
+            SourceSpec.of("prices-source", "prepared/prices"),
+        )
     _strategy_reading(tmp_path, "model", "prices", "close")
 
-    # The sessions come from a dataset that is not registered: the agenda cannot be built here.
-    # Nothing is guessed, and nothing is silently returned either -- it raises, and `judgments`
-    # turns that into a blocked entry.
-    unanswerable = _definition(sessions=(), sessions_from="absent")
+    # The trading days come from the execution table (design §3.3), and no `my-exec` dataset is
+    # registered here: the schedule cannot be built. Nothing is guessed, and nothing is silently
+    # returned either -- it raises, and `judgments` turns that into a blocked entry.
+    unanswerable = _definition()
     with pytest.raises(Exception) as refused:
         _judge(tmp_path, unanswerable)
-    assert "absent" in str(refused.value), refused.value
+    assert "my-exec" in str(refused.value), refused.value
 
     # And end to end, through the verb: blocked, not passed, and `ok` is false.
-    from vqapr.flow.judgments import judgments
+    from vqapr.run.preflight.checks import judgments
 
     found, blocked = judgments(unanswerable, Workspace.open(tmp_path))
     assert blocked, found
-    assert {entry["check"] for entry in blocked} >= {"execution_ordering"}
+    assert {entry.observed.split(" could not answer", 1)[0] for entry in blocked} >= {
+        "execution_ordering"
+    }
 
 
 def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) -> None:
@@ -529,32 +669,32 @@ def test_the_venue_judgment_reads_every_shipped_listing_shape(tmp_path: Path) ->
     found nothing -- indistinguishable from a pass. The second read `listings` as a sequence, which
     is Academic's shape; Krx keys a Mapping by instrument id, so it silently found nothing again.
     """
-    from vqapr.flow.judgments import _judge_weights
+    from vqapr.run.preflight.checks import _judge_weights
+    from vqapr.run.preflight.facts import RunFacts
 
     Workspace.create(tmp_path)
     source = tmp_path / "limited.py"
     source.write_text(
-        "from vqapr.exchange.venues.krx import KrxExchange, krx_rules\n"
+        "from vqapr.public import KrxExchange, krx_rules\n"
         "class Exchange(KrxExchange):\n"
         "    def __init__(self):\n"
         "        listings, instruments = krx_rules({'ABC': 'stock'}, price_limits=True)\n"
         "        super().__init__(listings)\n",
         encoding="utf-8",
     )
-    _register_component(tmp_path, "limited", ComponentKind.EXCHANGE, source)
+    _register_component(tmp_path, "limited", Role.EXCHANGE, source)
 
+    signed = _definition(
+        instruments=("ABC",),
+        exchange="limited",
+        initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+        initial_account_mode=AccountMode.SIGNED,
+    )
     judged = _judge_weights(
-        _definition(
-            instruments=("ABC",),
-            exchange="limited",
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.SIGNED,
-        ),
-        Workspace.open(tmp_path),
-        FailureSource(key_path="runs.x"),
+        signed, FailureSource(key_path="runs.x"), RunFacts(Workspace.open(tmp_path), signed)
     )
 
-    assert [failure.code for failure in judged] == ["check.weights.venue_conflict"], (
+    assert [failure.code for failure in judged] == ["weights.venue_conflict"], (
         "a signed account on a long-only listing was not caught, so the judgment is a no-op"
     )
     assert "long_only" in (judged[0].observed or "")
@@ -588,40 +728,64 @@ def test_check_creates_no_workspace_where_none_existed(tmp_path: Path) -> None:
 def test_this_verb_adds_no_second_name_for_a_defect_that_has_one(tmp_path: Path) -> None:
     """`check` is not a second judge, and the reported codes are the evidence.
 
-    An unopenable workspace already refuses with the framework's own code. Re-coding it as
-    `run.check.*` would rename a defect a reader may already have handling for, so the verb passes
-    that body through untouched. Its own two codes exist only for the case with no code at all --
-    a bare framework invariant that would otherwise surface as `stage: unhandled`.
+    An unopenable workspace already refuses with the framework's own code. Re-coding it as one of
+    this verb's own would rename a defect a reader may already have handling for, so the verb
+    passes that body through untouched. Its own two codes exist only for the case with no code at
+    all -- a bare framework invariant that would otherwise surface as an `unhandled` failure.
     """
     body = check("gone", tmp_path / "none")
     reported = {entry["code"] for entry in body["failures"]}
 
     assert reported, "the workspace judgment failed, so something must have been reported"
-    assert not any(code.startswith("run.check.") for code in reported), (
+    assert not reported & {"run.declaration_invalid", "preflight.refused"}, (
         f"check re-coded a refusal that already had a code: {sorted(reported)}"
     )
 
     assert len(set(CODES)) == len(CODES)
-    for code in CODES:
-        assert code.startswith(("check.", "run.check.")), (
-            f"{code} is not in this verb's namespace"
-        )
+
+    import inspect
+    import re
 
     from vqapr.cli.check import SIMULATION_CODES
+    from vqapr.run.preflight import checks as judgments_module
+    from vqapr.run.preflight.checks import JUDGMENT_BLOCKED, JUDGMENT_CODES
 
-    # One counted set. Record 148 closed the spec-file door: a datamodel is a `runs:` entry and
-    # its judgments (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
-    # nine `check.materialize.*` codes a spec used to settle are gone rather than merged.
-    assert len(SIMULATION_CODES) == 8, (
-        "a run settles exactly eight judgments; adding a ninth is a decision, not a detail"
+    # One set, owned by the judges. `check` used to hold a hand-written copy of the codes
+    # `run/preflight/checks.py` raises and pin its length here; the copy drifted when a judge was added
+    # (`datamodel.output_registered`) and the pin kept certifying the stale count. Record
+    # 148 closed the spec-file door: a datamodel is a `runs:` entry and its judgments
+    # (`check.datamodel.*`) are made by the same phases as a strategy run's, so the
+    # `check.materialize.*` codes a spec used to settle are gone rather than merged.
+    assert frozenset(JUDGMENT_CODES) == SIMULATION_CODES, (
+        "check must publish the judges' own list, not a copy of it"
     )
+    assert len(set(JUDGMENT_CODES)) == len(JUDGMENT_CODES)
     assert not any(code.startswith("check.materialize.") for code in CODES), (
         "the materialization spec's judgment set retired with the spec file (record 148)"
     )
-    assert set(CODES) == set(SIMULATION_CODES) | {
-        "run.check.declaration_invalid",
-        "run.check.preflight_refused",
+    assert set(CODES) == set(JUDGMENT_CODES) | {
+        "run.declaration_invalid",
+        "preflight.refused",
     }, "CODES must be exactly the judgment set plus the two framework-invariant codes"
+    assert JUDGMENT_BLOCKED not in CODES, (
+        "check reports a judgment that could not answer as blocked, never as a failure, so it "
+        "cannot emit require_judged's code"
+    )
+
+    # The tuple cannot drift from the judges: every code constant spelled at module level in the
+    # judgments module -- which, by construction, is the constant each judge raises through --
+    # must be a member. A tenth judge added with a constant but no line in `JUDGMENT_CODES`
+    # fails here rather than in a reader's handling. The codes lost their `check.` prefix with
+    # record `171`, so the shape matched is `NAME = "<subject>.<detail>"`, less the blocked code.
+    spelled = set(
+        re.findall(r'^[A-Z_]+ = "([a-z_]+\.[a-z_.]+)"$', inspect.getsource(judgments_module), re.M)
+    ) - {JUDGMENT_BLOCKED}
+    assert spelled, "the regex found no codes, so it proves nothing about drift"
+    published = set(JUDGMENT_CODES)
+    assert spelled == published, (
+        f"spelled in run/preflight/checks.py but not published: {sorted(spelled - published)}; "
+        f"published but not spelled: {sorted(published - spelled)}"
+    )
 
 
 def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(
@@ -629,12 +793,14 @@ def test_a_run_with_one_defect_reports_it_alone_and_a_repaired_run_is_clean(
 ) -> None:
     """The other direction: a run that carries nothing wrong is certified, not merely tolerated."""
     space = Workspace.open(workspace)
-    Workspace.open(workspace).register_dataset(
-        replace(
-            space.dataset("prices"),
-            dataset_id="full",
-            fields={"close": "close", "volume": "volume"},
-        ),
-        space.source("prices-source"),
-    )
-    assert "check.field.absent" in {entry["code"] for entry in check(RUN, workspace)["failures"]}
+    with Workspace.transaction(workspace) as t:
+        t.register_dataset(
+            replace(
+                space.dataset("prices"),
+                dataset_id="full",
+                fields={"close": "close", "volume": "volume"},
+                field_types={"close": "DOUBLE", "volume": "INTEGER"},
+            ),
+            space.source("prices-source"),
+        )
+    assert "field.absent" in {entry["code"] for entry in check(RUN, workspace)["failures"]}

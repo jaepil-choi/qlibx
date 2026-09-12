@@ -27,7 +27,7 @@ krx spelling      (q != quantize(q)) -> refuse 0.05: False    <- accepts below i
 KRX itself was safe only because its constructor forbids fractional listings, so the path was
 unreachable *on that venue*. Any venue reusing the shorter spelling with a divisible instrument
 would silently accept orders under its declared minimum. This is precisely the drift
-`docs/issues/002` predicted from duplicated validation.
+`docs/issues/archive/002` predicted from duplicated validation.
 
 ### 2. A venue-specific field would not have reached the fingerprint
 

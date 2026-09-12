@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
+from pydantic import BaseModel
 
 # The showcase's own directory is not guaranteed to be on sys.path - an acceptance
 # test importing this module runs from the repo root. Locate it explicitly.
@@ -24,20 +25,18 @@ from vqapr.domain.errors import VqaprError
 from vqapr.public import (
     AccountMode,
     AccountSnapshot,
-    ComponentKind,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
-    component_ref,
-    preflight_run,
-    register_component,
+    freeze,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_instruments,
+    register_strategy_model,
     run,
 )
 
@@ -46,8 +45,8 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 OUTPUTS = ROOT / "outputs"
 PROJECT = OUTPUTS / "project"
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 SESSIONS = (date(2024, 3, 5), date(2024, 3, 6), date(2024, 3, 7))
 KST = "Asia/Seoul"
@@ -83,7 +82,8 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     observation_target = observation.as_posix()
     con = duckdb.connect()
     try:
-        con.execute(f"""COPY (SELECT * FROM (VALUES
+        con.execute(f"""COPY (SELECT trade_at, instrument, is_tradable, CAST(close AS DOUBLE) AS close
+        FROM (VALUES
           (TIMESTAMPTZ '2024-03-05 10:00:00+09', 'A', true, 98.0),
           (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', true, 100.0),
           (TIMESTAMPTZ '2024-03-06 10:00:00+09', 'A', true, 101.0),
@@ -100,8 +100,11 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
           WHERE EXTRACT(hour FROM trade_at) = 15
         ) TO '{canonical_target}' (FORMAT PARQUET)""")
         # The observation dataset the strategy declares. Its instants are session closes, so
-        # the 04:00 callback on day N sees day N-1's close and nothing later.
-        con.execute(f"""COPY (SELECT * FROM (VALUES
+        # the 04:00 callback on day N sees day N-1's close and nothing later. The close is a
+        # DOUBLE on purpose: a bare `100.0` literal is DECIMAL to duckdb, and a DECIMAL column
+        # cannot be declared as a dataset field (issue 088).
+        con.execute(f"""COPY (SELECT available_at, instrument, CAST(close AS DOUBLE) AS close
+        FROM (VALUES
           (TIMESTAMPTZ '2024-03-04 15:30:00+09', 'A', 99.0),
           (TIMESTAMPTZ '2024-03-05 15:30:00+09', 'A', 100.0),
           (TIMESTAMPTZ '2024-03-06 15:30:00+09', 'A', 103.0),
@@ -113,23 +116,41 @@ def _write_parquets() -> tuple[Path, Path, Path, Path]:
     return execution, invalid, canonical, observation
 
 
-def _execution_input(input_id: str, path: Path) -> ExecutionInputRegistration:
-    return ExecutionInputRegistration.of(
-        input_id,
-        ExecutionTableSpec(
-            source=SourceSpec.of(f"{input_id}-source", path),
-            trade_at_field="trade_at",
-            instrument_field="instrument",
-            is_tradable_field="is_tradable",
-            price_fields={"close": "close"},
-        ),
-        FillConvention(FillSelector.NEXT_ELIGIBLE, time(15, 30), KST, "close"),
+def _venue_dataset(dataset_id: str) -> DatasetRegistration:
+    """The venue table as a dataset with an execution role (record 185).
+
+    `trade_at` is the instant a row is a fact about, the role names the tradable flag, and
+    the numeric fields are the prices the venue published. Which one a run fills at is the
+    run's own `execution.fill.trade_price`, so this table serves any fill without being
+    registered twice.
+    """
+    return DatasetRegistration.of(
+        dataset_id,
+        f"{dataset_id}-source",
+        instrument_field="instrument",
+        available_at="trade_at",
+        grain="instrument_instant",
+        key_fields=("trade_at", "instrument"),
+        fields={"close": "close", "is_tradable": "is_tradable"},
+        field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+        execution={"is_tradable": "is_tradable"},
+    )
+
+
+def _fill(dataset_id: str) -> RunExecution:
+    """This run's fill on the venue table: the next eligible 15:30 close after a decision."""
+    return RunExecution(
+        dataset=dataset_id,
+        trade_price="close",
+        fill=RunFill(at=time(15, 30)),
     )
 
 
 def _json_value(value: Any) -> Any:
     if is_dataclass(value):
         return {field.name: _json_value(getattr(value, field.name)) for field in fields(value)}
+    if isinstance(value, BaseModel):
+        return {name: _json_value(getattr(value, name)) for name in type(value).model_fields}
     if isinstance(value, dict):
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list, frozenset)):
@@ -143,24 +164,45 @@ def _json_value(value: Any) -> Any:
     return value
 
 
+MARKET_CLOCK_KINDS = ("MARKED", "MONITORED")
+"""Lifecycle kinds the MARKET clock writes (design §3.1): one per execution instant, so their
+count is the table's density -- exactly what `UC-TIME-002` lets vary."""
+
+
 def _signature(result: Any) -> dict[str, Any]:
     """What a run is, reduced to values two runs can be compared on.
 
-    `SimulationResult` carries object identity - occurrence ids minted per run, trace objects -
-    so comparing the results themselves would report a difference that means nothing. These are
-    the economic facts: how the account ended and how many of each lifecycle event happened.
+    `SimulationResult` carries object identity - event ids minted per run, trace objects -
+    so comparing the results themselves would report a difference that means nothing. Two
+    halves (design §3): `outcome` is what the SCHEDULE clock and the account say -- how the
+    account ended, how many decisions were made and settled -- and must not move with the
+    execution table's density (`UC-TIME-002`); `market_clock` is how many instants the book was
+    valued at, which IS the table's density and moves with it on purpose (record `206`).
     """
     final_state = result.final_state
     snapshot = final_state.account.snapshot
     lifecycle: dict[str, int] = {}
     for entry in final_state.lifecycle_trace:
         lifecycle[entry.kind.value] = lifecycle.get(entry.kind.value, 0) + 1
+    decisions = sum(1 for trace in result.events if type(trace).__name__ == "EventTrace")
     return {
-        "account_version": snapshot.version,
-        "cash": str(snapshot.cash),
-        "positions": {str(key): str(value) for key, value in sorted(snapshot.positions.items())},
-        "lifecycle": dict(sorted(lifecycle.items())),
-        "occurrences": len(result.occurrences),
+        "outcome": {
+            "account_version": snapshot.version,
+            "cash": str(snapshot.cash),
+            "positions": {
+                str(key): str(value) for key, value in sorted(snapshot.positions.items())
+            },
+            "lifecycle": {
+                kind: count
+                for kind, count in sorted(lifecycle.items())
+                if kind not in MARKET_CLOCK_KINDS
+            },
+            "decisions": decisions,
+        },
+        "market_clock": {
+            "valuations": lifecycle.get("MARKED", 0),
+            "instants": len(result.events) - decisions,
+        },
     }
 
 
@@ -186,7 +228,7 @@ def _report(trace: dict[str, Any]) -> str:
     density = html.escape(json.dumps(trace["density_invariance"], indent=2, default=str))
     invalid = html.escape(json.dumps(trace["invalid_registration"], indent=2, default=str))
     return f"""<!doctype html><meta charset="utf-8">
-<title>VQAPR execution input registration</title>
+<title>VQAPR venue dataset registration</title>
 <style>
 body{{font-family:system-ui;max-width:1100px;margin:2rem auto}}
 pre,table{{border:1px solid #ccc;padding:1rem;overflow:auto}}
@@ -195,13 +237,13 @@ td,th{{padding:.4rem;border:1px solid #ddd}}
 <h1>Execution input registration: declare, register, run</h1>
 <p>Every VQAPR import in this entry point comes from <code>vqapr.public</code>, the surface
 the shipped CLI stands on. The authored strategy in <code>show001_models.py</code> implements
-<code>vqapr.authoring.StrategyModel</code> and returns only <code>Hold</code>/<code>Rebalance</code>
+<code>vqapr.public.StrategyModel</code> and returns only <code>Hold</code>/<code>Rebalance</code>
 - the loader adapts it and the framework stamps every identity fact (intent id, strategy id,
 source refs, account version) itself.</p>
 <h2>Execution input rows (10:00 rows are deliberately non-selected)</h2>{execution_rows}
 <h2>Run summary</h2><pre>{run_trace}</pre>
 <h2>Density invariance</h2><pre>{density}</pre>
-<h2>Invalid execution input rejection</h2><pre>{invalid}</pre>
+<h2>Invalid venue table refused at registration</h2><pre>{invalid}</pre>
 <p>Verified against {VERIFIED_AGAINST}; last verified {LAST_VERIFIED_AT}.</p>"""
 
 
@@ -221,80 +263,103 @@ def main() -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("showcase-observation", observation_path),
     )
-    register_execution_input(PROJECT, _execution_input("krx-daily", execution_path))
+    register_dataset(
+        PROJECT,
+        _venue_dataset("krx-daily"),
+        SourceSpec.of("krx-daily-source", execution_path),
+    )
 
-    strategy_ref = component_ref(
-        "showcase-strategy", ComponentKind.STRATEGY_MODEL, strategy_path, "ShowcaseStrategy"
+    register_strategy_model(PROJECT, "showcase-strategy", strategy_path, "ShowcaseStrategy")
+    # What the one name IS, declared before the run that orders it (design §6.2).
+    register_instruments(PROJECT, {"A": "stock"})
+    register_exchange(
+        PROJECT, "showcase-exchange", ROOT / "show001_exchange.py", "ShowcaseExchange",
     )
-    exchange_ref = component_ref(
-        "showcase-exchange",
-        ComponentKind.EXCHANGE,
-        ROOT / "show001_exchange.py",
-        "ShowcaseExchange",
-    )
-    for reference in (strategy_ref, exchange_ref):
-        register_component(PROJECT, reference)
 
 
     definition = RunDefinition(
         run_id="show001",
         # The legacy showcase generated a Constraint whose methods were unconditionally-passing
         # stubs projecting trivial [0, 1] bounds. It demonstrated no economic behaviour, so the
-        # strategy entry names no constraints rather than an inert one authored to keep a field
+        # run declares no compliance rule rather than an inert one authored to keep a field
         # non-empty. See README.
-        strategies=(StrategyEntry("showcase-strategy"),),
-        sessions=tuple(SESSIONS),
+        strategy=StrategyEntry("showcase-strategy"),
         timezone=KST,
-        at=time(4, 0),
+        schedule=RunSchedule(every="1d", at=(time(4, 0),)),
         exchange="showcase-exchange",
-        execution_input_id="krx-daily",
+        execution=_fill("krx-daily"),
         start=datetime.fromisoformat(f"2024-03-05T00:00:00{OFFSET}"),
         end=datetime.fromisoformat(f"2024-03-07T23:00:00{OFFSET}"),
         initial_account_snapshot=AccountSnapshot(0, Decimal("100"), {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=("A",),
+        writes="show001-weights",
     )
 
     # --- One real run -------------------------------------------------------------------
-    dense_summary = _signature(run(PROJECT, preflight_run(PROJECT, definition)).result())
+    dense_summary = _signature(run(PROJECT, freeze(PROJECT, definition)).result())
 
     # --- Density invariance -------------------------------------------------------------
     # Same registered declaration, only the physical execution parquet's non-selected 10:00
-    # rows differ from the canonical trim. Nothing is re-registered: the registration names a
-    # path, and this rewrites what is at that path.
+    # rows differ from the canonical trim. The registration names a path; this rewrites what
+    # is at that path and registers THE SAME DECLARATION again (record 234): a run reads only
+    # the bytes registration measured, so the rewritten file is measured once more and the
+    # declaration is unchanged.
     dense_bytes = execution_path.read_bytes()
     shutil.copyfile(canonical_path, execution_path)
     try:
+        register_dataset(
+            PROJECT, _venue_dataset("krx-daily"), SourceSpec.of("krx-daily-source", execution_path)
+        )
+        # The same run again, deliberately: its first pass published `show001-weights`, and a
+        # run replaces its own output the way it replaces its own record (design §2).
         canonical_summary = _signature(
-            run(PROJECT, preflight_run(PROJECT, definition)).result()
+            run(PROJECT, freeze(PROJECT, definition), replace_record=True).result()
         )
     finally:
         execution_path.write_bytes(dense_bytes)
+        register_dataset(
+            PROJECT, _venue_dataset("krx-daily"), SourceSpec.of("krx-daily-source", execution_path)
+        )
 
     dense_signature = _json_value(dense_summary)
     canonical_signature = _json_value(canonical_summary)
-    if dense_signature != canonical_signature:
+    if dense_signature["outcome"] != canonical_signature["outcome"]:
         raise AssertionError(
             "non-selected execution row density changed outcome: "
-            f"{dense_signature} != {canonical_signature}"
+            f"{dense_signature['outcome']} != {canonical_signature['outcome']}"
+        )
+    # The other half moves BY DESIGN (§3, record `206`): the extra 10:00 rows are extra points
+    # of the market clock, and the book is valued at each of them.
+    if dense_signature["market_clock"]["valuations"] <= canonical_signature["market_clock"]["valuations"]:
+        raise AssertionError(
+            "a denser execution table must value the book at more instants: "
+            f"{dense_signature['market_clock']} vs {canonical_signature['market_clock']}"
         )
 
-    # --- Invalid execution input is rejected without workspace mutation -----------------
+    # --- An invalid venue table is refused at registration, without workspace mutation --
+    # The venue table is a dataset (record 185), so the dataset door judges it: a NaN close
+    # is `dataset.value_not_finite`, the same refusal any dataset gets, and nothing is written.
     workspace_path = PROJECT / ".vqapr" / "workspace.yaml"
     before_invalid = workspace_path.read_bytes()
     try:
-        register_execution_input(PROJECT, _execution_input("invalid-close", invalid_path))
+        register_dataset(
+            PROJECT,
+            _venue_dataset("invalid-close"),
+            SourceSpec.of("invalid-close-source", invalid_path),
+        )
     except VqaprError as error:
         invalid = error.as_dict()
         invalid.pop("correlation_id", None)
     else:
-        raise AssertionError("invalid selected price unexpectedly registered")
+        raise AssertionError("a venue table with a non-finite close unexpectedly registered")
     after_invalid = workspace_path.read_bytes()
     if after_invalid != before_invalid:
-        raise AssertionError("invalid registration mutated the workspace")
+        raise AssertionError("a refused registration mutated the workspace")
 
     con = duckdb.connect()
     try:
@@ -322,7 +387,8 @@ def main() -> None:
             "canonical_signature": canonical_signature,
             "claim": (
                 "Two runs over the same registered declaration differ only by three "
-                "non-selected 10:00 physical execution rows. Their economic signatures "
+                "non-selected 10:00 physical execution rows; the declaration was registered "
+                "again over the rewritten file (record 234). Their economic signatures "
                 "are equal."
             ),
         },
@@ -330,9 +396,9 @@ def main() -> None:
             "workspace_unchanged": True,
             "checked_file": ".vqapr/workspace.yaml",
             "note": (
-                "register_execution_input validates the venue table before it writes, so a "
-                "non-finite selected price on a tradable row is refused with the workspace "
-                "byte-identical to what it was."
+                "the venue table is a dataset, so register_dataset validates it before it "
+                "writes: a non-finite close is refused as dataset.value_not_finite with the "
+                "workspace byte-identical to what it was."
             ),
             "error": invalid,
         },

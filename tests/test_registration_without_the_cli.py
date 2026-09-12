@@ -10,7 +10,7 @@ rather than a layer, and a surface that owns rules costs twice: the rules cannot
 driving argparse, and they cannot be reached from another entry point — so a second entry point
 grows its own copy and the two diverge.
 
-`docs/issues/012` is that divergence, already paid for: `check` refused a spec that `run` completed,
+`docs/issues/archive/012` is that divergence, already paid for: `check` refused a spec that `run` completed,
 because each verb decided for itself.
 """
 
@@ -21,8 +21,8 @@ from pathlib import Path
 
 import yaml
 
-from vqapr.declarations import apply
-from vqapr.workspace import Workspace
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import Workspace
 
 
 def _clear_cli_modules() -> None:
@@ -56,6 +56,7 @@ def test_a_document_registers_with_the_cli_never_imported(
                         "key_fields": ["available_at", "instrument"],
                         "grain": "instrument_instant",
                         "fields": {"close": "close"},
+                        "field_types": {"close": "DOUBLE"},
                     }
                 },
             }
@@ -77,7 +78,7 @@ def test_a_document_registers_with_the_cli_never_imported(
     assert not leaked, (
         "registering a declaration imported the CLI: "
         + ", ".join(leaked)
-        + ". The rules are supposed to live in `vqapr/declarations.py`; if the layer reaches back "
+        + ". The rules are supposed to live in `vqapr/workspace/registration.py`; if the layer reaches back "
         "into the surface, the split moved the code without moving the dependency."
     )
 
@@ -90,7 +91,7 @@ def test_the_declaration_layer_does_not_import_the_surface() -> None:
     """
     import ast
 
-    source = Path("src/vqapr/declarations.py").read_text(encoding="utf-8")
+    source = Path("src/vqapr/workspace/registration.py").read_text(encoding="utf-8")
     reached = sorted(
         node.module
         for node in ast.walk(ast.parse(source))
@@ -99,7 +100,7 @@ def test_the_declaration_layer_does_not_import_the_surface() -> None:
     )
 
     assert not reached, (
-        "`vqapr/declarations.py` imports "
+        "`vqapr/workspace/registration.py` imports "
         + ", ".join(reached)
         + ". It is below both: the CLI renders its result and the facade re-exports its functions. "
         "Reaching up for either is the fan-in record 111 and 112 exist to remove."
@@ -130,6 +131,7 @@ def test_the_surface_still_registers_the_same_document(
                         "key_fields": ["available_at", "instrument"],
                         "grain": "instrument_instant",
                         "fields": {"close": "close"},
+                        "field_types": {"close": "DOUBLE"},
                     }
                 }
             }

@@ -25,7 +25,7 @@ before its producer existed, so this story adds a producer rather than also chan
 **Written inside `flow/materialize.py`, not in the CLI's `_materialize`.** That is the whole
 difference between this and a CLI feature: a public-API caller — the showcases, a notebook,
 `vqapr.materialize` — gets a record too. Putting it in the verb would have reproduced the split that
-`docs/issues/012` records, where `check` and `run` each decided for themselves.
+`docs/issues/archive/012` records, where `check` and `run` each decided for themselves.
 
 **The run id is derived from what was produced, not from a clock.** Two materializations of the same
 dataset over the same evaluation times *are* the same run, and giving them the same id makes a re-run
@@ -36,7 +36,7 @@ question a reader is asking when they list runs.
 **`.lineage.json` is dual-written for one release, and cannot drift.** `_lineage_payload`'s
 `invocations` block is now a *projection* of `_materialization_period`, the same structure the record
 carries. It used to build that block itself, so the record and the lineage file were two computations
-of one set of facts — the shape record `112` argues against and `docs/issues/012` is the cost of.
+of one set of facts — the shape record `112` argues against and `docs/issues/archive/012` is the cost of.
 Retiring the file is a separate owner-gated decision and is **not** in this story.
 
 ## R1's lesson, applied before it could happen again

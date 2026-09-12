@@ -121,16 +121,16 @@ def main() -> int:
 
         heading(2, "스키마 실패는 workspace를 만들지 않고 파싱 가능하게 끝난다")
         bad_schema = child("bad-schema", temporary_root / "bad-schema")
-        show_error("bad_schema", bad_schema, "dataset.register.schema.field_missing")
+        show_error("bad_schema", bad_schema, "dataset.field_missing")
 
         heading(3, "약한 logical key도 workspace를 만들지 않는다")
         weak_key = child("weak-key", temporary_root / "weak-key")
-        show_error("weak_key", weak_key, "dataset.register.key.duplicate")
+        show_error("weak_key", weak_key, "dataset.key_duplicate")
 
         heading(4, "source ID 불일치는 존재하지 않는 path를 열기 전에 실패한다")
         mismatch = child("mismatch", temporary_root / "mismatch")
         assert mismatch["source_path_exists"] is False
-        show_error("source_mismatch", mismatch, "dataset.register.schema.source_mismatch")
+        show_error("source_mismatch", mismatch, "dataset.source_mismatch")
         print(f"source_path_exists={mismatch['source_path_exists']}")
 
     print("\n" + "=" * 78)

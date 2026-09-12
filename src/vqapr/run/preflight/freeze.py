@@ -1,0 +1,750 @@
+"""Resolve a detached, immutable run declaration before any run mutation.
+
+Names in, values out: every registered name a run declares is loaded, checked against what it must
+be, and frozen into the values `frozen.py` defines. What it raises is a refusal the author can act
+on; what it reads is `facts.py`'s, read once; what `vqapr check` collects instead of raising is
+`checks.py`'s.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from decimal import Decimal
+from io import BytesIO
+
+from vqapr.component.compliance.base import Compliance
+from vqapr.component.exchange.base import Exchange
+from vqapr.component.loading import (
+    load_compliance,
+    load_data_model,
+    load_strategy_model,
+)
+from vqapr.component.reference import ComponentRef
+from vqapr.component.strategy.base import StrategyModel
+from vqapr.data.dataset import lookback_fits_grain, require_declared
+from vqapr.data.execution_table import ExecutionTable
+from vqapr.data.requirement import DataRequirement
+from vqapr.data.source import SourceSpec
+from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.errors import Failure, Stage, Status, VqaprError
+from vqapr.domain.fill import ExecutionHorizon
+from vqapr.domain.instants import require_tz_aware
+from vqapr.domain.listing import TradeRule
+from vqapr.domain.memory import ModelMemory
+from vqapr.domain.schedule import Schedule
+from vqapr.domain.wiring import Role
+from vqapr.run.preflight.checks import require_declared_roster
+from vqapr.run.preflight.facts import RunFacts, unresolved_target_failures, unresolved_targets
+from vqapr.run.preflight.frozen import FrozenDataModel, FrozenRun, FrozenSchedule, FrozenStrategy
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    ComplianceSet,
+    DataModelEntry,
+    RunDefinition,
+    StrategyConfig,
+    StrategyEntry,
+)
+
+__all__ = [
+    "freeze",
+]
+
+
+def _freeze_schedule(schedule: Schedule, *, start: datetime, end: datetime) -> FrozenSchedule:
+    """The run's schedule, sliced to `[start, end]`, with its identity carried over.
+
+    The schedule is derived by `derived_schedule` above and nowhere else, and `Schedule.daily`
+    already refuses a session whose wall time does not exist or happens twice; the role check
+    and the offset re-proof this used to make guarded an external supply path that does not
+    exist (record `182`).
+    """
+    return FrozenSchedule(
+        schedule_id=schedule.schedule_id,
+        events=schedule.inclusive_slice(start, end),
+        timezone=schedule.timezone,
+        content_identity=schedule.content_identity,
+    )
+
+
+def _validate_requirement(workspace: Workspace, requirement: object) -> SourceSpec:
+    """Check declared valuation input availability without reading physical source bytes.
+
+    A requirement names a dataset and one field, so both halves are checked here: the dataset must
+    be registered, and it must expose that field.
+    """
+    if not isinstance(requirement, DataRequirement):
+        raise TypeError("requirement must be a DataRequirement")
+    # Measured at registration and unchanged since (record `234`): the only physical question
+    # preflight asks of a source is its identity.
+    registration = workspace.require_verified(str(requirement.dataset_id))
+    require_declared(registration)
+    mismatch = lookback_fits_grain(requirement.lookback, registration.grain)
+    if mismatch is not None:
+        raise TypeError(f"dataset {str(requirement.dataset_id)!r}: {mismatch}")
+    if requirement.field_id not in registration.fields:
+        raise ValueError(
+            f"dataset {str(requirement.dataset_id)!r} does not provide required field: "
+            f"{requirement.field_id}"
+        )
+    return workspace.source(str(registration.source))
+
+
+def _freeze_sources(
+    workspace: Workspace, requirements: tuple[DataRequirement, ...], execution: SourceSpec | None
+) -> tuple[SourceSpec, ...]:
+    sources = [_validate_requirement(workspace, requirement) for requirement in requirements]
+    if execution is not None:
+        registered = workspace.source(str(execution.source_id))
+        if registered != execution:
+            raise ValueError(f"execution source declaration drift for {execution.source_id!r}")
+        sources.append(registered)
+    by_id = {source.source_id: source for source in sources}
+    return tuple(by_id[source_id] for source_id in sorted(by_id))
+
+
+def _validate_initial_model_state(
+    workspace: Workspace,
+    component: ComponentRef,
+    strategy: StrategyModel,
+    memory: ModelMemory,
+) -> bytes:
+    """Stage and round-trip the Flow-owned initial Strategy payload.
+
+    Three separate steps, each with its own `try` and its own name in the refusal
+    (`docs/issues/archive/076`). One block around all three could only say "cannot be staged", so a
+    `load_payload` that hit `EOFError` on an empty source and a `save_payload` that was not
+    deterministic produced the SAME sentence -- and the author could not tell which of their two
+    methods to open. The `from error` chain carries the original; `cli.run.preflight_refusal`
+    renders it.
+    """
+    component_id = component.component_id
+
+    def staged(step: str) -> ValueError:
+        return ValueError(f"strategy initial payload for {component_id!r} cannot be staged: {step}")
+
+    try:
+        strategy.memory = memory
+        payload = BytesIO()
+        strategy.save_payload(payload)
+        frozen_payload = payload.getvalue()
+    except Exception as error:
+        raise staged("save_payload on a fresh instance") from error
+
+    try:
+        restored = load_strategy_model(component, project_root=workspace.project_root)
+        restored.memory = memory
+        restored.load_payload(BytesIO(frozen_payload))
+    except Exception as error:
+        raise staged("load_payload of those bytes on a second fresh instance") from error
+
+    try:
+        round_trip = BytesIO()
+        restored.save_payload(round_trip)
+    except Exception as error:
+        raise staged("save_payload again") from error
+
+    if round_trip.getvalue() != frozen_payload:
+        raise ValueError(
+            f"strategy initial payload for {component_id!r} cannot be staged: "
+            "save_payload again wrote different bytes"
+        )
+    return frozen_payload
+
+
+def _validate_initial_account(
+    snapshot: AccountSnapshot | None,
+    mode: AccountMode | None,
+    exchange: Exchange,
+) -> None:
+    """Prove existing holdings can be closed by the loaded venue."""
+    if snapshot is None or mode is None:
+        return
+
+    failures: list[Failure] = []
+    for instrument_id, quantity in sorted(snapshot.positions.items()):
+        rule = exchange.rules.listings.get(instrument_id)
+        if rule is None:
+            failures.append(
+                Failure.bounded(
+                    "account.unlisted_holding",
+                    "every initial holding must have a listing on the selected Exchange",
+                    observed=instrument_id,
+                    fix=(
+                        f"add a listing for {instrument_id} to the Exchange, or drop it from "
+                        "the initial account"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+            continue
+        assert isinstance(rule, TradeRule)
+        if not rule.permits_position(quantity, -quantity):
+            failures.append(
+                Failure.bounded(
+                    "account.holding_not_closable",
+                    "each initial holding must be closable on the selected Exchange",
+                    observed=f"{instrument_id}: {rule.access.value}",
+                    fix=(
+                        f"permit closing access for {instrument_id} on the Exchange, or drop "
+                        "the holding from the initial account"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+        absolute = abs(quantity)
+        if absolute < rule.minimum_quantity:
+            failures.append(
+                Failure.bounded(
+                    "account.minimum_quantity",
+                    "each initial holding must meet its listing minimum_quantity",
+                    observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"raise the {instrument_id} holding to at least the listing "
+                        f"minimum_quantity ({rule.minimum_quantity}), or drop it from the "
+                        "initial account"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+        if (
+            not rule.fractional_allowed
+            and (absolute / rule.quantity_step).to_integral_value() != absolute / rule.quantity_step
+        ):
+            nearest_step = (absolute / rule.quantity_step).to_integral_value() * rule.quantity_step
+            # ROUND_HALF_EVEN sends anything below half a step to zero, and "round to 0" reads as
+            # a rounding instruction while actually meaning delete the holding. Name the smallest
+            # real position instead, and say the other option out loud.
+            nearest_hint = (
+                f"nearest valid quantity is {nearest_step}"
+                if nearest_step != 0
+                else (
+                    f"the smallest valid position is {rule.quantity_step}; "
+                    "drop the holding if that is more than you meant to hold"
+                )
+            )
+            failures.append(
+                Failure.bounded(
+                    "account.quantity_step",
+                    "each initial holding must align to its listing quantity_step",
+                    observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"round the {instrument_id} holding to a multiple of the listing "
+                        f"quantity_step ({rule.quantity_step}); {nearest_hint}"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+        if not rule.fractional_allowed and absolute != absolute.to_integral_value():
+            failures.append(
+                Failure.bounded(
+                    "account.fractional_quantity",
+                    "each initial holding must satisfy its listing fractional quantity rule",
+                    observed=f"{instrument_id}: {absolute}",
+                    fix=(
+                        f"round the {instrument_id} holding to a whole quantity, or set the "
+                        "listing's fractional_allowed to permit fractional holdings"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+        if mode is AccountMode.LONG_ONLY and quantity < Decimal("0"):
+            failures.append(
+                Failure.bounded(
+                    "account.mode",
+                    "a long-only initial account must not contain short holdings",
+                    observed=f"{instrument_id}: {quantity}",
+                    fix=(
+                        f"remove the short {instrument_id} holding from the initial account, "
+                        "or declare the account mode as not long-only"
+                    ),
+                    status=Status.PRECONDITION,
+                )
+            )
+    if failures:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=failures,
+            mutation=False,
+            retry_precondition=("correct the initial account or Exchange listing, then retry"),
+        )
+
+
+def _validate_execution_requirements(exchange: Exchange, execution_table: ExecutionTable) -> None:
+    """Prove the venue's declared regimes have the execution prices they need.
+
+    A venue computes its own regimes -- a KRX price limit is the base price times a declared rate
+    -- so it needs a number the user registered, never a conclusion the user derived. When that
+    number is absent the run is refused *before* it starts, and the message names the feature to
+    switch off rather than only the missing column. Running with the regime silently inert would
+    produce a result that looks like a limit-aware backtest and is not one.
+    """
+    requirements = exchange.execution_requirements()
+    if not requirements:
+        return
+    declared = set(execution_table.table.price_fields)
+    missing = tuple(
+        requirement for requirement in requirements if requirement.price not in declared
+    )
+    if not missing:
+        return
+    raise VqaprError(
+        stage=Stage.FREEZE,
+        failures=[
+            Failure.bounded(
+                code="execution.requirement_missing",
+                status=Status.MISSING,
+                requirement=(
+                    "the execution dataset must declare every price the Exchange requires, "
+                    "or the feature that needs it must be switched off"
+                ),
+                observed=", ".join(
+                    f"{item.feature} needs price {item.price!r}" for item in missing
+                ),
+                fix=(
+                    "register the missing price fields on the execution dataset, or construct "
+                    "the Exchange with the features that need them disabled"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            "register the required execution price, or construct the Exchange with that "
+            "feature disabled, then retry"
+        ),
+    )
+
+
+def _validate_instrument_universe(
+    instruments: tuple[str, ...],
+    exchange: Exchange,
+) -> None:
+    """Prove every instrument the run will trade can be filled by the selected venue.
+
+    Two different problems are separated. An *unlisted* instrument is a missing registration and
+    the fix is to register it. A listed instrument the venue permits **no side** on is a venue
+    judgement -- it publishes the instrument but will not fill it -- and the fix is to remove it
+    from the traded universe and read it as data instead. Reporting both as "unlisted" would invite
+    someone to register a listing that already exists.
+    """
+    listings = exchange.rules.listings
+    missing = tuple(instrument_id for instrument_id in instruments if instrument_id not in listings)
+    untradable = tuple(
+        instrument_id
+        for instrument_id in instruments
+        if instrument_id in listings and not listings[instrument_id].tradable
+    )
+    if not missing and not untradable:
+        return
+    failures: list[Failure] = []
+    if missing:
+        failures.append(
+            Failure.bounded(
+                code="universe.unlisted_instrument",
+                requirement="every frozen run instrument must have an Exchange listing",
+                observed=repr(missing),
+                fix=(
+                    "add an Exchange listing for each missing instrument, or remove it from "
+                    "the run's traded instrument universe"
+                ),
+                status=Status.PRECONDITION,
+            )
+        )
+    if untradable:
+        failures.append(
+            Failure.bounded(
+                code="universe.untradable_listing",
+                requirement="the Exchange must permit a side for every traded instrument",
+                observed=repr(untradable),
+                fix=(
+                    "remove each untradable instrument from the traded universe and read it "
+                    "as data instead, or update the Exchange listing to permit a side"
+                ),
+                status=Status.PRECONDITION,
+            )
+        )
+    raise VqaprError(
+        stage=Stage.FREEZE,
+        failures=failures,
+        mutation=False,
+        retry_precondition="register complete listings or remove unlisted instruments, then retry",
+    )
+
+
+def _require_execution_authority(definition: RunDefinition) -> None:
+    """Refuse a run that declares no execution price.
+
+    An observation dataset is optional: a Strategy may declare no requirement and decide nothing,
+    and a run of it is still a run. **An execution price is not optional.** Every run values its
+    book and fills against the prices a venue published, so the execution dataset is the one
+    registration that is mandatory from the start.
+
+    It is refused here rather than in `RunDefinition`, which is a pure value object built by
+    callers who supply the pairing another way, and rather than in `run()`, which is far too late:
+    this function promises a *run-ready* declaration, so returning a `FrozenRun` that `run()` will
+    reject contradicts its own contract. Late refusal also left
+    `_validate_instrument_universe` and `_validate_initial_account` skipped entirely, so a run
+    could freeze with unlisted instruments and never be told.
+    """
+    if definition.exchange is not None and definition.execution is not None:
+        return
+    raise VqaprError(
+        stage=Stage.FREEZE,
+        failures=[
+            Failure.bounded(
+                code="execution.missing",
+                status=Status.MISSING,
+                requirement=(
+                    "a run must declare an Exchange and an execution dataset with its fill; the "
+                    "execution price is required even when the Strategy reads no observation "
+                    "dataset"
+                ),
+                observed=(f"exchange={definition.exchange!r}, execution={definition.execution!r}"),
+                fix=(
+                    "declare both an Exchange and `execution: {dataset, fill}` on the "
+                    "RunDefinition before calling freeze"
+                ),
+            )
+        ],
+        mutation=False,
+        retry_precondition=(
+            "register the venue table as a dataset with an execution role and declare it "
+            "with its Exchange, then retry"
+        ),
+    )
+
+
+def _validate_execution_targets(
+    execution_table: ExecutionTable,
+    strategy_schedule: FrozenSchedule,
+    *,
+    horizon: ExecutionHorizon,
+    end: datetime,
+) -> None:
+    """Prove every strategy callback can bind an accepted intent before the run starts.
+
+    A callback may return ``Hold``, but preflight cannot assume that it will. If an
+    event has no exact target under the fill rule, an intent accepted there would fail only
+    after every earlier callback had already mutated account state. The horizon, the rule and
+    the callback instants are all frozen facts, so that refusal belongs here.
+
+    The horizon is handed in, cut once per command from the instants the workspace read for the
+    schedule (`bound_execution_horizon`). Calling ``select_target`` without it would rescan the
+    execution table once per event -- both slower and vulnerable to observing different
+    bytes while preflight is supposed to be proving one run.
+    """
+    unresolved = unresolved_targets(
+        execution_table, strategy_schedule.events, end=end, horizon=horizon
+    )
+    if not unresolved:
+        return
+
+    raise VqaprError(
+        stage=Stage.FREEZE,
+        failures=unresolved_target_failures(
+            unresolved,
+            execution_table.fill,
+            code="execution.target_outside_horizon",
+            requirement=(
+                "every strategy event must have an execution instant after it that the "
+                "fill rule admits, inside the run horizon"
+            ),
+            subject=f"fill={execution_table.fill.describe()}, end={end.isoformat()}",
+            end=end,
+        ),
+        mutation=False,
+        retry_precondition=(
+            "extend the run end through the missing execution instant, correct the execution "
+            "table, or loosen the fill rule, then retry"
+        ),
+    )
+
+
+def _freeze_strategy(
+    workspace: Workspace,
+    entry: StrategyEntry,
+    *,
+    compliance: tuple[str, ...],
+    decide: Schedule,
+    execution_table: ExecutionTable,
+    horizon: ExecutionHorizon,
+    facts: RunFacts,
+    start: datetime,
+    end: datetime,
+) -> FrozenStrategy:
+    """One strategy's layer: its component, the run's Compliance rules, and the decide schedule.
+
+    Every strategy of a run is called on the run's sessions at `at` (record `148`); the
+    binding that used to be registered per strategy is derived here. The strategy is the
+    instance the judgments already loaded (`facts`); its initial state is still proved on a
+    second fresh instance (`_validate_initial_model_state`, `docs/issues/archive/076`).
+    """
+    registered = workspace.component(entry.component_id)
+    if registered.kind is not Role.STRATEGY_MODEL:
+        raise ValueError(
+            f"strategy {entry.component_id!r} is registered as {registered.kind.value}, not as "
+            "a strategy"
+        )
+    config = StrategyConfig(registered, decide.schedule_id)
+    loaded_strategy = facts.component(entry.component_id, load_strategy_model)
+    initial_payload = _validate_initial_model_state(
+        workspace, config.component, loaded_strategy, entry.initial_model_memory
+    )
+    rules = tuple(_registered_compliance(workspace, name) for name in compliance)
+    strategy_requirements = tuple(loaded_strategy.requirements())
+    loaded_rules: tuple[Compliance, ...] = tuple(
+        facts.component(name, load_compliance) for name in compliance
+    )
+    compliance_requirements = tuple(
+        requirement for rule in loaded_rules for requirement in rule.requirements()
+    )
+    schedule = _freeze_schedule(decide, start=start, end=end)
+    _validate_execution_targets(execution_table, schedule, horizon=horizon, end=end)
+    return FrozenStrategy(
+        config=config,
+        compliance=ComplianceSet(rules),
+        schedule=schedule,
+        requirements=strategy_requirements,
+        compliance_requirements=compliance_requirements,
+        initial_model_memory=entry.initial_model_memory,
+        initial_payload=initial_payload,
+    )
+
+
+def _refuse_taken_output(workspace: Workspace, *, run_id: str, writes: str) -> None:
+    """A run writes a dataset that does not exist yet -- either kind, one rule (design §2).
+
+    Asked here rather than after the last session: a run that computed for an hour and then found
+    its name taken would have wasted the hour, and `check` asks the same question for the same
+    reason (`_judge_outputs`). Re-running a run whose output stands is done by withdrawing the
+    output first (`vqapr rm dataset`), which is how a produced dataset is told from an authored
+    one: only the former names a producer.
+    """
+    taken = next((item for item in workspace.datasets if str(item.dataset_id) == writes), None)
+    # The run's own product is not a taken name: it stands from an earlier run of THIS run,
+    # and whether to replace it is `run`'s question (`replace_record`), the same as its record.
+    # What is refused here is a name that belongs to someone else -- authored, or another run's.
+    if taken is not None and taken.produced_by != run_id:
+        raise VqaprError(
+            stage=Stage.FREEZE,
+            failures=[
+                Failure.bounded(
+                    code="run.output_registered",
+                    status=Status.CONFLICT,
+                    requirement="a run writes a dataset that does not exist yet",
+                    observed=f"{writes!r} is already registered",
+                    fix=(
+                        f"declare a new `writes` for run {run_id!r}, or withdraw the existing "
+                        f"{writes} first: vqapr rm dataset {writes}"
+                    ),
+                )
+            ],
+            mutation=False,
+            retry_precondition="choose a new `writes`, or withdraw the dataset, then retry",
+        )
+
+
+def _freeze_datamodel(
+    workspace: Workspace,
+    entry: DataModelEntry,
+    *,
+    decide: Schedule,
+    facts: RunFacts,
+    start: datetime,
+    end: datetime,
+) -> FrozenDataModel:
+    """One datamodel's layer: its component, the run's sessions sliced, and its output.
+
+    Refuses an output dataset id that is already registered, here rather than after the last
+    session: a run that computed for an hour and then found its name taken would have wasted
+    the hour, and `check` asks the same question for the same reason.
+    """
+    registered = workspace.component(entry.component_id)
+    if registered.kind is not Role.DATA_MODEL:
+        raise ValueError(
+            f"datamodel {entry.component_id!r} is registered as {registered.kind.value}, not as "
+            "a datamodel"
+        )
+    model = facts.component(entry.component_id, load_data_model)
+    schedule = _freeze_schedule(decide, start=start, end=end)
+    return FrozenDataModel(
+        component=registered,
+        schedule=schedule,
+        value_fields=entry.value_fields,
+        requirements=tuple(model.requirements()),
+        initial_model_memory=entry.initial_model_memory,
+    )
+
+
+def _registered_compliance(workspace: Workspace, component_id: str) -> ComponentRef:
+    ref = workspace.component(component_id)
+    if ref.kind is not Role.COMPLIANCE:
+        raise ValueError(
+            f"compliance rule {component_id!r} is registered as {ref.kind.value}, not as a "
+            "compliance rule"
+        )
+    return ref
+
+
+def _registered_exchange(workspace: Workspace, component_id: str) -> ComponentRef:
+    ref = workspace.component(component_id)
+    if ref.kind is not Role.EXCHANGE:
+        raise ValueError(
+            f"exchange {component_id!r} is registered as {ref.kind.value}, not as an exchange"
+        )
+    return ref
+
+
+def freeze(
+    workspace_or_root: Workspace | str,
+    definition: RunDefinition,
+    facts: RunFacts | None = None,
+) -> FrozenRun:
+    """Freeze one workspace snapshot into a run-ready declaration.
+
+    The run layer is resolved once -- venue, execution dataset, sessions, universe, account --
+    and each strategy the run names is frozen on top of it (design §4.1). This proves
+    that every callback of every strategy has somewhere to execute before any account mutates,
+    and collects the union of everything the strategy and the compliance rules read: that union
+    is the panel set the run will build.
+
+    *Run-ready* is the promise, so a declaration carrying no execution price is refused here
+    rather than frozen and rejected later by `run()`.
+    """
+    workspace = (
+        workspace_or_root
+        if isinstance(workspace_or_root, Workspace)
+        else Workspace.open(workspace_or_root)
+    )
+    if not isinstance(definition, RunDefinition):
+        raise TypeError("definition must be a RunDefinition")
+    # The facts the judgments read, when they were asked first (`verify.preflight`); otherwise
+    # this freeze reads them for itself, once.
+    facts = facts if facts is not None else RunFacts(workspace, definition)
+    if definition.datamodel is not None:
+        return _preflight_datamodel_run(workspace, definition, facts)
+    _require_execution_authority(definition)
+    if definition.start is None or definition.end is None:
+        raise ValueError("preflight requires aware start and end bounds")
+    start = require_tz_aware(definition.start, name="start")
+    end = require_tz_aware(definition.end, name="end")
+    if start.astimezone(UTC) > end.astimezone(UTC):
+        raise ValueError("start must not be after end")
+
+    # The one schedule the run declares by its sessions and wall time (record `148`).
+    decide = facts.schedule()
+
+    # Unconditional: `_require_execution_authority` has already refused a definition without
+    # them, so the universe and account checks below can no longer be skipped by omission.
+    exchange = _registered_exchange(workspace, definition.exchange or "")
+    # The venue needs to know what every ordered id IS (design §6.2). Which ids get ordered is
+    # the strategy's to decide at run time; that NOTHING is declared is knowable now.
+    require_declared_roster(workspace, run_id=definition.run_id)
+    loaded_exchange = facts.exchange()
+    execution_table = facts.execution_table()
+    horizon = facts.horizon()
+    _validate_execution_requirements(loaded_exchange, execution_table)
+    _validate_instrument_universe(definition.instruments, loaded_exchange)
+    _validate_initial_account(
+        definition.initial_account_snapshot, definition.initial_account_mode, loaded_exchange
+    )
+
+    if definition.strategy is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a strategy run declares no strategy")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
+    strategies = (
+        _freeze_strategy(
+            workspace,
+            definition.strategy,
+            compliance=definition.compliance,
+            decide=decide,
+            execution_table=execution_table,
+            horizon=horizon,
+            facts=facts,
+            start=start,
+            end=end,
+        ),
+    )
+    # Valuation subscribes to nothing: it reads the prices the venue already published to fill
+    # against, so it contributes no DataRequirement. The union is what the strategy and the
+    # compliance rules read, deduplicated, in the order first declared.
+    requirements: list[DataRequirement] = []
+    for layer in strategies:
+        for requirement in (*layer.requirements, *layer.compliance_requirements):
+            if requirement not in requirements:
+                requirements.append(requirement)
+    sources = _freeze_sources(workspace, tuple(requirements), execution_table.table.source)
+    datasets_by_id = {
+        requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
+        for requirement in requirements
+    }
+    datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
+
+    return FrozenRun(
+        run_id=definition.run_id,
+        writes=definition.writes,
+        source_digests={
+            str(source.source_id): workspace.source_digest(source) for source in sources
+        },
+        strategy=strategies[0],
+        exchange=exchange,
+        execution=execution_table,
+        start=start,
+        end=end,
+        initial_account_snapshot=definition.initial_account_snapshot,
+        initial_account_mode=definition.initial_account_mode,
+        instruments=definition.instruments,
+        requirements=tuple(requirements),
+        datasets=datasets,
+        sources=sources,
+    )
+
+
+def _preflight_datamodel_run(
+    workspace: Workspace, definition: RunDefinition, facts: RunFacts
+) -> FrozenRun:
+    """Freeze a datamodel run: the same sessions, no venue, no execution dataset, no account.
+
+    What a strategy run proves about its venue and its account does not apply -- a datamodel
+    sees neither (architecture 4.4) -- so the layer is the universe, the period and the sessions,
+    and each datamodel is frozen on top of it with the datasets it reads.
+    """
+    if definition.start is None or definition.end is None:
+        raise ValueError("preflight requires aware start and end bounds")
+    start = require_tz_aware(definition.start, name="start")
+    end = require_tz_aware(definition.end, name="end")
+    if start.astimezone(UTC) > end.astimezone(UTC):
+        raise ValueError("start must not be after end")
+    decide = facts.schedule()
+    if definition.datamodel is None:  # pragma: no cover -- `RunDefinition` refuses this
+        raise ValueError("a datamodel run declares no datamodel")
+    _refuse_taken_output(workspace, run_id=definition.run_id, writes=definition.writes)
+    datamodels = (
+        _freeze_datamodel(
+            workspace, definition.datamodel, decide=decide, facts=facts, start=start, end=end
+        ),
+    )
+    requirements: list[DataRequirement] = []
+    for layer in datamodels:
+        for requirement in layer.requirements:
+            if requirement not in requirements:
+                requirements.append(requirement)
+    sources = _freeze_sources(workspace, tuple(requirements), None)
+    datasets_by_id = {
+        requirement.dataset_id: workspace.dataset(str(requirement.dataset_id))
+        for requirement in requirements
+    }
+    datasets = tuple(datasets_by_id[dataset_id] for dataset_id in sorted(datasets_by_id))
+    return FrozenRun(
+        run_id=definition.run_id,
+        writes=definition.writes,
+        source_digests={
+            str(source.source_id): workspace.source_digest(source) for source in sources
+        },
+        datamodel=datamodels[0],
+        start=start,
+        end=end,
+        instruments=definition.instruments,
+        requirements=tuple(requirements),
+        datasets=datasets,
+        sources=sources,
+    )

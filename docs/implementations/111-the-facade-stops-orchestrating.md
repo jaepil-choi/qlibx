@@ -13,7 +13,7 @@ surface was also its orchestrator.
 Two consequences, neither theoretical:
 
 - **Fan-in.** Every module below it that needed one of those functions had to import the top-level
-  facade to get it — the defect `docs/issues/028` records, where `flow/judgments.py` reached up
+  facade to get it — the defect `docs/issues/archive/028` records, where `flow/judgments.py` reached up
   through `vqapr.public` because that is where `Workspace` was re-exported.
 - **A private consumer.** `cli/run.py:804` imported `_registered_roster` — a **private name** — from
   the documented surface. A private name crossing a module boundary is the surface admitting it is
@@ -63,7 +63,7 @@ the move working as intended rather than incidental churn:
   the counter is named `instants` rather than `formations`. It now reads `evidence/records.py`.
 - `tests/flow/test_a_damaged_roster_pointer_is_not_no_roster.py` (record `103`) imported
   `_registered_roster`; it imports `registered_roster`, and its docstring records the rename so the
-  `docs/issues/042` history stays legible.
+  `docs/issues/archive/042` history stays legible.
 
 ## Baseline regeneration
 

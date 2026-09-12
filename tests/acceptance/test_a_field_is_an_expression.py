@@ -1,4 +1,4 @@
-"""The acceptance criteria of `docs/issues/049`'s ruling, read one at a time.
+"""The acceptance criteria of `docs/issues/archive/049`'s ruling, read one at a time.
 
 The campaign's own measurement is 614x on a Korean statement warehouse
 (`kwam-enhanced-index/vqapr-performance-testbed/`), which this suite cannot carry. What it can
@@ -9,26 +9,25 @@ different is a different model rather than a faster one, so the equality is chec
 anti-join in both directions rather than as a spot comparison.
 
 The other two criteria are the ruling's other halves: a dataset with no instrument axis is not
-narrowed by a run's instrument list (`docs/issues/038`), and a requirement is a field id and a
+narrowed by a run's instrument list (`docs/issues/archive/038`), and a requirement is a field id and a
 lookback and nothing else.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
 
 from vqapr.data.lookback import CalendarLookback, InstantsLookback, RowsLookback
-from vqapr.data.requirements import DataRequirement
+from vqapr.data.requirement import DataRequirement
 from vqapr.data.store import DuckDbObservationStore
-from vqapr.data.windows import ModelWindow
+from vqapr.data.window import ModelWindow
 from vqapr.domain.errors import VqaprError
 from vqapr.public import DatasetRegistration, SourceSpec, register_dataset
-from vqapr.workspace import Workspace
+from vqapr.workspace.registry import Workspace
 
 EVALUATED_AT = datetime(2024, 4, 1, tzinfo=UTC)
 
@@ -93,7 +92,7 @@ def warehouse(tmp_path: Path) -> tuple[Path, Path]:
     long_dir.mkdir()
     wide_dir.mkdir()
     values = ", ".join(
-        f"('{name}', TIMESTAMPTZ '{at} 00:00:00+00', '{code}', {value}, {dump})"
+        f"('{name}', TIMESTAMPTZ '{at} 00:00:00+00', '{code}', {value}::DOUBLE, {dump})"
         for name, at, code, value, dump in _FACTS
     )
     con = duckdb.connect()
@@ -102,13 +101,11 @@ def warehouse(tmp_path: Path) -> tuple[Path, Path]:
             f"""CREATE TABLE facts AS SELECT * FROM (VALUES {values})
                 AS t(instrument, available_at, account_code, value, dump)"""
         )
-        con.execute(
-            f"COPY facts TO '{(long_dir / 'facts.parquet').as_posix()}' (FORMAT PARQUET)"
-        )
+        con.execute(f"COPY facts TO '{(long_dir / 'facts.parquet').as_posix()}' (FORMAT PARQUET)")
         pivoted = ", ".join(f"{_expression(code)} AS {name}" for name, code in ACCOUNTS.items())
         con.execute(
             f"""COPY (SELECT instrument, available_at, {pivoted} FROM facts GROUP BY 1, 2)
-                TO '{(wide_dir / 'facts.parquet').as_posix()}' (FORMAT PARQUET)"""
+                TO '{(wide_dir / "facts.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()
@@ -131,10 +128,11 @@ def _register(root: Path, dataset_id: str, path: Path, *, long: bool) -> None:
             ),
             # Both registrations expose the SAME eight field ids: a field id is unique within a
             # dataset, not across the workspace, and schema parity is what makes the two
-            # comparable at all (`docs/issues/049`, the owner's 2026-09-01 correction).
-            fields={
-                name: (_expression(code) if long else name) for name, code in ACCOUNTS.items()
-            },
+            # comparable at all (`docs/issues/archive/049`, the owner's 2026-09-01 correction).
+            fields={name: (_expression(code) if long else name) for name, code in ACCOUNTS.items()},
+            # An expression's declared type is what it evaluates to: `arg_max` over a DOUBLE
+            # column is a DOUBLE, and the pre-pivoted file carries the same eight DOUBLEs.
+            field_types=dict.fromkeys(ACCOUNTS, "DOUBLE"),
         ),
         SourceSpec.of(f"{dataset_id}-source", path),
     )
@@ -199,7 +197,7 @@ def test_criterion_1_a_long_registration_is_byte_identical_to_the_wide_one(
     # The one cell two download bundles disagree about resolves the same way on both sides, which
     # is the decision the pivot could not avoid and the expression states.
     key = f"A|{datetime(2024, 1, 31, tzinfo=UTC).isoformat()}"
-    assert from_long[key][sorted(ACCOUNTS).index("net_income")] == Decimal("11.5")
+    assert from_long[key][sorted(ACCOUNTS).index("net_income")] == 11.5
     # An instrument that published no rows for a field carries NULL rather than vanishing.
     absent = f"B|{datetime(2024, 1, 31, tzinfo=UTC).isoformat()}"
     assert from_long[absent][sorted(ACCOUNTS).index("operating_cash_flow")] is None
@@ -218,10 +216,10 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'RMRF', 0.01),
-                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'SMB', 0.02),
-                (TIMESTAMPTZ '2024-03-02 00:00:00+00', 'RMRF', 0.03),
-                (TIMESTAMPTZ '2024-03-02 00:00:00+00', 'SMB', 0.04)
+                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'RMRF', 0.01::DOUBLE),
+                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'SMB', 0.02::DOUBLE),
+                (TIMESTAMPTZ '2024-03-02 00:00:00+00', 'RMRF', 0.03::DOUBLE),
+                (TIMESTAMPTZ '2024-03-02 00:00:00+00', 'SMB', 0.04::DOUBLE)
               ) AS t(available_at, factor, value))
               TO '{(factors / "f.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -241,6 +239,7 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
                 "rmrf": "sum(value) FILTER (WHERE factor = 'RMRF')",
                 "smb": "sum(value) FILTER (WHERE factor = 'SMB')",
             },
+            field_types={"rmrf": "DOUBLE", "smb": "DOUBLE"},
         ),
         SourceSpec.of("kimchi-ff5-source", factors),
     )
@@ -260,7 +259,7 @@ def test_criterion_2_a_dataset_with_no_instrument_axis_is_not_narrowed(tmp_path:
     )
 
     batch = window.observations(requirement)
-    assert [row["rmrf"] for row in batch.rows] == [Decimal("0.01"), Decimal("0.03")], (
+    assert [row["rmrf"] for row in batch.rows] == pytest.approx([0.01, 0.03]), (
         "the declared instrument list must not filter a table that has no instrument axis"
     )
     assert all("instrument" not in row for row in batch.rows)
@@ -368,7 +367,7 @@ def test_a_field_the_named_dataset_does_not_expose_is_refused(
         window.observations(requirement)
 
     failure = refused.value.failures[0]
-    assert failure.code == "observation_store.resolve.field_missing"
+    assert failure.code == "store.field_missing"
     assert "net_income" in failure.observed, "the refusal must say what the dataset does expose"
 
 
@@ -394,12 +393,13 @@ def test_a_registration_that_mixes_the_two_shapes_is_refused(
                 grain="instrument_instant",
                 key_fields=("available_at", "instrument", "account_code", "dump"),
                 fields={"summed": _expression("111000"), "raw": "value"},
+                field_types={"summed": "DOUBLE", "raw": "DOUBLE"},
             ),
             SourceSpec.of("mixed-source", long_dir),
         )
 
     failure = refused.value.failures[0]
-    assert failure.code == "dataset.register.schema.projection_unbindable"
+    assert failure.code == "dataset.projection_unbindable"
     assert "row-wise:" in failure.observed and "grouped:" in failure.observed
 
 
@@ -416,7 +416,7 @@ def test_a_field_expression_may_not_carry_its_own_from(tmp_path: Path) -> None:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'A', 100.0)
+                (TIMESTAMPTZ '2024-03-01 00:00:00+00', 'A', 100.0::DOUBLE)
               ) AS t(available_at, instrument, close))
               TO '{(prices / "p.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -435,11 +435,12 @@ def test_a_field_expression_may_not_carry_its_own_from(tmp_path: Path) -> None:
                 grain="instrument_instant",
                 key_fields=("available_at", "instrument"),
                 fields={"tomorrow": "(SELECT max(close) FROM read_parquet('*.parquet'))"},
+                field_types={"tomorrow": "DOUBLE"},
             ),
             SourceSpec.of("peeking-source", prices),
         )
 
-    assert refused.value.failures[0].code == "dataset.register.schema.field_not_an_expression"
+    assert refused.value.failures[0].code == "dataset.field_not_an_expression"
 
 
 def test_a_bounded_grouped_read_returns_the_unbounded_answer(
@@ -484,9 +485,9 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
         stamp = f"TIMESTAMPTZ '{instant.isoformat()}'"
         for code in ("111000", "112000"):
             # DENSE publishes throughout; SPARSE stops after the bound window's first five.
-            facts.append(f"('DENSE', {stamp}, '{code}', {100 + index}.0)")
+            facts.append(f"('DENSE', {stamp}, '{code}', {100 + index}.0::DOUBLE)")
             if index <= 20:
-                facts.append(f"('SPARSE', {stamp}, '{code}', {200 + index}.0)")
+                facts.append(f"('SPARSE', {stamp}, '{code}', {200 + index}.0::DOUBLE)")
 
     source_dir = tmp_path / "long"
     source_dir.mkdir()
@@ -514,6 +515,7 @@ def test_a_bounded_grouped_read_returns_the_unbounded_answer(
                 "net_income": "sum(value) FILTER (WHERE account_code = '111000')",
                 "operating_income": "sum(value) FILTER (WHERE account_code = '112000')",
             },
+            field_types={"net_income": "DOUBLE", "operating_income": "DOUBLE"},
         ),
         SourceSpec.of("facts-source", source_dir),
     )

@@ -18,9 +18,8 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
-from vqapr.authoring import Rebalance
-from vqapr.portfolio.budgets import PortfolioDirection
 from vqapr.portfolio.optimize import QUANTUM
+from vqapr.public import PortfolioDirection, Rebalance
 
 OUTPUTS = Path(__file__).parent / "outputs"
 

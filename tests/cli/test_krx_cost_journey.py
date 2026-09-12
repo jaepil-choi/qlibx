@@ -27,7 +27,7 @@ import duckdb
 import pytest
 
 from vqapr.cli.main import main
-from vqapr.flow.run_records import read_table, strategy_refs
+from vqapr.record import read_table, strategy_refs
 
 _ZONE = ZoneInfo("Asia/Seoul")
 STOCK = "A005930"
@@ -65,7 +65,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
             for name, close in ((STOCK, stock), (ETF, etf))
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT session_date, available_at, instrument, close::DOUBLE AS close
+            FROM (VALUES
 {observed}
             ) AS t(session_date, available_at, instrument, close))
             TO '{observation.as_posix()}' (FORMAT PARQUET)"""
@@ -76,7 +77,8 @@ def _parquets(root: Path) -> tuple[Path, Path]:
             for name, close in ((STOCK, stock), (ETF, etf))
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES
+            f"""COPY (SELECT trade_at, instrument, is_tradable, close::DOUBLE AS close
+            FROM (VALUES
 {traded}
             ) AS t(trade_at, instrument, is_tradable, close))
             TO '{execution.as_posix()}' (FORMAT PARQUET)"""
@@ -90,14 +92,14 @@ _STRATEGY = '''"""Holds whichever name closed highest, so leadership changes for
 
 from decimal import Decimal
 
-from vqapr import authoring as va
+from vqapr import public as vq
 
 
-class Rotate(va.StrategyModel):
+class Rotate(vq.StrategyModel):
     def inputs(self):
         return {
-            "prices": va.DatasetInput(
-                dataset_id="prices", fields=("close",), lookback=va.RowsLookback(rows=1)
+            "prices": vq.DatasetInput(
+                dataset_id="prices", fields=("close",), lookback=vq.RowsLookback(rows=1)
             )
         }
 
@@ -107,9 +109,9 @@ class Rotate(va.StrategyModel):
             for name, value in call.read("prices", "close").latest().items()
         }
         if not latest:
-            return va.Hold(reason="no-observations")
+            return vq.Hold(reason="no-observations")
         winner = max(latest, key=lambda name: latest[name])
-        return va.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
+        return vq.Rebalance.of(long={winner: Decimal(1)}, invested="1.0")
 '''
 
 
@@ -126,21 +128,17 @@ datasets:
     grain: instrument_instant
     key_fields: [available_at, instrument]
     fields: {{close: close}}
-
-execution_inputs:
+    field_types: {{close: DOUBLE}}
   venue-daily:
-    table:
-      source_id: venue-source
-      path: {execution.as_posix()}
-      trade_at_field: trade_at
-      instrument_field: instrument
-      is_tradable_field: is_tradable
-      price_fields: {{close: close}}
-    fill:
-      selector: next_eligible
-      at: "15:30"
-      timezone: Asia/Seoul
-      trade_price: close
+    source_id: venue-source
+    path: {execution.as_posix()}
+    instrument_field: instrument
+    available_at: trade_at
+    grain: instrument_instant
+    key_fields: [trade_at, instrument]
+    fields: {{close: close, is_tradable: is_tradable}}
+    field_types: {{close: DOUBLE, is_tradable: BOOLEAN}}
+    execution: {{is_tradable: is_tradable}}
 """,
         encoding="utf-8",
     )
@@ -167,7 +165,7 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, payload
 
     # The roster: what each id IS. The project's statement, not the venue's.
-    from vqapr.domain.roster_export import export_roster
+    from vqapr.domain.instrument import export_roster
 
     written = export_roster({STOCK: "stock", ETF: "etf"}, tmp_path / "roster")
     roster = tmp_path / "roster.yaml"
@@ -191,7 +189,10 @@ def test_the_krx_scaffold_charges_a_stock_and_exempts_an_etf(
     assert code == 0, emitted
     source = Path(emitted["path"])
     body = source.read_text(encoding="utf-8")
-    assert "krx_listings" in body, "the krx profile builds its trading facts from ids alone"
+    assert "KrxExchange" in body and "INSTRUMENTS" in body, (
+        "the krx profile builds its trading facts from ids alone"
+    )
+    assert "sale_tax_rate" in body, "the rates are the venue's settings, set from config"
     # THE POINT: the emitted venue names no category anywhere. What each instrument is comes from
     # the registered roster at fill time, so there is nothing here to edit and nothing to keep in
     # step. A venue holding its own copy could disagree with the roster, and a fill would then say
@@ -229,14 +230,17 @@ components:
             {
                 "runs": {
                     "krx": {
+                        "writes": "krx-weights",
                         "strategies": {"rotate": {}},
                         # Decide at 04:00 on every session the prices have a row for; the book
                         # is valued at the 15:30 fill it lands on (record 148).
-                        "sessions_from": "prices",
                         "timezone": "Asia/Seoul",
-                        "at": "04:00",
+                        "schedule": {"every": "1d", "at": "04:00"},
                         "exchange": "krx-venue",
-                        "execution_input": "venue-daily",
+                        "execution": {
+                            "dataset": "venue-daily",
+                            "trade_price": "close", "fill": {"at": "15:30"},
+                        },
                         "start": datetime(2024, 3, 5, 0, tzinfo=_ZONE).isoformat(),
                         "end": datetime(2024, 3, 8, 23, tzinfo=_ZONE).isoformat(),
                         "initial_account": {"cash": "1000000", "mode": "long_only"},

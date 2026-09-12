@@ -1,6 +1,6 @@
 # 153 — a judgment that could not look is not a judgment that passed
 
-**Closes:** `docs/issues/077`. **Branch:** `step-02b-077-blocked-is-not-passed`, off `develop @
+**Closes:** `docs/issues/archive/077`. **Branch:** `step-02b-077-blocked-is-not-passed`, off `develop @
 87ffe2c7`. **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`, Step 2b.
 **Authority:** the owner, 2026-09-04 (decision D7).
 

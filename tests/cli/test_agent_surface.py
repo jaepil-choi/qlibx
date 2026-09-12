@@ -26,6 +26,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.skill_prose import installed_prose
 from vqapr import public
 from vqapr.cli.main import _COMMANDS, _DESCRIPTIONS, _SUMMARIES, main
 
@@ -159,19 +160,18 @@ def test_every_skill_action_accepts_the_same_root_override(action: str) -> None:
 
 def test_skill_install_is_inspectable_before_it_writes(tmp_path: Path) -> None:
     """An agent must be able to see where a mutating command would write before it runs."""
-    (tmp_path / ".git").mkdir()
 
     result = _run("--project-root", str(tmp_path), "skill", "install", "--dry-run")
     payload = json.loads(result.stdout.decode("utf-8").strip().splitlines()[-1])
 
     assert payload["ok"] is True
-    assert str(tmp_path) in payload["paths"]["agents"]
+    assert payload["written"], "a dry run that names no file it would write says nothing"
+    assert all(str(tmp_path) in path for path in payload["written"])
     assert not (tmp_path / ".agents").exists(), "a dry run wrote to disk"
 
 
 def test_installing_then_removing_leaves_nothing_behind(tmp_path: Path) -> None:
     """The install must be reversible, or a testbed cannot be reset between measurements."""
-    (tmp_path / ".git").mkdir()
 
     installed = json.loads(
         _run("--project-root", str(tmp_path), "skill", "install")
@@ -180,25 +180,46 @@ def test_installing_then_removing_leaves_nothing_behind(tmp_path: Path) -> None:
         .splitlines()[-1]
     )
     assert installed["ok"] is True
-    assert (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
+    # Not a named path: PRD §11.2 made the skill a set, so the guarantee is that both targets
+    # received entrypoints and that removal takes every one of them back out.
+    for target in (".agents", ".claude"):
+        assert list((tmp_path / target / "skills").rglob("SKILL.md")), f"{target} got no skill"
 
     _run("--project-root", str(tmp_path), "skill", "remove")
 
-    assert not (tmp_path / ".agents/skills/vqapr/SKILL.md").exists()
-    assert not (tmp_path / ".claude/skills/vqapr-skill/SKILL.md").exists()
+    for target in (".agents", ".claude"):
+        assert not list((tmp_path / target).rglob("SKILL.md")), f"{target} kept a skill"
+
+
+def test_both_targets_receive_identical_bytes(tmp_path: Path) -> None:
+    """PRD §11.2: no target is a pointer to another.
+
+    The rule that replaced the thin adapter. A copy that has drifted is now detectable per target
+    (`vqapr skill list`), which is what made a second real copy safe to write.
+    """
+    _run("--project-root", str(tmp_path), "skill", "install")
+
+    def tree(target: str) -> dict[str, bytes]:
+        base = tmp_path / target / "skills"
+        return {
+            path.relative_to(base).as_posix(): path.read_bytes()
+            for path in sorted(base.rglob("*"))
+            if path.is_file() and not path.name.startswith(".")
+        }
+
+    assert tree(".agents") == tree(".claude")
 
 
 def test_the_maintainer_readme_is_not_installed_as_agent_guidance(tmp_path: Path) -> None:
-    """`agent/skill/README.md` addresses whoever maintains that directory.
+    """`agent/skills/README.md` addresses whoever maintains that directory.
 
     Shipping it into the install would give an agent a second document to treat as authority, and
     that document talks about what the directory should contain rather than about using vqapr.
     """
-    (tmp_path / ".git").mkdir()
 
     _run("--project-root", str(tmp_path), "skill", "install")
 
-    installed = {path.name for path in (tmp_path / ".agents/skills/vqapr").iterdir()}
+    installed = {path.name for path in (tmp_path / ".agents" / "skills").rglob("*")}
     assert "SKILL.md" in installed
     assert "README.md" not in installed
 
@@ -246,8 +267,8 @@ def test_a_missing_input_file_is_typed_and_writes_nothing(
     )
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
-    assert payload["failures"][0]["code"] == "cli.input.file_missing"
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["code"] == "argument.file_missing"
     assert "detail" not in payload
     assert "traceback" not in payload
     assert not (tmp_path / ".vqapr").exists(), "a refusal left a side effect behind"
@@ -272,30 +293,30 @@ def test_rerunning_new_refuses_by_name_instead_of_raising(
     code, payload = _envelope(capsys, *argv)
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
-    assert payload["failures"][0]["code"] == "cli.input.file_exists"
+    assert payload["stage"] == "usage"
+    assert payload["failures"][0]["code"] == "argument.file_exists"
     assert "alpha" in payload["failures"][0]["observed"]
 
 
 _RUN_KEYS = (
-    "strategies",
+    "writes",
+    "strategy",
     "instruments",
     "start",
     "end",
-    "sessions_from",
     "timezone",
-    "at",
+    "schedule",
     "exchange",
-    "execution_input",
+    "execution",
     "initial_account",
 )
 """Every key a `runs:` entry declares before `vqapr run` can execute it.
 
-`RunDefinition` tolerates an absent period, venue, execution input and account because other
-callers supply them another way; `run` continues into `preflight_run`, which refuses without them.
-The sessions and the wall time are the run's own since record 148 (`sessions_from` or a literal
-`sessions`, `timezone`, `at`); the template leads with `sessions_from` because a dataset's own
-days are the common case. Pinned as a literal rather than imported: the template is judged
+`RunDefinition` tolerates an absent period, venue, execution dataset and account because other
+callers supply them another way; `run` continues into `freeze`, which refuses without them.
+The schedule clock is the run's own `schedule:` block since the two-clocks campaign (`every`
+with `at`, or with `from`/`to`), expanded over the execution dataset's trading days -- there is
+no day list to declare. Pinned as a literal rather than imported: the template is judged
 against what the reader needs to type, and a constant that moved with the code would make this
 test pass for any template.
 """
@@ -326,7 +347,8 @@ def test_an_emitted_run_declares_every_key_run_requires(
     (run,) = document["runs"].values()
     for key in _RUN_KEYS:
         assert key in run, f"the emitted template does not declare {key}"
-    assert run["strategies"], "a run names at least one strategy"
+    assert run["strategy"]["component"], "a run names the one strategy it executes"
+    assert run["writes"], "a run declares what it writes"
 
 
 def test_an_emitted_run_explains_each_key(tmp_path: Path) -> None:
@@ -354,14 +376,14 @@ def test_a_retired_run_spec_handed_to_run_is_refused_naming_the_runs_section(
     read the file would answer a `strategy:` file, a `datamodel:` file and a typo three ways.
     """
     spec = tmp_path / "thin.yaml"
-    spec.write_text("strategy:\n  component: a\n  agenda_id: b\n", encoding="utf-8")
+    spec.write_text("strategy:\n  component: a\n  schedule_id: b\n", encoding="utf-8")
 
     code, payload = _envelope(capsys, "--project-root", str(tmp_path), "run", str(spec))
 
     assert code == 1
-    assert payload["stage"] == "cli.input"
+    assert payload["stage"] == "usage"
     detail = payload["failures"][0]
-    assert detail["code"] == "cli.input.value_invalid"
+    assert detail["code"] == "argument.value_invalid"
     assert "registered run" in detail["requirement"]
     assert spec.name in detail["observed"]
     for command in ("vqapr new datamodel", "vqapr register", "vqapr run <run-id>"):
@@ -415,10 +437,9 @@ def test_the_installed_skill_requires_proof_of_timezone_localization(tmp_path: P
     so the skill must make one known-instant round-trip part of preparation, not an optional
     debugging trick learned after a failed run.
     """
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "known instant" in text
     assert "round-trip" in text
@@ -438,10 +459,9 @@ def test_the_installed_skill_points_at_the_public_library_surface(tmp_path: Path
     Asserted on the INSTALLED skill rather than the source, because that is the text an agent
     actually reads.
     """
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
 
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "vqapr.public" in text, "the skill still never names the library surface"
     assert "dir(public)" in text or "dir(vqapr.public)" in text, (
@@ -507,7 +527,7 @@ def test_unknown_section_sources_explains_inline_declaration(
     )
 
     assert code == 1
-    assert payload["stage"] == "declaration.read"
+    assert payload["stage"] == "register"
     observed = payload["failures"][0]["observed"]
     assert "inline" in observed.lower() or "pair" in observed.lower()
 
@@ -517,18 +537,19 @@ def test_a_rejected_enum_value_names_every_permitted_one(
 ) -> None:
     """A bad enum value must not arrive as an unhandled KeyError.
 
-    `fill.selector` was a raw `FillSelector[value.upper()]` lookup, so a wrong value crashed with
-    a traceback instead of a refusal. Measured: a reader spent six consecutive attempts on
-    price vocabulary (close, market, vwap, next_open) because the field name reads as "which
-    price" while the members are scheduling words. Guessing cannot converge on a vocabulary the
-    field name argues against, so the refusal has to carry the list.
+    The since-retired `fill.selector` was a raw `Enum[value.upper()]` lookup, so a wrong value
+    crashed with a traceback instead of a refusal, and a reader spent six consecutive guesses on
+    a vocabulary the field name argued against. The closed set that remains on a run is the
+    account mode; the refusal has to carry its list.
     """
-    spec = tmp_path / "ei.yaml"
+    spec = tmp_path / "runs.yaml"
     spec.write_text(
-        "execution_inputs:\n  krx:\n    table:\n      source_id: s\n      path: x.parquet\n"
-        "      trade_at_field: t\n      instrument_field: i\n      is_tradable_field: ok\n"
-        "      price_fields: {close: close}\n    fill:\n      selector: next_open\n"
-        '      at: "15:30"\n      timezone: Asia/Seoul\n      trade_price: close\n',
+        "runs:\n  r:\n    instruments: [A]\n    start: \"2024-03-05T00:00:00+09:00\"\n"
+        "    end: \"2024-03-06T23:00:00+09:00\"\n"
+        "    timezone: Asia/Seoul\n    schedule: {every: 1d, at: \"04:00\"}\n    exchange: venue\n"
+        "    execution:\n      dataset: krx\n      trade_price: close\n"
+        "      fill:\n        at: \"15:30\"\n"
+        "    initial_account: {cash: \"1000\", mode: long_short}\n    strategies: {alpha: {}}\n",
         encoding="utf-8",
     )
 
@@ -538,54 +559,10 @@ def test_a_rejected_enum_value_names_every_permitted_one(
     assert payload["stage"] != "unhandled"
     assert payload["failures"], "a bad enum value produced no structured failure"
     failure = payload["failures"][0]
-    assert failure["code"] == "declaration.read.value_not_permitted"
-    for member in ("same_day", "next_eligible"):
+    assert failure["code"] == "declaration.value_not_permitted"
+    for member in ("long_only", "signed"):
         assert member in failure["requirement"], f"{member} was not named"
     assert failure["examples"], "permitted values must ride as examples"
-
-
-def test_an_execution_input_template_covers_every_required_key(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """No scaffold existed for this kind, and it is the deepest nesting `register` accepts.
-
-    Measured: ten required keys across two nested blocks, discovered one refusal at a time.
-    """
-    import yaml
-
-    target = tmp_path / "ei.yaml"
-    code, _ = _envelope(
-        capsys, "--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)
-    )
-
-    assert code == 0
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    declared = next(iter(document["execution_inputs"].values()))
-    for key in (
-        "source_id",
-        "path",
-        "trade_at_field",
-        "instrument_field",
-        "is_tradable_field",
-        "price_fields",
-    ):
-        assert key in declared["table"], f"table does not declare {key}"
-    for key in ("selector", "at", "timezone", "trade_price"):
-        assert key in declared["fill"], f"fill does not declare {key}"
-
-
-def test_an_execution_input_template_emits_a_valid_selector(tmp_path: Path) -> None:
-    """The emitted value must be one the validator accepts, not a placeholder to guess at."""
-    import yaml
-
-    from vqapr.exchange.conventions import FillSelector
-
-    target = tmp_path / "ei.yaml"
-    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(target)])
-
-    document = yaml.safe_load(target.read_text(encoding="utf-8"))
-    declared = next(iter(document["execution_inputs"].values()))
-    assert declared["fill"]["selector"].upper() in FillSelector.__members__
 
 
 def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
@@ -601,15 +578,15 @@ def test_every_section_a_run_needs_has_a_template(tmp_path: Path) -> None:
     `instruments` and `components` are scaffolded as Python beside their own declaration rather
     than as a YAML template, so they are the two the YAML templates need not carry.
     """
-    from vqapr.cli.new import _DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE
-    from vqapr.declarations import SECTIONS
+    from vqapr.cli.new import _DATASET_TEMPLATE, _RUN_TEMPLATE
+    from vqapr.workspace.registration import SECTIONS
 
-    emitted = "\n".join((_DATASET_TEMPLATE, _EXECUTION_INPUT_TEMPLATE, _RUN_TEMPLATE))
+    emitted = "\n".join((_DATASET_TEMPLATE, _RUN_TEMPLATE))
 
-    assert set(SECTIONS) == {"instruments", "datasets", "execution_inputs", "components", "runs"}
+    assert set(SECTIONS) == {"instruments", "datasets", "components", "runs"}
     for section in set(SECTIONS) - {"instruments", "components"}:
         assert f"{section}:" in emitted, f"no template emits a {section} section"
-    for retired in ("agendas:", "strategy_configs:"):
+    for retired in ("agendas:", "strategy_configs:", "execution_inputs:"):
         assert retired not in emitted, f"{retired} is not a section register reads any more"
 
 
@@ -617,7 +594,7 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
     """The template's own header must say what running the file needs, not only what it declares.
 
     It once read "every required key is shown" while omitting that the components it names had to
-    be bound to an agenda elsewhere -- true about the file, false about what running it needs,
+    be bound to an schedule elsewhere -- true about the file, false about what running it needs,
     which is the harder kind of wrong to catch because nothing about the emitted file looks
     incomplete. There is no elsewhere since record 148: the run carries its own sessions and wall
     time, every strategy is called on every session and decides for itself, and the template has
@@ -629,35 +606,29 @@ def test_the_run_template_says_every_strategy_decides_on_every_session(tmp_path:
 
     text = target.read_text(encoding="utf-8")
 
-    assert "sessions_from" in text and "sessions:" in text, "both ways to say the sessions"
-    assert "EVERY session" in text, "the template does not say every strategy is called"
-    assert "call.evaluation_time" in text and "self.memory" in text, (
-        "the template does not say where a strategy's own cadence lives"
-    )
+    assert "schedule:" in text and "every:" in text, "the schedule clock is the schedule block"
+    assert "trading days" in text, "the template does not say where the days come from"
+    assert "from" in text and "to" in text, "the template does not show the intraday form"
     assert "nothing here registers them" in text
-    for retired in ("agenda", "strategy_configs"):
+    for retired in ("agendas:", "strategy_configs", "sessions_from", "sessions:"):
         assert retired not in text, f"the template still points at {retired!r}, which is gone"
 
 
 def test_generated_schedule_and_execution_defaults_are_causally_compatible(
     tmp_path: Path,
 ) -> None:
-    """Independent templates must not put a decision and its fill at the same instant."""
+    """The run template must not put a decision and its own fill at the same instant."""
     import yaml
 
     runs = tmp_path / "runs.yaml"
-    execution = tmp_path / "execution.yaml"
     main(["--project-root", str(tmp_path), "new", "run", "--out", str(runs)])
-    main(["--project-root", str(tmp_path), "new", "execution-input", "--out", str(execution)])
 
     (run,) = yaml.safe_load(runs.read_text(encoding="utf-8"))["runs"].values()
-    execution_document = yaml.safe_load(execution.read_text(encoding="utf-8"))
-    decide_at = time.fromisoformat(run["at"])
-    fill = next(iter(execution_document["execution_inputs"].values()))["fill"]
-    fill_at = time.fromisoformat(fill["at"])
+    decide_at = time.fromisoformat(run["schedule"]["at"])
+    fill_at = time.fromisoformat(run["execution"]["fill"]["at"])
 
     assert decide_at < fill_at
-    assert "STRICTLY LATER" in execution.read_text(encoding="utf-8")
+    assert "STRICTLY LATER" in runs.read_text(encoding="utf-8")
 
 
 def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:
@@ -676,14 +647,13 @@ def test_generated_run_boundaries_name_actual_instants(tmp_path: Path) -> None:
 
 def test_the_skill_names_launcher_and_immutable_setup_recovery(tmp_path: Path) -> None:
     """The first command and first correction must not require source or prior uv knowledge."""
-    (tmp_path / ".git").mkdir()
     main(["--project-root", str(tmp_path), "skill", "install"])
-    text = (tmp_path / ".agents/skills/vqapr/SKILL.md").read_text(encoding="utf-8")
+    text = installed_prose(tmp_path)
 
     assert "uv run vqapr --help" in text
     # Rewritten twice: `fix/023-narrow-the-provenance-promise` stopped it claiming re-registering
-    # CHANGED CONTENT under the same id is refused (`docs/issues/009` made that false), and
-    # `docs/issues/067` stopped it promising a `register --force` the CLI never had. It still
+    # CHANGED CONTENT under the same id is refused (`docs/issues/archive/009` made that false), and
+    # `docs/issues/archive/067` stopped it promising a `register --force` the CLI never had. It still
     # says one id means one declaration, and now says the edit loop is the same command again.
     assert "one id means one declaration" in text
     assert "register a *different* declaration" not in text
@@ -744,5 +714,5 @@ def test_a_declaration_that_is_not_a_mapping_says_what_it_parsed_as(
     code, payload = _envelope(capsys, "--project-root", str(tmp_path), "register", str(spec))
 
     assert code == 1
-    assert payload["failures"][0]["code"] == "cli.input.not_a_mapping"
+    assert payload["failures"][0]["code"] == "argument.not_a_mapping"
     assert "str" in payload["failures"][0]["observed"]

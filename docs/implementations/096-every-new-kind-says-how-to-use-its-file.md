@@ -1,6 +1,6 @@
 # 096 — Every `vqapr new` kind says how to use the file it wrote
 
-**Closes:** `docs/issues/026-four-of-nine-kinds-do-not-emit-the-key-the-help-promises.md`.
+**Closes:** `docs/issues/archive/026-four-of-nine-kinds-do-not-emit-the-key-the-help-promises.md`.
 **Branch:** `fix/026-declaration-key-on-every-kind`.
 
 ## Why this change exists

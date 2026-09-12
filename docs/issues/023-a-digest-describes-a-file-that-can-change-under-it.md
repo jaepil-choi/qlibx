@@ -2,14 +2,14 @@
 
 **Status:** docs half **closed** by `fix/023-narrow-the-provenance-promise` (docs-only, no
 implementation record). The skill no longer claims re-registering changed content under the same id
-is refused - `docs/issues/009` removed that gate deliberately and `tests/flow/test_edit_loop.py`
+is refused - `docs/issues/archive/009` removed that gate deliberately and `tests/flow/test_edit_loop.py`
 proves it is gone. It now names the two-command edit loop, calls `source_digest` a receipt that
 nothing re-checks, and keeps the one-id-one-declaration rule 009 explicitly retained.
 
 **HELD, not scheduled: 023p** - the `matches`/`differs`/`absent` read-back in `show run`. It remains
 undecided, and the narrowed text is tested NOT to imply it exists. If 023p is ever taken up,
 `tests/cli/test_the_skill_states_provenance_without_promising_a_gate.py` is where the change lands.
-It must never become a gate: `docs/issues/009`'s "What not to do" applies verbatim.
+It must never become a gate: `docs/issues/archive/009`'s "What not to do" applies verbatim.
 
 **Status when filed:** open. Found 2026-08-30 by the final first-time-user journey in
 `kwam-enhanced-index/vqapr-final-testbed/`, against `vqapr-0.2.0a1`. Recorded there as **F-009**,
@@ -17,7 +17,7 @@ It must never become a gate: `docs/issues/009`'s "What not to do" applies verbat
 package does, and the promise is about provenance."*
 **Touches:** the installed skill (two paragraphs quoted below), `src/vqapr/cli/check.py` preflight.
 
-## Read `docs/issues/009` before deciding anything here
+## Read `docs/issues/archive/009` before deciding anything here
 
 009 removed the two component-fingerprint refusals on purpose. Its Decision 2 is titled *"the
 component fingerprint stops refusing"*, and its argument is that editing a registered component is

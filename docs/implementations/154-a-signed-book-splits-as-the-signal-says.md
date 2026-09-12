@@ -1,6 +1,6 @@
 # 154 — a signed book splits as the signal says: `Rebalance.signed`, and `of` via `rescale`
 
-**Closes:** `docs/issues/075`. **Branch:** `step-03-075-signed-book`, off `develop @ fd5b169c`.
+**Closes:** `docs/issues/archive/075`. **Branch:** `step-03-075-signed-book`, off `develop @ fd5b169c`.
 **Campaign:** `docs/refactoring/2026-09-04-the-one-shape-campaign.md`, Step 3. **Authority:** the
 owner, 2026-09-04.
 

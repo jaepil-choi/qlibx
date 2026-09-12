@@ -77,7 +77,7 @@ datasets:
 | `grain` | 뜻 | 등록이 검사하는 것 | panel |
 |---|---|---|---|
 | `instrument_instant` | (available_at, instrument)당 field별 값 하나 | **그 쌍의 유일성** — §17.1.2가 요구한 검사 | 가능 |
-| `instant` | available_at당 값 하나, instrument 축 없음 (`docs/issues/038`) | available_at의 유일성 | 가능 (1열) |
+| `instant` | available_at당 값 하나, instrument 축 없음 (`docs/issues/archive/038`) | available_at의 유일성 | 가능 (1열) |
 | `rows` | vendor grain. long / EAV | 선언된 `key_fields`의 유일성 — 오늘과 같다 | **불가** |
 
 - **선언이지 유도가 아니다.** 레인 C의 `aggregated`는 long source에서 `instrument_instant`에 *도달하는
@@ -312,7 +312,7 @@ runs:
 - `vqapr register` 가 run을 workspace에 넣는다. **재사용의 단위가 파일이 아니라 등록된 이름**이 된다.
   오늘은 `cli/run.py`가 호출마다 spec을 읽어 `RunDefinition`을 새로 만든다 (§17.3).
 - `vqapr run krx-2015-2024 [--strategy ou-ff5] [--jobs 3]`
-- **`docs/issues/040`이 이 설계의 전제조건이다.** 세 전략이 같은 agenda를 가리켜야 하고, 오늘은 agenda가
+- **`docs/issues/archive/040`이 이 설계의 전제조건이다.** 세 전략이 같은 agenda를 가리켜야 하고, 오늘은 agenda가
   전략 하나만 구동한다. 040의 ruling(agenda는 공유 가능하다)이 먼저 들어와야 한다. **들어왔다 —
   record `138`(2026-09-02).**
 - `FrozenRun`이 둘로 갈린다:
@@ -357,7 +357,7 @@ runs:
 - strategy record는 **content-addressed**다. 같은 run + 같은 fingerprint를 다시 돌리면 같은 디렉터리이고,
   조건을 바꾸면 **옆에 새로 생긴다.** 데이터가 바뀌었으면(`source_digest` 불일치) 거절하고 두 digest를
   이름으로 댄다 — 오늘의 `--force`가 그 자리를 그대로 이어받는다.
-- `run.json`이 **execution input id를 든다.** `docs/issues/034`가 여기서 닫힌다: run이 자기가 어떤 체결
+- `run.json`이 **execution input id를 든다.** `docs/issues/archive/034`가 여기서 닫힌다: run이 자기가 어떤 체결
   규약을 썼는지 말할 수 있게 된다. §17.7이 지적한 유일한 결손이다.
 - `declared_digest` / `source_digest`는 남는다. **접힌 값이 아니라 component별로** 남고, 둘의 차이가
   *"등록 이후 편집되었다"*를 말하는 receipt라는 `009`의 결정은 그대로다.
@@ -505,6 +505,6 @@ behavior가 되었는지를 가리키는 표.
 
 §15-6(`RowsLookback`이 세는 축)은 §7-1로 대체되어 닫힌다.
 
-**다음 작업은 명사 2다.** 그것은 `docs/issues/036`의 CONVERGE ruling을 실행하는 것이고, 이 문서 §3이
+**다음 작업은 명사 2다.** 그것은 `docs/issues/archive/036`의 CONVERGE ruling을 실행하는 것이고, 이 문서 §3이
 그 목표 모양이다. 착수하려면 ExecPlan 하나와 implementation record 하나가 필요하다 —
 `.agent/PLANS.md`와 `AGENTS.md`의 "Implementation records and commits" 절을 따른다.

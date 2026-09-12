@@ -14,26 +14,31 @@ tries to write inside `.vqapr/` itself?
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
 import duckdb
 import pytest
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
 from vqapr.cli.check import check
-from vqapr.data.datasets import DatasetRegistration
-from vqapr.data.sources import SourceSpec
-from vqapr.exchange.conventions import FillConvention, FillSelector
-from vqapr.exchange.execution_table import ExecutionInputRegistration, ExecutionTableSpec
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.extension.fingerprint import fingerprint_component
-from vqapr.flow.run import RunDefinition, StrategyEntry
-from vqapr.inputs import InputError
+from vqapr.component.fingerprint import fingerprint_component
+from vqapr.component.reference import ComponentRef
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.domain.account import AccountMode, AccountSnapshot
+from vqapr.domain.errors import InputError
+from vqapr.domain.wiring import Role
 from vqapr.public import register_dataset as pub_register_dataset
-from vqapr.workspace import WORKSPACE_DIRECTORY, Workspace
+from vqapr.public import register_instruments
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, Workspace
+from vqapr.workspace.run_definition import (
+    RunSchedule,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 _SPAN = (datetime(2024, 1, 2, tzinfo=UTC), datetime(2025, 1, 2, tzinfo=UTC))
 
@@ -57,8 +62,8 @@ def _prices_dataset(root: Path) -> None:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0),
-                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0)
+                (TIMESTAMPTZ '2024-01-02 00:00:00+00', 'A', 100.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 00:00:00+00', 'A', 101.0::DOUBLE)
               ) AS t(available_at, instrument, close))
               TO '{(prices_dir / "d.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
@@ -74,6 +79,7 @@ def _prices_dataset(root: Path) -> None:
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
             fields={"close": "close"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("prices-src", prices_dir),
     )
@@ -96,40 +102,42 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     source = root / "evil.py"
     source.write_text(evil_body.format(marker=str(marker).replace("\\", "\\\\")), encoding="utf-8")
     workspace = Workspace.open(root)
-    workspace.register_component(
-        ComponentRef.of(
-            "evil",
-            ComponentKind.STRATEGY_MODEL,
-            source,
-            "Strategy",
-            fingerprint=fingerprint_component(
-                source, kind=ComponentKind.STRATEGY_MODEL, object_name="Strategy"
-            ),
+    with Workspace.transaction(workspace) as t:
+        t.register_component(
+            ComponentRef.of(
+                "evil",
+                Role.STRATEGY_MODEL,
+                source,
+                "Strategy",
+                fingerprint=fingerprint_component(
+                    source, kind=Role.STRATEGY_MODEL, object_name="Strategy"
+                ),
+            )
         )
-    )
 
     venue_source = root / "venue.py"
     venue_source.write_text(
         "from decimal import Decimal\n"
-        "from vqapr.exchange.venue import AcademicExchange, TradeRule\n"
-        "from vqapr.exchange.listings import ListingAccess\n"
+        "from vqapr.public import AcademicExchange, TradeRule\n"
+        "from vqapr.public import ListingAccess\n"
         "class Venue(AcademicExchange):\n"
         "    def __init__(self):\n"
         "        super().__init__({'A': TradeRule('A', Decimal('1'), Decimal('1'), False,\n"
         "            ListingAccess.LONG_ONLY)})\n",
         encoding="utf-8",
     )
-    Workspace.open(root).register_component(
-        ComponentRef.of(
-            "venue",
-            ComponentKind.EXCHANGE,
-            venue_source,
-            "Venue",
-            fingerprint=fingerprint_component(
-                venue_source, kind=ComponentKind.EXCHANGE, object_name="Venue"
-            ),
+    with Workspace.transaction(root) as t:
+        t.register_component(
+            ComponentRef.of(
+                "venue",
+                Role.EXCHANGE,
+                venue_source,
+                "Venue",
+                fingerprint=fingerprint_component(
+                    venue_source, kind=Role.EXCHANGE, object_name="Venue"
+                ),
+            )
         )
-    )
 
     exec_dir = root / "prepared" / "exec"
     exec_dir.mkdir(parents=True)
@@ -137,50 +145,54 @@ def _run_ready_workspace(root: Path, marker: Path, *, evil_body: str) -> str:
     try:
         con.execute(
             f"""COPY (SELECT * FROM (VALUES
-                (TIMESTAMPTZ '2024-01-02 15:30:00+09', 'A', true, 100.0),
-                (TIMESTAMPTZ '2024-01-03 15:30:00+09', 'A', true, 101.0)
+                (TIMESTAMPTZ '2024-01-02 15:30:00+09', 'A', true, 100.0::DOUBLE),
+                (TIMESTAMPTZ '2024-01-03 15:30:00+09', 'A', true, 101.0::DOUBLE)
               ) AS t(trade_at, instrument, is_tradable, close))
               TO '{(exec_dir / "e.parquet").as_posix()}' (FORMAT PARQUET)"""
         )
     finally:
         con.close()
-    Workspace.open(root).register_execution_input(
-        ExecutionInputRegistration.of(
-            "my-exec",
-            ExecutionTableSpec(
-                source=SourceSpec.of("exec-src", exec_dir),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(
-                selector=FillSelector.NEXT_ELIGIBLE,
-                local_time=datetime(2024, 1, 1, 15, 30).time(),
-                timezone="Asia/Seoul",
-                trade_price="close",
-            ),
-        )
+    # A strategy run needs a declared roster to reach `preflight` clean (design §6.2).
+    register_instruments(root, {"A": "stock"})
+    pub_register_dataset(
+        root,
+        DatasetRegistration.of(
+            'my-exec',
+            'exec-src',
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "close", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
+        ),
+        SourceSpec.of("exec-src", exec_dir),
     )
 
     # One session at 09:00 Seoul, decided before the 15:30 fill; the run declares it directly
-    # (record `148`), so nothing about the agenda is registered separately.
-    Workspace.open(root).register_run(
-        RunDefinition(
-            run_id="probe",
-            strategies=(StrategyEntry("evil"),),
-            timezone="Asia/Seoul",
-            at=time(9, 0),
-            sessions=(date(2024, 1, 2),),
-            instruments=("A",),
-            exchange="venue",
-            execution_input_id="my-exec",
-            start=datetime(2024, 1, 2, tzinfo=UTC),
-            end=datetime(2024, 1, 5, tzinfo=UTC),
-            initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
-            initial_account_mode=AccountMode.LONG_ONLY,
+    # (record `148`), so nothing about the schedule is registered separately.
+    with Workspace.transaction(root) as t:
+        t.register_run(
+            RunDefinition(
+                run_id="probe",
+                strategy=StrategyEntry("evil"),
+                timezone="Asia/Seoul",
+                schedule=RunSchedule(every="1d", at=(time(9, 0),)),
+                instruments=("A",),
+                exchange="venue",
+                execution=RunExecution(
+                    dataset='my-exec',
+                    trade_price='close',
+                    fill=RunFill(at=time(15, 30)),
+                ),
+                start=datetime(2024, 1, 2, tzinfo=UTC),
+                end=datetime(2024, 1, 5, tzinfo=UTC),
+                initial_account_snapshot=AccountSnapshot(0, Decimal("1000"), {}),
+                initial_account_mode=AccountMode.LONG_ONLY,
+                writes="probe-weights",
+            )
         )
-    )
     return "probe"
 
 

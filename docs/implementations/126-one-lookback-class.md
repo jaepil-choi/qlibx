@@ -14,7 +14,7 @@ other, and said so itself:
 
 Two names for one idea, plus a copy constructor to move between them, is the shape
 `docs/vqapr-architecture.md` §4.4 rules out in one sentence — *"공유 항목의 해석 코드는 하나다"* —
-and the smallest instance of the duplication `docs/issues/036` was decided against on 2026-08-31.
+and the smallest instance of the duplication `docs/issues/archive/036` was decided against on 2026-08-31.
 
 ## What changed
 
@@ -23,7 +23,7 @@ defining its own. `engine_lookback` is gone; `requirement_for` passes the declar
 straight through, so a declaration now carries the engine's object from the moment it is written.
 
 **The engine's classes are the survivors, and the reason is what an author reads.** The engine's
-`RowsLookback` carries the `docs/issues/033` warning — that it counts rows **per instrument**, so a
+`RowsLookback` carries the `docs/issues/archive/033` warning — that it counts rows **per instrument**, so a
 sparse name reaches further back than a liquid one, and a cross-sectional model built on it is
 *"well formed, non-null, passes every check, and is wrong"*. It names the measurement too: a
 1,637-name universe with `rows=313` returned rows spanning 1,865 distinct sessions. The authoring
@@ -67,10 +67,10 @@ window — which is exactly the failure mode issue 033 describes as passing ever
 The declaration types themselves — `authoring.DatasetInput` versus `data.requirements.DataRequirement`
 — are still two, and so are the two call surfaces (`call.read(alias)` versus
 `context.window.observations(requirement)`). Those are the rest of the convergence
-`docs/issues/036` decided on, and the owner settled the direction on 2026-09-01: **the authoring
+`docs/issues/archive/036` decided on, and the owner settled the direction on 2026-09-01: **the authoring
 shape is the one to converge onto.** The work list is 036's own table, built by a first-time user
 who had to construct it to get through the package.
 
 `DatasetInput.dataset_id` **stays**. Removing it was briefly on the table while a field id was
-going to be unique workspace-wide, but the owner overturned that half of `docs/issues/049` on
+going to be unique workspace-wide, but the owner overturned that half of `docs/issues/archive/049` on
 2026-09-01: a field id is unique within a dataset, and a requirement names `(dataset_id, field_id)`.

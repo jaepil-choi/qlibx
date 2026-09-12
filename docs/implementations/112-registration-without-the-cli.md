@@ -1,7 +1,7 @@
 # 112 — Registration without the CLI
 
 **Closes:** Step 8 of the approved structural plan, and the structural cause behind
-`docs/issues/012`.
+`docs/issues/archive/012`.
 **Branch:** `step-08-registration-without-the-cli`.
 
 ## Why this change exists
@@ -14,7 +14,7 @@ sessions, walked a `.py` with `ast` to find the sole authored subclass, and regi
 that owns rules costs twice: the rules cannot be tested without driving argparse, and they cannot be
 reached from any other entry point — so a second entry point grows its own copy and the two diverge.
 
-`docs/issues/012` is that divergence already paid for: `check` refused a spec that `run` completed,
+`docs/issues/archive/012` is that divergence already paid for: `check` refused a spec that `run` completed,
 because each verb decided for itself.
 
 ## What changed

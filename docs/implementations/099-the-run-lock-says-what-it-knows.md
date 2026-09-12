@@ -1,6 +1,6 @@
 # 099 — The run lock says what it knows, and names the wait that costs nothing
 
-**Closes:** `docs/issues/037-the-run-lock-heals-itself-and-no-message-says-so.md`.
+**Closes:** `docs/issues/archive/037-the-run-lock-heals-itself-and-no-message-says-so.md`.
 **Branch:** `fix/037-run-lock-states-what-it-knows`.
 
 ## Why this change exists

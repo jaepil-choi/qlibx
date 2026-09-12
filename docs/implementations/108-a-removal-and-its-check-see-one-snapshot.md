@@ -1,6 +1,6 @@
 # 108 — A removal and its check see one snapshot
 
-**Closes:** `docs/issues/043`, and Step 4 of the approved structural plan.
+**Closes:** `docs/issues/archive/043`, and Step 4 of the approved structural plan.
 **Branch:** `step-04-a-removal-sees-one-snapshot`.
 
 ## The window

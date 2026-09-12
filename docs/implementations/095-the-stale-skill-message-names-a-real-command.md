@@ -1,6 +1,6 @@
 # 095 — The stale-skill message names a command that runs
 
-**Closes:** `docs/issues/025-the-stale-skill-message-names-a-flag-that-does-not-exist.md`.
+**Closes:** `docs/issues/archive/025-the-stale-skill-message-names-a-flag-that-does-not-exist.md`.
 **Branch:** `fix/025-stale-skill-message`.
 
 ## Why this change exists

@@ -9,7 +9,7 @@ nothing about the code that actually ships.
 Three things are asserted beyond what `run.py` itself already asserts before returning:
 
 * the recorded tables exist with the shape the assignment requires,
-* the neutralised signal is exactly orthogonal to a market column on every occurrence, recomputed
+* the neutralised signal is exactly orthogonal to a market column on every event, recomputed
   from the published artifact rather than trusted from the transform, and
 * the re-hydrated marks equal the committed ones, field for field.
 """
@@ -71,50 +71,46 @@ def test_the_recorded_tables_exist_with_the_expected_shape(pipeline_result) -> N
     assert trace["account_run_record"]["rows"] > 0
     assert trace["account_run_record"]["rows"] == trace["account_run_record"]["read_back"]
 
-    assert trace["signal_occurrences"] > 0
-    assert trace["signal_occurrences"] <= trace["callbacks"]
+    assert trace["signal_events"] > 0
+    assert trace["signal_events"] <= trace["callbacks"]
 
-    assert set(digests) == {
-        "signal_measurement.parquet",
-        "signal_measurement.lineage.json",
-        "run_account.parquet",
-        "run_account.lineage.json",
-    }
+    assert set(digests) == {"signal_measurement", "run_account"}
 
 
-def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
+def test_the_neutralised_signal_is_exactly_orthogonal_on_every_event(
     showcase, tmp_path
 ) -> None:
     """Recomputed from the published artifact alone, not from the transform's own contract."""
     project = tmp_path / "orthogonality-project"
     trace, _digests = showcase._pipeline(project)
 
-    output_path = project / ".vqapr" / "materialized" / "signal_measurement.parquet"
-    assert output_path.is_file()
+    # The table the run recorded, registered as a dataset from the run's own record (Step 4).
+    directory = project / trace["signal_run_record"]["directory"]
+    assert directory.is_dir() and any(directory.glob("*.parquet"))
 
     con = duckdb.connect()
     try:
         rows = con.execute(
-            f"SELECT available_at, neutralized_signal "
-            f"FROM read_parquet('{output_path.as_posix()}') ORDER BY available_at, instrument"
+            f"SELECT event_time, neutralized_signal "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet') ORDER BY event_time, instrument"
         ).fetchall()
     finally:
         con.close()
 
     assert rows, "the published signal table must not be empty"
 
-    by_occurrence: dict[object, list[Decimal]] = {}
+    by_event: dict[object, list[Decimal]] = {}
     for available_at, neutralized_signal in rows:
-        by_occurrence.setdefault(available_at, []).append(Decimal(neutralized_signal))
+        by_event.setdefault(available_at, []).append(Decimal(neutralized_signal))
 
-    assert len(by_occurrence) == trace["signal_occurrences"]
-    for available_at, values in by_occurrence.items():
+    assert len(by_event) == trace["signal_events"]
+    for available_at, values in by_event.items():
         assert sum(values) == 0, (
             f"neutralised signal at {available_at} is not orthogonal to the market column: "
             f"sum={sum(values)}"
         )
 
-    assert any(value != 0 for values in by_occurrence.values() for value in values), (
+    assert any(value != 0 for values in by_event.values() for value in values), (
         "at least one recorded signal must be genuinely non-flat"
     )
 
@@ -122,7 +118,7 @@ def test_the_neutralised_signal_is_exactly_orthogonal_on_every_occurrence(
 def test_an_identity_signal_would_fail_the_orthogonality_check() -> None:
     """The falsifier has to kill a no-op: an un-neutralised ranked signal is not orthogonal."""
     sys.path.insert(0, str(REPO_ROOT / "src"))
-    from vqapr.transforms.cross_section import rank
+    from vqapr.signals.transform import rank
 
     raw = {"A": Decimal("10"), "B": Decimal("20"), "C": Decimal("30"), "D": Decimal("47")}
     ranked = rank(raw)

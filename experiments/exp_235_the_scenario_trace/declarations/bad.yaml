@@ -1,0 +1,16 @@
+# Scenario ②: a registration that is wrong about its file. `adj_close` is not a column of
+# observations.parquet; the door opens the file, sees that, and writes nothing.
+datasets:
+  sample-adjusted:
+    source_id: sample-adjusted-source
+    path: observations.parquet
+    instrument_field: instrument
+    available_at: available_at
+    grain: instrument_instant
+    key_fields:
+    - available_at
+    - instrument
+    fields:
+      adj_close: adj_close
+    field_types:
+      adj_close: DOUBLE

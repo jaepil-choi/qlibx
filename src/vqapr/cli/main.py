@@ -19,10 +19,11 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
-from vqapr.cli import check, list_, new, register, rm, run, show, skill
-from vqapr.cli.envelope import UsageError, emit, failure
-from vqapr.inputs import VALUE_INVALID, InputError
-from vqapr.workspace import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
+from vqapr.agent.skillset import upgrade_note
+from vqapr.cli import check, export, list_, new, register, rm, run, show, skill
+from vqapr.cli.envelope import UsageError, emit, failure, note
+from vqapr.domain.errors import VALUE_INVALID, InputError, Stage
+from vqapr.workspace.registry import WORKSPACE_DIRECTORY, WORKSPACE_FILENAME
 
 _COMMANDS: dict[str, Any] = {
     "new": new,
@@ -31,19 +32,39 @@ _COMMANDS: dict[str, Any] = {
     "run": run,
     "list": list_,
     "show": show,
+    "export": export,
     "rm": rm,
     "skill": skill,
 }
 
+_STAGES: dict[str, Stage] = {
+    "new": Stage.WRITE,
+    "register": Stage.REGISTER,
+    "check": Stage.CHECK,
+    "run": Stage.RUN,
+    "list": Stage.READ,
+    "show": Stage.READ,
+    "export": Stage.WRITE,
+    "rm": Stage.REMOVE,
+    "skill": Stage.READ,
+}
+"""The operation each verb is, for an exception the verb itself did not classify.
+
+An unhandled exception does not know which stage it escaped from; the command that was running
+does (record `171`). `read` for the three verbs that only read; `write` for `new` and `export`,
+which write files and touch no workspace.
+"""
+
 _SUMMARIES: dict[str, str] = {
-    "new": "scaffold a component, or emit a dataset/execution-input/run declaration template",
+    "new": "scaffold a component, or emit a dataset/run declaration template",
     "register": "validate a declaration and add what it declares to the workspace",
     "check": "prove a registered run is ready, reporting every problem at once, without running",
     "run": "freeze a registered run, preflight it, and execute its strategies",
     "list": "show what the workspace holds and what the store recorded",
     "show": "answer questions about one run or one strategy record, from what was frozen",
+    "export": "write one strategy record as CSV files: NAV, holdings, fills, weights, its tables",
     "rm": "remove a run's records, or withdraw a registration nothing still names",
-    "skill": "install the agent skill into this project, or remove and inspect it",
+    "skill": "install the agent skills into this project, or remove and inspect them",
 }
 """One line per verb, shown in `vqapr --help`.
 
@@ -59,15 +80,13 @@ _DESCRIPTIONS: dict[str, str] = {
         "      writes a component .py that runs as written, plus the .yaml that registers it.\n"
         "  vqapr new dataset --out <path>\n"
         "      writes a dataset declaration template with every required key commented.\n"
-        "  vqapr new execution-input --out <path>\n"
-        "      writes the venue-table declaration a run fills against.\n"
         "  vqapr new run --out <path>\n"
         "      writes a `runs:` declaration template with every required key commented.\n\n"
         "Nothing is registered by this command. Pass the emitted .yaml to `vqapr register`."
     ),
     "register": (
         "Validate a declaration and add what it declares to the workspace.\n\n"
-        "Datasets, sources, execution inputs, components and runs are all "
+        "Datasets, sources, components and runs are all "
         "declared in one YAML document. Sections are applied in dependency order, so a valid "
         "document "
         "cannot fail because of the order it was typed in.\n\n"
@@ -85,24 +104,27 @@ _DESCRIPTIONS: dict[str, str] = {
         "this package, not a sandbox."
     ),
     "run": (
-        "Judge a registered run, freeze it, preflight it, and execute its strategies.\n\n"
-        "  vqapr run <run-id> [--strategy <id>]... [--jobs N] [--force]\n"
-        "      runs every strategy the run names (or those given), each with its own account "
-        "and its own record under .vqapr/runs/<run-id>/strategies/<id>@<fp8>/.\n"
-        "  vqapr run <datamodel-run-id>\n"
-        "      runs every datamodel the run names, each writing its dataset under "
+        "Judge a registered run, freeze it, preflight it, and execute its model.\n\n"
+        "  vqapr run <run-id> [<run-id> ...] [--jobs N] [--force]\n"
+        "      a strategy run runs its one strategy with its own account and its own record "
+        "under .vqapr/runs/<run-id>/strategies/<id>@<fp8>/; a datamodel run runs its one "
+        "datamodel, writing the dataset it declared as `writes` under "
         ".vqapr/materialized/<dataset-id>/ and its record under "
-        ".vqapr/runs/<run-id>/datamodels/<id>@<fp8>/ (record 148: a datamodel is a run)."
+        ".vqapr/runs/<run-id>/datamodels/<id>@<fp8>/ (record 201: a run is one model)."
         "\n\n"
         "The same judgments `vqapr check` makes are made here before the run is frozen: a run "
         "that would fail `check` is refused rather than executed. Declare a run with "
         "`vqapr new run --out runs.yaml`, register it, and prove it with `vqapr check <run-id>`."
         "\n\n"
-        "Every strategy the run names is run, in a single process or under --jobs. A refusal "
-        "inside one strategy is that strategy's outcome: the others still run, and the "
-        "envelope reports every strategy with a status (ok:false, stage run.strategy_failed, "
-        "the failed strategy's refusal in its own block). While a run is executing, "
-        "`vqapr list strategies --run <run-id>` shows each strategy's progress."
+        "Several run ids run several runs, in a single process or in parallel under --jobs N: "
+        "N processes, one run each, strategy and datamodel runs alike, and the envelope's `jobs` "
+        "says how many processes actually ran the batch. A batch in which one run reads the "
+        "dataset another run in it writes is refused whole before anything starts "
+        "(run.batch_dependent): run the producer first, then the batch. A refusal inside one "
+        "run is that run's outcome: the others still run, and the envelope reports every run "
+        "with a status (ok:false, stage run.strategy_failed, the failed run's refusal in its own "
+        "block). While a run is executing, `vqapr list strategies --run <run-id>` shows its "
+        "progress."
     ),
     "list": (
         "Show what the workspace already holds.\n\n"
@@ -121,6 +143,22 @@ _DESCRIPTIONS: dict[str, str] = {
         "Reads what the run froze to disk, so it answers from any process. Nothing is "
         "recomputed; re-running to answer a question about a run would be a different run."
     ),
+    "export": (
+        "Write one strategy record as files, for a user or a comparison script to read.\n\n"
+        "  vqapr export <run-id>/<strategy-id>@<fp8> --out <dir> [--force]\n\n"
+        "  nav.csv          event_time, date, account_version, cash, nav: one row per valuation,\n"
+        "                   the series the report measures (the opening point included)\n"
+        "  holdings.csv     event_time, date, instrument, quantity, price, value\n"
+        "  fills.csv        vqapr.fill as recorded: requested and dealt quantity, price, cash,\n"
+        "                   commission, tax, and the reason a fill dealt nothing\n"
+        "  weights.csv      vqapr.weight: the weights each decision asked for\n"
+        "  monitoring.csv   vqapr.monitoring, when the run declared a compliance rule\n"
+        "  tables/<t>.csv   each table the strategy formed, as recorded\n"
+        "  report.json      the strategy's report (strategy_report(...).as_record())\n\n"
+        "Numbers are exact decimal text, never rounded through a float; `date` is the local date "
+        "of `event_time` in the zone it was recorded in. Nothing is joined or recomputed. A file "
+        "an earlier export left is refused unless --force."
+    ),
     "rm": (
         "Remove records, or withdraw a registration.\n\n"
         "  vqapr rm run <run-id> [--keep-latest]     a run's records (a live one is refused)\n"
@@ -129,10 +167,11 @@ _DESCRIPTIONS: dict[str, str] = {
         "                                            a registration nothing live still names"
     ),
     "skill": (
-        "Install the agent skill into this project, or remove and inspect it.\n\n"
-        "Installs to .agents/skills/vqapr/, and with --target claude|both also writes a thin "
-        "adapter under .claude/skills/ that points at it. The project root is the nearest .git "
-        "ancestor unless --into overrides it. AGENTS.md and CLAUDE.md are never touched."
+        "Install the agent skills into this project, or remove and inspect them.\n\n"
+        "Writes each skill to .agents/skills/vqapr-<name>/ and .claude/skills/vqapr-<name>/ under "
+        "the workspace root (the current directory, or --project-root); both targets get "
+        "identical bytes. --into names another directory. AGENTS.md and CLAUDE.md are never "
+        "touched."
     ),
 }
 """What each verb is, written for the agent reading `--help`.
@@ -153,16 +192,35 @@ class _Parser(argparse.ArgumentParser):
 
     `--help` and `--version` leave through `exit()` rather than `error()`, so they keep argparse's
     own behaviour untouched.
+
+    A refusal names the refusing command's own usage line (record `250`). argparse raises an
+    UNRECOGNIZED argument from the top-level parser, whatever subcommand it followed, so
+    `main` parses with `parse_known_args` and hands the leftovers to `reject_unrecognized`, which
+    refuses them as the subcommand's parser -- `vqapr new`, not `vqapr`.
     """
 
+    commands: dict[str, argparse.ArgumentParser]
+
     def error(self, message: str) -> NoReturn:
+        raise self._refusal(message)
+
+    def reject_unrecognized(self, command: str | None, extras: Sequence[str]) -> NoReturn:
+        """Refuse arguments no parser consumed, as the subcommand they followed."""
+        owner = getattr(self, "commands", {}).get(command or "")
+        refusing = owner if isinstance(owner, _Parser) else self
+        refused = " ".join(extras)
+        raise refusing._refusal(f"unrecognized arguments: {refused}", observed=refused)
+
+    def _refusal(self, message: str, *, observed: str | None = None) -> UsageError:
         if "--project-root" in message and "unrecognized" in message:
             message = (
                 "--project-root must come before the subcommand: "
                 "vqapr --project-root <dir> <command>. "
                 "The current directory is the default when omitted."
             )
-        raise UsageError(message, prog=self.prog)
+        # argparse wraps a long usage over several indented lines; one line reads as one form.
+        usage = " ".join(self.format_usage().split()).removeprefix("usage: ")
+        return UsageError(message, prog=self.prog, usage=usage, observed=observed)
 
     def _print_message(self, message: str, file: Any = None) -> None:
         """Write help as UTF-8 bytes rather than through the inherited console encoding.
@@ -185,8 +243,9 @@ class _Parser(argparse.ArgumentParser):
         buffer.flush()
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser() -> _Parser:
     parser = _Parser(prog="vqapr")
+    parser.commands = {}
     parser.add_argument(
         "--project-root",
         type=Path,
@@ -209,6 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
         module.add_arguments(subparser)
         subparser.set_defaults(handler=module.run)
+        parser.commands[name] = subparser
     return parser
 
 
@@ -223,13 +283,13 @@ def _nearest_workspace_above(start: Path) -> Path | None:
 def _resolve_project_root(explicit: Path | None) -> Path:
     """The root every command works in, refusing an implicit one that would shadow an ancestor.
 
-    `docs/issues/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr` beside
-    the project's real workspace and the next `check` refused for datasets registered five
-    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written
-    to, and silently choosing the parent would put the caller's files in a directory they did
-    not name. So an implicit root that has no workspace while an ancestor has one is refused,
-    naming both; an explicit `--project-root` is never second-guessed, so a nested workspace is
-    still one command away when it is meant.
+    `docs/issues/archive/066`: `vqapr register` run from `work/decl/` created `work/decl/.vqapr`
+    beside the project's real workspace and the next `check` refused for datasets registered five
+    minutes earlier. Git's discovery rule is the model -- walk up -- but a workspace is written to,
+    and silently choosing the parent would put the caller's files in a directory they did not name.
+    So an implicit root that has no workspace while an ancestor has one is refused, naming both; an
+    explicit `--project-root` is never second-guessed, so a nested workspace is still one command
+    away when it is meant.
     """
     if explicit is not None:
         return Path(explicit)
@@ -255,23 +315,53 @@ def _resolve_project_root(explicit: Path | None) -> Path:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
+    typed = list(sys.argv[1:] if argv is None else argv)
     try:
-        args = parser.parse_args(argv)
+        args, extras = parser.parse_known_args(typed)
+        if extras:
+            parser.reject_unrecognized(getattr(args, "command", None), extras)
     except UsageError as error:
+        if error.observed is None:
+            # What was refused, when argparse did not single out tokens: the line as typed.
+            error.observed = " ".join(["vqapr", *typed])
         # The command line never reached a handler, so there is no project root to dump beside.
-        return emit(failure(error))
+        return emit(failure(error, stage=Stage.USAGE))
     try:
         project_root = _resolve_project_root(args.project_root)
     except InputError as refused:
-        return emit(failure(refused))
+        return emit(failure(refused, stage=Stage.USAGE))
     handler: Callable[..., dict[str, Any]] = args.handler
     try:
         payload = handler(args, project_root=project_root)
     except Exception as error:  # every failure leaves through the same envelope
-        payload = failure(error, project_root=project_root)
-    # Every envelope says WHICH workspace it is about (`docs/issues/066`): a refusal about
+        payload = failure(error, project_root=project_root, stage=_STAGES[args.command])
+    # Every envelope says WHICH workspace it is about (`docs/issues/archive/066`): a refusal about
     # registration state that names the cure but not the place it looked is correct and not
     # enough to act on. Absolute, so a reader comparing two commands' answers can see when
     # they were about different directories.
     payload["workspace_root"] = str(project_root.resolve())
+    _warn_if_skills_are_from_another_version(project_root, command=args.command)
     return emit(payload)
+
+
+def _warn_if_skills_are_from_another_version(project_root: Path, *, command: str) -> None:
+    """Say, on stderr, when the installed agent skills came from a different vqapr.
+
+    Not in the envelope. stdout carries one JSON document and nothing else -- an agent having a
+    single parsing path is that envelope's whole reason to exist, and a warning line is not worth
+    breaking it for. stderr reaches the same reader: a person sees it, and so does an agent whose
+    shell tool returns both streams.
+
+    On every command rather than on `skill list` alone, because a stale skill does its damage
+    while an agent reads it and runs something else (record `168`: a judgment only the CLI's own
+    verb asks is a defect). The check is one manifest read and a string compare; the full
+    per-file verdict is `vqapr skill list`.
+
+    Not on `skill` itself, where telling the caller to run the command they are already running
+    is noise, and where `list` reports all of this properly anyway.
+    """
+    if command == "skill":
+        return
+    message = upgrade_note(project_root)
+    if message is not None:
+        note(f"vqapr: {message}")

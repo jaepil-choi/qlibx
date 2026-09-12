@@ -1,0 +1,27 @@
+{
+  "correlation_id": "04588d9d74794ef5b9c083d9ba88abec",
+  "detail": "D:\\chljeffreyz\\DevProjects\\qlibx\\.agent\\runs\\v060-call-flow-review\\sample\\.vqapr\\diagnostics\\04588d9d74794ef5b9c083d9ba88abec.txt",
+  "error": "VqaprError: INTENT:run.judgments — 1 failure(s)\n  [check.lookback.uncovered] dataset 'sample-prices' must carry history reaching back past the first decision, or that decision reads a short window",
+  "failures": [
+    {
+      "code": "check.lookback.uncovered",
+      "example_total": 0,
+      "examples": [],
+      "explain": "dataset-preparation",
+      "fix": "start the run late enough that its first decision falls at or after 2022-01-03 15:30:00+09:00, or prepare the dataset with history reaching further back",
+      "observed": "dataset begins 2022-01-03 15:30:00+09:00, first decision 2022-01-03T08:00:00+09:00, lookback 6 row(s)",
+      "requirement": "dataset 'sample-prices' must carry history reaching back past the first decision, or that decision reads a short window",
+      "source": {
+        "file": null,
+        "key_path": "runs.sample-run.start",
+        "line": null
+      }
+    }
+  ],
+  "family": "INTENT",
+  "mutation": false,
+  "ok": false,
+  "retry_precondition": null,
+  "stage": "run.judgments",
+  "workspace_root": "D:\\chljeffreyz\\DevProjects\\qlibx\\.agent\\runs\\v060-call-flow-review\\sample"
+}

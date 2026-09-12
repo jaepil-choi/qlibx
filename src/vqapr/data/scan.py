@@ -12,15 +12,17 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Any
 
 import duckdb
+import pyarrow as pa
 
-from vqapr.data.sources import SourceSpec
-from vqapr.domain.errors import ExplainTopic, Failure, FailureFamily, FailureSource, VqaprError
+from vqapr.data.source import SourceSpec
+from vqapr.domain.errors import Failure, FailureSource, Stage, Status, VqaprError
 
 _EXAMPLE_LIMIT = 5
 
@@ -33,6 +35,13 @@ class ColumnType(StrEnum):
 
     `TIMESTAMP_TZ`와 `TIMESTAMP_NAIVE`를 가르는 것이 이 enum의 존재 이유다 — naive timestamp는
     저장도 되고 조회도 되지만 **조용히 틀린다.**
+
+    `DECIMAL`도 같은 이유로 따로 있다. 2026-09-08 이전에는 `DOUBLE`로 접혔고, 그래서 등록은
+    `DOUBLE`이라 적어 두고 모델은 `Decimal`을 받았다(`docs/issues/088`). 잰 타입이 선언과
+    대조되는 지금은 접을 수 없다: 대조가 볼 수 없는 차이는 대조가 아니다.
+
+    선언할 수 있는 것은 `DECLARABLE_FIELD_TYPES`뿐이다. `TIMESTAMP_NAIVE` · `DECIMAL` · `OTHER`는
+    측정에서만 나오고, 등록은 그 각각을 이름 붙여 거부한다.
     """
 
     TIMESTAMP_TZ = "TIMESTAMP_TZ"
@@ -40,9 +49,33 @@ class ColumnType(StrEnum):
     DATE = "DATE"
     INTEGER = "INTEGER"
     DOUBLE = "DOUBLE"
+    DECIMAL = "DECIMAL"
     VARCHAR = "VARCHAR"
     BOOLEAN = "BOOLEAN"
     OTHER = "OTHER"
+
+
+DECLARABLE_FIELD_TYPES = frozenset(
+    {
+        ColumnType.TIMESTAMP_TZ,
+        ColumnType.DATE,
+        ColumnType.INTEGER,
+        ColumnType.DOUBLE,
+        ColumnType.VARCHAR,
+        ColumnType.BOOLEAN,
+    }
+)
+"""What a dataset declaration may say a field is (`docs/issues/088`).
+
+The data plane carries one numeric type per kind: `INTEGER` arrives as `int`, `DOUBLE` as
+`float`. `DECIMAL` is deliberately absent -- exact arithmetic lives on the money side of the
+execution boundary (`data/execution_table.py` converts a price once, explicitly), and a field
+that reached a model as `Decimal` would put two numeric types into one expression, which is the
+defect `docs/implementations/051` and `088` both describe.
+"""
+DECLARABLE_FIELD_TYPE_NAMES = ", ".join(
+    member.value for member in ColumnType if member in DECLARABLE_FIELD_TYPES
+)
 
 
 _INTEGER_TYPES = frozenset(
@@ -72,11 +105,38 @@ def _normalize(duck_type: str) -> ColumnType:
         return ColumnType.DATE
     if t in _INTEGER_TYPES:
         return ColumnType.INTEGER
-    if t in _DOUBLE_TYPES or t.startswith("DECIMAL"):
+    if t in _DOUBLE_TYPES:
         return ColumnType.DOUBLE
+    if t.startswith("DECIMAL"):
+        return ColumnType.DECIMAL
     if t == "VARCHAR":
         return ColumnType.VARCHAR
     if t == "BOOLEAN":
+        return ColumnType.BOOLEAN
+    return ColumnType.OTHER
+
+
+def column_type_of_arrow(arrow_type: pa.DataType) -> ColumnType:
+    """The `ColumnType` an arrow type lands as when duckdb reads the parquet it is written to.
+
+    The producer of a materialized dataset (`run/engine/output.py`) states its field types
+    from the schema it wrote, through this one mapping, so that what it declares is what
+    `DESCRIBE` will measure on the file (`docs/issues/088`). Kept next to `_normalize` because the
+    two are one vocabulary read from two directions.
+    """
+    if pa.types.is_timestamp(arrow_type):
+        return ColumnType.TIMESTAMP_TZ if arrow_type.tz is not None else ColumnType.TIMESTAMP_NAIVE
+    if pa.types.is_date(arrow_type):
+        return ColumnType.DATE
+    if pa.types.is_integer(arrow_type):
+        return ColumnType.INTEGER
+    if pa.types.is_floating(arrow_type):
+        return ColumnType.DOUBLE
+    if pa.types.is_decimal(arrow_type):
+        return ColumnType.DECIMAL
+    if pa.types.is_string(arrow_type) or pa.types.is_large_string(arrow_type):
+        return ColumnType.VARCHAR
+    if pa.types.is_boolean(arrow_type):
         return ColumnType.BOOLEAN
     return ColumnType.OTHER
 
@@ -148,6 +208,15 @@ class FiniteCheck:
         return not self.non_finite
 
 
+_BARE_NAME = re.compile(r"[^\W\d]\w*", re.UNICODE)
+
+
+def _field_sql(expression: str) -> str:
+    """A declared field as SQL: a bare column name quoted, an expression parenthesised."""
+    stripped = expression.strip()
+    return _quote(stripped) if _BARE_NAME.fullmatch(stripped) else f"({stripped})"
+
+
 def _quote(field: str) -> str:
     if not isinstance(field, str) or not field.strip():
         raise ValueError("field must be a non-empty column name")
@@ -160,10 +229,18 @@ def _relation(spec: SourceSpec) -> str:
     `hive_partitioned`가 여기서 실제로 갈린다 — False면 파티션 키가 컬럼으로 살아나지 않는다.
     """
     path = spec.path
-    target = (path / "**" / "*.parquet").as_posix() if path.is_dir() else path.as_posix()
-    target = target.replace("'", "''")
     hive = 1 if spec.hive_partitioned else 0
-    return f"read_parquet('{target}', hive_partitioning={hive})"
+    if not path.is_dir():
+        target = path.as_posix().replace("'", "''")
+        return f"read_parquet('{target}', hive_partitioning={hive})"
+    # A directory is many parts, and their schemas are unioned by name rather than taken from
+    # whichever file duckdb opens first. A run's record writes a column that was all-null in an
+    # early session as `null`-typed there and with its real type later (`run_records.py`,
+    # `_arrow_table`), and states that "every reader unions with the later type" -- this reader
+    # did not, so a registered `vqapr.account` directory read or refused depending on which part
+    # sorted first (one-shape campaign Step 4, record 159).
+    target = (path / "**" / "*.parquet").as_posix().replace("'", "''")
+    return f"read_parquet('{target}', hive_partitioning={hive}, union_by_name=true)"
 
 
 def _configure(con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
@@ -199,6 +276,15 @@ def _open(spec: SourceSpec) -> duckdb.DuckDBPyConnection:
     return _configure(duckdb.connect())
 
 
+def _one_row(cursor: duckdb.DuckDBPyConnection) -> tuple[Any, ...]:
+    """The row an aggregate query always yields; `count(*)`/`min`/`max` over a relation cannot
+    return an empty result, so a missing row is duckdb breaking its contract, not a data fact."""
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("an aggregate query returned no row")
+    return row
+
+
 def _require_path(spec: SourceSpec) -> None:
     """경로 존재를 typed failure로 확인한다.
 
@@ -208,11 +294,11 @@ def _require_path(spec: SourceSpec) -> None:
     """
     if not spec.path.exists():
         raise VqaprError(
-            stage="source.scan.open",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.path_missing",
+                    code="source.path_missing",
+                    status=Status.MISSING,
                     requirement=f"source '{spec.source_id}' must point at an existing path",
                     observed=str(spec.path),
                     source=FailureSource(file=str(spec.path)),
@@ -220,7 +306,6 @@ def _require_path(spec: SourceSpec) -> None:
                         f"check the path declared for source '{spec.source_id}', then create "
                         "or restore the file or directory at it"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
                 )
             ],
             retry_precondition="create the path, then retry the same operation",
@@ -360,11 +445,11 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
         rows = con.execute(f"DESCRIBE SELECT * FROM {_relation(spec)}").fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.describe",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.unreadable",
+                    code="source.unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=f"source '{spec.source_id}' must be readable parquet",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path)),
@@ -372,7 +457,7 @@ def describe(spec: SourceSpec) -> dict[str, ColumnType]:
                         f"open '{spec.path}' with duckdb directly to see the underlying error, "
                         "then repair or re-export the parquet at that path"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -416,6 +501,9 @@ class ProjectionSchema:
     field_types: Mapping[str, ColumnType]
     aggregated: bool
     errors: tuple[str, ...] = ()
+    observed: Mapping[str, str] = field(default_factory=dict)
+    """duckdb's own type string per field (`DECIMAL(18,4)`, `TIMESTAMP`), for a refusal that
+    compares the declaration against it: `ColumnType` names the class, this names the type."""
 
     @property
     def ok(self) -> bool:
@@ -482,7 +570,9 @@ def describe_projection(
 
     A field is an expression, so what it is typed as -- and whether it aggregates the rows an
     instant holds -- are facts about the composed query rather than about any source column. Both
-    are read off `DESCRIBE`, which is why an author never writes a type.
+    are read off `DESCRIBE`. The type is what the author's declaration is compared against
+    (`docs/issues/088`): the author says what the field is, this says what the file makes of the
+    expression, and `datasets.check_schema` refuses when they differ.
 
     **The two shapes are mutually exclusive, and that is what lets the binder be the judge.** The
     identity columns are projected bare, so the grouped shape binds only when every field is an
@@ -511,64 +601,114 @@ def describe_projection(
                 errors.append(str(exc).splitlines()[0])
                 continue
             described = {name: _normalize(dtype) for name, dtype, *_ in rows}
-            return ProjectionSchema({name: described[name] for name in fields}, aggregated)
+            spelled = {name: str(dtype) for name, dtype, *_ in rows}
+            return ProjectionSchema(
+                {name: described[name] for name in fields},
+                aggregated,
+                observed={name: spelled[name] for name in fields},
+            )
     finally:
         con.close()
     return ProjectionSchema({}, False, errors=tuple(errors))
 
 
-def row_count(spec: SourceSpec) -> int:
-    """How many rows the source holds, without reading them."""
+def row_count(spec: SourceSpec, *, relation: str | None = None) -> int:
+    """How many rows the source holds -- or, given a `projection_relation`, how many it yields.
+
+    A grouped projection collapses the source's rows to one per (instant, instrument), so the two
+    counts differ, and reporting the source's as the dataset's told a reader a 39-million-row
+    panel was what their model would receive (`docs/issues/093`). Counting a grouped projection
+    is a full pass over the file; the caller says which count it wants.
+    """
     con = _open(spec)
     try:
-        return int(con.execute(f"SELECT count(*) FROM {_relation(spec)}").fetchone()[0])
+        target = _relation(spec) if relation is None else relation
+        return int(_one_row(con.execute(f"SELECT count(*) FROM {target}"))[0])
     finally:
         con.close()
 
 
-def head(spec: SourceSpec, *, limit: int = 100) -> list[dict[str, object]]:
-    """The first rows of a source, as plain dicts. `limit=0` reads every row.
+def head(
+    spec: SourceSpec, *, limit: int = 100, relation: str | None = None
+) -> list[dict[str, object]]:
+    """The first rows of a source -- or of a `projection_relation` over it -- as plain dicts.
+    `limit=0` reads none and runs no query: `show dataset --limit 0` on a 430 MB source used to
+    read its 8.7 million rows into dicts, which exhausted the machine before it returned
+    (`docs/issues/report-2026-09-10-show-dataset-limit-zero-does-not-return-on-a-large-source`).
 
-    A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback,
-    no dataset semantics. `show dataset` is the caller, and what it answers is "what is in this
-    file" rather than "what would a model have seen" -- conflating the two would make an inspection
-    command quietly disagree with the windows a run actually reads.
+    A scan primitive for a reader, not an observation query: no point-in-time cutoff, no lookback.
+    `show dataset` is the caller. With `relation` it answers "what does this dataset yield" --
+    the declared fields, holding the values a model would receive, which is the only thing that
+    confirms an aggregated registration did what its author meant (`docs/issues/093`); without
+    it, "what is in this file". Neither applies a cutoff or a lookback, so neither can quietly
+    disagree with the windows a run actually reads. `LIMIT` over a grouped projection still
+    evaluates the whole grouping, so on a large source the projected head costs a full pass.
     """
+    if limit <= 0:
+        return []
     con = _open(spec)
     try:
-        sql = f"SELECT * FROM {_relation(spec)}"
-        if limit:
-            sql += f" LIMIT {int(limit)}"
+        target = _relation(spec) if relation is None else relation
+        sql = f"SELECT * FROM {target} LIMIT {int(limit)}"
         cursor = con.execute(sql)
         names = [column[0] for column in cursor.description]
         return [
-            {name: (str(value) if isinstance(value, Decimal) else value)
-             for name, value in zip(names, row, strict=True)}
+            {
+                name: (str(value) if isinstance(value, Decimal) else value)
+                for name, value in zip(names, row, strict=True)
+            }
             for row in cursor.fetchall()
         ]
     finally:
         con.close()
 
 
-def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
+def _instant_literal(bound: datetime, *, name: str) -> str:
+    """One aware instant as a `TIMESTAMPTZ` literal: digits, `T`, `:`, `+`/`-` and nothing else."""
+    if bound.tzinfo is None or bound.utcoffset() is None:
+        raise ValueError(f"{name} must be a timezone-aware datetime")
+    return f"TIMESTAMPTZ '{bound.astimezone(UTC).isoformat()}'"
+
+
+def distinct_values(
+    spec: SourceSpec,
+    field: str,
+    *,
+    not_before: datetime | None = None,
+    not_after: datetime | None = None,
+) -> tuple[object, ...]:
     """Read one physical column as sorted distinct values for a non-Model consumer.
 
     This is a scan primitive, not an observation query. It does not apply PIT, lookback, or
     dataset semantics; callers such as the execution-table boundary own those meanings.
+
+    `not_before` / `not_after` bound the values read, inclusive, so a caller that wants the
+    sessions of one run's period does not read a ten-year table's whole column to keep one
+    year of it (record `247`); duckdb prunes row groups on the bound. The bounds go into the
+    statement as `TIMESTAMPTZ` literals, not as parameters: binding a tz-aware datetime costs
+    a process its first ~450 ms (measured, 1.25M rows: bound-by-parameter 590 ms on the first
+    call against 107 ms for the whole column and 80 ms bound-by-literal; warm, 5 against 15).
     """
     quoted = _quote(field)
+    bounds = ((">=", not_before, "not_before"), ("<=", not_after, "not_after"))
+    clauses = [
+        f"{quoted} {operator} {_instant_literal(bound, name=name)}"
+        for operator, bound, name in bounds
+        if bound is not None
+    ]
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     con = _open(spec)
     try:
         rows = con.execute(
-            f"SELECT DISTINCT {quoted} FROM {_relation(spec)} ORDER BY {quoted}"
+            f"SELECT DISTINCT {quoted} FROM {_relation(spec)}{where} ORDER BY {quoted}"
         ).fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.distinct",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.distinct.unreadable",
+                    code="source.distinct_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=f"field {field!r} must be readable from source '{spec.source_id}'",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path), key_path=field),
@@ -576,7 +716,7 @@ def distinct_values(spec: SourceSpec, field: str) -> tuple[object, ...]:
                         f"confirm column {field!r} exists with that exact name in "
                         f"'{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -605,11 +745,11 @@ def candidate_instants(
         ).fetchall()
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.execution_candidates",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.execution_candidates.unreadable",
+                    code="source.execution_candidates_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement="the execution instant field must be queryable",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path), key_path=trade_at_field),
@@ -617,7 +757,7 @@ def candidate_instants(
                         f"confirm column {trade_at_field!r} exists with that exact name in "
                         f"'{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
             mutation=False,
@@ -649,7 +789,7 @@ def exact_snapshot_rows(
     projections = [
         f"{trade_at} AS {_quote('trade_at')}",
         f"{instrument} AS {_quote('instrument')}",
-        *(f"{_quote(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
+        *(f"{_field_sql(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
     ]
     borrowed = _Borrowed(spec, session)
     try:
@@ -672,11 +812,11 @@ def exact_snapshot_rows(
         )
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.execution_snapshot",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.execution_snapshot.unreadable",
+                    code="source.execution_snapshot_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement="the exact execution snapshot fields must be queryable",
                     observed=str(exc).splitlines()[0],
                     source=FailureSource(file=str(spec.path)),
@@ -684,7 +824,69 @@ def exact_snapshot_rows(
                         f"confirm {trade_at_field!r}, {instrument_field!r}, and the requested "
                         f"fields all exist with those exact names in '{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
+                )
+            ],
+            mutation=False,
+        ) from exc
+    finally:
+        borrowed.close()
+
+
+def execution_window_table(
+    spec: SourceSpec,
+    *,
+    trade_at_field: str,
+    instrument_field: str,
+    since: object,
+    until: object,
+    instruments: Sequence[str],
+    fields: Mapping[str, str],
+    session: ScanSession | None = None,
+) -> Any:
+    """Every execution row with `since <= trade_at <= until` for `instruments`, as one Arrow table.
+
+    The window read behind `ExecutionSnapshots` (record `222`): the same projection
+    `exact_snapshot_rows` makes for one instant, over a span of them, ordered by instant then
+    instrument so a caller can slice one instant's rows out by offset. Arrow, not rows: the
+    caller converts the slice it needs, when it needs it.
+    """
+    if not instruments:
+        raise ValueError("an execution window requires at least one instrument")
+    if not fields:
+        raise ValueError("an execution window requires at least one field")
+    trade_at = _quote(trade_at_field)
+    instrument = _quote(instrument_field)
+    placeholders = ", ".join("?" for _ in instruments)
+    projections = [
+        f"{trade_at} AS {_quote('trade_at')}",
+        f"{instrument} AS {_quote('instrument')}",
+        *(f"{_field_sql(physical)} AS {_quote(semantic)}" for semantic, physical in fields.items()),
+    ]
+    borrowed = _Borrowed(spec, session)
+    try:
+        cursor = borrowed.connection.execute(
+            f"SELECT {', '.join(projections)} FROM {_relation(spec)} "
+            f"WHERE {trade_at} >= ? AND {trade_at} <= ? AND {instrument} IN ({placeholders}) "
+            f"ORDER BY {trade_at}, {instrument}",
+            [since, until, *instruments],
+        )
+        return cursor.fetch_arrow_table()
+    except duckdb.Error as exc:
+        raise VqaprError(
+            stage=Stage.READ,
+            failures=[
+                Failure.bounded(
+                    code="source.execution_snapshot_unreadable",
+                    status=Status.UNAVAILABLE,
+                    requirement="the exact execution snapshot fields must be queryable",
+                    observed=str(exc).splitlines()[0],
+                    source=FailureSource(file=str(spec.path)),
+                    fix=(
+                        f"confirm {trade_at_field!r}, {instrument_field!r}, and the requested "
+                        f"fields all exist with those exact names in '{spec.path}', then retry"
+                    ),
+                    cause=exc,
                 )
             ],
             mutation=False,
@@ -709,10 +911,12 @@ def key_check(spec: SourceSpec, fields: Sequence[str]) -> KeyCheck:
             f"SELECT {cols}, count(*) AS n, ({null_pred}) AS has_null "
             f"FROM {_relation(spec)} GROUP BY {cols}"
         )
-        null_groups, dup_groups = con.execute(
-            f"SELECT coalesce(sum(CASE WHEN has_null THEN 1 ELSE 0 END), 0), "
-            f"       coalesce(sum(CASE WHEN n > 1 THEN 1 ELSE 0 END), 0) FROM ({grouped})"
-        ).fetchone()
+        null_groups, dup_groups = _one_row(
+            con.execute(
+                f"SELECT coalesce(sum(CASE WHEN has_null THEN 1 ELSE 0 END), 0), "
+                f"       coalesce(sum(CASE WHEN n > 1 THEN 1 ELSE 0 END), 0) FROM ({grouped})"
+            )
+        )
 
         null_examples: tuple[str, ...] = ()
         dup_examples: tuple[str, ...] = ()
@@ -756,9 +960,9 @@ def span_check(spec: SourceSpec, available_at: str) -> SpanCheck:
     column = _quote(available_at)
     con = _open(spec)
     try:
-        rows, first, last = con.execute(
-            f"SELECT count(*), min({column}), max({column}) FROM {_relation(spec)}"
-        ).fetchone()
+        rows, first, last = _one_row(
+            con.execute(f"SELECT count(*), min({column}), max({column}) FROM {_relation(spec)}")
+        )
     finally:
         con.close()
     return SpanCheck(rows=int(rows), first=first, last=last)
@@ -772,7 +976,7 @@ def positive_finite_when_true(
     identity_fields: Sequence[str],
 ) -> ConditionalPositiveCheck:
     """조건이 true인 행의 선택 numeric value가 null/NaN/inf/비양수인지 센다."""
-    value = _quote(value_field)
+    value = _field_sql(value_field)
     condition = _quote(condition_field)
     identities = tuple(identity_fields)
     if not identities:
@@ -785,7 +989,7 @@ def positive_finite_when_true(
     con = _open(spec)
     try:
         count = int(
-            con.execute(f"SELECT count(*) FROM {_relation(spec)} WHERE {invalid}").fetchone()[0]
+            _one_row(con.execute(f"SELECT count(*) FROM {_relation(spec)} WHERE {invalid}"))[0]
         )
         examples: tuple[str, ...] = ()
         if count:
@@ -796,11 +1000,11 @@ def positive_finite_when_true(
             examples = tuple(repr(row) for row in rows)
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.conditional_positive",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.conditional_positive.unreadable",
+                    code="source.conditional_positive_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=(
                         f"fields {condition_field!r} and {value_field!r} must be readable "
                         f"from source '{spec.source_id}'"
@@ -811,7 +1015,7 @@ def positive_finite_when_true(
                         f"confirm {condition_field!r} and {value_field!r} exist with those "
                         f"exact names in '{spec.path}', then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -857,7 +1061,7 @@ def finite_check(
     read = _relation(spec) if relation is None else relation
     con = _open(spec)
     try:
-        counted = con.execute(f"SELECT {counts_sql} FROM {read}").fetchone()
+        counted = _one_row(con.execute(f"SELECT {counts_sql} FROM {read}"))
         non_finite = tuple(
             (column, int(total)) for column, total in zip(selected, counted, strict=True) if total
         )
@@ -870,11 +1074,11 @@ def finite_check(
             examples.append((column, tuple(repr(row) for row in rows)))
     except duckdb.Error as exc:
         raise VqaprError(
-            stage="source.scan.finite",
-            family=FailureFamily.DATA,
+            stage=Stage.READ,
             failures=[
                 Failure.bounded(
-                    code="source.scan.finite.unreadable",
+                    code="source.finite_unreadable",
+                    status=Status.UNAVAILABLE,
                     requirement=(
                         f"columns {', '.join(repr(c) for c in selected)} must be readable "
                         f"from source '{spec.source_id}'"
@@ -885,7 +1089,7 @@ def finite_check(
                         f"confirm those columns exist with those exact names in '{spec.path}', "
                         "then retry"
                     ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
+                    cause=exc,
                 )
             ],
         ) from exc
@@ -911,7 +1115,7 @@ changed the answer for -- and the bounded query carries the aggregate that keeps
 current. On a real warehouse the check is worth it: 210 MB of daily prices went from 165 ms to
 88 ms per query. On a small source it is pure overhead, because duckdb reads the whole thing in
 less time than deciding not to takes; measured on a 200 KB fixture panel, and against the earlier
-form that re-checked on every query, estimating made a 2,940-occurrence run 28% *slower*. So the
+form that re-checked on every query, estimating made a 2,940-event run 28% *slower*. So the
 estimate is gated on the only thing that decides which regime a source is in, and the gate is
 measured once per run.
 """
@@ -1134,7 +1338,20 @@ def _rows_bound(
     return proved
 
 
-def observation_rows(
+@dataclass(frozen=True, slots=True)
+class _ObservationQuery:
+    """One PIT observation statement, built and not yet run; what the two readers share."""
+
+    sql: str
+    parameters: tuple[object, ...]
+    proofs: int
+    aimed: tuple[object, int] | None
+    bound_key: tuple[object, ...]
+    rows: int | None
+    instruments: tuple[str, ...]
+
+
+def _observation_query(
     spec: SourceSpec,
     *,
     instrument_field: str | None,
@@ -1142,13 +1359,13 @@ def observation_rows(
     key_fields: Sequence[str],
     fields: Mapping[str, str],
     aggregated: bool,
-    instruments: Sequence[str],
+    instruments: Sequence[str] | None,
     evaluation_time: object,
     rows: int | None = None,
     lower_bound: object | None = None,
     session: ScanSession | None = None,
-) -> tuple[dict[str, object], ...]:
-    """Execute one PIT observation query with its lookback pushed into SQL.
+) -> _ObservationQuery:
+    """Build one PIT observation query with its lookback pushed into SQL.
 
     **The window predicates are written here and only here.** `available_at <= evaluation_time`,
     the lookback bound, and the instrument list are the framework's, whatever the registration
@@ -1174,8 +1391,12 @@ def observation_rows(
     if not fields:
         raise ValueError("observation query requires at least one field")
     keyed_by_instrument = instrument_field is not None
-    if keyed_by_instrument and not instruments:
+    if keyed_by_instrument and instruments is not None and not instruments:
         raise ValueError("observation query requires at least one instrument")
+    if instruments is None and rows is not None:
+        # `None` is every instrument the source holds (a cube bake, record `236`); a rows bound
+        # is proved per declared instrument, and there are none declared.
+        raise ValueError("a read over every instrument takes a calendar bound, not a rows lookback")
 
     available = _quote(available_at_field)
     identity = identity_projections(instrument_field, available_at_field)
@@ -1184,8 +1405,9 @@ def observation_rows(
     predicates = [f"{available} <= ?"]
     if keyed_by_instrument:
         instrument = _quote(instrument_field)  # type: ignore[arg-type]
-        predicates.append(f"{instrument} IN ({', '.join('?' for _ in instruments)})")
-        parameters.extend(instruments)
+        if instruments is not None:
+            predicates.append(f"{instrument} IN ({', '.join('?' for _ in instruments)})")
+            parameters.extend(instruments)
 
     counted: _Counted | None = None
     aimed: tuple[object, int] | None = None
@@ -1193,7 +1415,9 @@ def observation_rows(
     if lower_bound is not None:
         predicates.append(f"{available} >= ?")
         parameters.append(lower_bound)
-    elif rows is not None and session is not None and keyed_by_instrument:
+    elif (
+        rows is not None and session is not None and keyed_by_instrument and instruments is not None
+    ):
         # A RowsLookback carries no bound of its own, so without this the window below is
         # evaluated over the source's entire history on every callback. `_rows_bound` returns a
         # bound together with the instruments it would have changed the answer for; those are
@@ -1327,48 +1551,140 @@ def observation_rows(
             f"ORDER BY {ascending}"
         )
 
+    return _ObservationQuery(
+        sql=sql,
+        parameters=(*proof_parameters, *parameters),
+        proofs=len(proofs),
+        aimed=aimed,
+        bound_key=bound_key,
+        rows=rows,
+        instruments=() if instruments is None else tuple(instruments),
+    )
+
+
+def _observations_unreadable(spec: SourceSpec, exc: duckdb.Error) -> VqaprError:
+    return VqaprError(
+        stage=Stage.READ,
+        failures=[
+            Failure.bounded(
+                code="source.observations_unreadable",
+                status=Status.UNAVAILABLE,
+                requirement="the registered source and its field expressions must be queryable",
+                observed=str(exc).splitlines()[0],
+                source=FailureSource(file=str(spec.path)),
+                fix=(
+                    f"confirm every registered field expression still evaluates against "
+                    f"'{spec.path}', then re-register or fix the source"
+                ),
+                cause=exc,
+            )
+        ],
+        mutation=False,
+        retry_precondition="fix the registered source or fields, then retry",
+    )
+
+
+def observation_rows(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    key_fields: Sequence[str],
+    fields: Mapping[str, str],
+    aggregated: bool,
+    instruments: Sequence[str],
+    evaluation_time: object,
+    rows: int | None = None,
+    lower_bound: object | None = None,
+    session: ScanSession | None = None,
+) -> tuple[dict[str, object], ...]:
+    """Execute one PIT observation query and hand back its rows, one dict each.
+
+    The statement is `_observation_query`'s, and so are the window predicates. This is the
+    row-grain reader (`rows(alias)`); the panel reads the same statement as columns through
+    `observation_table` (record `232`).
+    """
+    query = _observation_query(
+        spec,
+        instrument_field=instrument_field,
+        available_at_field=available_at_field,
+        key_fields=key_fields,
+        fields=fields,
+        aggregated=aggregated,
+        instruments=instruments,
+        evaluation_time=evaluation_time,
+        rows=rows,
+        lower_bound=lower_bound,
+        session=session,
+    )
     borrowed = _Borrowed(spec, session)
     try:
-        cursor = borrowed.connection.execute(sql, [*proof_parameters, *parameters])
+        cursor = borrowed.connection.execute(query.sql, list(query.parameters))
         names = tuple(description[0] for description in cursor.description)
         fetched = cursor.fetchall()
     except duckdb.Error as exc:
-        raise VqaprError(
-            stage="source.scan.observations",
-            family=FailureFamily.DATA,
-            failures=[
-                Failure.bounded(
-                    code="source.scan.observations.unreadable",
-                    requirement=(
-                        "the registered source and its field expressions must be queryable"
-                    ),
-                    observed=str(exc).splitlines()[0],
-                    source=FailureSource(file=str(spec.path)),
-                    fix=(
-                        f"confirm every registered field expression still evaluates against "
-                        f"'{spec.path}', then re-register or fix the source"
-                    ),
-                    explain=ExplainTopic.SOURCE_ACCESS,
-                )
-            ],
-            mutation=False,
-            retry_precondition="fix the registered source or fields, then retry",
-        ) from exc
+        raise _observations_unreadable(spec, exc) from exc
     finally:
         borrowed.close()
 
+    aimed = query.aimed
     if aimed is None or session is None:
         return tuple(dict(zip(names, row, strict=True)) for row in fetched)
 
     # A bound was aimed for, so the answer carries its proof: one count per counting argument,
     # appended after the declared ones. Read it, keep it for the next callback, drop it here.
-    carried = names[: len(names) - len(proofs)]
+    carried = names[: len(names) - query.proofs]
     counts = range(len(carried), len(names))
     column = names.index("instrument")
-    proved = {row[column] for row in fetched if all(row[index] >= rows for index in counts)}
+    proved = {row[column] for row in fetched if all(row[index] >= query.rows for index in counts)}
     session.remember_rows_bound(
-        bound_key,
-        _RowsBound(aimed[0], tuple(name for name in instruments if name not in proved), aimed[1]),
+        query.bound_key,
+        _RowsBound(
+            aimed[0], tuple(name for name in query.instruments if name not in proved), aimed[1]
+        ),
     )
     # Not strict: the proof columns ride past the end of `carried` and are dropped here.
     return tuple(dict(zip(carried, row, strict=False)) for row in fetched)
+
+
+def observation_table(
+    spec: SourceSpec,
+    *,
+    instrument_field: str | None,
+    available_at_field: str,
+    key_fields: Sequence[str],
+    fields: Mapping[str, str],
+    aggregated: bool,
+    instruments: Sequence[str] | None,
+    evaluation_time: object,
+    lower_bound: object,
+    session: ScanSession | None = None,
+) -> pa.Table:
+    """Execute one PIT observation query and hand back its columns, as Arrow (record `232`).
+
+    The panel's reader: the same statement `observation_rows` runs, over a calendar bound
+    (the run's horizon, for a panel), fetched as one Arrow table instead of one dict per row.
+    Columns are `available_at`, `instrument` (when the dataset has an instrument axis) and one
+    per declared field; `Panel.from_table` pivots them without walking a row in Python.
+    `instruments=None` reads every instrument the source holds: the cube bake (record `236`).
+    """
+    query = _observation_query(
+        spec,
+        instrument_field=instrument_field,
+        available_at_field=available_at_field,
+        key_fields=key_fields,
+        fields=fields,
+        aggregated=aggregated,
+        instruments=instruments,
+        evaluation_time=evaluation_time,
+        lower_bound=lower_bound,
+        session=session,
+    )
+    borrowed = _Borrowed(spec, session)
+    try:
+        cursor = borrowed.connection.execute(query.sql, list(query.parameters))
+        return cursor.fetch_arrow_table()
+    except duckdb.Error as exc:
+        raise _observations_unreadable(spec, exc) from exc
+    finally:
+        borrowed.close()

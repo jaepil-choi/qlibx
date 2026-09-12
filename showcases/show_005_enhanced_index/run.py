@@ -1,18 +1,18 @@
 """An alpha run, its published allocation, and an enhanced index built on top — through the spine.
 
-    alpha run (Academic)  ->  publish_run_allocation  ->  alpha_allocation dataset
+    alpha run (Academic)  ->  its recorded vqapr.weight, registered  ->  alpha_allocation
                                                                 |
     committed benchmark panel  ------------------------------- + -->  enhanced index run (KRX)
                                                                           desired = bench + s·active
-                                                                          projected onto NoShort
-                                                                          and SingleNameCap
+                                                                          built inside no_short
+                                                                          and single_name_cap
 
-Both halves are ordinary runs: `RunDefinition`, `preflight_run`, `run`, a real `Account`, real order
+Both halves are ordinary runs: `RunDefinition`, `freeze`, `run`, a real `Account`, real order
 planning and the declared execution profile. The enhanced-index Strategy reads **two allocation
 inputs** — the committed benchmark and the published alpha — through ordinary `DataRequirement`
 subscriptions inside its point-in-time window, so the combination is proved on the subscription
 path rather than by reading parquet beside it. Its bounds are the ones the registered shipped
-constraint set projected for that occurrence, not a second copy of the same rule.
+box the strategy builds for that event, not a second copy of the same rule.
 
 The fill journal the second run committed is replayed independently against the committed
 `Account`, the monitoring findings over every marked account version are read back rather than
@@ -34,6 +34,7 @@ import hashlib
 import json
 import shutil
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -43,30 +44,25 @@ import duckdb
 
 from vqapr.cli.register import run as register_cli
 from vqapr.public import (
-    SHIPPED_CONSTRAINTS,
+    SHIPPED_COMPLIANCE,
     AccountMode,
     AccountSnapshot,
-    AllocationPublicationSpec,
-    ComponentKind,
     DatasetRegistration,
-    ExecutionInputRegistration,
-    ExecutionTableSpec,
-    FillConvention,
-    FillSelector,
     RunDefinition,
+    RunExecution,
+    RunFill,
+    RunSchedule,
     SourceSpec,
     StrategyEntry,
     ZeroDealtReason,
-    callback_evidence,
-    component_ref,
     export_roster,
-    preflight_run,
-    publish_run_allocation,
-    register_component,
+    freeze,
+    register_compliance,
     register_dataset,
-    register_execution_input,
+    register_exchange,
+    register_strategy_model,
     run,
-    shipped_constraint_path,
+    shipped_compliance_path,
 )
 
 HERE = Path(__file__).resolve().parent
@@ -77,10 +73,11 @@ VENUE = "Asia/Seoul"
 OFFSET = "+09:00"
 INITIAL_CASH = Decimal("1000000000")
 CAP = "0.10"
-"""Single-name cap above the index weight, in the shipped constraint's own config spelling."""
+"""Single-name cap above the index weight: the strategy builds inside it (`single_name_cap`), and
+the shipped compliance rule of the same name observes the book against its own copy of it."""
 
-VERIFIED_AGAINST = "vqapr-0.4.1"
-LAST_VERIFIED_AT = "2026-09-03"
+VERIFIED_AGAINST = "vqapr-0.16.0"
+LAST_VERIFIED_AT = "2026-09-10"
 
 
 def _sessions(path: Path) -> list[date]:
@@ -179,8 +176,11 @@ class SignedAlpha(StrategyModel):
 
     def decide(self, context):
         rows = context.window.observations(self.requirements()[0]).rows
+        # A DOUBLE field arrives as a float; cross to Decimal once, through str.
         closes = {
-            str(row["instrument"]): row["close"] for row in rows if row["close"] is not None
+            str(row["instrument"]): Decimal(str(row["close"]))
+            for row in rows
+            if row["close"] is not None
         }
         if len(closes) < 2:
             return Hold(reason="a cross-sectional view needs at least two names")
@@ -235,7 +235,10 @@ from vqapr.public import (
     Rebalance,
     RowsLookback,
     StrategyModel,
+    intersect,
+    no_short,
     optimize,
+    single_name_cap,
     validate_allocation,
 )
 
@@ -255,11 +258,16 @@ BUDGET = Budget(
 
 
 class EnhancedIndex(StrategyModel):
-    """desired = benchmark + SCALE·active, projected onto the projected constraint set."""
+    """desired = benchmark + SCALE·active, projected onto the box this strategy builds itself:
+    no short, and no name above `max(cap, index weight)` (design §7.1)."""
 
-    def __init__(self, *, benchmark_dataset_id: str, alpha_dataset_id: str) -> None:
+    def __init__(
+        self, *, benchmark_dataset_id: str, alpha_dataset_id: str, cap: str, benchmark_tolerance: str
+    ) -> None:
         self._benchmark_dataset_id = benchmark_dataset_id
         self._alpha_dataset_id = alpha_dataset_id
+        self._cap = Decimal(cap)
+        self._benchmark_tolerance = Decimal(benchmark_tolerance)
 
     def requirements(self):
         return (
@@ -269,8 +277,9 @@ class EnhancedIndex(StrategyModel):
         )
 
     def _panel(self, context, requirement, field):
+        # A DOUBLE field arrives as a float; cross to Decimal once, through str.
         return {
-            str(row["instrument"]): row[field]
+            str(row["instrument"]): Decimal(str(row[field]))
             for row in context.window.observations(requirement).rows
             if row[field] is not None
         }
@@ -295,8 +304,23 @@ class EnhancedIndex(StrategyModel):
             label="subscribed alpha allocation",
         )
 
-        bounds = context.constraint_bounds
-        instruments = tuple(sorted(bounds.lower_weights))
+        # The benchmark is this callback's own subscription too, and the cap is relative to it, so
+        # it is validated here -- before it becomes a bound -- the way the alpha is.
+        validate_allocation(
+            benchmark,
+            AllocationInvariants.of(
+                sign=AllocationSign.LONG_ONLY,
+                tolerance=self._benchmark_tolerance,
+                required_coverage=(),
+            ),
+            label="subscribed benchmark allocation",
+        )
+        # The box, built here by the strategy (design §7.1): a floor at zero intersected with a
+        # symmetric single-name cap lifted to the index weight where the index is heavier.
+        instruments = tuple(sorted(context.window.instruments))
+        lower, upper = intersect(
+            no_short(instruments), single_name_cap(instruments, benchmark, self._cap)
+        )
         desired = {
             name: (
                 benchmark.get(name, Decimal(0)) + SCALE * active.get(name, Decimal(0))
@@ -332,9 +356,9 @@ class EnhancedIndex(StrategyModel):
         # as a constraint violation and fails the callback -- see README, "Known gap".
         frozen = frozenset()
         if current:
-            pinned = max(current, key=lambda name: (bounds.upper_weights[name] - current[name], name))
+            pinned = max(current, key=lambda name: (upper[name] - current[name], name))
             frozen = frozenset({pinned})
-        result = self._solve(desired, current, bounds, frozen)
+        result = self._solve(desired, current, lower, upper, frozen)
         reported = len(result.frozen_outside_box)
 
         for name in frozen:
@@ -343,7 +367,7 @@ class EnhancedIndex(StrategyModel):
 
         history = dict(self.memory or {})
         history["rebalances"] = int(history.get("rebalances", 0)) + 1
-        history["frozen_occurrences"] = int(history.get("frozen_occurrences", 0)) + len(frozen)
+        history["frozen_events"] = int(history.get("frozen_events", 0)) + len(frozen)
         history["frozen_outside_box"] = int(history.get("frozen_outside_box", 0)) + reported
         # Monitoring only, recorded after the decision and never fed back into it.
         history["active_norm"] = str(self._active_norm(result.weights, benchmark))
@@ -355,12 +379,12 @@ class EnhancedIndex(StrategyModel):
             budget=BUDGET,
         )
 
-    def _solve(self, desired, current, bounds, frozen):
+    def _solve(self, desired, current, lower, upper, frozen):
         return optimize(
             desired=desired,
             current=current,
-            lower=dict(bounds.lower_weights),
-            upper=dict(bounds.upper_weights),
+            lower=lower,
+            upper=upper,
             frozen=frozen,
             cash_range=(Decimal("0"), Decimal("1")),
         )
@@ -520,12 +544,12 @@ def _replay(result: Any) -> dict[str, Any]:
 
 
 def _monitoring(result: Any) -> dict[str, Any]:
-    """Read back the monitoring verdict the run produced over every marked account version.
+    """Read back what the compliance rules found over every marked account version.
 
-    Registering a constraint set proves nothing by itself. The set is *enforced* at the decision:
-    an intent that fails its projected bounds is refused and the run stops, so 21 completed
-    rebalances are 21 compliant intents. Monitoring is the other half, and it is evidence rather
-    than a gate -- a failing finding does not stop anything, so it has to be read to exist.
+    Declaring compliance rules proves nothing by itself. A rule observes; it does not gate -- a
+    failing finding stops nothing, so it has to be read to exist. And the rules are independent of
+    the box the strategy built inside (design §7.2): the strategy's cap and the rule's cap are two
+    declarations of the same number, and the report is where they meet.
 
     A drift finding here is not a defect. `single_name_cap` is defined relative to the index, and
     the index moves: the book is built at 09:00 against the previous session's weight and marked at
@@ -537,9 +561,9 @@ def _monitoring(result: Any) -> dict[str, Any]:
     account would mean the account authority itself failed, so that one aborts.
     """
     reports = [
-        occurrence.result.report
-        for occurrence in result.occurrences
-        if getattr(getattr(occurrence, "result", None), "report", None) is not None
+        event.result.report
+        for event in result.events
+        if getattr(getattr(event, "result", None), "report", None) is not None
     ]
     if not reports:
         raise AssertionError("the run produced no monitoring evidence")
@@ -550,17 +574,17 @@ def _monitoring(result: Any) -> dict[str, Any]:
         for finding in report.findings:
             if finding.passed:
                 continue
-            if finding.constraint_id == "no-short":
+            if finding.rule_id == "no-short":
                 raise AssertionError(
                     "a long-only account marked a short position: "
                     f"{finding.measured} against {finding.bound}"
                 )
             drift_findings += 1
-            seen = drift.get(finding.constraint_id)
+            seen = drift.get(finding.rule_id)
             if seen is None or finding.excess > seen[0]:
-                drift[finding.constraint_id] = (finding.excess, finding.measured, finding.bound)
+                drift[finding.rule_id] = (finding.excess, finding.measured, finding.bound)
     return {
-        "monitoring_occurrences": len(reports),
+        "monitoring_events": len(reports),
         "monitoring_drift_findings": drift_findings,
         "worst_drift": {
             name: f"{measured} against {bound}, excess {excess}"
@@ -584,12 +608,105 @@ def _recorded_fills(result: Any) -> list[dict[str, Any]]:
     return [dict(row) for row in result.final_state.recorder_rows.get("vqapr.fill", ())]
 
 
+def _recorded_rows(
+    project: Path, run_result: Any, *, run_id: str, component_id: str, table: str
+) -> list[dict[str, Any]]:
+    """The rows a stored run recorded for one table, read back from its record in commit order.
+
+    A run given a store streams every chunk to `tables/<table>/` and keeps none on its roots, so
+    `final_state.recorder_rows` is empty for it; this is the same rows from the place they went.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        return []
+    con = duckdb.connect()
+    try:
+        cursor = con.execute(
+            f"SELECT * FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true) "
+            "ORDER BY event_time, sequence"
+        )
+        columns = [description[0] for description in cursor.description]
+        return [dict(zip(columns, row, strict=True)) for row in cursor.fetchall()]
+    finally:
+        con.close()
+
+
 def _digest(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """One digest over a file, or over every parquet part of a directory in name order."""
+    digest = hashlib.sha256()
+    if path.is_dir():
+        for part in sorted(path.glob("*.parquet")):
+            digest.update(part.name.encode("utf-8"))
+            digest.update(part.read_bytes())
+    else:
+        digest.update(path.read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class _Registered:
+    """A run's table, registered as a dataset: where it is and what it holds."""
+
+    dataset_id: str
+    directory: Path
+    row_count: int
+    events: int
+
+
+def _register_run_table(
+    project: Path,
+    run_result: Any,
+    *,
+    run_id: str,
+    component_id: str,
+    dataset_id: str,
+    table: str,
+    fields: dict[str, str],
+    field_types: dict[str, str],
+) -> _Registered:
+    """Register one table a member run recorded, as the dataset the next run reads.
+
+    A run with a store streams every table it writes as a parquet directory under its own record,
+    `.vqapr/runs/<run>/strategies/<id>@<fp8>/tables/<table>/`, and that directory registers like
+    any other source (one-shape campaign Step 4). `available_at` is the row's `event_time`, the
+    decision instant it was written at. A record stores a `Decimal` as text, so a numeric field is
+    `CAST` in the registration -- to DOUBLE, the one numeric type a field may be declared as
+    (issue 088). A weight on the `1e-12` grid has at most twelve significant digits, so the reader
+    gets it back exactly through `Decimal(str(...))`.
+    """
+    ref = str(run_result.records[component_id]["strategy_ref"])
+    directory = project / ".vqapr" / "runs" / run_id / "strategies" / ref / "tables" / table
+    if not any(directory.glob("*.parquet")):
+        raise AssertionError(f"run {run_id!r} recorded no {table!r} rows under {directory}")
+    source_id = f"{dataset_id}-source"
+    register_dataset(
+        project,
+        DatasetRegistration.of(
+            dataset_id,
+            source_id,
+            instrument_field="instrument",
+            available_at="event_time",
+            grain="instrument_instant",
+            key_fields=("event_time", "instrument"),
+            fields=fields,
+            field_types=field_types,
+        ),
+        SourceSpec.of(source_id, directory),
+    )
+    con = duckdb.connect()
+    try:
+        rows, events = con.execute(
+            f"SELECT count(*), count(DISTINCT event_time) "
+            f"FROM read_parquet('{directory.as_posix()}/*.parquet', union_by_name = true)"
+        ).fetchone()
+    finally:
+        con.close()
+    return _Registered(dataset_id, directory, int(rows), int(events))
 
 
 def _inject_halt(source: Path, target: Path, instrument: str, days: list[date]) -> tuple[str, ...]:
-    """Copy the committed execution input with one instrument halted over a window.
+    """Copy the committed venue table with one instrument halted over a window.
 
     The fixture records no halts, so a halt has to be constructed to exercise the path. The values
     themselves are untouched; only `is_tradable` flips, which is exactly the venue fact the
@@ -651,7 +768,10 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"close": "close"},
+            # The committed fixture stores close as DECIMAL(18, 4), which no field may be declared
+            # as (issue 088): cast to DOUBLE here, and cross back with Decimal(str(...)) on read.
+            fields={"close": "CAST(close AS DOUBLE)"},
+            field_types={"close": "DOUBLE"},
         ),
         SourceSpec.of("krx-observation", observation_path),
     )
@@ -664,32 +784,38 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             available_at="available_at",
             grain="instrument_instant",
             key_fields=("available_at", "instrument"),
-            fields={"benchmark_weight": "benchmark_weight"},
+            # DECIMAL(18, 8) in the fixture; the same cast, for the same reason.
+            fields={"benchmark_weight": "CAST(benchmark_weight AS DOUBLE)"},
+            field_types={"benchmark_weight": "DOUBLE"},
         ),
         SourceSpec.of("krx-benchmark", benchmark_path),
     )
     # A halt the Strategy could not have predicted. Tradability is only knowable at execution
     # time, so the Strategy never freezes for it: it keeps targeting the weight it wants, the
     # Exchange refuses the fill while the halt lasts, the position stays put, monitoring keeps
-    # reporting, and the next occurrence tries again. That loop is asserted below.
+    # reporting, and the next event tries again. That loop is asserted below.
     # Written once and shared by both replicates: a fresh parquet per run would change the
     # registered source digest and make the determinism check fail on our own scaffolding.
     halted_path = OUTPUTS / "execution_with_halt.parquet"
     halt_days = _inject_halt(execution_path, halted_path, universe[0], sessions[6:12])
 
-    register_execution_input(
+    register_dataset(
         project,
-        ExecutionInputRegistration.of(
+        # The venue table is a dataset with an execution role (record 185): `trade_at` is the
+        # instant its row is a fact about, the role names the tradable flag, and which price
+        # a run fills at is that run's own `execution.fill.trade_price`.
+        DatasetRegistration.of(
             "krx-daily",
-            ExecutionTableSpec(
-                source=SourceSpec.of("krx-execution", halted_path),
-                trade_at_field="trade_at",
-                instrument_field="instrument",
-                is_tradable_field="is_tradable",
-                price_fields={"close": "close"},
-            ),
-            FillConvention(FillSelector.SAME_DAY, time(15, 30), VENUE, "close"),
+            "krx-execution",
+            instrument_field="instrument",
+            available_at="trade_at",
+            grain="instrument_instant",
+            key_fields=("trade_at", "instrument"),
+            fields={"close": "CAST(close AS DOUBLE)", "is_tradable": "is_tradable"},
+            field_types={"close": "DOUBLE", "is_tradable": "BOOLEAN"},
+            execution={"is_tradable": "is_tradable"},
         ),
+        SourceSpec.of("krx-execution", halted_path),
     )
 
     # The project declares what each id IS, once, before anything trades. A venue borrows this;
@@ -713,48 +839,43 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     halted_instrument = universe[0]
 
     paths = _write_components(project, universe, kinds)
-    alpha_ref = component_ref(
-        "show005-alpha", ComponentKind.STRATEGY_MODEL, paths["alpha"], "SignedAlpha"
-    )
-    academic_ref = component_ref(
-        "show005-academic", ComponentKind.EXCHANGE, paths["academic"], "ShowcaseAcademicExchange"
-    )
-    krx_ref = component_ref(
-        "show005-krx", ComponentKind.EXCHANGE, paths["krx"], "ShowcaseKrxExchange"
-    )
-    index_ref = component_ref(
+    register_strategy_model(project, "show005-alpha", paths["alpha"], "SignedAlpha")
+    register_exchange(project, "show005-academic", paths["academic"], "ShowcaseAcademicExchange")
+    register_exchange(project, "show005-krx", paths["krx"], "ShowcaseKrxExchange")
+    register_strategy_model(
+        project,
         "show005-index",
-        ComponentKind.STRATEGY_MODEL,
         paths["enhanced"],
         "EnhancedIndex",
         config={
             "benchmark_dataset_id": "benchmark_weight_daily",
             "alpha_dataset_id": "alpha_allocation",
+            "cap": CAP,
+            "benchmark_tolerance": tolerance,
         },
     )
-    # The shipped constraints enter through the same door as any user component: a resolved path,
-    # a fingerprint and a config. Nothing about them bypasses registration.
-    no_short_ref = component_ref(
+    # The shipped compliance rules enter through the same door as any user component: a resolved
+    # path, a fingerprint and a config. Their parameters are their own -- the cap below is the
+    # rule's copy, not the strategy's (design §7.2).
+    register_compliance(
+        project,
         "no-short",
-        ComponentKind.CONSTRAINT,
-        shipped_constraint_path("no_short"),
+        shipped_compliance_path("no_short"),
         "NoShort",
-        config={"constraint_id": "no-short"},
+        config={"compliance_id": "no-short"},
     )
-    cap_ref = component_ref(
+    register_compliance(
+        project,
         "single-name-cap",
-        ComponentKind.CONSTRAINT,
-        shipped_constraint_path("single_name_cap"),
+        shipped_compliance_path("single_name_cap"),
         "SingleNameCap",
         config={
             "cap": CAP,
             "benchmark_dataset_id": "benchmark_weight_daily",
             "tolerance": tolerance,
-            "constraint_id": "single-name-cap",
+            "compliance_id": "single-name-cap",
         },
     )
-    for reference in (alpha_ref, index_ref, academic_ref, krx_ref, no_short_ref, cap_ref):
-        register_component(project, reference)
 
 
     start = datetime.fromisoformat(f"{callback_days[0].isoformat()}T00:00:00{OFFSET}")
@@ -762,40 +883,60 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
 
     alpha_definition = RunDefinition(
         run_id="show005-alpha",
-        strategies=(StrategyEntry("show005-alpha"),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("show005-alpha"),
         timezone=VENUE,
-        at=time(8, 30),
+        schedule=RunSchedule(every="1d", at=(time(8, 30),)),
         exchange="show005-academic",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.SIGNED,
         instruments=universe,
+        writes="show005-alpha-weights",
     )
-    alpha_result = run(project, preflight_run(project, alpha_definition)).result()
-    alpha_evidence = callback_evidence(alpha_result)
+    alpha_run = run(
+        project, freeze(project, alpha_definition), store_root=project / ".vqapr"
+    )
+    alpha_result = alpha_run.result()
 
-    published = publish_run_allocation(
-        project, AllocationPublicationSpec.of("alpha_allocation"), alpha_evidence
+    # The alpha's decisions reach the index run the way any dataset does: the table the alpha
+    # run recorded, registered under the id the index subscribes to.
+    published = _register_run_table(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        dataset_id="alpha_allocation",
+        table="vqapr.weight",
+        fields={"weight": "CAST(weight AS DOUBLE)"},
+        field_types={"weight": "DOUBLE"},
     )
 
     index_definition = RunDefinition(
         run_id="show005-index",
-        strategies=(StrategyEntry("show005-index", ("no-short", "single-name-cap")),),
-        sessions=tuple(callback_days),
+        strategy=StrategyEntry("show005-index"),
+        compliance=("no-short", "single-name-cap"),
         timezone=VENUE,
-        at=time(9, 0),
+        schedule=RunSchedule(every="1d", at=(time(9, 0),)),
         exchange="show005-krx",
-        execution_input_id="krx-daily",
+        execution=RunExecution(
+            dataset="krx-daily",
+            trade_price="close",
+            fill=RunFill(at=time(15, 30)),
+        ),
         start=start,
         end=end,
         initial_account_snapshot=AccountSnapshot(0, INITIAL_CASH, {}),
         initial_account_mode=AccountMode.LONG_ONLY,
         instruments=universe,
+        writes="show005-index-weights",
     )
-    index_result = run(project, preflight_run(project, index_definition)).result()
+    index_result = run(project, freeze(project, index_definition)).result()
 
     alpha_memory = _memory(alpha_result)
     index_memory = _memory(index_result)
@@ -805,13 +946,19 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     if not index_replay["whole_shares_only"]:
         raise AssertionError("the KRX profile must hold whole shares only")
     # Both frozen outcomes are claimed in the README, so both are checked here rather than merely
-    # reported: the pinned holding is returned verbatim every occurrence, and it never drifts
+    # reported: the pinned holding is returned verbatim every event, and it never drifts
     # outside its own box, which is what keeps this run clear of the known intent-boundary gap.
-    if int(index_memory.get("frozen_occurrences", 0)) == 0:
+    if int(index_memory.get("frozen_events", 0)) == 0:
         raise AssertionError("no freeze survived, so frozen invariance was never demonstrated")
     # The recorder's first real-spine evidence: rows that a run() actually produced, not rows a
     # test constructed against the state object. Nothing in this repository had proved this before.
-    signal_rows = alpha_result.final_state.recorder_rows.get("alpha.signal", ())
+    signal_rows = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="alpha.signal",
+    )
     if len(signal_rows) != len(callback_days) * len(universe):
         raise AssertionError(
             f"expected {len(callback_days) * len(universe)} recorded signal rows, "
@@ -820,13 +967,25 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     # Canon 9.2 makes weight and decision-time account state defaults: no Strategy here
     # declares them and every run records them anyway. A default that needed asking for
     # would not be a default.
-    default_weight = alpha_result.final_state.recorder_rows.get("vqapr.weight", ())
-    default_account = alpha_result.final_state.recorder_rows.get("vqapr.account", ())
+    default_weight = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="vqapr.weight",
+    )
+    default_account = _recorded_rows(
+        project,
+        alpha_run,
+        run_id="show005-alpha",
+        component_id="show005-alpha",
+        table="vqapr.account",
+    )
     if not default_weight or not default_account:
         raise AssertionError("the package-owned default records are missing from a real run")
-    # ONE account-level row per occurrence, and every one of them carries a nav.
+    # ONE account-level row per event, and every one of them carries a nav.
     #
-    # This pinned two rows per occurrence while `vqapr.account` had two writers -- a measurement
+    # This pinned two rows per event while `vqapr.account` had two writers -- a measurement
     # and a null-nav restatement from the callback path. Issue 010 separated the two facts into
     # two tables, so the naive read of this one is now correct: no filter, no nulls, one value
     # per date. A null appearing here again would mean a non-measuring writer came back.
@@ -836,7 +995,7 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
     account_level = [row for row in default_account if row["instrument"] == "_ACCOUNT"]
     if len(account_level) != len(callback_days):
         raise AssertionError(
-            f"expected one account-level row per occurrence, saw {len(account_level)}"
+            f"expected one account-level row per event, saw {len(account_level)}"
         )
     unmeasured = [row for row in account_level if row["nav"] is None]
     if unmeasured:
@@ -895,29 +1054,26 @@ def _pipeline(project: Path) -> tuple[dict[str, Any], dict[str, str]]:
             "exchange": "Academic (fractional, zero cost)",
             "account_mode": AccountMode.SIGNED.value,
             "views": alpha_memory.get("views"),
-            "published_dataset": str(published.registration.dataset_id),
-            "published_occurrences": published.occurrences,
+            "published_dataset": published.dataset_id,
+            "published_events": published.events,
             "published_rows": published.row_count,
-            "publication": published.output_path.name,
+            "publication": "vqapr.weight, registered from the alpha run's record",
         },
         "index_run": {
             "exchange": "KRX (whole shares, 3bp commission, 20bp sale tax, long only)",
             "account_mode": AccountMode.LONG_ONLY.value,
             "subscribed_allocation_inputs": ["alpha_allocation", "benchmark_weight_daily"],
-            "shipped_constraints": sorted(SHIPPED_CONSTRAINTS),
+            "shipped_compliance": sorted(SHIPPED_COMPLIANCE),
             "single_name_cap": CAP,
             "rebalances": index_memory.get("rebalances"),
-            "frozen_occurrences": index_memory.get("frozen_occurrences"),
+            "frozen_events": index_memory.get("frozen_events"),
             "frozen_outside_box": index_memory.get("frozen_outside_box"),
             "final_active_norm": index_memory.get("active_norm"),
             **index_monitoring,
             **index_replay,
         },
     }
-    digests = {
-        "alpha_allocation.parquet": _digest(published.output_path),
-        "alpha_allocation.lineage.json": _digest(published.lineage_path),
-    }
+    digests = {"alpha_allocation": _digest(published.directory)}
     return trace, digests
 
 
@@ -943,16 +1099,16 @@ def main() -> None:
 
     index = trace["index_run"]
     print(f"sessions / callbacks    : {trace['sessions']} / {trace['callbacks']}")
-    print(f"alpha views published   : {trace['alpha_run']['published_occurrences']} occurrences")
+    print(f"alpha views published   : {trace['alpha_run']['published_events']} events")
     print(f"recorded signal rows    : {trace['recorder']['rows']} (first real-spine recorder use)")
     print(f"subscribed inputs       : {', '.join(index['subscribed_allocation_inputs'])}")
-    print(f"shipped constraints     : {', '.join(index['shipped_constraints'])}")
+    print(f"shipped compliance      : {', '.join(index['shipped_compliance'])}")
     print(f"rebalances              : {index['rebalances']}")
     print(
-        f"frozen / drifted out    : {index['frozen_occurrences']} / {index['frozen_outside_box']}"
+        f"frozen / drifted out    : {index['frozen_events']} / {index['frozen_outside_box']}"
     )
     print(
-        f"monitored occurrences   : {index['monitoring_occurrences']} "
+        f"monitored events   : {index['monitoring_events']} "
         f"({index['monitoring_drift_findings']} cap-drift findings, 0 short positions)"
     )
     print(f"worst drift             : {json.dumps(index['worst_drift'], sort_keys=True)}")

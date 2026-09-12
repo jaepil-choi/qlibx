@@ -17,24 +17,32 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from vqapr.account.account import AccountMode
-from vqapr.account.snapshot import AccountSnapshot
-from vqapr.declarations import apply
+from vqapr.component.reference import ComponentRef
+from vqapr.data.dataset import DatasetRegistration
+from vqapr.data.source import SourceSpec
+from vqapr.domain.account import AccountMode, AccountSnapshot
 from vqapr.domain.errors import VqaprError
-from vqapr.extension.component import ComponentKind, ComponentRef
-from vqapr.flow.run import DataModelEntry, RunDefinition, StrategyEntry
-from vqapr.workspace import Workspace
+from vqapr.domain.wiring import Role
+from vqapr.workspace.registration import apply
+from vqapr.workspace.registry import Workspace
+from vqapr.workspace.run_definition import (
+    DataModelEntry,
+    RunDefinition,
+    RunExecution,
+    RunFill,
+    StrategyEntry,
+)
 
 KST = ZoneInfo("Asia/Seoul")
 SESSIONS = (date(2024, 3, 6), date(2024, 3, 7))
-ENTRY = DataModelEntry("reversal", "reversal_2d", ("score",))
+ENTRY = DataModelEntry("reversal", ("score",))
 _RUN_READY: dict[str, object] = {
     "instruments": ["A", "B"],
     "start": "2024-03-06T00:00:00+09:00",
     "end": "2024-03-08T00:00:00+09:00",
     "timezone": "Asia/Seoul",
-    "at": "16:00",
-    "sessions": ["2024-03-06", "2024-03-07"],
+    "schedule": {"every": "1d", "at": "16:00", "days_from": "prices"},
+    "writes": "reversal_2d",
 }
 """A `runs.<id>` body with everything but its models, for each test to add one kind to."""
 _DATAMODELS = {"reversal": {"dataset_id": "reversal_2d", "value_fields": ["score"]}}
@@ -43,12 +51,11 @@ _DATAMODELS = {"reversal": {"dataset_id": "reversal_2d", "value_fields": ["score
 def _definition(**overrides: object) -> RunDefinition:
     declared: dict[str, object] = {
         "run_id": "factors",
-        "strategies": (),
-        "datamodels": (ENTRY,),
+        "writes": "reversal_2d",
+        "datamodel": ENTRY,
         "instruments": ("A", "B"),
         "timezone": "Asia/Seoul",
-        "at": time(16, 0),
-        "sessions": SESSIONS,
+        "schedule": {"every": "1d", "at": time(16, 0), "days_from": "prices"},
         "start": datetime(2024, 3, 6, tzinfo=KST),
         "end": datetime(2024, 3, 8, tzinfo=KST),
     }
@@ -58,40 +65,59 @@ def _definition(**overrides: object) -> RunDefinition:
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> Workspace:
-    """One datamodel and one strategy registered: the right kind and the wrong kind to name."""
+    """One datamodel and one strategy registered: the right kind and the wrong kind to name --
+    and the dataset a datamodel run takes its trading days from (design §3.3)."""
     space = Workspace.create(tmp_path)
-    for name, kind in (
-        ("reversal", ComponentKind.DATA_MODEL),
-        ("ou-k0", ComponentKind.STRATEGY_MODEL),
-    ):
-        space.register_component(
-            ComponentRef.of(name, kind, tmp_path / f"{name}.py", "Thing", fingerprint="a" * 64)
+    with Workspace.transaction(space) as t:
+        t.register_dataset(
+            DatasetRegistration.of(
+                "prices",
+                "prices-source",
+                instrument_field="instrument",
+                available_at="available_at",
+                grain="instrument_instant",
+                key_fields=("available_at", "instrument"),
+                fields={"close": "close"},
+                field_types={"close": "DOUBLE"},
+            ).with_span(datetime(2024, 3, 1, tzinfo=KST), datetime(2024, 3, 31, tzinfo=KST)),
+            SourceSpec.of("prices-source", tmp_path / "prices"),
         )
+    for name, kind in (
+        ("reversal", Role.DATA_MODEL),
+        ("ou-k0", Role.STRATEGY_MODEL),
+    ):
+        with Workspace.transaction(space) as t:
+            t.register_component(
+                ComponentRef.of(name, kind, tmp_path / f"{name}.py", "Thing", fingerprint="a" * 64)
+            )
     return Workspace.open(tmp_path)
 
 
 def test_a_run_holds_one_kind_of_model() -> None:
     """Strategies or datamodels: the two share sessions but nothing else a run declares."""
     with pytest.raises(ValueError, match="not both"):
-        _definition(strategies=(StrategyEntry("ou-k0"),))
-    with pytest.raises(ValueError, match="at least one strategy or at least one datamodel"):
-        _definition(datamodels=())
+        _definition(strategy=StrategyEntry("ou-k0"))
+    with pytest.raises(ValueError, match="not both and not neither"):
+        _definition(datamodel=None)
 
     definition = _definition()
     assert definition.kind == "datamodel"
-    assert definition.members == (ENTRY,)
-    assert definition.member("reversal") is ENTRY
-    assert definition.datamodel("reversal") is ENTRY
-    with pytest.raises(KeyError, match="does not name datamodel 'absent'"):
-        definition.datamodel("absent")
-    with pytest.raises(KeyError, match="does not name strategy 'reversal'"):
-        definition.strategy("reversal")
+    assert definition.member is ENTRY
+    assert definition.datamodel is ENTRY
+    assert definition.strategy is None
 
 
 @pytest.mark.parametrize(
     "override",
     [
-        {"exchange": "venue", "execution_input_id": "venue-daily"},
+        {
+            "exchange": "venue",
+            "execution": RunExecution(
+                dataset="venue-daily",
+                trade_price="close",
+                fill=RunFill(at=time(15, 30)),
+            ),
+        },
         {
             "initial_account_snapshot": AccountSnapshot(0, Decimal("1000"), {}),
             "initial_account_mode": AccountMode.LONG_ONLY,
@@ -100,15 +126,19 @@ def test_a_run_holds_one_kind_of_model() -> None:
 )
 def test_a_datamodel_run_may_not_declare_what_it_cannot_use(override: dict[str, object]) -> None:
     """A datamodel sees no account and passes through no venue; a run saying otherwise lies."""
-    with pytest.raises(ValueError, match="declares no exchange, execution_input or initial_acc"):
+    with pytest.raises(ValueError, match="declares no exchange, execution or initial_acc"):
         _definition(**override)
 
 
-def test_a_run_writes_each_output_dataset_once() -> None:
-    with pytest.raises(ValueError, match="each output dataset at most once"):
-        _definition(datamodels=(ENTRY, DataModelEntry("momentum", "reversal_2d", ("score",))))
-    with pytest.raises(ValueError, match="each model at most once"):
-        _definition(datamodels=(ENTRY, DataModelEntry("reversal", "other", ("score",))))
+def test_a_run_writes_one_output_dataset() -> None:
+    """A run is one arrow of the graph, so it writes one thing and two members are refused."""
+    with pytest.raises(ValueError, match="names exactly one model"):
+        _definition(
+            datamodels={
+                "reversal": {"dataset_id": "reversal_2d", "value_fields": ["score"]},
+                "momentum": {"dataset_id": "momentum_2d", "value_fields": ["score"]},
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -127,39 +157,38 @@ def test_the_entry_refuses_a_value_field_the_output_cannot_carry(
 ) -> None:
     """`available_at` and `instrument` are the package's columns; a value field is the model's."""
     with pytest.raises(error, match=said):
-        DataModelEntry("reversal", "reversal_2d", value_fields)
+        DataModelEntry("reversal", value_fields)
 
 
 def test_the_entry_normalizes_its_opening_memory() -> None:
-    assert DataModelEntry("reversal", "out", ("score",)).initial_model_memory is None
-    assert DataModelEntry(
-        "reversal", "out", ("score",), initial_model_memory={"calls": 10}
-    ).initial_model_memory == {"calls": 10}
+    # `{}` unless declared (`docs/issues/089`, record `215`): the first callback finds a mapping.
+    assert DataModelEntry("reversal", ("score",)).initial_model_memory == {}
+    assert DataModelEntry("reversal", ("score",), initial_model_memory={"calls": 10}).initial_model_memory == {"calls": 10}
 
 
 def test_a_datamodel_run_registers_reads_back_and_is_idempotent(workspace: Workspace) -> None:
     """Written in the shape an author writes, and read back as the same value."""
     definition = _definition(
-        datamodels=(
-            DataModelEntry("reversal", "reversal_2d", ("score",), initial_model_memory={"k": 1}),
-        )
+        datamodel=DataModelEntry("reversal", ("score",), initial_model_memory={"k": 1}), writes="reversal_2d"
     )
 
-    assert workspace.register_run(definition) is True
-    assert workspace.register_run(definition) is False, "the same run again changes nothing"
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is True
+    with Workspace.transaction(workspace) as t:
+        assert t.register_run(definition) is False, "the same run again changes nothing"
 
     reopened = Workspace.open(workspace.project_root)
     assert reopened.run_definition("factors") == definition
     assert reopened.run_definition("factors").kind == "datamodel"
     written = yaml.safe_load(reopened.path.read_text(encoding="utf-8"))["runs"]["factors"]
-    assert written["datamodels"] == {
-        "reversal": {
-            "dataset_id": "reversal_2d",
-            "value_fields": ["score"],
-            "initial_model_memory": {"k": 1},
-        }
+    # The stored spelling since 2026-09-09: `writes` on the run, the one model as a block.
+    assert written["writes"] == "reversal_2d"
+    assert written["datamodel"] == {
+        "component": "reversal",
+        "value_fields": ["score"],
+        "initial_model_memory": {"k": 1},
     }
-    assert "strategies" not in written
+    assert "strategy" not in written and "datamodels" not in written
     assert "initial_account" not in written
 
 
@@ -185,12 +214,12 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
 ) -> None:
     """Unregistered, or registered as a strategy: either way `vqapr run` would meet an id it
     cannot freeze, so registration refuses it first."""
-    with pytest.raises(VqaprError) as refused:
-        workspace.register_run(
-            _definition(datamodels=(DataModelEntry(component_id, "out", ("score",)),))
+    with pytest.raises(VqaprError) as refused, Workspace.transaction(workspace) as t:
+        t.register_run(
+            _definition(datamodel=DataModelEntry(component_id, ("score",)), writes="out")
         )
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "workspace.run.register.reference"
+    assert failure["code"] == "run.reference_invalid"
     assert names in failure["requirement"], failure["requirement"]
 
 
@@ -204,8 +233,16 @@ def test_a_run_naming_a_datamodel_that_is_not_one_is_refused_by_name(
         ({**_RUN_READY}, "exactly one of `strategies:` or `datamodels:`"),
         ({**_RUN_READY, "strategies": {}, "datamodels": {}}, "exactly one of `strategies:`"),
         (
-            {**_RUN_READY, "strategies": {"ou-k0": None}, "execution_input": "venue-daily"},
-            "exchange and execution_input_id must be declared together",
+            {
+                **_RUN_READY,
+                "schedule": {"every": "1d", "at": "16:00"},
+                "strategies": {"ou-k0": None},
+                "execution": {
+                    "dataset": "venue-daily",
+                    "trade_price": "close", "fill": {"at": "15:30"},
+                },
+            },
+            "exchange and execution must be declared together",
         ),
         (
             {**_RUN_READY, "datamodels": _DATAMODELS, "exchange": "venue"},
@@ -231,6 +268,6 @@ def test_a_document_declaring_the_wrong_kind_or_half_a_kind_is_refused(
     with pytest.raises(VqaprError) as refused:
         apply(document, workspace.project_root, base=workspace.project_root)
     failure = refused.value.as_dict()["failures"][0]
-    assert failure["code"] == "declaration.read.run_invalid"
+    assert failure["code"] == "declaration.run_invalid"
     assert failure["source"]["key_path"] == "runs.bad"
     assert said in failure["observed"], failure["observed"]
